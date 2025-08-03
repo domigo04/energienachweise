@@ -5,16 +5,15 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
-from dotenv import dotenv_values
+import os  # Statt dotenv
 
 from .database import get_db
 from .models import User  # Passe ggf. an, falls dein User-Modell anders heißt
 
-# 🔐 ENV-VARIABLEN LADEN
-config = dotenv_values(".env")
-SECRET_KEY = config["SECRET_KEY"]
-ALGORITHM = config["ALGORITHM"]
-ACCESS_TOKEN_EXPIRE_MINUTES = int(config["ACCESS_TOKEN_EXPIRE_MINUTES"])
+# 🔐 ENV-VARIABLEN LADEN – Railway-kompatibel
+SECRET_KEY = os.environ["SECRET_KEY"]
+ALGORITHM = os.environ["ALGORITHM"]
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ["ACCESS_TOKEN_EXPIRE_MINUTES"])
 
 # 🔐 Login-Endpunkt für OAuth2
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")  # ggf. anpassen!

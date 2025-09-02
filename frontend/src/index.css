@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+@theme {
+  /* Deine Brand-Grays – Beispiele, passe gern an */
+  --color-sirego-gray-50:  #f9fafb;
+  --color-sirego-gray-100: #f3f4f6;
+  --color-sirego-gray-200: #e5e7eb;
+  --color-sirego-gray-300: #d1d5db;
+  --color-sirego-gray-400: #9ca3af;
+  --color-sirego-gray-500: #6b7280;
+  --color-sirego-gray-600: #4b5563;
+  --color-sirego-gray-700: #374151;
+  --color-sirego-gray-800: #1f2937;
+  --color-sirego-gray-900: #111827;
+}
+
+/* falls du @apply irgendwo nutzt, dann in einem Layer */
+@layer components {
+  /* Beispiel:
+  .card { @apply bg-sirego-gray-100; }
+  */
+}

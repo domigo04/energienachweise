@@ -1,32 +1,32 @@
+# backend/create_admin.py
 import os
 from dotenv import load_dotenv
-from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.models.user import User, Role
 from app.auth import hash_password
 
+# .env laden (eine Ebene höher)
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@example.com")
+ADMIN_INITIAL_PASSWORD = os.getenv("ADMIN_INITIAL_PASSWORD", "admin")
+
 def main():
-    load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
-    admin_email = os.getenv("ADMIN_EMAIL")
-    admin_pw = os.getenv("ADMIN_INITIAL_PASSWORD", "admin")
-
-    if not admin_email:
-        print("ADMIN_EMAIL fehlt in .env"); return
-
-    db: Session = SessionLocal()
+    db = SessionLocal()
     try:
-        u = db.query(User).filter(User.email == admin_email).first()
-        if u:
-            print("Admin existiert bereits:", admin_email); return
-
+        user = db.query(User).filter(User.email == ADMIN_EMAIL).first()
+        if user:
+            print("Admin existiert bereits:", ADMIN_EMAIL)
+            return
         admin = User(
-            email=admin_email,
-            password_hash=hash_password(admin_pw),
+            email=ADMIN_EMAIL,
+            password_hash=hash_password(ADMIN_INITIAL_PASSWORD),
             role=Role.admin,
             is_verified=True
         )
-        db.add(admin); db.commit()
-        print("Admin angelegt:", admin_email)
+        db.add(admin)
+        db.commit()
+        print("Admin erstellt:", ADMIN_EMAIL)
     finally:
         db.close()
 

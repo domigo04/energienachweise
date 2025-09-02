@@ -9,3 +9,6 @@ azure-storage-blob==12.19.0
 python-dotenv==1.0.0
 bcrypt==4.0.1
 pydantic[email]  # <– Diese Zeile ist NEU
+PyJWT
+
+PyJWT # falls noch nicht drin

@@ -2,13 +2,12 @@ import React from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import "./index.css";
 
-// Layout-Komponenten
 import Header from "./components/header";
-import Footer from "./components/Footer";
+import Footer from "./components/footer";
 
-// Seiten
 import HomePage from "./pages/HomePage";
 import Login from "./pages/Login";
+import AdminLogin from "./pages/AdminLogin";
 import AdminDashboard from "./pages/AdminDashboard";
 import ExpertDashboard from "./pages/ExpertDashboard";
 import CustomerDashboard from "./pages/CustomerDashboard";
@@ -22,32 +21,27 @@ export default function App() {
   return (
     <Router>
       <div className="flex flex-col min-h-screen">
-        {/* Header immer oben */}
         <Header />
-
-        {/* Seiteninhalt */}
         <main className="flex-grow">
           <Routes>
-            {/* Public */}
             <Route path="/" element={<HomePage />} />
             <Route path="/login" element={<Login />} />
             <Route path="/experte-werden" element={<ExpertRegister />} />
             <Route path="/kunden-registrierung" element={<CustomerRegister />} />
 
-            {/* Dashboards */}
+            <Route path="/admin-login" element={<AdminLogin />} />
+            <Route path="/admin" element={<Navigate to="/admin-login" replace />} />
             <Route path="/admin-dashboard" element={<AdminDashboard />} />
+            <Route path="/admin/experten/:id" element={<ExpertenDetail />} />
+
             <Route path="/experte-dashboard" element={<ExpertDashboard />} />
             <Route path="/kunde-dashboard" element={<CustomerDashboard />} />
             <Route path="/projekt-erstellen" element={<ProjektErstellen />} />
             <Route path="/profil" element={<ExpertProfile />} />
-            <Route path="/admin/experten/:id" element={<ExpertenDetail />} />
 
-            {/* Fallback */}
-            <Route path="*" element={<Navigate to="/" replace />} />
+            <Route path="*" element={<div className="p-8 text-center">404 – Seite nicht gefunden</div>} />
           </Routes>
         </main>
-
-        {/* Footer immer unten */}
         <Footer />
       </div>
     </Router>

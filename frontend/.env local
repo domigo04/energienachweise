@@ -1,6 +1,0 @@
-# API Base URL für Vite
-VITE_API_BASE=https://energienachweise-production.up.railway.app
-
-
-# Google Maps Key (falls du ihn hast)
-VITE_GOOGLE_MAPS_API_KEY=dein_google_maps_key

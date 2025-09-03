@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 app = FastAPI()
 
 # --- CORS ---
-raw = os.getenv("ALLOWED_ORIGINS", '["http://localhost:5173"]')
+raw = os.getenv("ALLOWED_ORIGINS", '["http://localhost:5173","http://127.0.0.1:5173","https://www.energienachweise.com","https://energienachweise.com"]')
 try:
     origins = json.loads(raw)
     if not isinstance(origins, list):
@@ -16,10 +16,10 @@ except Exception:
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=list(set(origins)),   # doppelte entfernen
+    allow_methods=["*"],                # GET, POST, OPTIONS, etc.
+    allow_headers=["*"],                # z.B. Content-Type, Authorization
+    allow_credentials=False,            # wichtig: keine Cookies, nur Bearer-Token
 )
 
 # --- Router danach importieren ---

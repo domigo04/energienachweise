@@ -1,12 +1,14 @@
 # app/main.py
 import os, json
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import inspect
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import OperationalError
 
 app = FastAPI()
 
 # ---------- CORS (robust, debug-freundlich) ----------
-# Nimm ENV-Liste, sonst fallback auf breite Defaults.
 raw = os.getenv(
     "ALLOWED_ORIGINS",
     '["https://www.energienachweise.com","https://energienachweise.com","http://localhost:5173","http://127.0.0.1:5173"]'
@@ -18,15 +20,13 @@ try:
 except Exception:
     origins = [raw]
 
-# WICHTIG: Wir erlauben zur Fehlersuche ALLES via Regex.
-# (Sobald alles läuft, kannst du allow_origin_regex auskommentieren.)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(set(origins)),
-    allow_origin_regex=".*",      # <-- Debug: überall erlaubt (kein Cookie-Auth, daher ok)
+    allow_origin_regex=".*",      # Debug: überall erlaubt
     allow_methods=["*"],
     allow_headers=["*"],
-    allow_credentials=False,      # wir nutzen Bearer im Authorization-Header, keine Cookies
+    allow_credentials=False,      # wir nutzen Bearer Tokens, keine Cookies
 )
 
 # ---------- Health ----------
@@ -53,11 +53,10 @@ app.include_router(quotes_router)
 app.include_router(requests_router)
 app.include_router(matching_router)
 
-# ---------- DB-Init & Admin-Seed (verhindert 500 auf frischem Deploy) ----------
-from app.database import Base, engine, SessionLocal
-from app.models.user import User, Role  # Pfade ggf. anpassen
+# ---------- DB-Init & Admin-Seed ----------
+from app.database import Base, engine, SessionLocal, get_db
+from app.models.user import User, Role  # ggf. Pfade prüfen
 from app.auth import hash_password
-from sqlalchemy.exc import OperationalError
 
 @app.on_event("startup")
 def init_db_and_seed_admin():
@@ -87,3 +86,25 @@ def init_db_and_seed_admin():
         print("Admin seed error:", e)
     finally:
         db.close()
+
+# ---------- DEBUG ENDPOINT ----------
+@app.get("/__debug")
+def __debug(db: Session = Depends(get_db)):
+    insp = inspect(engine)
+    has_users = insp.has_table("users")
+    user_count = None
+    admin_exists = None
+    error = None
+    try:
+        if has_users:
+            user_count = db.query(User).count()
+            admin_exists = db.query(User).filter(User.email == os.getenv("ADMIN_EMAIL", "info@sirego.ch")).first() is not None
+    except Exception as e:
+        error = str(e)
+    return {
+        "db_url": os.getenv("DATABASE_URL"),
+        "has_users_table": has_users,
+        "user_count": user_count,
+        "admin_exists": admin_exists,
+        "error": error,
+    }

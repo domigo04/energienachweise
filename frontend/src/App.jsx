@@ -16,6 +16,7 @@ import ExpertRegister from "./pages/ExpertRegister";
 import CustomerRegister from "./pages/CustomerRegister";
 import ExpertProfile from "./pages/ExpertProfile";
 import ExpertenDetail from "./pages/ExpertenDetail";
+import HxDiagramPage from "./pages/HxDiagramPage"; // <— NEU
 
 export default function App() {
   return (
@@ -38,8 +39,12 @@ export default function App() {
             <Route path="/kunde-dashboard" element={<CustomerDashboard />} />
             <Route path="/projekt-erstellen" element={<ProjektErstellen />} />
             <Route path="/profil" element={<ExpertProfile />} />
+            <Route path="/hx-diagramm" element={<HxDiagramPage />} /> {/* NEU */}
 
-            <Route path="*" element={<div className="p-8 text-center">404 – Seite nicht gefunden</div>} />
+            <Route
+              path="*"
+              element={<div className="p-8 text-center">404 – Seite nicht gefunden</div>}
+            />
           </Routes>
         </main>
         <Footer />

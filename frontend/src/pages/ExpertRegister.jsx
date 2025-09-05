@@ -1,73 +1,113 @@
-import React, { useState } from "react";
-import axios from "axios";
+// src/pages/ExpertRegister.jsx
+import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CheckCircle } from "lucide-react";
+import { CheckCircle, ChevronLeft, ChevronRight } from "lucide-react";
+import { api } from "../api";
 
-const fachbereicheList = [
-  "Wärmedämmung",
-  "Heizungsanlagen",
-  "Klima- und Belüftungsanlagen",
-  "Beleuchtungsanlagen",
-  "Schutz vor Lärm",
+// Keys → was ans Backend geht; label → was der User sieht
+const FACHBEREICHE = [
+  { key: "waermedaemmung", label: "Wärmedämmung" },
+  { key: "heizung", label: "Heizung" },
+  { key: "klima_lueftung", label: "Klima/Lüftung" },
+  { key: "beleuchtung", label: "Beleuchtung" },
+  { key: "laerm", label: "Schutz vor Lärm" },
 ];
 
-function ExpertRegister() {
+const steps = [
+  { key: "account", label: "Konto" },
+  { key: "person", label: "Personentyp" },
+  { key: "fach", label: "Fachbereiche" },
+  { key: "proof", label: "Berufsnachweis" },
+  { key: "review", label: "Prüfen & Absenden" },
+];
+
+export default function ExpertRegister() {
   const navigate = useNavigate();
-  const [formData, setFormData] = useState({
+
+  const [stepIdx, setStepIdx] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [error, setError] = useState("");
+
+  const [form, setForm] = useState({
     email: "",
     password: "",
-    personentyp: "natuerliche_person", // passend zu Enum
+    personentyp: "natuerliche_person", // muss mit Backend-Enum matchen
     firma: "",
     vorname: "",
     nachname: "",
     mitarbeiteranzahl: "",
-    fachbereiche: [],
+    fachbereiche: [], // <-- Keys aus FACHBEREICHE
     berufsnachweis: "",
   });
-  const [showModal, setShowModal] = useState(false);
-  const [message, setMessage] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
 
-  const handleChange = (e) => {
-    const { name, value, type } = e.target;
+  // ---------- helpers ----------
+  const setField = (name, value) => setForm((f) => ({ ...f, [name]: value }));
 
-    if (type === "checkbox") {
-      const updated = formData.fachbereiche.includes(value)
-        ? formData.fachbereiche.filter((fb) => fb !== value)
-        : [...formData.fachbereiche, value];
-      setFormData({ ...formData, fachbereiche: updated });
-    } else {
-      setFormData({ ...formData, [name]: value });
+  const toggleFach = (key) =>
+    setForm((f) => {
+      const has = f.fachbereiche.includes(key);
+      return { ...f, fachbereiche: has ? f.fachbereiche.filter((k) => k !== key) : [...f.fachbereiche, key] };
+    });
+
+  // ---------- step validation ----------
+  const stepValid = useMemo(() => {
+    switch (steps[stepIdx].key) {
+      case "account":
+        return /^\S+@\S+\.\S+$/.test(form.email) && typeof form.password === "string" && form.password.length >= 6;
+      case "person":
+        if (form.personentyp === "firma") {
+          const numOk =
+            String(form.mitarbeiteranzahl).length > 0 &&
+            !Number.isNaN(Number(form.mitarbeiteranzahl)) &&
+            Number(form.mitarbeiteranzahl) >= 0;
+          return form.firma.trim().length > 1 && numOk;
+        }
+        return form.vorname.trim().length > 1 && form.nachname.trim().length > 1;
+      case "fach":
+        return form.fachbereiche.length > 0;
+      case "proof":
+        return form.berufsnachweis.length === 0 || form.berufsnachweis.length >= 5;
+      case "review":
+        return true;
+      default:
+        return false;
     }
+  }, [stepIdx, form]);
+
+  const next = () => {
+    if (!stepValid) return;
+    setError("");
+    setStepIdx((i) => Math.min(i + 1, steps.length - 1));
+  };
+  const prev = () => {
+    setError("");
+    setStepIdx((i) => Math.max(i - 1, 0));
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  // ---------- submit ----------
+  const submit = async () => {
     setIsLoading(true);
+    setError("");
 
     const payload = {
-      email: formData.email,
-      password: formData.password,
-      personentyp: formData.personentyp,
-      fachbereiche: formData.fachbereiche,
-      berufsnachweis: formData.berufsnachweis || null,
-      firma: formData.personentyp === "firma" ? formData.firma : null,
+      email: form.email,
+      password: form.password,
+      personentyp: form.personentyp, // "natuerliche_person" | "firma"
+      fachbereiche: form.fachbereiche, // <-- Keys!
+      berufsnachweis: form.berufsnachweis || null,
+      firma: form.personentyp === "firma" ? form.firma : null,
       mitarbeiteranzahl:
-        formData.personentyp === "firma"
-          ? Number(formData.mitarbeiteranzahl)
-          : null,
-      vorname: formData.personentyp === "natuerliche_person" ? formData.vorname : null,
-      nachname: formData.personentyp === "natuerliche_person" ? formData.nachname : null,
+        form.personentyp === "firma" && form.mitarbeiteranzahl !== "" ? Number(form.mitarbeiteranzahl) : null,
+      vorname: form.personentyp === "natuerliche_person" ? form.vorname : null,
+      nachname: form.personentyp === "natuerliche_person" ? form.nachname : null,
     };
 
     try {
-      await axios.post("http://localhost:8000/experts/register", payload);
-      setMessage("✅ Registrierung erfolgreich!");
+      await api.post("/experts/register", payload);
       setShowModal(true);
-      setIsLoading(false);
-
-      setFormData({
-        email: "",
+      setForm({
+        email: form.email,
         password: "",
         personentyp: "natuerliche_person",
         firma: "",
@@ -77,105 +117,326 @@ function ExpertRegister() {
         fachbereiche: [],
         berufsnachweis: "",
       });
-
       setTimeout(() => {
         setShowModal(false);
         navigate("/");
-      }, 5000);
-    } catch (err) {
-      console.error("❌ Fehler beim Registrieren:", err.response?.data || err.message);
-      setMessage("❌ Registrierung fehlgeschlagen. Bitte überprüfen Sie Ihre Angaben.");
+      }, 4500);
+    } catch (e) {
+      const status = e?.response?.status;
+      const data = e?.response?.data;
+      const detail = data?.detail;
+
+      const buildMsg = () => {
+        if (typeof detail === "string") return detail;
+        if (Array.isArray(detail)) {
+          return detail
+            .map((err) => {
+              const path = Array.isArray(err?.loc) ? err.loc.join(".") : "";
+              return `${path ? path + ": " : ""}${err?.msg || "Ungültige Eingabe"}`;
+            })
+            .join(" | ");
+        }
+        if (detail && typeof detail === "object") {
+          if (typeof detail.message === "string") return detail.message;
+          try {
+            return JSON.stringify(detail);
+          } catch {}
+        }
+        if (data && typeof data === "object") {
+          try {
+            return JSON.stringify(data);
+          } catch {}
+        }
+        return e?.message || "Unbekannter Fehler";
+      };
+
+      if (status === 409) {
+        setError("Diese E-Mail ist bereits registriert.");
+      } else if (status === 0 || (typeof detail === "string" && detail.toLowerCase().includes("not allowed"))) {
+        setError("Netzwerk/CORS-Problem. Prüfe VITE_API_BASE & CORS im Backend.");
+      } else {
+        setError(buildMsg());
+      }
+    } finally {
       setIsLoading(false);
-      setTimeout(() => setMessage(""), 3000);
     }
   };
 
+  // ---------- ui pieces ----------
+  const Progress = () => (
+    <div className="flex items-center gap-2 mb-6">
+      {steps.map((s, i) => {
+        const active = i === stepIdx;
+        const done = i < stepIdx;
+        return (
+          <div key={s.key} className="flex items-center gap-2">
+            <div
+              className={[
+                "w-9 h-9 rounded-full flex items-center justify-center text-sm font-semibold",
+                done ? "bg-green-500 text-white" : active ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700",
+              ].join(" ")}
+              title={s.label}
+            >
+              {done ? "✓" : i + 1}
+            </div>
+            {i < steps.length - 1 && <div className="w-10 h-1 rounded bg-gray-300" />}
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  const Actions = () => (
+    <div className="flex items-center justify-between pt-2">
+      <button
+        type="button"
+        onClick={prev}
+        disabled={stepIdx === 0 || isLoading}
+        className="inline-flex items-center gap-2 px-4 py-3 rounded-xl border hover:bg-gray-50 disabled:opacity-50"
+      >
+        <ChevronLeft className="w-4 h-4" />
+        Zurück
+      </button>
+
+      {stepIdx < steps.length - 1 ? (
+        <button
+          type="button"
+          onClick={next}
+          disabled={!stepValid || isLoading}
+          className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50"
+        >
+          Weiter
+          <ChevronRight className="w-4 h-4" />
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={submit}
+          disabled={isLoading}
+          className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50"
+        >
+          {isLoading ? "Wird gesendet…" : "Registrieren"}
+        </button>
+      )}
+    </div>
+  );
+
+  const fachLabels = form.fachbereiche
+    .map((k) => FACHBEREICHE.find((x) => x.key === k)?.label || k)
+    .join(", ");
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-8 px-4">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-10 px-4">
       <div className="max-w-3xl mx-auto">
-        <form onSubmit={handleSubmit} className="bg-white shadow-xl rounded-2xl p-8 space-y-6">
-          <h1 className="text-3xl font-bold text-center text-gray-900 mb-6">Expertenregistrierung</h1>
+        <div className="bg-white shadow-xl rounded-2xl p-8">
+          <h1 className="text-3xl font-bold text-center text-gray-900 mb-2">Expertenregistrierung</h1>
+          <p className="text-center text-gray-600 mb-6">
+            Registriere dich in wenigen Schritten. Du kannst die Angaben jederzeit im Profil ergänzen.
+          </p>
 
-          <div className="grid md:grid-cols-2 gap-6">
-            <div>
-              <label className="block text-gray-700 font-semibold mb-1">E-Mail</label>
-              <input type="email" name="email" required value={formData.email} onChange={handleChange}
-                className="w-full p-3 border rounded-lg" disabled={isLoading} />
-            </div>
-            <div>
-              <label className="block text-gray-700 font-semibold mb-1">Passwort</label>
-              <input type="password" name="password" required minLength={6} value={formData.password} onChange={handleChange}
-                className="w-full p-3 border rounded-lg" disabled={isLoading} />
-            </div>
-          </div>
+          <Progress />
 
-          <div>
-            <label className="block text-gray-700 font-semibold mb-1">Personentyp</label>
-            <select name="personentyp" value={formData.personentyp} onChange={handleChange}
-              className="w-full p-3 border rounded-lg" disabled={isLoading}>
-              <option value="natuerliche_person">Natürliche Person</option>
-              <option value="firma">Firma</option>
-            </select>
-          </div>
-
-          {formData.personentyp === "firma" ? (
-            <>
-              <div>
-                <label className="block text-gray-700 font-semibold mb-1">Firmenname</label>
-                <input type="text" name="firma" required value={formData.firma} onChange={handleChange}
-                  className="w-full p-3 border rounded-lg" disabled={isLoading} />
+          {steps[stepIdx].key === "account" && (
+            <section className="space-y-6">
+              <div className="grid md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-gray-700 font-semibold mb-1">E-Mail</label>
+                  <input
+                    type="email"
+                    value={form.email}
+                    onChange={(e) => setField("email", e.target.value)}
+                    className="w-full p-3 border rounded-lg"
+                    placeholder="name@firma.ch"
+                    autoComplete="email"
+                    disabled={isLoading}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-gray-700 font-semibold mb-1">Passwort</label>
+                  <input
+                    type="password"
+                    value={form.password}
+                    onChange={(e) => setField("password", e.target.value)}
+                    className="w-full p-3 border rounded-lg"
+                    placeholder="mind. 6 Zeichen"
+                    autoComplete="new-password"
+                    minLength={6}
+                    disabled={isLoading}
+                    required
+                  />
+                </div>
               </div>
-              <div>
-                <label className="block text-gray-700 font-semibold mb-1">Mitarbeitende</label>
-                <input type="number" name="mitarbeiteranzahl" required value={formData.mitarbeiteranzahl} onChange={handleChange}
-                  className="w-full p-3 border rounded-lg" disabled={isLoading} />
-              </div>
-            </>
-          ) : (
-            <>
-              <div>
-                <label className="block text-gray-700 font-semibold mb-1">Vorname</label>
-                <input type="text" name="vorname" required value={formData.vorname} onChange={handleChange}
-                  className="w-full p-3 border rounded-lg" disabled={isLoading} />
-              </div>
-              <div>
-                <label className="block text-gray-700 font-semibold mb-1">Nachname</label>
-                <input type="text" name="nachname" required value={formData.nachname} onChange={handleChange}
-                  className="w-full p-3 border rounded-lg" disabled={isLoading} />
-              </div>
-            </>
+              <p className="text-sm text-gray-500">Dein Passwort wird sicher gehasht gespeichert.</p>
+              <Actions />
+            </section>
           )}
 
-          <div>
-            <label className="block text-gray-700 font-semibold mb-1">Berufsnachweis (optional)</label>
-            <input type="text" name="berufsnachweis" value={formData.berufsnachweis} onChange={handleChange}
-              className="w-full p-3 border rounded-lg" disabled={isLoading} />
-          </div>
+          {steps[stepIdx].key === "person" && (
+            <section className="space-y-6">
+              <div>
+                <label className="block text-gray-700 font-semibold mb-1">Personentyp</label>
+                <select
+                  value={form.personentyp}
+                  onChange={(e) => setField("personentyp", e.target.value)}
+                  className="w-full p-3 border rounded-lg"
+                  disabled={isLoading}
+                >
+                  <option value="natuerliche_person">Natürliche Person</option>
+                  <option value="firma">Firma</option>
+                </select>
+              </div>
 
-          <div>
-            <label className="block text-gray-700 font-semibold mb-2">Fachbereiche (Mehrfachauswahl möglich)</label>
-            <div className="grid md:grid-cols-2 gap-3">
-              {fachbereicheList.map((bereich) => (
-                <label key={bereich} className="flex items-center space-x-3 bg-white border p-3 rounded-lg cursor-pointer">
-                  <input type="checkbox" name="fachbereiche" value={bereich}
-                    checked={formData.fachbereiche.includes(bereich)}
-                    onChange={handleChange} disabled={isLoading} />
-                  <span>{bereich}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          {message && (
-            <p className="text-center font-semibold text-red-600 mt-2">{message}</p>
+              {form.personentyp === "firma" ? (
+                <div className="grid md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-gray-700 font-semibold mb-1">Firmenname</label>
+                    <input
+                      type="text"
+                      value={form.firma}
+                      onChange={(e) => setField("firma", e.target.value)}
+                      className="w-full p-3 border rounded-lg"
+                      disabled={isLoading}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-gray-700 font-semibold mb-1">Mitarbeitende</label>
+                    <input
+                      type="number"
+                      value={form.mitarbeiteranzahl}
+                      onChange={(e) => setField("mitarbeiteranzahl", e.target.value)}
+                      className="w-full p-3 border rounded-lg"
+                      min={0}
+                      disabled={isLoading}
+                      required
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="grid md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-gray-700 font-semibold mb-1">Vorname</label>
+                    <input
+                      type="text"
+                      value={form.vorname}
+                      onChange={(e) => setField("vorname", e.target.value)}
+                      className="w-full p-3 border rounded-lg"
+                      disabled={isLoading}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-gray-700 font-semibold mb-1">Nachname</label>
+                    <input
+                      type="text"
+                      value={form.nachname}
+                      onChange={(e) => setField("nachname", e.target.value)}
+                      className="w-full p-3 border rounded-lg"
+                      disabled={isLoading}
+                      required
+                    />
+                  </div>
+                </div>
+              )}
+              <Actions />
+            </section>
           )}
 
-          <button type="submit"
-            className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-4 rounded-xl font-semibold hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50"
-            disabled={isLoading}>
-            {isLoading ? "Bitte warten..." : "Registrieren"}
-          </button>
-        </form>
+          {steps[stepIdx].key === "fach" && (
+            <section className="space-y-4">
+              <label className="block text-gray-700 font-semibold">Fachbereiche</label>
+              <div className="grid md:grid-cols-2 gap-3">
+                {FACHBEREICHE.map(({ key, label }) => (
+                  <label
+                    key={key}
+                    className="flex items-center space-x-3 bg-white border p-3 rounded-lg cursor-pointer hover:bg-gray-50"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={form.fachbereiche.includes(key)}
+                      onChange={() => toggleFach(key)}
+                      disabled={isLoading}
+                    />
+                    <span>{label}</span>
+                  </label>
+                ))}
+              </div>
+              <p className="text-sm text-gray-500">Wähle mindestens einen Bereich aus.</p>
+              <Actions />
+            </section>
+          )}
+
+          {steps[stepIdx].key === "proof" && (
+            <section className="space-y-4">
+              <label className="block text-gray-700 font-semibold">Berufsnachweis (optional)</label>
+              <input
+                type="text"
+                value={form.berufsnachweis}
+                onChange={(e) => setField("berufsnachweis", e.target.value)}
+                placeholder="z. B. Diplom, Link zum Lebenslauf o. ä."
+                className="w-full p-3 border rounded-lg"
+                disabled={isLoading}
+              />
+              <p className="text-sm text-gray-500">
+                Du kannst später im Profil Dokumente hochladen. Für die Registrierung reicht ein kurzer Hinweis.
+              </p>
+              <Actions />
+            </section>
+          )}
+
+          {steps[stepIdx].key === "review" && (
+            <section className="space-y-6">
+              <div className="bg-gray-50 border rounded-xl p-4">
+                <h3 className="font-semibold text-gray-800 mb-3">Zusammenfassung</h3>
+                <dl className="grid md:grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <dt className="text-gray-500">E-Mail</dt>
+                    <dd className="text-gray-900 break-all">{form.email}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-gray-500">Personentyp</dt>
+                    <dd className="text-gray-900">{form.personentyp === "firma" ? "Firma" : "Natürliche Person"}</dd>
+                  </div>
+                  {form.personentyp === "firma" ? (
+                    <>
+                      <div>
+                        <dt className="text-gray-500">Firma</dt>
+                        <dd className="text-gray-900">{form.firma || "—"}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-gray-500">Mitarbeitende</dt>
+                        <dd className="text-gray-900">{form.mitarbeiteranzahl || "—"}</dd>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div>
+                        <dt className="text-gray-500">Vorname</dt>
+                        <dd className="text-gray-900">{form.vorname || "—"}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-gray-500">Nachname</dt>
+                        <dd className="text-gray-900">{form.nachname || "—"}</dd>
+                      </div>
+                    </>
+                  )}
+                  <div className="md:col-span-2">
+                    <dt className="text-gray-500">Fachbereiche</dt>
+                    <dd className="text-gray-900">{fachLabels || "—"}</dd>
+                  </div>
+                  <div className="md:col-span-2">
+                    <dt className="text-gray-500">Berufsnachweis</dt>
+                    <dd className="text-gray-900">{form.berufsnachweis || "—"}</dd>
+                  </div>
+                </dl>
+              </div>
+              <Actions />
+            </section>
+          )}
+
+          {error && <p className="text-center font-semibold text-red-600 mt-6">{error}</p>}
+        </div>
       </div>
 
       {showModal && (
@@ -183,12 +444,10 @@ function ExpertRegister() {
           <div className="bg-white p-8 rounded-xl shadow-xl text-center max-w-md">
             <CheckCircle className="text-green-500 w-12 h-12 mx-auto mb-4" />
             <h2 className="text-2xl font-bold text-gray-800 mb-2">Registrierung erfolgreich!</h2>
-            <p className="text-gray-600">Wir prüfen Ihre Angaben und benachrichtigen Sie per E-Mail.</p>
+            <p className="text-gray-600">Wir prüfen deine Angaben und benachrichtigen dich per E-Mail.</p>
           </div>
         </div>
       )}
     </div>
   );
 }
-
-export default ExpertRegister;

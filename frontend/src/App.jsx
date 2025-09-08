@@ -16,7 +16,8 @@ import ExpertRegister from "./pages/ExpertRegister";
 import CustomerRegister from "./pages/CustomerRegister";
 import ExpertProfile from "./pages/ExpertProfile";
 import ExpertenDetail from "./pages/ExpertenDetail";
-import HxDiagramPage from "./pages/HxDiagramPage"; // <— NEU
+import HxDiagramPage from "./pages/HxDiagramPage"; // bestehend
+import WarmwasserTool from "./pages/WarmwasserTool"; // ⬅️ NEU
 
 export default function App() {
   return (
@@ -39,7 +40,9 @@ export default function App() {
             <Route path="/kunde-dashboard" element={<CustomerDashboard />} />
             <Route path="/projekt-erstellen" element={<ProjektErstellen />} />
             <Route path="/profil" element={<ExpertProfile />} />
-            <Route path="/hx-diagramm" element={<HxDiagramPage />} /> {/* NEU */}
+
+            <Route path="/hx-diagramm" element={<HxDiagramPage />} />
+            <Route path="/warmwasser-tool" element={<WarmwasserTool />} /> {/* ⬅️ NEU */}
 
             <Route
               path="*"

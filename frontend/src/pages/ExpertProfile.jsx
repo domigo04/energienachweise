@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from "react";
+// src/pages/ExpertProfile.jsx
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   User,
@@ -6,250 +7,441 @@ import {
   Award,
   FileText,
   Save,
-  ArrowLeft
+  ChevronLeft,
+  Loader2,
+  CheckCircle2,
+  CircleAlert,
 } from "lucide-react";
+import { api } from "../api";
 
-const fachbereicheList = [
-  "Wärmedämmung",
-  "Heizungsanlagen",
-  "Klima- und Belüftungsanlagen",
-  "Beleuchtungsanlagen",
-  "Schutz vor Lärm",
+// --- Fachbereiche: Keys (API) ↔ Labels (UI) ---
+const FACHBEREICHE = [
+  { key: "waermedaemmung", label: "Wärmedämmung" },
+  { key: "heizung", label: "Heizung" },
+  { key: "klima_lueftung", label: "Klima/Lüftung" },
+  { key: "beleuchtung", label: "Beleuchtung" },
+  { key: "laerm", label: "Schutz vor Lärm" },
 ];
+const labelByKey = Object.fromEntries(FACHBEREICHE.map((f) => [f.key, f.label]));
+const keyByLabel = Object.fromEntries(FACHBEREICHE.map((f) => [f.label, f.key]));
 
-function ExpertProfile() {
-  const [formData, setFormData] = useState({
+// Hilfsfunktionen zum Normalisieren (Backend kann Keys ODER Labels liefern)
+function normalizeFachbereicheFromApi(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.map((v) => keyByLabel[v] || v).filter((v) => FACHBEREICHE.some((f) => f.key === v));
+}
+function toApiFachbereiche(keys) {
+  // Sende Keys (sauberste Variante)
+  return Array.isArray(keys) ? keys : [];
+}
+
+export default function ExpertProfile() {
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  const [form, setForm] = useState({
     email: "",
-    personentyp: "natuerliche_person",
-    fachbereiche: [],
+    personentyp: "natuerliche_person", // "natuerliche_person" | "firma"
+    fachbereiche: [], // Keys
     berufsnachweis: "",
     mitarbeiteranzahl: "",
-    profilbild: null,
+    vorname: "",
+    nachname: "",
+    firma: "",
   });
+  const [initial, setInitial] = useState(form);
 
-  const [message, setMessage] = useState("");
-  const navigate = useNavigate();
+  const expertId = useMemo(() => localStorage.getItem("user_id"), []);
+  const emailFromLS = useMemo(() => localStorage.getItem("email") || "", []);
 
+  // ---- Load profile (DEPLOY-SAFE: nutzt api-Instanz & Token) ----
   useEffect(() => {
-    const userEmail = localStorage.getItem("email");
-    const userId = localStorage.getItem("user_id");
-
-    if (!userEmail || !userId) return navigate("/login");
-
-    const fetchProfile = async () => {
-      try {
-        const res = await fetch(`http://localhost:8000/experts/${userId}`);
-        const data = await res.json();
-
-        setFormData({
-          email: data.email,
-          personentyp: data.personentyp,
-          fachbereiche: data.fachbereiche || [],
-          berufsnachweis: data.berufsnachweis || "",
-          mitarbeiteranzahl: data.mitarbeiteranzahl || "",
-          profilbild: null,
-        });
-      } catch (err) {
-        console.error("Fehler beim Laden des Profils:", err);
+    async function run() {
+      if (!expertId) {
+        navigate("/login");
+        return;
       }
-    };
+      try {
+        setLoading(true);
+        // Falls du /experts/me hast, nimm das. Sonst bleibt /experts/:id
+        const res = await api.get(`/experts/${expertId}`);
+        const data = res.data || {};
+        const fachKeys = normalizeFachbereicheFromApi(data.fachbereiche || []);
 
-    fetchProfile();
-  }, [navigate]);
-
-  const handleChange = (e) => {
-    const { name, value, type, files } = e.target;
-
-    if (type === "file") {
-      setFormData({ ...formData, profilbild: files[0] });
-    } else if (type === "checkbox") {
-      const updatedList = formData.fachbereiche.includes(value)
-        ? formData.fachbereiche.filter((item) => item !== value)
-        : [...formData.fachbereiche, value];
-      setFormData({ ...formData, fachbereiche: updatedList });
-    } else {
-      setFormData({ ...formData, [name]: value });
+        const next = {
+          email: data.email || emailFromLS,
+          personentyp: data.personentyp || "natuerliche_person",
+          fachbereiche: fachKeys,
+          berufsnachweis: data.berufsnachweis || "",
+          mitarbeiteranzahl: data.mitarbeiteranzahl ?? "",
+          vorname: data.vorname || "",
+          nachname: data.nachname || "",
+          firma: data.firma || "",
+        };
+        setForm(next);
+        setInitial(next);
+      } catch (e) {
+        console.error("Profil laden fehlgeschlagen:", e?.response?.data || e);
+        setError("Profil konnte nicht geladen werden.");
+      } finally {
+        setLoading(false);
+      }
     }
-  };
+    run();
+  }, [expertId, emailFromLS, navigate]);
 
+  // ---- Helpers ----
+  const setField = (name, value) => setForm((f) => ({ ...f, [name]: value }));
+  const toggleFach = (key) =>
+    setForm((f) => {
+      const has = f.fachbereiche.includes(key);
+      return {
+        ...f,
+        fachbereiche: has ? f.fachbereiche.filter((k) => k !== key) : [...f.fachbereiche, key],
+      };
+    });
+
+  const hasChanges = useMemo(() => JSON.stringify(form) !== JSON.stringify(initial), [form, initial]);
+
+  // ---- Submit ----
   const handleSubmit = async (e) => {
-    e.preventDefault();
-
-    const expert_id = localStorage.getItem("user_id");
+    e?.preventDefault?.();
+    setSaving(true);
+    setError("");
+    setMessage("");
 
     const payload = {
-      personentyp: formData.personentyp,
-      fachbereiche: formData.fachbereiche,
-      berufsnachweis: formData.berufsnachweis || null,
+      // email wird i. d. R. nicht hier editiert
+      personentyp: form.personentyp, // "natuerliche_person" | "firma"
+      fachbereiche: toApiFachbereiche(form.fachbereiche), // Keys
+      berufsnachweis: form.berufsnachweis || null,
       mitarbeiteranzahl:
-        formData.personentyp === "firma" && formData.mitarbeiteranzahl
-          ? parseInt(formData.mitarbeiteranzahl)
+        form.personentyp === "firma" && form.mitarbeiteranzahl !== ""
+          ? Number(form.mitarbeiteranzahl)
           : null,
+      // fakultativ – falls Backend diese Felder speichert/bearbeiten lässt:
+      vorname: form.personentyp === "natuerliche_person" ? form.vorname || null : null,
+      nachname: form.personentyp === "natuerliche_person" ? form.nachname || null : null,
+      firma: form.personentyp === "firma" ? form.firma || null : null,
+    };
+
+    // Fehlertext schön formatieren
+    const toMsg = (data, fallback) => {
+      const detail = data?.detail;
+      if (typeof detail === "string") return detail;
+      if (Array.isArray(detail)) {
+        return detail
+          .map((err) => {
+            const path = Array.isArray(err?.loc) ? err.loc.join(".") : "";
+            return `${path ? path + ": " : ""}${err?.msg || "Ungültige Eingabe"}`;
+          })
+          .join(" | ");
+      }
+      if (detail && typeof detail === "object" && typeof detail.message === "string") return detail.message;
+      try {
+        if (data && typeof data === "object") return JSON.stringify(data);
+      } catch {}
+      return fallback || "Unbekannter Fehler";
     };
 
     try {
-      const res = await fetch(`http://localhost:8000/experts/${expert_id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      // PATCH /experts/:id (oder /experts/me, wenn vorhanden)
+      const res = await api.patch(`/experts/${expertId}`, payload);
+      const updated = res.data || {};
+      const fachKeys = normalizeFachbereicheFromApi(updated.fachbereiche || payload.fachbereiche);
 
-      if (!res.ok) throw new Error("Update fehlgeschlagen");
-
-      setMessage("✅ Profil erfolgreich gespeichert");
-      setTimeout(() => setMessage(""), 3000);
-    } catch (err) {
-      console.error("❌ Fehler beim Speichern:", err);
-      setMessage("❌ Fehler beim Speichern");
-      setTimeout(() => setMessage(""), 3000);
+      const next = {
+        email: updated.email || form.email,
+        personentyp: updated.personentyp || form.personentyp,
+        fachbereiche: fachKeys,
+        berufsnachweis: updated.berufsnachweis ?? (form.berufsnachweis || ""),
+        mitarbeiteranzahl: updated.mitarbeiteranzahl ?? payload.mitarbeiteranzahl ?? "",
+        vorname: updated.vorname ?? form.vorname,
+        nachname: updated.nachname ?? form.nachname,
+        firma: updated.firma ?? form.firma,
+      };
+      setForm(next);
+      setInitial(next);
+      setMessage("Profil gespeichert.");
+      setTimeout(() => setMessage(""), 2500);
+    } catch (e) {
+      console.error("Speichern fehlgeschlagen:", e?.response?.data || e);
+      const data = e?.response?.data;
+      setError(toMsg(data, e?.message));
+      setTimeout(() => setError(""), 4000);
+    } finally {
+      setSaving(false);
     }
   };
 
+  // ---- UI ----
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 px-4 py-10">
+        <div className="max-w-4xl mx-auto">
+          <div className="bg-white rounded-2xl shadow-xl p-8 flex items-center gap-3">
+            <Loader2 className="w-5 h-5 animate-spin text-indigo-600" />
+            <span className="text-slate-700">Profil wird geladen…</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const FachChip = ({ k, label }) => {
+    const active = form.fachbereiche.includes(k);
+    return (
+      <button
+        type="button"
+        onClick={() => toggleFach(k)}
+        className={[
+          "px-3 py-2 rounded-xl border text-sm transition",
+          active
+            ? "bg-indigo-600 text-white border-indigo-600"
+            : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50",
+        ].join(" ")}
+      >
+        {label}
+      </button>
+    );
+  };
+
+  const PersonentypToggle = () => (
+    <div className="grid grid-cols-2 rounded-xl overflow-hidden border border-slate-200">
+      <button
+        type="button"
+        onClick={() => setField("personentyp", "natuerliche_person")}
+        className={[
+          "px-4 py-2 text-center text-sm md:text-base",
+          form.personentyp === "natuerliche_person" ? "bg-indigo-600 text-white" : "bg-white text-slate-700",
+        ].join(" ")}
+      >
+        Natürliche Person
+      </button>
+      <button
+        type="button"
+        onClick={() => setField("personentyp", "firma")}
+        className={[
+          "px-4 py-2 text-center text-sm md:text-base",
+          form.personentyp === "firma" ? "bg-indigo-600 text-white" : "bg-white text-slate-700",
+        ].join(" ")}
+      >
+        Firma
+      </button>
+    </div>
+  );
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-8 px-4">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 px-4 py-10">
       <div className="max-w-4xl mx-auto">
-        {/* Zurück Button */}
+        {/* Back */}
         <div className="mb-4">
           <button
-  onClick={() => navigate("/experte-dashboard")}
-  className="px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200 text-sm"
->
-  Zurück zum Dashboard
-</button>
-
+            onClick={() => navigate("/experte-dashboard")}
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-sm"
+          >
+            <ChevronLeft className="w-4 h-4" />
+            Zurück zum Dashboard
+          </button>
         </div>
 
-        {/* Header */}
+        {/* Header Card */}
         <div className="bg-white rounded-2xl shadow-xl p-6 mb-6">
-          <div className="flex items-center justify-center space-x-3">
-            <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center">
-              <User className="w-6 h-6 text-white" />
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-600 to-blue-600 text-white flex items-center justify-center text-xl font-semibold">
+              {form.email?.[0]?.toUpperCase() || "E"}
             </div>
-            <h1 className="text-3xl font-bold text-gray-900">Mein Expertenprofil</h1>
+            <div className="flex-1">
+              <h1 className="text-2xl md:text-3xl font-bold text-slate-900">Mein Expertenprofil</h1>
+              <p className="text-slate-600">{form.email}</p>
+            </div>
+            {message && (
+              <div className="hidden md:flex items-center gap-2 text-green-700 bg-green-50 border border-green-200 px-3 py-2 rounded-lg">
+                <CheckCircle2 className="w-4 h-4" />
+                <span className="text-sm">{message}</span>
+              </div>
+            )}
+            {error && (
+              <div className="hidden md:flex items-center gap-2 text-red-700 bg-red-50 border border-red-200 px-3 py-2 rounded-lg">
+                <CircleAlert className="w-4 h-4" />
+                <span className="text-sm">{error}</span>
+              </div>
+            )}
           </div>
-          <p className="text-center text-gray-600 mt-2">Bearbeiten Sie Ihre Profilinformationen</p>
         </div>
 
-        {/* Formular */}
+        {/* Form */}
         <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-xl overflow-hidden">
           <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-6 text-white">
-            <div className="flex items-center space-x-4">
-              <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center">
-                <User className="w-10 h-10" />
+            <div className="flex items-center gap-4">
+              <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center">
+                <User className="w-8 h-8" />
               </div>
               <div>
-                <h2 className="text-2xl font-bold">{formData.email}</h2>
-                <p className="text-blue-100">Expertenprofil</p>
+                <h2 className="text-xl md:text-2xl font-semibold">Profilangaben</h2>
+                <p className="text-blue-100">Bearbeite deine öffentlichen & administrativen Daten</p>
               </div>
             </div>
           </div>
 
-          <div className="p-8">
-            <div className="grid lg:grid-cols-2 gap-8">
-              {/* Linke Spalte */}
+          <div className="p-6 md:p-8">
+            <div className="grid md:grid-cols-2 gap-8">
+              {/* Personentyp & Pflichtfelder */}
               <div className="space-y-6">
-                {/* Personentyp */}
-                <div className="bg-gray-50 rounded-xl p-6">
-                  <label className="flex items-center space-x-2 font-semibold text-gray-800 mb-4">
-                    <Building className="w-5 h-5 text-blue-600" />
-                    <span>Personentyp</span>
+                <div className="bg-gray-50 rounded-xl p-6 border border-slate-100">
+                  <label className="flex items-center gap-2 font-semibold text-slate-800 mb-3">
+                    <Building className="w-5 h-5 text-indigo-600" />
+                    Personentyp
                   </label>
-                  <select
-                    name="personentyp"
-                    value={formData.personentyp}
-                    onChange={handleChange}
-                    className="w-full p-3 border-2 border-gray-200 rounded-lg"
-                  >
-                    <option value="natuerliche_person">Natürliche Person</option>
-                    <option value="firma">Firma</option>
-                  </select>
+                  <PersonentypToggle />
+
+                  {form.personentyp === "firma" ? (
+                    <div className="mt-5 grid grid-cols-1 gap-4">
+                      <div>
+                        <label className="block text-sm text-slate-600 mb-1">Firmenname</label>
+                        <input
+                          type="text"
+                          value={form.firma}
+                          onChange={(e) => setField("firma", e.target.value)}
+                          className="w-full p-3 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                          placeholder="z. B. SIREGO GmbH"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm text-slate-600 mb-1">Mitarbeitende</label>
+                        <input
+                          type="number"
+                          min={0}
+                          value={form.mitarbeiteranzahl}
+                          onChange={(e) => setField("mitarbeiteranzahl", e.target.value)}
+                          className="w-full p-3 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                          placeholder="Anzahl"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm text-slate-600 mb-1">Vorname</label>
+                        <input
+                          type="text"
+                          value={form.vorname}
+                          onChange={(e) => setField("vorname", e.target.value)}
+                          className="w-full p-3 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                          placeholder="Vorname"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm text-slate-600 mb-1">Nachname</label>
+                        <input
+                          type="text"
+                          value={form.nachname}
+                          onChange={(e) => setField("nachname", e.target.value)}
+                          className="w-full p-3 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                          placeholder="Nachname"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                {/* Mitarbeitende */}
-                {formData.personentyp === "firma" && (
-                  <div className="bg-gray-50 rounded-xl p-6">
-                    <label className="flex items-center space-x-2 font-semibold text-gray-800 mb-4">
-                      <User className="w-5 h-5 text-blue-600" />
-                      <span>Mitarbeitende</span>
-                    </label>
-                    <input
-                      type="number"
-                      name="mitarbeiteranzahl"
-                      value={formData.mitarbeiteranzahl}
-                      onChange={handleChange}
-                      placeholder="Anzahl Mitarbeitende"
-                      className="w-full p-3 border-2 border-gray-200 rounded-lg"
-                    />
-                  </div>
-                )}
-
-                {/* Berufsnachweis */}
-                <div className="bg-gray-50 rounded-xl p-6">
-                  <label className="flex items-center space-x-2 font-semibold text-gray-800 mb-4">
-                    <Award className="w-5 h-5 text-blue-600" />
-                    <span>Berufsnachweis</span>
+                <div className="bg-gray-50 rounded-xl p-6 border border-slate-100">
+                  <label className="flex items-center gap-2 font-semibold text-slate-800 mb-3">
+                    <Award className="w-5 h-5 text-indigo-600" />
+                    Berufsnachweis (optional)
                   </label>
                   <input
                     type="text"
-                    name="berufsnachweis"
-                    value={formData.berufsnachweis}
-                    onChange={handleChange}
-                    placeholder="z. B. Fachausweis Gebäudetechnik"
-                    className="w-full p-3 border-2 border-gray-200 rounded-lg"
+                    value={form.berufsnachweis}
+                    onChange={(e) => setField("berufsnachweis", e.target.value)}
+                    className="w-full p-3 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                    placeholder="z. B. Fachausweis Gebäudetechnik oder Link zum PDF"
                   />
+                  <p className="text-xs text-slate-500 mt-2">
+                    Dokumente kannst du später direkt im Profil hochladen.
+                  </p>
                 </div>
               </div>
 
-              {/* Rechte Spalte */}
+              {/* Fachbereiche */}
               <div className="space-y-6">
-                {/* Fachbereiche */}
-                <div className="bg-gray-50 rounded-xl p-6">
-                  <label className="flex items-center space-x-2 font-semibold text-gray-800 mb-4">
-                    <FileText className="w-5 h-5 text-blue-600" />
-                    <span>Fachbereiche</span>
+                <div className="bg-gray-50 rounded-xl p-6 border border-slate-100">
+                  <label className="flex items-center gap-2 font-semibold text-slate-800 mb-3">
+                    <FileText className="w-5 h-5 text-indigo-600" />
+                    Fachbereiche
                   </label>
-                  <p className="text-sm text-gray-600 mb-4">Mehrfachauswahl möglich</p>
-                  <div className="space-y-2">
-                    {fachbereicheList.map((bereich) => (
-                      <label key={bereich} className="flex items-center space-x-3">
-                        <input
-                          type="checkbox"
-                          name="fachbereiche"
-                          value={bereich}
-                          checked={formData.fachbereiche.includes(bereich)}
-                          onChange={handleChange}
-                          className="w-5 h-5"
-                        />
-                        <span>{bereich}</span>
-                      </label>
+                  <p className="text-sm text-slate-600 mb-4">Wähle alle Bereiche aus, in denen du befugt bist.</p>
+                  <div className="flex flex-wrap gap-2">
+                    {FACHBEREICHE.map(({ key, label }) => (
+                      <FachChip key={key} k={key} label={label} />
                     ))}
                   </div>
+                  {form.fachbereiche.length === 0 && (
+                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-4 inline-flex items-center gap-2">
+                      <CircleAlert className="w-4 h-4" />
+                      Bitte mindestens einen Fachbereich auswählen.
+                    </p>
+                  )}
+                </div>
+
+                {/* Zusammenfassung */}
+                <div className="bg-white rounded-xl p-5 border border-slate-100">
+                  <h3 className="font-semibold text-slate-800 mb-3">Kurzüberblick</h3>
+                  <dl className="grid grid-cols-1 gap-2 text-sm">
+                    <div className="flex justify-between">
+                      <dt className="text-slate-500">Personentyp</dt>
+                      <dd className="text-slate-900">
+                        {form.personentyp === "firma" ? "Firma" : "Natürliche Person"}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-slate-500">Fachbereiche</dt>
+                      <dd className="text-slate-900">
+                        {form.fachbereiche.length
+                          ? form.fachbereiche.map((k) => labelByKey[k] || k).join(", ")
+                          : "—"}
+                      </dd>
+                    </div>
+                  </dl>
                 </div>
               </div>
             </div>
 
-            {/* Speichern Button */}
-            <div className="mt-8 pt-8 border-t border-gray-200">
+            {/* Action Bar */}
+            <div className="mt-8 pt-6 border-t border-slate-200 flex flex-col md:flex-row md:items-center gap-3">
               <button
                 type="submit"
-                className="w-full flex items-center justify-center space-x-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 px-6 rounded-xl font-semibold text-lg shadow-lg hover:scale-105 transition"
+                disabled={saving || !hasChanges || form.fachbereiche.length === 0}
+                className={[
+                  "w-full md:w-auto inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-semibold",
+                  saving || !hasChanges || form.fachbereiche.length === 0
+                    ? "bg-slate-200 text-slate-500 cursor-not-allowed"
+                    : "bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-700 hover:to-indigo-700",
+                ].join(" ")}
               >
-                <Save className="w-6 h-6" />
-                <span>Profil speichern</span>
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-5 h-5" />}
+                {saving ? "Wird gespeichert…" : hasChanges ? "Profil speichern" : "Keine Änderungen"}
               </button>
-            </div>
 
-            {/* Feedback */}
-            {message && (
-              <div className="mt-6 p-4 bg-green-100 border border-green-300 text-green-800 rounded-lg text-center font-semibold">
-                {message}
-              </div>
-            )}
+              {message && (
+                <span className="inline-flex items-center gap-2 text-green-700 bg-green-50 border border-green-200 px-3 py-2 rounded-lg">
+                  <CheckCircle2 className="w-4 h-4" />
+                  {message}
+                </span>
+              )}
+              {error && (
+                <span className="inline-flex items-center gap-2 text-red-700 bg-red-50 border border-red-200 px-3 py-2 rounded-lg">
+                  <CircleAlert className="w-4 h-4" />
+                  {error}
+                </span>
+              )}
+            </div>
           </div>
         </form>
       </div>
     </div>
   );
 }
-
-export default ExpertProfile;

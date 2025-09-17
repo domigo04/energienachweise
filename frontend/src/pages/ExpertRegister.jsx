@@ -97,8 +97,10 @@ export default function ExpertRegister() {
     setIsLoading(true);
     setError("");
 
-    // Backend-Format: EXAKT wie dein Schema es braucht
-    const personentypText = form.personentyp === "natuerliche_person" ? "natürliche Person" : "Firma";
+    // Backend-Format: mit kaputtem Encoding (TEMPORÄRER FIX!)
+    const personentypText = form.personentyp === "natuerliche_person" 
+      ? "natÃ¼rliche Person"  // <- kaputtes Encoding für dein aktuelles Schema
+      : "Firma";
     const fachbereicheLabels = form.fachbereiche.map(k => LABEL_BY_KEY[k] || k);
 
     const payload = {

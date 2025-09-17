@@ -16,8 +16,11 @@ import ExpertRegister from "./pages/ExpertRegister";
 import CustomerRegister from "./pages/CustomerRegister";
 import ExpertProfile from "./pages/ExpertProfile";
 import ExpertenDetail from "./pages/ExpertenDetail";
-import HxDiagramPage from "./pages/HxDiagramPage"; // bestehend
-import WarmwasserTool from "./pages/WarmwasserTool"; // ⬅️ NEU
+import HxDiagramPage from "./pages/HxDiagramPage";
+import WarmwasserTool from "./pages/WarmwasserTool";
+
+// ⬇️ NEU
+import CoolingCalc from "./pages/CoolingCalc";
 
 export default function App() {
   return (
@@ -42,7 +45,10 @@ export default function App() {
             <Route path="/profil" element={<ExpertProfile />} />
 
             <Route path="/hx-diagramm" element={<HxDiagramPage />} />
-            <Route path="/warmwasser-tool" element={<WarmwasserTool />} /> {/* ⬅️ NEU */}
+            <Route path="/warmwasser-tool" element={<WarmwasserTool />} />
+
+            {/* ⬇️ NEU: Frontend-only Kühllast */}
+            <Route path="/kuehllast" element={<CoolingCalc />} />
 
             <Route
               path="*"

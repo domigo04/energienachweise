@@ -1,4 +1,3 @@
-// src/components/header.jsx
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import { Menu, X, LogIn, ChevronDown } from "lucide-react";
@@ -39,7 +38,6 @@ export default function Header() {
     return () => window.removeEventListener("scroll", onScroll);
   }, [visible]);
 
-  // Outside-Click schließt Tools
   useEffect(() => {
     const onDocDown = (e) => {
       if (!toolsRef.current) return;
@@ -49,20 +47,17 @@ export default function Header() {
     return () => document.removeEventListener("mousedown", onDocDown);
   }, []);
 
-  // Bei Route-Wechsel alles schließen
   useEffect(() => {
     setToolsOpen(false);
     setOpen(false);
   }, [location.pathname]);
 
-  // Escape zum Schließen
   useEffect(() => {
     const onKey = (e) => e.key === "Escape" && setToolsOpen(false);
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, []);
 
-  // Helpers für Delay-Schließen
   const cancelClose = () => {
     if (closeTimer.current) {
       clearTimeout(closeTimer.current);
@@ -88,7 +83,9 @@ export default function Header() {
     { to: "/admin", label: "Admin" },
   ];
 
+  // ⬇️ Kühllast im Tools-Menü ergänzt
   const TOOLS = [
+    { to: "/kuehllast", label: "Kühllast" },
     { to: "/hx-diagramm", label: "h–x Diagramm" },
     { to: "/warmwasser-tool", label: "Warmwasser Tool" },
   ];
@@ -139,14 +136,8 @@ export default function Header() {
               <div ref={toolsRef} className="relative">
                 <button
                   type="button"
-                  onClick={() => {
-                    cancelClose();
-                    setToolsOpen((v) => !v);
-                  }}
-                  onMouseEnter={() => {
-                    cancelClose();
-                    setToolsOpen(true);
-                  }}
+                  onClick={() => { cancelClose(); setToolsOpen((v) => !v); }}
+                  onMouseEnter={() => { cancelClose(); setToolsOpen(true); }}
                   onMouseLeave={scheduleClose}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
@@ -164,10 +155,9 @@ export default function Header() {
                   <ChevronDown className={`w-4 h-4 transition-transform ${toolsOpen ? "rotate-180" : ""}`} />
                 </button>
 
-                {/* Hover-Bridge + Dropdown Wrapper */}
                 <div
                   className={[
-                    "absolute right-0 top-full pt-2 z-50", // pt-2 = unsichtbare Brücke
+                    "absolute right-0 top-full pt-2 z-50",
                     toolsOpen ? "pointer-events-auto" : "pointer-events-none",
                   ].join(" ")}
                   onMouseEnter={cancelClose}

@@ -1,0 +1,5 @@
+{
+  "co2_outdoor_ppm": 400,
+  "co2_indoor_limit_ppm": 1000,
+  "co2_emission_lph_per_person": 18
+}

@@ -1,0 +1,48 @@
+[
+  {
+    "id": "3.1_buero_einzel_gruppe",
+    "title": "Einzel-/Gruppenbüro (3.1)",
+    "notes": "bis 6 Arbeitsplätze – SIA-Richtwerte",
+    "people_per_m2": 0.06,
+    "vent_m3h_per_m2": 2.1,
+    "vent_m3h_per_person": 29,
+    "sensible_per_person_W": 75,
+    "latent_per_person_W": 55,
+    "lighting_W_m2": 12,
+    "equipment_W_m2": 15,
+    "simultaneity_people": 0.8,
+    "target_temp_summer_C": 26,
+    "target_temp_winter_C": 21,
+    "noise_class_db": 33
+  },
+  {
+    "id": "3.2_buero_grossraum",
+    "title": "Grossraumbüro (3.2)",
+    "people_per_m2": 0.1,
+    "vent_m3h_per_m2": 2.9,
+    "vent_m3h_per_person": 29,
+    "sensible_per_person_W": 75,
+    "latent_per_person_W": 55,
+    "lighting_W_m2": 15,
+    "equipment_W_m2": 18,
+    "simultaneity_people": 0.8,
+    "target_temp_summer_C": 26,
+    "target_temp_winter_C": 21,
+    "noise_class_db": 33
+  },
+  {
+    "id": "3.3_sitzungszimmer",
+    "title": "Sitzungszimmer (3.3)",
+    "people_per_m2": 0.4,
+    "vent_m3h_per_m2": 9.7,
+    "vent_m3h_per_person": 29,
+    "sensible_per_person_W": 75,
+    "latent_per_person_W": 55,
+    "lighting_W_m2": 12,
+    "equipment_W_m2": 5,
+    "simultaneity_people": 1.0,
+    "target_temp_summer_C": 26,
+    "target_temp_winter_C": 21,
+    "noise_class_db": 42
+  }
+]

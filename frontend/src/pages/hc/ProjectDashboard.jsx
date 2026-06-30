@@ -147,6 +147,22 @@ export default function ProjectDashboard() {
         )}
       </div>
 
+      {/* Cockpit / Anlagenschema — die eine Wahrheit */}
+      {project.status !== "archiviert" && (
+        <Link to={`/heizungscockpit/projekte/${id}/schema`}
+          className="block rounded-xl p-5 mb-6 shadow-sm transition bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-base font-semibold">🔧 Anlagenschema öffnen</div>
+              <div className="text-sm text-blue-100 mt-0.5">
+                Schema zeichnen — Berechnungen leben in den Bauteilen
+              </div>
+            </div>
+            <span className="text-2xl leading-none">→</span>
+          </div>
+        </Link>
+      )}
+
       {/* Grunddaten */}
       {bd && (
         <div className="bg-white border border-gray-200 rounded-xl p-5 mb-6 shadow-sm">

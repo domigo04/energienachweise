@@ -4,7 +4,6 @@ import { ChevronDown, Menu, X } from "lucide-react";
 import logo from "../png/logo.png";
 
 const RECHNER = [
-  { to: "/heizungscockpit/hydraulik",             label: "Hydraulik-Editor" },
   { to: "/heizungscockpit/rechner/ventil",        label: "Ventilauslegung (M3)" },
   { to: "/heizungscockpit/rechner/druckverlust",  label: "Druckverlust (M4)" },
   { to: "/heizungscockpit/rechner/ravel",         label: "RAVEL-Wirtschaftlichkeit (M10)" },

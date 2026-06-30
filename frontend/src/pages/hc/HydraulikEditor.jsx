@@ -1,5 +1,5 @@
-import React, { useCallback, useState, useMemo, useRef } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import React, { useCallback, useState, useMemo, useRef, useEffect } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   ReactFlow, Background, Controls, MiniMap,
   addEdge, useNodesState, useEdgesState,
@@ -9,6 +9,7 @@ import '@xyflow/react/dist/style.css';
 import { NODE_TYPES } from '../../components/hc/nodes/HydraulikNodes';
 import { EDGE_TYPES } from '../../components/hc/edges/FlowEdge';
 import { SCHALTUNGEN } from '../../components/hc/nodes/schaltungen';
+import { getProject, listSchemas, createSchema, saveSchema } from '../../api/hcApi';
 
 // ── Konstanten ────────────────────────────────────────────────
 const KVS_REIHE = [0.1, 0.16, 0.25, 0.4, 0.63, 1.0, 1.6, 2.5, 4.0, 6.3, 10, 16, 25, 40, 63];
@@ -37,7 +38,6 @@ const STD_PALETTE = [
 ];
 
 const newId = () => `n_${Date.now()}_${Math.floor(Math.random() * 9999)}`;
-const LS_KEY = 'hc-user-schemas';
 
 // ── Phase 2: Topologie-bewusste Hydraulik-Berechnung ─────────
 // Für jede Leitung: V' = Summe der HK-Volumenströme auf der WE-fernen Seite
@@ -203,54 +203,7 @@ function useHydraulicFlows(nodes, edges) {
   }, [nodes, edges]);
 }
 
-// ── Phase 1: Schema speichern / überspeichern / laden ─────────
-function useSavedSchemas() {
-  const [schemas, setSchemas] = useState(() =>
-    JSON.parse(localStorage.getItem(LS_KEY) || '[]')
-  );
-  // Neu speichern oder bestehendes überspeichern (gleicher Name)
-  const save = (name, nodes, edges) => {
-    const exists = schemas.find(s => s.name === name);
-    const updated = exists
-      ? schemas.map(s => s.name === name ? { ...s, nodes, edges } : s)
-      : [...schemas, { id: Date.now(), name, nodes, edges }];
-    localStorage.setItem(LS_KEY, JSON.stringify(updated));
-    setSchemas(updated);
-    return !!exists; // true = überspeichert
-  };
-  // Gezieltes Überspeichern per ID (Update-Button)
-  const update = (id, nodes, edges) => {
-    const updated = schemas.map(s => s.id === id ? { ...s, nodes, edges } : s);
-    localStorage.setItem(LS_KEY, JSON.stringify(updated));
-    setSchemas(updated);
-  };
-  const remove = (id) => {
-    const updated = schemas.filter(s => s.id !== id);
-    localStorage.setItem(LS_KEY, JSON.stringify(updated));
-    setSchemas(updated);
-  };
-  return { schemas, save, update, remove };
-}
-
-// Schema als Gruppe auf Canvas einfügen
-function instantiateSchema(schema, dropPos, setNodes, setEdges) {
-  const xs = schema.nodes.map(n => n.position.x);
-  const ys = schema.nodes.map(n => n.position.y);
-  const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
-  const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
-  const idMap = {};
-  const newNodes = schema.nodes.map(n => {
-    const nid = newId(); idMap[n.id] = nid;
-    return { ...n, id: nid, position: { x: dropPos.x + (n.position.x - cx), y: dropPos.y + (n.position.y - cy) } };
-  });
-  const newEdges = schema.edges.map(e => ({
-    ...e, id: newId(),
-    source: idMap[e.source] || e.source,
-    target: idMap[e.target] || e.target,
-  }));
-  setNodes(ns => [...ns, ...newNodes]);
-  setEdges(es => [...es, ...newEdges]);
-}
+// (Persönliche Schema-Vorlagen folgen in Phase 2 — jetzt lebt das Schema im Backend.)
 
 // ── Properties Panel ─────────────────────────────────────────
 function PropertiesPanel({ node, nodeFlows, onUpdate, onDelete, navigate }) {
@@ -440,15 +393,62 @@ function PvBox({ pv, v, kvs_eff }) {
 // ── Haupt-Editor ──────────────────────────────────────────────
 function EditorInner() {
   const navigate = useNavigate();
+  const { id: projectId } = useParams();
   const { screenToFlowPosition } = useReactFlow();
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selected, setSelected]     = useState(null);
   const [edgeColor, setEdgeColor]   = useState('#ef4444');
-  const [schemaName, setSchemaName] = useState('Neues Schema');
-  const { schemas: userSchemas, save: saveSchema, update: updateSchema, remove: removeSchema } = useSavedSchemas();
+  const [schemaName, setSchemaName] = useState('Schema');
+  const [projectName, setProjectName] = useState('');
+  const [schemaId, setSchemaId]     = useState(null);
+  const [loaded, setLoaded]         = useState(false);
+  const [saveState, setSaveState]   = useState('idle'); // idle | saving | saved | error
 
   const { edgeFlows, nodeFlows } = useHydraulicFlows(nodes, edges);
+
+  // ── Schema aus Backend laden (oder anlegen, falls noch keins existiert) ──
+  // Ref-Guard: pro Projekt nur EINMAL initialisieren. React-StrictMode führt
+  // Effekte im Dev-Modus absichtlich doppelt aus — ohne Guard würden dabei
+  // zwei Schemas angelegt. Bei Projektwechsel (neue id) wird neu geladen.
+  const initedProject = useRef(null);
+  useEffect(() => {
+    if (initedProject.current === projectId) return;
+    initedProject.current = projectId;
+    (async () => {
+      try {
+        const proj = await getProject(projectId);
+        setProjectName(proj.name);
+      } catch { /* Projektname ist optional */ }
+      try {
+        const list = await listSchemas(projectId);
+        const s = list[0] || await createSchema(projectId, { name: 'Schema', graph: { nodes: [], edges: [] } });
+        setSchemaId(s.id);
+        setSchemaName(s.name || 'Schema');
+        setNodes(s.graph?.nodes || []);
+        setEdges(s.graph?.edges || []);
+      } catch (e) {
+        console.error('Schema konnte nicht geladen werden', e);
+      } finally {
+        setLoaded(true);
+      }
+    })();
+  }, [projectId, setNodes, setEdges]);
+
+  // ── Autosave (debounced) — das Schema ist die eine Wahrheit ──
+  useEffect(() => {
+    if (!loaded || !schemaId) return;
+    setSaveState('saving');
+    const t = setTimeout(async () => {
+      try {
+        await saveSchema(schemaId, { name: schemaName, graph: { nodes, edges } });
+        setSaveState('saved');
+      } catch {
+        setSaveState('error');
+      }
+    }, 800);
+    return () => clearTimeout(t);
+  }, [nodes, edges, schemaName, loaded, schemaId]);
 
   // Undo-History
   const snapshots = useRef([]);
@@ -535,17 +535,7 @@ function EditorInner() {
     const s = SCHALTUNGEN[key];
     setNodes(s.nodes.map(n=>({...n})));
     setEdges(s.edges.map(e=>({...e})));
-    setSchemaName(s.name); setSelected(null);
-  };
-
-  const handleSaveSchema = () => {
-    if (nodes.length === 0) { alert('Kein Schema zum Speichern.'); return; }
-    const existing = userSchemas.map(s => s.name).join(', ');
-    const hint = existing ? ` (bestehende: ${existing} — gleicher Name = überspeichern)` : '';
-    const name = window.prompt(`Schema-Name${hint}:`);
-    if (!name?.trim()) return;
-    const wasOverwrite = saveSchema(name.trim(), nodes, edges);
-    alert(wasOverwrite ? `"${name}" überspeichert ✓` : `"${name}" gespeichert ✓`);
+    setSelected(null);
   };
 
   const onConnect = useCallback((params) => {
@@ -561,15 +551,9 @@ function EditorInner() {
     if (!raw) return;
     snap();
     const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
-    if (raw.startsWith('user-schema:')) {
-      const id = parseInt(raw.replace('user-schema:', ''));
-      const schema = userSchemas.find(s => s.id === id);
-      if (schema) instantiateSchema(schema, pos, setNodes, setEdges);
-      return;
-    }
     const p = STD_PALETTE.find(p => p.type === raw);
     setNodes(ns => [...ns, { id: newId(), type: raw, position: pos, data: { label: p?.label || raw } }]);
-  }, [screenToFlowPosition, setNodes, setEdges, userSchemas, snap]);
+  }, [screenToFlowPosition, setNodes, snap]);
 
   const onNodeClick  = useCallback((_, n) => setSelected(n), []);
   const onPaneClick  = useCallback(() => setSelected(null), []);
@@ -589,10 +573,13 @@ function EditorInner() {
     <div style={{ display:'flex', flexDirection:'column', height:'calc(100vh - 64px)', fontFamily:'system-ui,sans-serif' }}>
       {/* Topbar */}
       <div style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 14px', background:'white', borderBottom:'1px solid #e2e8f0', flexShrink:0, flexWrap:'wrap' }}>
-        <Link to="/heizungscockpit" style={{ fontSize:12, color:'#2563eb', whiteSpace:'nowrap' }}>← Heizungscockpit</Link>
+        <Link to={`/heizungscockpit/projekte/${projectId}`} style={{ fontSize:12, color:'#2563eb', whiteSpace:'nowrap' }}>← {projectName || 'Projekt'}</Link>
         <span style={{ color:'#e2e8f0' }}>|</span>
         <input value={schemaName} onChange={e=>setSchemaName(e.target.value)}
           style={{ fontSize:13, fontWeight:700, border:'1px solid #f1f5f9', borderRadius:4, padding:'2px 8px', color:'#1e293b', minWidth:160 }}/>
+        <span style={{ fontSize:11, whiteSpace:'nowrap', color: saveState==='error' ? '#dc2626' : saveState==='saving' ? '#94a3b8' : '#16a34a' }}>
+          {saveState==='saving' ? '● Speichere…' : saveState==='error' ? '● Nicht gespeichert' : loaded ? '● Gespeichert' : ''}
+        </span>
 
         <span style={{ fontSize:11, color:'#94a3b8' }}>Vorlage:</span>
         {Object.entries(SCHALTUNGEN).map(([k,s])=>(
@@ -601,12 +588,6 @@ function EditorInner() {
             {s.name}
           </button>
         ))}
-
-        {/* Phase 1: Schema speichern */}
-        <button onClick={handleSaveSchema}
-          style={{ fontSize:11, padding:'4px 10px', borderRadius:5, border:'1px solid #86efac', background:'#f0fdf4', cursor:'pointer', color:'#15803d', fontWeight:600, marginLeft:8, whiteSpace:'nowrap' }}>
-          💾 Schema speichern
-        </button>
 
         <div style={{ display:'flex', gap:4, alignItems:'center', marginLeft:'auto' }}>
           <span style={{ fontSize:11, color:'#94a3b8' }}>Linie:</span>
@@ -634,34 +615,7 @@ function EditorInner() {
             </div>
           ))}
 
-          {/* Phase 1: Gespeicherte Schaltungen */}
-          {userSchemas.length > 0 && (
-            <>
-              <div style={{ padding:'10px 10px 4px', fontSize:9, fontWeight:700, color:'#16a34a', textTransform:'uppercase', letterSpacing:'0.08em', borderTop:'1px solid #e2e8f0', marginTop:6 }}>
-                Meine Schaltungen
-              </div>
-              {userSchemas.map(s=>(
-                <div key={s.id} draggable
-                  onDragStart={e=>{e.dataTransfer.setData('application/reactflow',`user-schema:${s.id}`); e.dataTransfer.effectAllowed='move';}}
-                  style={{ margin:'3px 8px', padding:'6px 8px', background:'#f0fdf4', border:'1px solid #86efac', borderRadius:6, cursor:'grab', fontSize:11, color:'#15803d', userSelect:'none' }}>
-                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                    <div>
-                      <div style={{ fontWeight:600 }}>{s.name}</div>
-                      <div style={{ fontSize:9, color:'#4ade80' }}>{s.nodes.length} Bauteile</div>
-                    </div>
-                    <div style={{ display:'flex', gap:2 }}>
-                      {/* Überspeichern */}
-                      <button onClick={()=>{ if(nodes.length>0&&window.confirm(`"${s.name}" mit aktuellem Canvas überspeichern?`)){updateSchema(s.id,nodes,edges);} }}
-                        title="Mit aktuellem Canvas überspeichern"
-                        style={{ background:'none', border:'none', color:'#16a34a', cursor:'pointer', fontSize:12, padding:'0 3px', lineHeight:1 }}>↑</button>
-                      <button onClick={()=>removeSchema(s.id)}
-                        style={{ background:'none', border:'none', color:'#ef4444', cursor:'pointer', fontSize:14, padding:'0 2px', lineHeight:1 }}>×</button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </>
-          )}
+          {/* Persönliche Vorlagen folgen in Phase 2 (dann aus dem Backend) */}
 
           <div style={{ padding:'6px 10px 8px', fontSize:9, color:'#cbd5e1', marginTop:4 }}>
             Auf Canvas ziehen.<br/>T-Stück = Mehrfach-Abzweigung

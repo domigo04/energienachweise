@@ -34,3 +34,19 @@ export const deleteGroup = (groupId) =>
 
 export const reorderGroups = (projectId, groupIds) =>
   api.post(`${BASE}/projects/${projectId}/groups/reorder`, { group_ids: groupIds }).then(r => r.data);
+
+// --- Anlagenschema (Hydraulik) ---
+export const listSchemas = (projectId) =>
+  api.get(`${BASE}/projects/${projectId}/schemas`).then(r => r.data);
+
+export const createSchema = (projectId, data) =>
+  api.post(`${BASE}/projects/${projectId}/schemas`, data).then(r => r.data);
+
+export const getSchema = (schemaId) =>
+  api.get(`${BASE}/schemas/${schemaId}`).then(r => r.data);
+
+export const saveSchema = (schemaId, data) =>
+  api.put(`${BASE}/schemas/${schemaId}`, data).then(r => r.data);
+
+export const deleteSchema = (schemaId) =>
+  api.delete(`${BASE}/schemas/${schemaId}`);

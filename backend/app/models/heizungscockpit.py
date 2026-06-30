@@ -66,6 +66,11 @@ class HcProject(Base):
         cascade="all, delete-orphan",
         order_by="HcHeatingGroup.sort_order"
     )
+    schemas = relationship(
+        "HcSchema", back_populates="project",
+        cascade="all, delete-orphan",
+        order_by="HcSchema.created_at"
+    )
 
 
 class HcProjectBaseData(Base):
@@ -133,3 +138,23 @@ class HcCalculationResult(Base):
     results_json = Column(Text)
     notizen = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class HcSchema(Base):
+    """Anlagenschema (Hydraulik) — die eine Wahrheit eines Projekts.
+
+    Speichert den kompletten React-Flow-Graphen (Bauteile + Leitungen inkl.
+    aller Auslegungs-Eingaben) als JSON. Aus diesem Graphen lässt sich später
+    die Stückliste / Kostenschätzung ableiten.
+    """
+    __tablename__ = "hc_schemas"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, default=1, index=True)
+    project_id = Column(Integer, ForeignKey("hc_projects.id"), index=True)
+    name = Column(String, nullable=False, default="Schema")
+    graph_json = Column(Text, nullable=False, default="{}")  # {nodes:[...], edges:[...]}
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    project = relationship("HcProject", back_populates="schemas")

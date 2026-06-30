@@ -139,3 +139,25 @@ class GroupTemplateOut(BaseModel):
 
 class ReorderRequest(BaseModel):
     group_ids: List[int]
+
+
+# ── Anlagenschema (Hydraulik) ──
+class SchemaCreate(BaseModel):
+    name: Optional[str] = "Schema"
+    graph: Optional[dict] = None
+
+
+class SchemaUpdate(BaseModel):
+    name: Optional[str] = None
+    graph: Optional[dict] = None
+
+
+class SchemaOut(BaseModel):
+    id: int
+    project_id: int
+    name: str
+    graph: dict = {}
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}

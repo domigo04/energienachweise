@@ -44,6 +44,13 @@ from app.routers.quotes import router as quotes_router
 from app.routers.requests import router as requests_router
 from app.routers.matching import router as matching_router
 
+# Heizungscockpit
+from app.routers.hc_projects import router as hc_projects_router
+from app.routers.hc_groups import router as hc_groups_router
+from app.routers.hc_ventil import router as hc_ventil_router
+from app.routers.hc_druckverlust import router as hc_druckverlust_router
+from app.routers.hc_ravel import router as hc_ravel_router
+
 app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(customer_router)
@@ -52,10 +59,18 @@ app.include_router(projects_router)
 app.include_router(quotes_router)
 app.include_router(requests_router)
 app.include_router(matching_router)
+app.include_router(hc_projects_router)
+app.include_router(hc_groups_router)
+app.include_router(hc_ventil_router)
+app.include_router(hc_druckverlust_router)
+app.include_router(hc_ravel_router)
 
 # ---------- DB-Init & Admin-Seed ----------
 from app.database import Base, engine, SessionLocal, get_db
-from app.models.user import User, Role  # ggf. Pfade prüfen
+from app.models.user import User, Role
+from app.models.heizungscockpit import (  # noqa: F401 — Tabellen müssen vor create_all importiert sein
+    HcProject, HcProjectBaseData, HcGroupTemplate, HcHeatingGroup, HcCalculationResult,
+)
 from app.auth import hash_password
 
 @app.on_event("startup")
@@ -86,6 +101,30 @@ def init_db_and_seed_admin():
         print("Admin seed error:", e)
     finally:
         db.close()
+
+    # Heizungscockpit: Gruppen-Vorlagen einmalig anlegen
+    from app.models.heizungscockpit import HcGroupTemplate, HcGruppeTyp
+    db2 = SessionLocal()
+    try:
+        if db2.query(HcGroupTemplate).count() == 0:
+            templates = [
+                HcGroupTemplate(name="Fussbodenheizung (FBH)", typ=HcGruppeTyp.fbh, standard_vl=35.0, standard_rl=28.0, beschreibung="VL 35 / RL 28 °C", is_system=True),
+                HcGroupTemplate(name="Heizkörper modern (HK)", typ=HcGruppeTyp.hk, standard_vl=55.0, standard_rl=45.0, beschreibung="VL 55 / RL 45 °C", is_system=True),
+                HcGroupTemplate(name="Heizkörper alt (HK)", typ=HcGruppeTyp.hk, standard_vl=70.0, standard_rl=55.0, beschreibung="VL 70 / RL 55 °C", is_system=True),
+                HcGroupTemplate(name="Lufterhitzer", typ=HcGruppeTyp.lufterhitzer, standard_vl=60.0, standard_rl=45.0, beschreibung="VL 60 / RL 45 °C", is_system=True),
+                HcGroupTemplate(name="Brauchwarmwasser (BWW)", typ=HcGruppeTyp.bww, standard_vl=65.0, standard_rl=55.0, beschreibung="VL 65 / RL 55 °C", is_system=True),
+                HcGroupTemplate(name="Lüftungsregister", typ=HcGruppeTyp.lueftungsregister, standard_vl=60.0, standard_rl=45.0, beschreibung="VL 60 / RL 45 °C", is_system=True),
+                HcGroupTemplate(name="Wandheizung", typ=HcGruppeTyp.wandheizung, standard_vl=35.0, standard_rl=28.0, beschreibung="VL 35 / RL 28 °C", is_system=True),
+                HcGroupTemplate(name="TABS (Betonkernaktivierung)", typ=HcGruppeTyp.tabs, standard_vl=30.0, standard_rl=25.0, beschreibung="VL 30 / RL 25 °C", is_system=True),
+                HcGroupTemplate(name="Konvektoren", typ=HcGruppeTyp.konvektoren, standard_vl=55.0, standard_rl=45.0, beschreibung="VL 55 / RL 45 °C", is_system=True),
+            ]
+            db2.add_all(templates)
+            db2.commit()
+            print(f"[INIT] {len(templates)} Gruppen-Vorlagen angelegt")
+    except Exception as e:
+        print("Gruppen-Vorlagen seed error:", e)
+    finally:
+        db2.close()
 
 # ---------- DEBUG ENDPOINT ----------
 @app.get("/__debug")

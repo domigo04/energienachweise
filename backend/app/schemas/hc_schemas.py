@@ -1,0 +1,141 @@
+from pydantic import BaseModel
+from typing import Optional, List
+from datetime import datetime
+from enum import Enum
+
+
+class ProjectStatus(str, Enum):
+    aktiv = "aktiv"
+    archiviert = "archiviert"
+
+
+class HeizungsSystem(str, Enum):
+    fbh = "FBH"
+    hk = "HK"
+    gemischt = "gemischt"
+
+
+class GruppeTyp(str, Enum):
+    fbh = "FBH"
+    hk = "HK"
+    lufterhitzer = "Lufterhitzer"
+    bww = "BWW"
+    lueftungsregister = "Lueftungsregister"
+    wandheizung = "Wandheizung"
+    tabs = "TABS"
+    konvektoren = "Konvektoren"
+
+
+class GruppeStatus(str, Enum):
+    aktiv = "aktiv"
+    inaktiv = "inaktiv"
+    ignoriert = "ignoriert"
+
+
+class ProjectBaseDataIn(BaseModel):
+    t_aussen: float = -8.0
+    t_innen: float = 20.0
+    heizungssystem: HeizungsSystem = HeizungsSystem.gemischt
+    warmwasser_bedarf_kw: Optional[float] = None
+
+
+class ProjectCreate(BaseModel):
+    name: str
+    standort: Optional[str] = None
+    kunde: Optional[str] = None
+    beschreibung: Optional[str] = None
+    base_data: Optional[ProjectBaseDataIn] = None
+
+
+class ProjectUpdate(BaseModel):
+    name: Optional[str] = None
+    standort: Optional[str] = None
+    kunde: Optional[str] = None
+    beschreibung: Optional[str] = None
+    status: Optional[ProjectStatus] = None
+    base_data: Optional[ProjectBaseDataIn] = None
+
+
+class ProjectBaseDataOut(BaseModel):
+    t_aussen: float
+    t_innen: float
+    heizungssystem: HeizungsSystem
+    warmwasser_bedarf_kw: Optional[float]
+
+    model_config = {"from_attributes": True}
+
+
+class HeatingGroupCreate(BaseModel):
+    name: str
+    typ: GruppeTyp
+    leistung_kw: float = 0.0
+    vorlauf: float
+    ruecklauf: float
+    template_id: Optional[int] = None
+    sort_order: int = 0
+
+
+class HeatingGroupUpdate(BaseModel):
+    name: Optional[str] = None
+    leistung_kw: Optional[float] = None
+    vorlauf: Optional[float] = None
+    ruecklauf: Optional[float] = None
+    sort_order: Optional[int] = None
+
+
+class HeatingGroupStatusUpdate(BaseModel):
+    status: GruppeStatus
+
+
+class HeatingGroupOut(BaseModel):
+    id: int
+    name: str
+    typ: GruppeTyp
+    leistung_kw: float
+    vorlauf: float
+    ruecklauf: float
+    volumenstrom_m3h: Optional[float]
+    status: GruppeStatus
+    sort_order: int
+    template_id: Optional[int]
+    warnings: List[str] = []
+
+    model_config = {"from_attributes": True}
+
+
+class ProjectOut(BaseModel):
+    id: int
+    name: str
+    standort: Optional[str]
+    kunde: Optional[str]
+    beschreibung: Optional[str]
+    status: ProjectStatus
+    base_data: Optional[ProjectBaseDataOut]
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ProjectDetailOut(ProjectOut):
+    heating_groups: List[HeatingGroupOut] = []
+    summe_leistung_kw: float = 0.0
+    summe_volumenstrom_m3h: float = 0.0
+    summe_volumenstrom_lh: float = 0.0
+    rl_gemischt: Optional[float] = None
+
+
+class GroupTemplateOut(BaseModel):
+    id: int
+    name: str
+    typ: GruppeTyp
+    standard_vl: float
+    standard_rl: float
+    beschreibung: Optional[str]
+    is_system: bool
+
+    model_config = {"from_attributes": True}
+
+
+class ReorderRequest(BaseModel):
+    group_ids: List[int]

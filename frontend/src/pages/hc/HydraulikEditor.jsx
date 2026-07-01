@@ -163,8 +163,12 @@ function useHydraulicFlows(nodes, edges) {
       while (queue.length) {
         const cur = queue.shift();
         for (const { to, eid } of (revAdj[cur] || [])) {
-          if (!calcEdges.has(eid)) edgeFlows[eid] = (edgeFlows[eid] || 0) + flow;
-          if (!visited.has(to)) { visited.add(to); queue.push(to); }
+          // Fluss nur beim Entdecken eines NEUEN Knotens gutschreiben — sonst
+          // wird dieselbe Kante von beiden Enden gezählt (Doppelzählung).
+          if (!visited.has(to)) {
+            if (!calcEdges.has(eid)) edgeFlows[eid] = (edgeFlows[eid] || 0) + flow;
+            visited.add(to); queue.push(to);
+          }
         }
       }
     });
@@ -184,8 +188,12 @@ function useHydraulicFlows(nodes, edges) {
       while (queue.length) {
         const cur = queue.shift();
         for (const { to, eid } of (rlAdj[cur] || [])) {
-          if (!calcEdges.has(eid)) edgeFlows[eid] = (edgeFlows[eid] || 0) + flow;
-          if (!visited.has(to)) { visited.add(to); queue.push(to); }
+          // Rücklauf: Fluss nur beim Entdecken eines NEUEN Knotens gutschreiben,
+          // sonst zählt die Kante doppelt (Bug: 40.585 statt 20.292 nach dem HK).
+          if (!visited.has(to)) {
+            if (!calcEdges.has(eid)) edgeFlows[eid] = (edgeFlows[eid] || 0) + flow;
+            visited.add(to); queue.push(to);
+          }
         }
       }
     });
@@ -210,7 +218,7 @@ function PropertiesPanel({ node, nodeFlows, onUpdate, onDelete, navigate }) {
   if (!node) return (
     <div style={{ padding: 14, fontSize: 11, color: '#94a3b8', lineHeight: 1.7 }}>
       <div style={{ fontWeight: 700, color: '#64748b', marginBottom: 8 }}>Eigenschaften</div>
-      Bauteil anklicken.
+      Einfachklick = ansehen · <b>Doppelklick = Auslegung öffnen</b>.
       <div style={{ marginTop: 14, fontSize: 10, borderTop: '1px solid #e2e8f0', paddingTop: 10 }}>
         <b>T-Stück:</b> Kleinen schwarzen Kreis platzieren → mehrere Leitungen anschliessen.<br /><br />
         <b>Parallel-Heizkreise:</b> Jeden HK mit T-Stück verbinden → T-Stück zur Pumpe → V' wird korrekt addiert.
@@ -357,6 +365,146 @@ function PropertiesPanel({ node, nodeFlows, onUpdate, onDelete, navigate }) {
   );
 }
 
+// ── Auslegungs-Modal (Doppelklick auf ein Bauteil) ───────────
+const TITLES = {
+  heizkreis: 'Heizkreis', valve2: '2-Wege Regelventil', valve3: '3-Wege Mischventil',
+  pump: 'Pumpe', erzeuger: 'Wärmeerzeuger', verteiler: 'Verteiler', speicher: 'Speicher',
+};
+
+function BigVal({ label, value, unit = '', sub = '', color = '#1d4ed8' }) {
+  return (
+    <div style={{ background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:8, padding:'12px 14px' }}>
+      <div style={{ fontSize:11, color:'#64748b' }}>{label}</div>
+      <div style={{ fontSize:22, fontWeight:700, color, fontFamily:'monospace' }}>
+        {value != null && value !== '' ? `${value}${unit ? ' ' + unit : ''}` : '—'}
+      </div>
+      {sub && <div style={{ fontSize:10, color:'#94a3b8', marginTop:2 }}>{sub}</div>}
+    </div>
+  );
+}
+
+function AuslegungModal({ node, v, onUpdate, onClose, navigate }) {
+  const d = node.data;
+  const set = (k, val) => onUpdate(node.id, k, val);
+  let body;
+
+  if (node.type === 'heizkreis') {
+    const vl=parseFloat(d.vl_temp), rl=parseFloat(d.rl_temp), q=parseFloat(d.q_kw);
+    const dt=vl-rl, calc=(!isNaN(vl)&&!isNaN(rl)&&!isNaN(q)&&dt>0)?q/(1.163*dt):null;
+    body = (
+      <div style={{ display:'grid', gap:12 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+          <div><label style={lbl}>Vorlauf [°C]</label>
+            <input type="number" style={{...inp,borderColor:'#fca5a5'}} value={d.vl_temp??''} onChange={e=>set('vl_temp',e.target.value)} placeholder="35"/></div>
+          <div><label style={lbl}>Rücklauf [°C]</label>
+            <input type="number" style={{...inp,borderColor:'#93c5fd'}} value={d.rl_temp??''} onChange={e=>set('rl_temp',e.target.value)} placeholder="28"/></div>
+        </div>
+        <div><label style={lbl}>Leistung Q [kW]</label>
+          <input type="number" style={inp} value={d.q_kw??''} onChange={e=>set('q_kw',e.target.value)} placeholder="8.5"/></div>
+        <BigVal label="Volumenstrom V'" value={calc!=null?calc.toFixed(4):null} unit="m³/h" color="#15803d"
+          sub={calc!=null?`V' = Q / (1.163 · ΔT),  ΔT = ${dt} K  →  ${(calc*1000).toFixed(0)} l/h`:'Vorlauf, Rücklauf und Leistung eingeben'}/>
+      </div>
+    );
+  } else if (node.type === 'valve2') {
+    const dp_kpa=parseFloat(d.dp_var), dp_bar=dp_kpa/100;
+    let kvs_theor=null, kvs_vorschlag=null, pv=null;
+    if(v&&dp_kpa>0){kvs_theor=v/Math.sqrt(dp_bar); kvs_vorschlag=KVS_REIHE.find(k=>k>=kvs_theor)||KVS_REIHE.at(-1);}
+    const kvs_eff=parseFloat(d.kvs_eff||kvs_vorschlag);
+    if(v&&kvs_eff>0){const dpv=(v/kvs_eff)**2; pv=dpv/(dpv+dp_bar)*100;}
+    body = (
+      <div style={{ display:'grid', gap:12 }}>
+        <BigVal label="Durchfluss V' (aus verbundenem Heizkreis)" value={v?v.toFixed(4):null} unit="m³/h" color="#15803d"
+          sub={v?'kommt automatisch aus der Topologie':'Bauteil mit einem Heizkreis verbinden'}/>
+        <div><label style={lbl}>Δpvar — Druckabfall variabler Anlagenteil [kPa]</label>
+          <input type="number" style={inp} value={d.dp_var??''} onChange={e=>set('dp_var',e.target.value)} placeholder="26"/></div>
+        {kvs_theor ? <>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+            <BigVal label="kvs theoretisch" value={kvs_theor.toFixed(3)} color="#1e293b"/>
+            <BigVal label="kvs Vorschlag" value={kvs_vorschlag} color="#1d4ed8" sub="nächstgrösser, Norm-Reihe"/>
+          </div>
+          <div><label style={lbl}>kvs gewählt</label>
+            <select style={{...inp,cursor:'pointer'}} value={d.kvs_eff||kvs_vorschlag||''} onChange={e=>set('kvs_eff',e.target.value)}>
+              {KVS_REIHE.map(k=><option key={k} value={k}>{k}{k===kvs_vorschlag?'  ← Vorschlag':''}</option>)}
+            </select></div>
+          {pv!=null && <PvBox pv={pv} v={v} kvs_eff={kvs_eff}/>}
+        </> : <div style={warnSt}>Δpvar eingeben und Heizkreis verbinden — dann erscheint die kvs-Auslegung.</div>}
+      </div>
+    );
+  } else if (node.type === 'valve3') {
+    const dp_kpa=parseFloat(d.dp_var), dp_bar=dp_kpa/100;
+    const kvs_vorschlag = (v&&dp_kpa>0) ? (KVS_REIHE.find(k=>k>=v/Math.sqrt(dp_bar))||KVS_REIHE.at(-1)) : null;
+    body = (
+      <div style={{ display:'grid', gap:12 }}>
+        <BigVal label="Durchfluss V' (aus Topologie)" value={v?v.toFixed(4):null} unit="m³/h" color="#15803d"/>
+        <div><label style={lbl}>Δpvar [kPa]</label>
+          <input type="number" style={inp} value={d.dp_var??''} onChange={e=>set('dp_var',e.target.value)} placeholder="26"/></div>
+        <BigVal label="kvs Vorschlag" value={kvs_vorschlag} color="#1d4ed8"/>
+      </div>
+    );
+  } else if (node.type === 'pump') {
+    const rohrL=parseFloat(d.rohr_m)||0, pam=parseFloat(d.pam)||70, app=parseFloat(d.apparate_kpa)||0;
+    const dpRohr=rohrL*pam/1000, dpTotal=dpRohr+app;
+    body = (
+      <div style={{ display:'grid', gap:12 }}>
+        <BigVal label="Förder-Volumenstrom V' (aus Topologie)" value={v?v.toFixed(4):null} unit="m³/h" color="#15803d"/>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
+          <div><label style={lbl}>Rohr VL+RL [m]</label><input type="number" style={inp} value={d.rohr_m??''} onChange={e=>set('rohr_m',e.target.value)} placeholder="120"/></div>
+          <div><label style={lbl}>Auf [Pa/m]</label><input type="number" style={inp} value={d.pam??''} onChange={e=>set('pam',e.target.value)} placeholder="70"/></div>
+          <div><label style={lbl}>Apparate [kPa]</label><input type="number" style={inp} value={d.apparate_kpa??''} onChange={e=>set('apparate_kpa',e.target.value)} placeholder="22"/></div>
+        </div>
+        <BigVal label="Förderhöhe" value={dpTotal>0?dpTotal.toFixed(1):null} unit="kPa"
+          sub={dpTotal>0?`Rohr ${dpRohr.toFixed(1)} + Apparate ${app.toFixed(1)} kPa  =  ${(dpTotal/10).toFixed(2)} mWS`:'Rohrlänge und Apparate eingeben'}/>
+      </div>
+    );
+  } else if (node.type === 'erzeuger') {
+    body = (
+      <div style={{ display:'grid', gap:10 }}>
+        <div><label style={lbl}>Typ</label><input style={inp} value={d.typ??''} onChange={e=>set('typ',e.target.value)} placeholder="z.B. Wärmepumpe"/></div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
+          <div><label style={lbl}>Leistung [kW]</label><input type="number" style={inp} value={d.leistung_kw??''} onChange={e=>set('leistung_kw',e.target.value)}/></div>
+          <div><label style={lbl}>VL [°C]</label><input type="number" style={inp} value={d.vl_temp??''} onChange={e=>set('vl_temp',e.target.value)}/></div>
+          <div><label style={lbl}>RL [°C]</label><input type="number" style={inp} value={d.rl_temp??''} onChange={e=>set('rl_temp',e.target.value)}/></div>
+        </div>
+        <button style={btnBlue} onClick={()=>navigate('/heizungscockpit/rechner/ravel')}>→ RAVEL Wirtschaftlichkeit</button>
+      </div>
+    );
+  } else {
+    body = <div style={{ fontSize:12, color:'#94a3b8' }}>Für dieses Bauteil ist in Phase 1 noch keine Auslegung hinterlegt.</div>;
+  }
+
+  return (
+    <div onClick={onClose} style={modalBackdrop}>
+      <div onClick={e=>e.stopPropagation()} style={modalCard}>
+        <div style={modalHeader}>
+          <div>
+            <div style={{ fontSize:10, textTransform:'uppercase', letterSpacing:'0.08em', color:'#94a3b8' }}>Auslegung</div>
+            <div style={{ fontSize:16, fontWeight:700, color:'#1e293b' }}>
+              {TITLES[node.type] || node.type}{d.label ? ` — ${d.label}` : ''}
+            </div>
+          </div>
+          <button onClick={onClose} style={modalClose} title="Schliessen">×</button>
+        </div>
+        <div style={{ padding:'4px 20px 16px' }}>
+          <div style={{ marginBottom:12 }}>
+            <label style={lbl}>Bezeichnung</label>
+            <input style={inp} value={d.label??''} onChange={e=>set('label',e.target.value)} placeholder="z.B. Ventil 1 — HK1 FBH"/>
+          </div>
+          {body}
+        </div>
+        <div style={{ padding:'10px 20px', borderTop:'1px solid #f1f5f9', fontSize:11, color:'#94a3b8', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+          <span>Änderungen werden automatisch im Schema gespeichert.</span>
+          <button onClick={onClose} style={{ background:'#1d4ed8', color:'white', border:'none', borderRadius:6, padding:'5px 16px', fontSize:12, fontWeight:600, cursor:'pointer' }}>Fertig</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const modalBackdrop = { position:'fixed', inset:0, background:'rgba(15,23,42,0.45)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:2000, padding:20 };
+const modalCard = { background:'white', borderRadius:12, width:'min(560px, 94vw)', maxHeight:'88vh', overflowY:'auto', boxShadow:'0 24px 60px rgba(0,0,0,0.35)' };
+const modalHeader = { display:'flex', alignItems:'flex-start', justifyContent:'space-between', padding:'18px 20px 8px' };
+const modalClose = { background:'none', border:'none', fontSize:26, lineHeight:1, color:'#94a3b8', cursor:'pointer', padding:0 };
+
 // ── UI-Helpers ────────────────────────────────────────────────
 const panelSt = { padding: 12, overflowY: 'auto', flex: 1 };
 const lbl = { display:'block', fontSize:10, color:'#6b7280', marginBottom:3, marginTop:6 };
@@ -404,6 +552,7 @@ function EditorInner() {
   const [schemaId, setSchemaId]     = useState(null);
   const [loaded, setLoaded]         = useState(false);
   const [saveState, setSaveState]   = useState('idle'); // idle | saving | saved | error
+  const [auslegung, setAuslegung]   = useState(null);   // Bauteil für Doppelklick-Auslegung
 
   const { edgeFlows, nodeFlows } = useHydraulicFlows(nodes, edges);
 
@@ -555,9 +704,11 @@ function EditorInner() {
     setNodes(ns => [...ns, { id: newId(), type: raw, position: pos, data: { label: p?.label || raw } }]);
   }, [screenToFlowPosition, setNodes, snap]);
 
-  const onNodeClick  = useCallback((_, n) => setSelected(n), []);
+  const onNodeClick       = useCallback((_, n) => setSelected(n), []);
+  const onNodeDoubleClick = useCallback((_, n) => setAuslegung(n), []);
   const onPaneClick  = useCallback(() => setSelected(null), []);
-  const selectedNode = selected ? nodes.find(n => n.id === selected.id) || null : null;
+  const selectedNode  = selected  ? nodes.find(n => n.id === selected.id)  || null : null;
+  const auslegungNode = auslegung ? nodes.find(n => n.id === auslegung.id) || null : null;
 
   const updateNode = (id, key, val) =>
     setNodes(ns => ns.map(n => n.id === id ? { ...n, data: { ...n.data, [key]: val } } : n));
@@ -632,6 +783,7 @@ function EditorInner() {
             onDrop={onDrop}
             onDragOver={onDragOver}
             onNodeClick={onNodeClick}
+            onNodeDoubleClick={onNodeDoubleClick}
             onPaneClick={onPaneClick}
             nodeTypes={NODE_TYPES}
             edgeTypes={EDGE_TYPES}
@@ -663,6 +815,16 @@ function EditorInner() {
           <PropertiesPanel node={selectedNode} nodeFlows={nodeFlows} onUpdate={updateNode} onDelete={deleteNode} navigate={navigate}/>
         </div>
       </div>
+
+      {auslegungNode && (
+        <AuslegungModal
+          node={auslegungNode}
+          v={nodeFlows[auslegungNode.id]}
+          onUpdate={updateNode}
+          onClose={() => setAuslegung(null)}
+          navigate={navigate}
+        />
+      )}
     </div>
   );
 }

@@ -1,17 +1,15 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import { getProject, updateProject } from "../../api/hcApi";
-
-const MODULE_CARDS = [
-  { id: "heizgruppen", label: "Heizgruppen", icon: "🔥", beschreibung: "Heizgruppen-Generator mit Volumenstrom", phase: "MVP", href: "heizgruppen" },
-  { id: "kvs", label: "kvs / Ventilauslegung", icon: "🔧", beschreibung: "kvs-Berechnung mit Ventilautorität", phase: "Verfügbar", href: "/heizungscockpit/rechner/ventil", extern: true },
-  { id: "druckverlust", label: "Druckverlust", icon: "📊", beschreibung: "Approximative Rohrnetz-Berechnung (3 Kreise)", phase: "Verfügbar", href: "/heizungscockpit/rechner/druckverlust", extern: true },
-  { id: "ravel", label: "RAVEL-Wirtschaftlichkeit", icon: "💶", beschreibung: "Dynamische Annuitätenmethode, bis 6 Varianten", phase: "Verfügbar", href: "/heizungscockpit/rechner/ravel", extern: true },
-  { id: "waermeleistung", label: "Wärmeleistungsbedarf", icon: "🏠", beschreibung: "Raumstruktur nach SIA 384.2", phase: "Phase 2", href: null },
-  { id: "bww", label: "Brauchwarmwasser", icon: "🚿", beschreibung: "Speichergrösse, Ladeleistung", phase: "Phase 3", href: null },
-];
+import { GEBAEUDEKATEGORIEN } from "../../data/sia";
 
 const HEIZUNGSSYSTEM_LABELS = { FBH: "Fussbodenheizung", HK: "Heizkörper", gemischt: "Gemischt" };
+
+const SCHNELL_TOOLS = [
+  { id: "ventil", label: "Ventilauslegung", beschreibung: "kvs-Berechnung mit Ventilautorität", href: "/heizungscockpit/rechner/ventil" },
+  { id: "druckverlust", label: "Druckverlust", beschreibung: "Approximative Rohrnetz-Berechnung", href: "/heizungscockpit/rechner/druckverlust" },
+  { id: "ravel", label: "RAVEL-Wirtschaftlichkeit", beschreibung: "Dynamische Annuitätenmethode, bis 6 Varianten", href: "/heizungscockpit/rechner/ravel" },
+];
 
 export default function ProjectDashboard() {
   const { id } = useParams();
@@ -186,6 +184,20 @@ export default function ProjectDashboard() {
                 <div className="font-medium text-gray-900">{bd.warmwasser_bedarf_kw} kW</div>
               </div>
             )}
+            {bd.gebaeudekategorie && (
+              <div>
+                <div className="text-xs text-gray-500">Gebäudekategorie</div>
+                <div className="font-medium text-gray-900">
+                  {GEBAEUDEKATEGORIEN.find(k => k.value === bd.gebaeudekategorie)?.label || bd.gebaeudekategorie}
+                </div>
+              </div>
+            )}
+            {bd.klimastation && (
+              <div>
+                <div className="text-xs text-gray-500">Klimastation</div>
+                <div className="font-medium text-gray-900">{bd.klimastation}</div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -217,30 +229,26 @@ export default function ProjectDashboard() {
         </div>
       )}
 
-      {/* Modul-Karten */}
-      <h2 className="text-sm font-semibold text-gray-700 mb-3">Berechnungsmodule</h2>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {MODULE_CARDS.map(mod => {
-          const available = ["MVP", "Verfügbar"].includes(mod.phase);
-          const link = mod.href ? (mod.extern ? mod.href : `/heizungscockpit/projekte/${id}/${mod.href}`) : null;
-          const inner = (
-            <div className={`bg-white border rounded-xl p-4 transition ${available ? "border-gray-200 hover:border-blue-300 hover:shadow-sm cursor-pointer" : "border-gray-100 opacity-60"}`}>
-              <div className="flex items-start justify-between mb-2">
-                <span className="text-2xl">{mod.icon}</span>
-                <span className={`text-xs px-2 py-0.5 rounded ${mod.phase === "Verfügbar" ? "bg-green-100 text-green-700" : available ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-400"}`}>
-                  {mod.phase}
-                </span>
-              </div>
-              <div className="font-medium text-gray-800 text-sm">{mod.label}</div>
-              <div className="text-xs text-gray-500 mt-1">{mod.beschreibung}</div>
-            </div>
-          );
-          return link ? (
-            <Link key={mod.id} to={link}>{inner}</Link>
-          ) : (
-            <div key={mod.id}>{inner}</div>
-          );
-        })}
+      {/* Tür 2 — Schnell-Tools (UC2) */}
+      <h2 className="text-sm font-semibold text-gray-700 mb-3">Schnell-Tools</h2>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Link
+          to={`/heizungscockpit/projekte/${id}/heizgruppen`}
+          className="bg-white border border-gray-200 rounded-xl p-4 hover:border-blue-300 hover:shadow-sm transition"
+        >
+          <div className="font-medium text-gray-800 text-sm mb-1">Heizgruppen</div>
+          <div className="text-xs text-gray-500">Heizgruppen-Generator mit Volumenstrom</div>
+        </Link>
+        {SCHNELL_TOOLS.map(tool => (
+          <Link
+            key={tool.id}
+            to={tool.href}
+            className="bg-white border border-gray-200 rounded-xl p-4 hover:border-blue-300 hover:shadow-sm transition"
+          >
+            <div className="font-medium text-gray-800 text-sm mb-1">{tool.label}</div>
+            <div className="text-xs text-gray-500">{tool.beschreibung}</div>
+          </Link>
+        ))}
       </div>
     </div>
   );

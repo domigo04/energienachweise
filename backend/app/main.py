@@ -1,6 +1,7 @@
 # app/main.py
 import os, json
 from fastapi import FastAPI
+from sqlalchemy import text
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="Heizungscockpit")
@@ -53,12 +54,28 @@ from app.models.heizungscockpit import (  # noqa: F401 — Tabellen vor create_a
 )
 
 
+def _ensure_columns():
+    to_add = {"hc_project_base_data": [("gebaeudekategorie", "VARCHAR"), ("klimastation", "VARCHAR")]}
+    with engine.connect() as conn:
+        for table, cols in to_add.items():
+            existing = {r[1] for r in conn.execute(text(f"PRAGMA table_info({table})"))}
+            for name, typ in cols:
+                if name not in existing:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {typ}"))
+        conn.commit()
+
+
 @app.on_event("startup")
 def init_db_and_seed():
     try:
         Base.metadata.create_all(bind=engine)
     except Exception as e:
         print("DB init error:", e)
+
+    try:
+        _ensure_columns()
+    except Exception as e:
+        print("Column migration error:", e)
 
     # Heizungscockpit: Gruppen-Vorlagen einmalig anlegen
     from app.models.heizungscockpit import HcGroupTemplate, HcGruppeTyp

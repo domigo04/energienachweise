@@ -82,6 +82,8 @@ class HcProjectBaseData(Base):
     t_aussen = Column(Float, default=-8.0)
     t_innen = Column(Float, default=20.0)
     heizungssystem = Column(SAEnum(HcHeizungsSystem), default=HcHeizungsSystem.gemischt)
+    gebaeudekategorie = Column(String, nullable=True)
+    klimastation = Column(String, nullable=True)
     warmwasser_bedarf_kw = Column(Float, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

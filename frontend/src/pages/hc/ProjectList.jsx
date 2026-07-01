@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getProjects, createProject } from "../../api/hcApi";
+import { GEBAEUDEKATEGORIEN, KLIMASTATIONEN } from "../../data/sia";
 
 const statusBadge = (status) => {
   if (status === "archiviert")
@@ -13,7 +14,7 @@ export default function ProjectList() {
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: "", standort: "", kunde: "", beschreibung: "" });
+  const [form, setForm] = useState({ name: "", standort: "", kunde: "", beschreibung: "", gebaeudekategorie: "", klimastation: "", t_aussen: -8 });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -34,6 +35,12 @@ export default function ProjectList() {
         standort: form.standort || null,
         kunde: form.kunde || null,
         beschreibung: form.beschreibung || null,
+        base_data: {
+          t_aussen: Number(form.t_aussen) || -8,
+          t_innen: 20,
+          gebaeudekategorie: form.gebaeudekategorie || null,
+          klimastation: form.klimastation || null,
+        },
       });
       navigate(`/heizungscockpit/projekte/${project.id}`);
     } catch {
@@ -107,6 +114,45 @@ export default function ProjectList() {
                   onChange={e => setForm(f => ({ ...f, beschreibung: e.target.value }))}
                 />
               </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Gebäudekategorie (SIA 380/1)</label>
+                <select
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  value={form.gebaeudekategorie}
+                  onChange={e => setForm(f => ({ ...f, gebaeudekategorie: e.target.value }))}
+                >
+                  <option value="">— bitte wählen —</option>
+                  {GEBAEUDEKATEGORIEN.map(k => (
+                    <option key={k.value} value={k.value}>{k.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Klimastation (SIA 2028)</label>
+                <select
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  value={form.klimastation}
+                  onChange={e => {
+                    const station = KLIMASTATIONEN.find(s => s.name === e.target.value);
+                    setForm(f => ({ ...f, klimastation: e.target.value, t_aussen: station ? station.theta_e : f.t_aussen }));
+                  }}
+                >
+                  <option value="">— bitte wählen —</option>
+                  {KLIMASTATIONEN.map(s => (
+                    <option key={s.name} value={s.name}>{s.name} ({s.theta_e} °C)</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Auslegungstemperatur aussen [°C]</label>
+                <input
+                  type="number"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={form.t_aussen}
+                  onChange={e => setForm(f => ({ ...f, t_aussen: e.target.value }))}
+                />
+                <p className="text-xs text-gray-400 mt-1">aus SIA 2028, überschreibbar</p>
+              </div>
             </div>
             <div className="flex gap-2 pt-2">
               <button
@@ -118,7 +164,7 @@ export default function ProjectList() {
               </button>
               <button
                 type="button"
-                onClick={() => { setShowForm(false); setForm({ name: "", standort: "", kunde: "", beschreibung: "" }); }}
+                onClick={() => { setShowForm(false); setForm({ name: "", standort: "", kunde: "", beschreibung: "", gebaeudekategorie: "", klimastation: "", t_aussen: -8 }); }}
                 className="border border-gray-300 text-gray-600 hover:bg-gray-50 px-4 py-2 rounded-lg text-sm transition"
               >
                 Abbrechen

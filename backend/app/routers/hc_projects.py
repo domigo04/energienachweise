@@ -90,6 +90,8 @@ def create_project(body: ProjectCreate, db: Session = Depends(get_db)):
         t_innen=bd_in.t_innen if bd_in else 20.0,
         heizungssystem=bd_in.heizungssystem if bd_in else "gemischt",
         warmwasser_bedarf_kw=bd_in.warmwasser_bedarf_kw if bd_in else None,
+        gebaeudekategorie=bd_in.gebaeudekategorie if bd_in else None,
+        klimastation=bd_in.klimastation if bd_in else None,
     )
     db.add(bd)
     db.commit()
@@ -130,7 +132,7 @@ def update_project(project_id: int, body: ProjectUpdate, db: Session = Depends(g
             bd = HcProjectBaseData(tenant_id=TENANT_ID, project_id=project.id)
             db.add(bd)
             db.flush()
-        for field in ("t_aussen", "t_innen", "heizungssystem", "warmwasser_bedarf_kw"):
+        for field in ("t_aussen", "t_innen", "heizungssystem", "warmwasser_bedarf_kw", "gebaeudekategorie", "klimastation"):
             val = getattr(body.base_data, field, None)
             if val is not None:
                 setattr(project.base_data, field, val)

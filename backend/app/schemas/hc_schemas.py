@@ -37,6 +37,8 @@ class ProjectBaseDataIn(BaseModel):
     t_innen: float = 20.0
     heizungssystem: HeizungsSystem = HeizungsSystem.gemischt
     warmwasser_bedarf_kw: Optional[float] = None
+    gebaeudekategorie: Optional[str] = None
+    klimastation: Optional[str] = None
 
 
 class ProjectCreate(BaseModel):
@@ -61,6 +63,8 @@ class ProjectBaseDataOut(BaseModel):
     t_innen: float
     heizungssystem: HeizungsSystem
     warmwasser_bedarf_kw: Optional[float]
+    gebaeudekategorie: Optional[str] = None
+    klimastation: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

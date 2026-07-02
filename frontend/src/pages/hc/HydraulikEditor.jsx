@@ -52,23 +52,29 @@ const newId = () => `n_${Date.now()}_${Math.floor(Math.random() * 9999)}`;
 // Für alles ohne Verteiler: Rückwärts-Propagierung entlang VL-Kanten.
 function useHydraulicFlows(nodes, edges) {
   return useMemo(() => {
-    if (nodes.length === 0) return { edgeFlows: {}, nodeFlows: {} };
+    if (nodes.length === 0) return { edgeFlows: {}, nodeFlows: {}, verteilerResults: {} };
 
-    // ── V' pro Heizkreis ──────────────────────────────────────
+    // ── V' pro Heizkreis (Sekundär-Fluss) ────────────────────
     const hkFlows = {};
+    const nodeById = {};
+    nodes.forEach(n => { nodeById[n.id] = n; });
+    // F2: Knoten, an denen die Ast-Suche stoppen muss, damit sie nicht über einen
+    // gemeinsamen Erzeuger / anderen Verteiler zu einer FREMDEN Gruppe überläuft.
+    const blockNodes = new Set(nodes.filter(n => n.type === 'verteiler' || n.type === 'erzeuger').map(n => n.id));
     nodes.filter(n => n.type === 'heizkreis').forEach(hk => {
       const vl = parseFloat(hk.data.vl_temp), rl = parseFloat(hk.data.rl_temp), q = parseFloat(hk.data.q_kw);
       const dt = vl - rl;
       if (!isNaN(vl) && !isNaN(rl) && !isNaN(q) && dt > 0 && q > 0)
         hkFlows[hk.id] = q / (1.163 * dt);
     });
-    if (!Object.keys(hkFlows).length) return { edgeFlows: {}, nodeFlows: {} };
+    if (!Object.keys(hkFlows).length) return { edgeFlows: {}, nodeFlows: {}, verteilerResults: {} };
 
     const edgeFlows  = {};
     const nodeFlows  = {};
     const calcEdges  = new Set(); // Kanten die schon berechnet wurden
+    const verteilerResults = {}; // { [verteilerId]: { vl_vt, rl_misch, q_total, m_prim_total } }
 
-    // ── Hilfsfunktion: BFS-V' ab startId, excludeNodes ausschliessen ─
+    // ── VL-BFS: ab startId alle HK über VL/schwarz-Kanten summieren ─
     const bfsFlow = (startId, excludeNodes) => {
       const ex      = new Set(excludeNodes);
       const visited = new Set([startId, ...ex]);
@@ -87,6 +93,29 @@ function useHydraulicFlows(nodes, edges) {
       return flow;
     };
 
+    // ── RL-BFS: ab startId alle HK über BLAUE Kanten finden (für RL-Ast-Fluss) ─
+    // Gibt alle erreichbaren heizkreis-Knoten zurück (Verteiler ausgeschlossen).
+    const bfsRlHeizkreise = (startId, excludeNodes) => {
+      const ex      = new Set(excludeNodes);
+      const visited = new Set([startId, ...ex]);
+      const queue   = [startId];
+      const found   = [];
+      if (nodeById[startId]?.type === 'heizkreis') found.push(startId);
+      while (queue.length) {
+        const cur = queue.shift();
+        for (const e of edges) {
+          if (e.style?.stroke !== '#3b82f6') continue; // nur RL-Kanten
+          const other = e.source === cur ? e.target : e.target === cur ? e.source : null;
+          if (other && !visited.has(other)) {
+            visited.add(other);
+            if (nodeById[other]?.type === 'heizkreis') found.push(other);
+            queue.push(other);
+          }
+        }
+      }
+      return found;
+    };
+
     // ── Handle-Parser: 'vl-1' → {type:'vl', num:'1'} ───────────
     const parseHandle = (h) => {
       if (!h) return { type: null, num: null };
@@ -97,48 +126,129 @@ function useHydraulicFlows(nodes, edges) {
       return { type: t, num };
     };
 
-    // ── 1. Verteiler-zentrierte Berechnung ─────────────────────
+    // ── 1. Verteiler-zentrierte Berechnung (PHYSIK.md §4) ─────
     nodes.filter(n => n.type === 'verteiler').forEach(vn => {
       const vnEdges = edges.filter(e => e.source === vn.id || e.target === vn.id);
 
       // Kanten nach Ast-Nummer und Typ (vl/rl) gruppieren
-      const branches = {}; // { '1': {vl:edge, rl:edge}, 'main': {vl:edge, rl:edge} }
+      const branches = {}; // { '1': {vlList, rlList}, 'main': {vlList, rlList} }
       vnEdges.forEach(e => {
         const h = e.source === vn.id ? e.sourceHandle : e.targetHandle;
         const { type, num } = parseHandle(h);
         if (!type || !num) return;
-        if (!branches[num]) branches[num] = { vl: null, rl: null, vlList: [], rlList: [] };
-        if (type === 'vl') { branches[num].vl = e; branches[num].vlList.push(e); }
-        if (type === 'rl') { branches[num].rl = e; branches[num].rlList.push(e); }
+        if (!branches[num]) branches[num] = { vlList: [], rlList: [] };
+        if (type === 'vl') branches[num].vlList.push(e);
+        if (type === 'rl') branches[num].rlList.push(e);
       });
 
-      let totalV = 0;
+      // ── Schritt 1: je Ast den externen Knoten + HK-Daten bestimmen ──
+      // VL-Ast → externer Knoten über VL-Kante → VL-BFS liefert HK-Liste
+      // RL-Ast → externer Knoten über RL-Kante → RL-BFS liefert HK-Liste
+      // In beiden Fällen brauchen wir die heizkreis-Daten der Gruppe.
 
-      // Nummerierte Äste (nicht 'main')
+      const astData = []; // { num, vlList, rlList, hkIds: [...] }
       Object.entries(branches).forEach(([num, br]) => {
         if (num === 'main') return;
-        // Startknoten: der Knoten auf der Nicht-Verteiler-Seite der VL-Kante
-        // (falls keine VL vorhanden: RL-Kante verwenden)
-        const refEdge = br.vl || br.rl;
-        if (!refEdge) return;
-        const branchStart = refEdge.source === vn.id ? refEdge.target : refEdge.source;
-        const branchV = bfsFlow(branchStart, [vn.id]);
+        // Externe Knoten für VL- und RL-Seite bestimmen
+        const vlEdge = br.vlList[0];
+        const rlEdge = br.rlList[0];
 
-        // VL-Ast und RL-Ast bekommen denselben V'
-        ;[...br.vlList, ...br.rlList].forEach(e => {
-          edgeFlows[e.id] = branchV;
-          calcEdges.add(e.id);
-        });
-        totalV += branchV;
+        // Heizkreise über VL-BFS (rot/schwarz) ab VL-Seite
+        let hkIds = [];
+        if (vlEdge) {
+          const extVl = vlEdge.source === vn.id ? vlEdge.target : vlEdge.source;
+          // Alle HKs auf dieser VL-Ast-Seite (F2: an Verteiler UND Erzeuger stoppen)
+          const vis = new Set([extVl, ...blockNodes]);
+          const q2  = [extVl];
+          if (nodeById[extVl]?.type === 'heizkreis') hkIds.push(extVl);
+          while (q2.length) {
+            const cur = q2.shift();
+            for (const e of edges) {
+              if (e.style?.stroke === '#3b82f6') continue;
+              const other = e.source === cur ? e.target : e.target === cur ? e.source : null;
+              if (other && !vis.has(other)) {
+                vis.add(other);
+                if (nodeById[other]?.type === 'heizkreis') hkIds.push(other);
+                q2.push(other);
+              }
+            }
+          }
+        } else if (rlEdge) {
+          // Kein VL-Ast: RL-BFS als Fallback
+          const extRl = rlEdge.source === vn.id ? rlEdge.target : rlEdge.source;
+          hkIds = bfsRlHeizkreise(extRl, [...blockNodes]);
+        }
+        astData.push({ num, vlList: br.vlList, rlList: br.rlList, hkIds });
       });
 
-      // Hauptanschluss = Summe aller Äste
+      // ── Schritt 2: VL_verteiler = max(vl_temp aller HKs) ────
+      let vl_vt = -Infinity;
+      astData.forEach(ast => {
+        ast.hkIds.forEach(hkId => {
+          const hk = nodeById[hkId];
+          const vl = parseFloat(hk?.data?.vl_temp);
+          if (!isNaN(vl)) vl_vt = Math.max(vl_vt, vl);
+        });
+      });
+      if (!isFinite(vl_vt)) vl_vt = null;
+
+      // ── Schritt 3: Primär-Fluss je Ast (PHYSIK.md §4) ────────
+      let m_prim_total = 0;
+      let rl_num = 0; // Zähler für gewichteten RL_misch
+      let q_total = 0;
+      const verteilerWarnings = []; // F1: unmögliche Gruppen laut melden statt still auf 0 setzen
+
+      astData.forEach(ast => {
+        // Summe Q und RL_misch-Beitrag aller HKs dieser Gruppe
+        let ast_q = 0, ast_m_prim = 0;
+        ast.hkIds.forEach(hkId => {
+          const hk = nodeById[hkId];
+          const q   = parseFloat(hk?.data?.q_kw);
+          const rl  = parseFloat(hk?.data?.rl_temp);
+          if (!isNaN(q) && !isNaN(rl) && vl_vt !== null) {
+            const denom = 1.163 * (vl_vt - rl);
+            if (denom > 0) {
+              const m = q / denom;
+              ast_m_prim += m;
+              rl_num += m * rl;
+              ast_q += q;
+            } else {
+              // F1: RL ≥ Verteiler-VL → physikalisch unmöglich. Laut warnen statt still 0.
+              verteilerWarnings.push(`${hk?.data?.label || 'Heizkreis'}: RL ${rl} °C ≥ Verteiler-VL ${vl_vt} °C — physikalisch nicht möglich`);
+            }
+          }
+        });
+        ast.m_prim = ast_m_prim;
+        m_prim_total += ast_m_prim;
+        q_total += ast_q;
+
+        // VL-Ast-Kanten: Primär-Fluss dieser Gruppe
+        ast.vlList.forEach(e => { edgeFlows[e.id] = ast_m_prim; calcEdges.add(e.id); });
+
+        // RL-Ast: RL-BFS vom externen RL-Knoten — eigenen Heizkreis suchen,
+        // Fluss = m_prim dieser Gruppe (unabhängig von Stutzen-Nummer, PHYSIK §2)
+        ast.rlList.forEach(e => {
+          edgeFlows[e.id] = ast_m_prim;
+          calcEdges.add(e.id);
+        });
+      });
+
+      const rl_misch = m_prim_total > 0 ? rl_num / m_prim_total : null;
+
+      // Hauptanschluss = Primär-Gesamt-Fluss
       ;[...(branches.main?.vlList || []), ...(branches.main?.rlList || [])].forEach(e => {
-        edgeFlows[e.id] = totalV;
+        edgeFlows[e.id] = m_prim_total;
         calcEdges.add(e.id);
       });
 
-      nodeFlows[vn.id] = totalV;
+      nodeFlows[vn.id] = m_prim_total;
+      verteilerResults[vn.id] = {
+        vl_vt,
+        rl_misch,
+        q_total,
+        m_prim_total,
+        warnings: verteilerWarnings,
+      };
     });
 
     // ── 2. Rückwärts-Propagierung für restliche VL-Kanten ──────
@@ -207,14 +317,14 @@ function useHydraulicFlows(nodes, edges) {
             .map(e => edgeFlows[e.id] || 0));
     });
 
-    return { edgeFlows, nodeFlows };
+    return { edgeFlows, nodeFlows, verteilerResults };
   }, [nodes, edges]);
 }
 
 // (Persönliche Schema-Vorlagen folgen in Phase 2 — jetzt lebt das Schema im Backend.)
 
 // ── Properties Panel ─────────────────────────────────────────
-function PropertiesPanel({ node, nodeFlows, onUpdate, onDelete, navigate }) {
+function PropertiesPanel({ node, nodeFlows, verteilerResults, onUpdate, onDelete, navigate }) {
   if (!node) return (
     <div style={{ padding: 14, fontSize: 11, color: '#94a3b8', lineHeight: 1.7 }}>
       <div style={{ fontWeight: 700, color: '#64748b', marginBottom: 8 }}>Eigenschaften</div>
@@ -350,6 +460,34 @@ function PropertiesPanel({ node, nodeFlows, onUpdate, onDelete, navigate }) {
         {fld('VL Temperatur','vl_temp','','°C')}
         {fld('RL Temperatur','rl_temp','','°C')}
         <button style={btnBlue} onClick={()=>navigate('/heizungscockpit/rechner/ravel')}>→ RAVEL Wirtschaftlichkeit</button>
+        <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
+      </div>
+    );
+  }
+
+  // ── VERTEILER ──
+  if (node.type === 'verteiler') {
+    const vr = verteilerResults?.[node.id];
+    return (
+      <div style={panelSt}>
+        <PT>Verteiler</PT>
+        {fld('Bezeichnung','label','','','text')}
+        {vr ? (
+          <>
+            <div style={{ fontSize:10, fontWeight:700, color:'#475569', marginTop:10, marginBottom:4, textTransform:'uppercase', letterSpacing:'0.05em' }}>Verteiler-Hydraulik (Primärseite)</div>
+            {ro('VL Verteiler', vr.vl_vt != null ? vr.vl_vt.toFixed(1) : null, '°C', true)}
+            {ro('RL Misch', vr.rl_misch != null ? vr.rl_misch.toFixed(1) : null, '°C')}
+            {ro('Q total', vr.q_total != null ? vr.q_total.toFixed(2) : null, 'kW', true)}
+            {ro('m_prim total', vr.m_prim_total != null ? vr.m_prim_total.toFixed(4) : null, 'm³/h', true)}
+            {vr.warnings?.length > 0 && (
+              <div style={{ ...warnSt, background:'#fef2f2', border:'1px solid #fca5a5', color:'#b91c1c', marginTop:6 }}>
+                ⚠ {vr.warnings.join(' · ')}
+              </div>
+            )}
+          </>
+        ) : (
+          <div style={warnSt}>Heizkreise an Verteiler anschliessen</div>
+        )}
         <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
     );
@@ -554,7 +692,7 @@ function EditorInner() {
   const [saveState, setSaveState]   = useState('idle'); // idle | saving | saved | error
   const [auslegung, setAuslegung]   = useState(null);   // Bauteil für Doppelklick-Auslegung
 
-  const { edgeFlows, nodeFlows } = useHydraulicFlows(nodes, edges);
+  const { edgeFlows, nodeFlows, verteilerResults } = useHydraulicFlows(nodes, edges);
 
   // ── Schema aus Backend laden (oder anlegen, falls noch keins existiert) ──
   // Ref-Guard: pro Projekt nur EINMAL initialisieren. React-StrictMode führt
@@ -812,7 +950,7 @@ function EditorInner() {
           <div style={{ padding:'8px 12px 4px', fontSize:9, fontWeight:700, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.08em', borderBottom:'1px solid #f1f5f9' }}>
             Eigenschaften
           </div>
-          <PropertiesPanel node={selectedNode} nodeFlows={nodeFlows} onUpdate={updateNode} onDelete={deleteNode} navigate={navigate}/>
+          <PropertiesPanel node={selectedNode} nodeFlows={nodeFlows} verteilerResults={verteilerResults} onUpdate={updateNode} onDelete={deleteNode} navigate={navigate}/>
         </div>
       </div>
 

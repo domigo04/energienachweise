@@ -13,7 +13,9 @@ Eigenschaften der Bauteile im Schema, eine Wahrheit. Details im **[Pflichtenheft
 3. **So schlank wie möglich.** Kein Ballast, keine Features auf Vorrat.
 4. **Sprache:** einfaches (Schweizer) Deutsch, «ss» statt «ß». Dominic ist Heizungsplaner,
    kein Programmierer → Technisches immer **ELI5** erklären (wie für ein Kind).
-5. **Korrektheit vor allem** bei der Hydraulik — «es muss stimmen».
+5. **Korrektheit vor allem** bei der Hydraulik — «es muss stimmen». Alle physikalischen
+   Regeln stehen verbindlich in **[PHYSIK.md](PHYSIK.md)** (wächst mit — bei jedem Physik-Feature
+   dort nachschlagen und neue Erkenntnisse ergänzen).
 
 ## Agenten-Team (`.claude/agents/`)
 - **hc-coder** — setzt eine *freigegebene* Änderung um; erfindet nie Scope; bei offener Frage stoppt er und fragt.

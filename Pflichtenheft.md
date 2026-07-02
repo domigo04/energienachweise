@@ -68,3 +68,15 @@ Mehrere Schemas pro Projekt im Datenmodell vorgesehen; in Phase 1 genügt eines.
 - Keine Kostenschätzung (nur Datenmodell vorbereiten).
 - Keine Hersteller-APIs.
 - Primärseite (Erzeuger ↔ Verteiler) ist zeichenbar, «lebt» aber noch nicht.
+
+---
+
+## 10. Synoptik-Ausbau (verschärftes Ziel — Dominic-Feedback + CAD)
+Ziel: ein **echtes synoptisches Schema wie im CAD**, mit Intelligenz (nicht nur Optik).
+- **Verteiler synoptisch:** breit, **wählbare Anzahl Abgänge**; Hauptanschlüsse links (dort summiert); VL oben / RL unten.
+- **Verbrauchergruppe = ein Block (rotes Rechteck)** mit Q, VL/RL, Typ (FBH, Lüftung …). Einspritz/Bypass wird **im Block** gerechnet (keine fragilen T-Stücke von Hand). Speicher bleibt grün.
+- **Mischtemperatur am Verteiler:** verbindlich nach **[PHYSIK.md](PHYSIK.md) §4** (VL = höchste Gruppen-VL; Misch-RL mengengewichtet über die Primär-Flüsse).
+- **Nummerierung + Legende:** jedes Bauteil eine Nummer + Eigenschaftstabelle unten (Fabrikat, Kvs, Massenstrom …), wie im CAD.
+- **Bauteil-Klassen:** *auszulegen* (WP, Pumpe, 2-/3-Weg-Ventil, Expansionsgefäss, Speicher, Wärmezähler [übernimmt Leitungs-Durchfluss + Typ]) vs. *nur Symbol + Fabrikat* (STAD, Temperaturfühler).
+- **Editor-UX:** Leitungen greifen & Segmente verschieben (AutoCAD × Figma-Snapping); Bauteil in eine Leitung ziehen → snappt rein. Bauteil-Symbole liefert Dominic als **SVG** → 1:1 einsetzen.
+- **Projekt-Start:** zwei grosse Kacheln «Schnellauslegung» / «Schema-Tool».

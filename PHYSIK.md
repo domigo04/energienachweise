@@ -6,7 +6,9 @@ ergänzen. Diese Regeln ändern sich nicht — sie sind die Wahrheit, gegen die 
 
 ## 1. Volumenstrom
 `V' [m³/h] = Q [kW] / (1.163 · ΔT [K])`, mit `ΔT = VL − RL`.
-(1.163 = c·ρ Wasser in kWh/(m³·K).) Beispiel: 8.5 kW, 35/28 → 1.462 m³/h.
+(1.163 = c·ρ Wasser in kWh/(m³·K).) Beispiel: 8.5 kW, 35/30 (ΔT 5 K) → 1.462 m³/h.
+_(Tippfehler korrigiert: vorher stand hier «35/28» — mit ΔT 7 K wären es 1.044 m³/h.
+Auch der Auftrag v3.0 rundet falsch auf «1.464»; exakt sind 8.5 / 5.815 = 1.4617.)_
 
 ## 2. Rücklauf-Zählung im Netz (Bug-Historie)
 - Jede Leitung wird beim Aufsummieren nur **einmal** gezählt (beim Entdecken eines neuen
@@ -57,7 +59,14 @@ Regeln am Verteiler:
 **Ergebnis:** Verteiler VL **40 °C**, RL **29.4 °C**, Primärfluss **1.218 m³/h**, Leistung **15 kW**.
 (Merke: Gruppe 2 braucht 40 = VL_Verteiler → keine Einspritzung, Primär = Sekundär.)
 
-## 5. Bauteil-Klassen
+## 5. Druckverlust im Netz
+- **In Reihe** (Rohr → Ventil → Verbraucher im selben Kreis): Druckverluste **addieren**.
+- **Parallel** (mehrere Äste am Verteiler): **nicht** addieren — der **ungünstigste Ast**
+  (höchstes Δp) ist massgebend. Die übrigen Kreise werden über Ventile darauf eingeregelt.
+- **Pumpenförderhöhe = Δp gemeinsamer Teil + Δp ungünstigster Ast.**
+  (Der Verteiler kennt seinen ungünstigsten Ast seit Loop A; die Pumpen-Verknüpfung folgt in Loop C.)
+
+## 6. Bauteil-Klassen
 - **Auszulegen**: Wärmepumpe, Umwälzpumpe, 2-/3-Weg-Ventil, Expansionsgefäss,
   technischer Speicher (grün), **Wärmezähler** (übernimmt den Durchfluss der Leitung,
   in der er sitzt, + Typ).

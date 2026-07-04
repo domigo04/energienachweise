@@ -1,6 +1,6 @@
 from datetime import datetime
 import enum
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, Enum as SAEnum
+from sqlalchemy import Column, Integer, String, Float, Boolean, Date, DateTime, ForeignKey, Text, Enum as SAEnum
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -139,6 +139,46 @@ class HcCalculationResult(Base):
     inputs_json = Column(Text)
     results_json = Column(Text)
     notizen = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class BkpGebaeudekategorie(str, enum.Enum):
+    efh = "EFH"
+    mfh_2_5 = "MFH_2_5"
+    mfh_6_10 = "MFH_6_10"
+    mfh_11plus = "MFH_11plus"
+    gewerbe = "Gewerbe"
+    industrie = "Industrie"
+
+
+class BkpWpTyp(str, enum.Enum):
+    sole_wasser = "sole_wasser"
+    luft_wasser = "luft_wasser"
+    wasser_wasser = "wasser_wasser"
+    alle = "alle"
+
+
+class BkpEintrag(Base):
+    """BKP-Kostenschätzung (Phase 3) — Tabelle ab Tag 1 vorhanden, bleibt vorerst LEER.
+
+    Ein Eintrag = ein ausgewerteter Devi-/Submissions-Betrag für eine
+    BKP-Position (Auftrag v3.0 Kap. 4.4). Zeitgewichtung: calculations/bkp.py.
+    """
+    __tablename__ = "bkp_eintraege"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, default=1, index=True)
+    bkp_nr = Column(String, nullable=False, index=True)  # z.B. "242.3"
+    bkp_name = Column(String, nullable=False)
+    gebaeudekategorie = Column(SAEnum(BkpGebaeudekategorie), nullable=False)
+    wp_typ = Column(SAEnum(BkpWpTyp), nullable=True)
+    betrag_chf = Column(Float, nullable=False)
+    datum_submission = Column(Date, nullable=False)   # bestimmt Zeitgewicht
+    gewicht = Column(Float, nullable=True)            # berechnet, Halbwertszeit ~3 Jahre
+    ngf_m2 = Column(Float, nullable=True)             # → Kennwert CHF/m² NGF
+    leistung_kw = Column(Float, nullable=True)        # → Kennwert CHF/kW
+    projekt_id = Column(Integer, ForeignKey("hc_projects.id"), nullable=True)
+    quelle = Column(String, nullable=True)            # "Devi" | "Submission" | "Richtpreis" | "Ist-Kosten"
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

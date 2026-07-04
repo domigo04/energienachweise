@@ -50,3 +50,11 @@ export const saveSchema = (schemaId, data) =>
 
 export const deleteSchema = (schemaId) =>
   api.delete(`${BASE}/schemas/${schemaId}`);
+
+// --- Hydraulik-Berechnung (Backend = einzige Rechen-Wahrheit) ---
+export const hydraulikBerechnen = (graph) =>
+  api.post(`${BASE}/hydraulik/berechnen`, graph).then(r => r.data);
+
+// --- BKP-Kostenschätzung (Phase 3, Katalog steht ab Tag 1) ---
+export const getBkpPositionen = (params) =>
+  api.get(`${BASE}/bkp/positionen`, { params }).then(r => r.data);

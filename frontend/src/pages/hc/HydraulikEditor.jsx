@@ -6,10 +6,11 @@ import {
   Panel, ConnectionMode, useReactFlow, ReactFlowProvider,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { NODE_TYPES } from '../../components/hc/nodes/HydraulikNodes';
+import { NODE_TYPES, NUMMERIERT } from '../../components/hc/nodes/HydraulikNodes';
 import { EDGE_TYPES } from '../../components/hc/edges/FlowEdge';
 import { SCHALTUNGEN } from '../../components/hc/nodes/schaltungen';
-import { getProject, listSchemas, createSchema, saveSchema } from '../../api/hcApi';
+import { getProject, listSchemas, createSchema, saveSchema, hydraulikBerechnen } from '../../api/hcApi';
+import { API_BASE } from '../../api';
 
 // ── Konstanten ────────────────────────────────────────────────
 const KVS_REIHE = [0.1, 0.16, 0.25, 0.4, 0.63, 1.0, 1.6, 2.5, 4.0, 6.3, 10, 16, 25, 40, 63];
@@ -25,6 +26,7 @@ const WAERMEABGABE = [
 ];
 
 const STD_PALETTE = [
+  { type: 'gruppe',     label: 'Verbrauchergruppe',  desc: 'CAD-Strang: Pumpe, Einspritz, Q/VL/RL' },
   { type: 'heizkreis',  label: 'Heizkreis',          desc: 'VL / RL / Q → V\' auto' },
   { type: 'pump',       label: 'Pumpe',               desc: 'V\' aus Topologie' },
   { type: 'valve2',     label: '2WV Regelventil',     desc: 'KVS-Vorschlag auto' },
@@ -39,299 +41,26 @@ const STD_PALETTE = [
 
 const newId = () => `n_${Date.now()}_${Math.floor(Math.random() * 9999)}`;
 
-// ── Phase 2: Topologie-bewusste Hydraulik-Berechnung ─────────
-// Für jede Leitung: V' = Summe der HK-Volumenströme auf der WE-fernen Seite
-// (korrekte Parallel/Serien-Erkennung)
-// ── Hydraulik: Verteiler-zentriert + Rückwärts-Propagierung ──
-//
-// Verteiler-Logik (Hauptweg):
-//   vl-1 + rl-1 = Ast 1 (ein Kreis, gleicher V')
-//   vl-2 + rl-2 = Ast 2 (eigener V')
-//   vl-main + rl-main = Summe aller Äste
-//
-// Für alles ohne Verteiler: Rückwärts-Propagierung entlang VL-Kanten.
-function useHydraulicFlows(nodes, edges) {
-  return useMemo(() => {
-    if (nodes.length === 0) return { edgeFlows: {}, nodeFlows: {}, verteilerResults: {} };
+// Nächste freie Bauteil-Nummer (Nummerierung bleibt stabil, weil sie in
+// node.data.nr gespeichert wird — das Schema ist die Datenbank).
+const naechsteNr = (ns) => ns.reduce((m, x) => Math.max(m, parseInt(x.data?.nr) || 0), 0) + 1;
 
-    // ── V' pro Heizkreis (Sekundär-Fluss) ────────────────────
-    const hkFlows = {};
-    const nodeById = {};
-    nodes.forEach(n => { nodeById[n.id] = n; });
-    // F2: Knoten, an denen die Ast-Suche stoppen muss, damit sie nicht über einen
-    // gemeinsamen Erzeuger / anderen Verteiler zu einer FREMDEN Gruppe überläuft.
-    const blockNodes = new Set(nodes.filter(n => n.type === 'verteiler' || n.type === 'erzeuger').map(n => n.id));
-    nodes.filter(n => n.type === 'heizkreis').forEach(hk => {
-      const vl = parseFloat(hk.data.vl_temp), rl = parseFloat(hk.data.rl_temp), q = parseFloat(hk.data.q_kw);
-      const dt = vl - rl;
-      if (!isNaN(vl) && !isNaN(rl) && !isNaN(q) && dt > 0 && q > 0)
-        hkFlows[hk.id] = q / (1.163 * dt);
-    });
-    if (!Object.keys(hkFlows).length) return { edgeFlows: {}, nodeFlows: {}, verteilerResults: {} };
-
-    const edgeFlows  = {};
-    const nodeFlows  = {};
-    const calcEdges  = new Set(); // Kanten die schon berechnet wurden
-    const verteilerResults = {}; // { [verteilerId]: { vl_vt, rl_misch, q_total, m_prim_total } }
-
-    // ── VL-BFS: ab startId alle HK über VL/schwarz-Kanten summieren ─
-    const bfsFlow = (startId, excludeNodes) => {
-      const ex      = new Set(excludeNodes);
-      const visited = new Set([startId, ...ex]);
-      const queue   = [startId];
-      let flow = hkFlows[startId] || 0;
-      while (queue.length) {
-        const cur = queue.shift();
-        for (const e of edges) {
-          if (e.style?.stroke === '#3b82f6') continue; // RL ignorieren
-          const other = e.source === cur ? e.target : e.target === cur ? e.source : null;
-          if (other && !visited.has(other)) {
-            visited.add(other); flow += hkFlows[other] || 0; queue.push(other);
-          }
-        }
-      }
-      return flow;
-    };
-
-    // ── RL-BFS: ab startId alle HK über BLAUE Kanten finden (für RL-Ast-Fluss) ─
-    // Gibt alle erreichbaren heizkreis-Knoten zurück (Verteiler ausgeschlossen).
-    const bfsRlHeizkreise = (startId, excludeNodes) => {
-      const ex      = new Set(excludeNodes);
-      const visited = new Set([startId, ...ex]);
-      const queue   = [startId];
-      const found   = [];
-      if (nodeById[startId]?.type === 'heizkreis') found.push(startId);
-      while (queue.length) {
-        const cur = queue.shift();
-        for (const e of edges) {
-          if (e.style?.stroke !== '#3b82f6') continue; // nur RL-Kanten
-          const other = e.source === cur ? e.target : e.target === cur ? e.source : null;
-          if (other && !visited.has(other)) {
-            visited.add(other);
-            if (nodeById[other]?.type === 'heizkreis') found.push(other);
-            queue.push(other);
-          }
-        }
-      }
-      return found;
-    };
-
-    // ── Handle-Parser: 'vl-1' → {type:'vl', num:'1'} ───────────
-    const parseHandle = (h) => {
-      if (!h) return { type: null, num: null };
-      const t = h.startsWith('vl') ? 'vl' : h.startsWith('rl') ? 'rl' : null;
-      if (!t) return { type: null, num: null };
-      const m = h.match(/(\d+)/);
-      const num = h.includes('main') ? 'main' : (m ? m[1] : null);
-      return { type: t, num };
-    };
-
-    // ── 1. Verteiler-zentrierte Berechnung (PHYSIK.md §4) ─────
-    nodes.filter(n => n.type === 'verteiler').forEach(vn => {
-      const vnEdges = edges.filter(e => e.source === vn.id || e.target === vn.id);
-
-      // Kanten nach Ast-Nummer und Typ (vl/rl) gruppieren
-      const branches = {}; // { '1': {vlList, rlList}, 'main': {vlList, rlList} }
-      vnEdges.forEach(e => {
-        const h = e.source === vn.id ? e.sourceHandle : e.targetHandle;
-        const { type, num } = parseHandle(h);
-        if (!type || !num) return;
-        if (!branches[num]) branches[num] = { vlList: [], rlList: [] };
-        if (type === 'vl') branches[num].vlList.push(e);
-        if (type === 'rl') branches[num].rlList.push(e);
-      });
-
-      // ── Schritt 1: je Ast den externen Knoten + HK-Daten bestimmen ──
-      // VL-Ast → externer Knoten über VL-Kante → VL-BFS liefert HK-Liste
-      // RL-Ast → externer Knoten über RL-Kante → RL-BFS liefert HK-Liste
-      // In beiden Fällen brauchen wir die heizkreis-Daten der Gruppe.
-
-      const astData = []; // { num, vlList, rlList, hkIds: [...] }
-      Object.entries(branches).forEach(([num, br]) => {
-        if (num === 'main') return;
-        // Externe Knoten für VL- und RL-Seite bestimmen
-        const vlEdge = br.vlList[0];
-        const rlEdge = br.rlList[0];
-
-        // Heizkreise über VL-BFS (rot/schwarz) ab VL-Seite
-        let hkIds = [];
-        if (vlEdge) {
-          const extVl = vlEdge.source === vn.id ? vlEdge.target : vlEdge.source;
-          // Alle HKs auf dieser VL-Ast-Seite (F2: an Verteiler UND Erzeuger stoppen)
-          const vis = new Set([extVl, ...blockNodes]);
-          const q2  = [extVl];
-          if (nodeById[extVl]?.type === 'heizkreis') hkIds.push(extVl);
-          while (q2.length) {
-            const cur = q2.shift();
-            for (const e of edges) {
-              if (e.style?.stroke === '#3b82f6') continue;
-              const other = e.source === cur ? e.target : e.target === cur ? e.source : null;
-              if (other && !vis.has(other)) {
-                vis.add(other);
-                if (nodeById[other]?.type === 'heizkreis') hkIds.push(other);
-                q2.push(other);
-              }
-            }
-          }
-        } else if (rlEdge) {
-          // Kein VL-Ast: RL-BFS als Fallback
-          const extRl = rlEdge.source === vn.id ? rlEdge.target : rlEdge.source;
-          hkIds = bfsRlHeizkreise(extRl, [...blockNodes]);
-        }
-        astData.push({ num, vlList: br.vlList, rlList: br.rlList, hkIds });
-      });
-
-      // ── Schritt 2: VL_verteiler = max(vl_temp aller HKs) ────
-      let vl_vt = -Infinity;
-      astData.forEach(ast => {
-        ast.hkIds.forEach(hkId => {
-          const hk = nodeById[hkId];
-          const vl = parseFloat(hk?.data?.vl_temp);
-          if (!isNaN(vl)) vl_vt = Math.max(vl_vt, vl);
-        });
-      });
-      if (!isFinite(vl_vt)) vl_vt = null;
-
-      // ── Schritt 3: Primär-Fluss je Ast (PHYSIK.md §4) ────────
-      let m_prim_total = 0;
-      let rl_num = 0; // Zähler für gewichteten RL_misch
-      let q_total = 0;
-      const verteilerWarnings = []; // F1: unmögliche Gruppen laut melden statt still auf 0 setzen
-
-      astData.forEach(ast => {
-        // Summe Q und RL_misch-Beitrag aller HKs dieser Gruppe
-        let ast_q = 0, ast_m_prim = 0;
-        ast.hkIds.forEach(hkId => {
-          const hk = nodeById[hkId];
-          const q   = parseFloat(hk?.data?.q_kw);
-          const rl  = parseFloat(hk?.data?.rl_temp);
-          if (!isNaN(q) && !isNaN(rl) && vl_vt !== null) {
-            const denom = 1.163 * (vl_vt - rl);
-            if (denom > 0) {
-              const m = q / denom;
-              ast_m_prim += m;
-              rl_num += m * rl;
-              ast_q += q;
-            } else {
-              // F1: RL ≥ Verteiler-VL → physikalisch unmöglich. Laut warnen statt still 0.
-              verteilerWarnings.push(`${hk?.data?.label || 'Heizkreis'}: RL ${rl} °C ≥ Verteiler-VL ${vl_vt} °C — physikalisch nicht möglich`);
-            }
-          }
-        });
-        ast.m_prim = ast_m_prim;
-        m_prim_total += ast_m_prim;
-        q_total += ast_q;
-
-        // VL-Ast-Kanten: Primär-Fluss dieser Gruppe
-        ast.vlList.forEach(e => { edgeFlows[e.id] = ast_m_prim; calcEdges.add(e.id); });
-
-        // RL-Ast: RL-BFS vom externen RL-Knoten — eigenen Heizkreis suchen,
-        // Fluss = m_prim dieser Gruppe (unabhängig von Stutzen-Nummer, PHYSIK §2)
-        ast.rlList.forEach(e => {
-          edgeFlows[e.id] = ast_m_prim;
-          calcEdges.add(e.id);
-        });
-      });
-
-      const rl_misch = m_prim_total > 0 ? rl_num / m_prim_total : null;
-
-      // Hauptanschluss = Primär-Gesamt-Fluss
-      ;[...(branches.main?.vlList || []), ...(branches.main?.rlList || [])].forEach(e => {
-        edgeFlows[e.id] = m_prim_total;
-        calcEdges.add(e.id);
-      });
-
-      nodeFlows[vn.id] = m_prim_total;
-      verteilerResults[vn.id] = {
-        vl_vt,
-        rl_misch,
-        q_total,
-        m_prim_total,
-        warnings: verteilerWarnings,
-      };
-    });
-
-    // ── 2. Rückwärts-Propagierung für restliche VL-Kanten ──────
-    // (Kreise ohne Verteiler oder Kanten zwischen Verteiler und WE/Pumpe)
-    const revAdj = {};
-    nodes.forEach(n => { revAdj[n.id] = []; });
-    edges.forEach(e => {
-      if (calcEdges.has(e.id)) return;       // schon berechnet
-      if (e.style?.stroke === '#3b82f6') return; // RL weglassen
-      const isVL = e.style?.stroke === '#ef4444';
-      if (isVL) {
-        revAdj[e.target]?.push({ to: e.source, eid: e.id });
-      } else {
-        revAdj[e.source]?.push({ to: e.target, eid: e.id });
-        revAdj[e.target]?.push({ to: e.source, eid: e.id });
-      }
-    });
-
-    Object.entries(hkFlows).forEach(([hkId, flow]) => {
-      const visited = new Set([hkId]);
-      const queue = [hkId];
-      while (queue.length) {
-        const cur = queue.shift();
-        for (const { to, eid } of (revAdj[cur] || [])) {
-          // Fluss nur beim Entdecken eines NEUEN Knotens gutschreiben — sonst
-          // wird dieselbe Kante von beiden Enden gezählt (Doppelzählung).
-          if (!visited.has(to)) {
-            if (!calcEdges.has(eid)) edgeFlows[eid] = (edgeFlows[eid] || 0) + flow;
-            visited.add(to); queue.push(to);
-          }
-        }
-      }
-    });
-
-    // ── 3. RL-Kanten die noch kein V' haben ────────────────────
-    const rlAdj = {};
-    nodes.forEach(n => { rlAdj[n.id] = []; });
-    edges.forEach(e => {
-      if (e.style?.stroke !== '#3b82f6' || calcEdges.has(e.id)) return;
-      rlAdj[e.source]?.push({ to: e.target, eid: e.id });
-      rlAdj[e.target]?.push({ to: e.source, eid: e.id });
-    });
-
-    Object.entries(hkFlows).forEach(([hkId, flow]) => {
-      const visited = new Set([hkId]);
-      const queue = [hkId];
-      while (queue.length) {
-        const cur = queue.shift();
-        for (const { to, eid } of (rlAdj[cur] || [])) {
-          // Rücklauf: Fluss nur beim Entdecken eines NEUEN Knotens gutschreiben,
-          // sonst zählt die Kante doppelt (Bug: 40.585 statt 20.292 nach dem HK).
-          if (!visited.has(to)) {
-            if (!calcEdges.has(eid)) edgeFlows[eid] = (edgeFlows[eid] || 0) + flow;
-            visited.add(to); queue.push(to);
-          }
-        }
-      }
-    });
-
-    // ── 4. Knoten-Flows ─────────────────────────────────────────
-    nodes.forEach(node => {
-      if (nodeFlows[node.id] !== undefined) return;
-      nodeFlows[node.id] = node.type === 'heizkreis'
-        ? (hkFlows[node.id] || 0)
-        : Math.max(0, ...edges.filter(e => e.source === node.id || e.target === node.id)
-            .map(e => edgeFlows[e.id] || 0));
-    });
-
-    return { edgeFlows, nodeFlows, verteilerResults };
-  }, [nodes, edges]);
-}
+// ── Hydraulik-Berechnung: passiert im BACKEND (Goldene Regel) ──
+// Der Editor schickt den Graphen (debounced) an POST /api/v1/hydraulik/berechnen
+// und zeigt nur noch die Resultate an. Regeln: PHYSIK.md §1–§4,
+// Rechen-Kern: backend/app/calculations/hydraulik.py (pytest-getestet).
 
 // (Persönliche Schema-Vorlagen folgen in Phase 2 — jetzt lebt das Schema im Backend.)
 
 // ── Properties Panel ─────────────────────────────────────────
-function PropertiesPanel({ node, nodeFlows, verteilerResults, onUpdate, onDelete, navigate }) {
+function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, onUpdate, onDelete, onSetAbgaenge, navigate }) {
   if (!node) return (
     <div style={{ padding: 14, fontSize: 11, color: '#94a3b8', lineHeight: 1.7 }}>
       <div style={{ fontWeight: 700, color: '#64748b', marginBottom: 8 }}>Eigenschaften</div>
       Einfachklick = ansehen · <b>Doppelklick = Auslegung öffnen</b>.
       <div style={{ marginTop: 14, fontSize: 10, borderTop: '1px solid #e2e8f0', paddingTop: 10 }}>
-        <b>T-Stück:</b> Kleinen schwarzen Kreis platzieren → mehrere Leitungen anschliessen.<br /><br />
-        <b>Parallel-Heizkreise:</b> Jeden HK mit T-Stück verbinden → T-Stück zur Pumpe → V' wird korrekt addiert.
+        <b>Verbrauchergruppe (roter Block):</b> auf die Leinwand ziehen, VL/RL unten an die Verteiler-Stutzen anschliessen — die Einspritzung wird im Block gerechnet.<br /><br />
+        <b>Verteiler:</b> Anzahl Abgänge hier im Panel wählbar. Die Summen stehen links am Balken.
       </div>
     </div>
   );
@@ -356,10 +85,66 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, onUpdate, onDelete
     </div>
   );
 
+  // ── VERBRAUCHERGRUPPE (ein Block, Einspritz-Rechnung intern — PHYSIK §4) ──
+  if (node.type === 'gruppe') {
+    const gr = gruppeResults?.[node.id];
+    const vl=parseFloat(d.vl_temp), rl=parseFloat(d.rl_temp), dt=vl-rl;
+    return (
+      <div style={panelSt}>
+        <PT>Verbrauchergruppe</PT>
+        {fld('Bezeichnung','label','z.B. Gruppe 1 — FBH EG','','text')}
+        <label style={lbl}>Typ (Wärmeabgabe)</label>
+        <select style={{...inp,cursor:'pointer'}} value={d.typ||''} onChange={e=>{
+          const s=WAERMEABGABE.find(x=>x.label===e.target.value);
+          set('typ',e.target.value); if(s){set('vl_temp',s.vl);set('rl_temp',s.rl);}
+        }}>
+          <option value="">— wählen —</option>
+          {WAERMEABGABE.map(x=><option key={x.label}>{x.label}</option>)}
+        </select>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:5,marginTop:6}}>
+          <div><label style={{...lbl,color:'#ef4444'}}>VL [°C]</label>
+            <input type="number" style={{...inp,borderColor:'#fca5a5'}} value={d.vl_temp??''} onChange={e=>set('vl_temp',e.target.value)} placeholder="35"/></div>
+          <div><label style={{...lbl,color:'#3b82f6'}}>RL [°C]</label>
+            <input type="number" style={{...inp,borderColor:'#93c5fd'}} value={d.rl_temp??''} onChange={e=>set('rl_temp',e.target.value)} placeholder="28"/></div>
+        </div>
+        {fld('Leistung Q','q_kw','z.B. 8.5','kW')}
+        {fld('Druckverlust Ast','dp_kpa','z.B. 20','kPa')}
+        {vl>0&&rl>0&&dt<=0&&<div style={warnSt}>⚠ VL muss grösser als RL sein</div>}
+        <div style={{ display:'flex', gap:12, marginTop:8, fontSize:11, color:'#374151' }}>
+          <label style={{ display:'flex', gap:4, alignItems:'center', cursor:'pointer' }}>
+            <input type="checkbox" checked={d.hat_pumpe!==false} onChange={e=>set('hat_pumpe',e.target.checked)}/> Pumpe
+          </label>
+          <label style={{ display:'flex', gap:4, alignItems:'center', cursor:'pointer' }}>
+            <input type="checkbox" checked={d.hat_ventil!==false} onChange={e=>set('hat_ventil',e.target.checked)}/> Ventil
+          </label>
+        </div>
+        {gr && gr.m_sek != null ? (
+          <>
+            <ResultBox v={gr.m_sek} label="V' sekundär (Gruppenseite)" unit="m³/h" />
+            {ro("V' primär (Verteilerseite)", gr.m_prim, 'm³/h', true)}
+            {gr.einspritz ? (
+              <div style={{ background:'#fef2f2', border:'1px solid #fca5a5', borderRadius:6, padding:'6px 8px', marginTop:4, fontSize:10, color:'#b91c1c' }}>
+                <b>Einspritzung aktiv</b> — Bypass {Number(gr.m_bypass).toFixed(3)} m³/h · ΔT prim {gr.dt_prim} K
+              </div>
+            ) : (
+              <div style={{ fontSize:9, color:'#94a3b8', marginTop:4 }}>Keine Einspritzung — primär = sekundär.</div>
+            )}
+            {gr.pumpe?.dp_kpa != null && ro('Pumpe Förderhöhe', `${gr.pumpe.dp_kpa.toFixed(1)} kPa = ${gr.pumpe.mws.toFixed(2)} mWS`, '')}
+            {gr.ventil && ro('Ventil kvs / Autorität', `${gr.ventil.kvs_eff} / ${gr.ventil.pv.toFixed(1)} %`, '')}
+            <div style={{ fontSize:9, color:'#94a3b8', marginTop:4 }}>Pumpe + Ventil auslegen: <b>Doppelklick</b> auf den Strang.</div>
+          </>
+        ) : (
+          <div style={warnSt}>Q, VL und RL eingeben — das Backend rechnet automatisch.</div>
+        )}
+        <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
+      </div>
+    );
+  }
+
   // ── HEIZKREIS ──
   if (node.type === 'heizkreis') {
-    const vl=parseFloat(d.vl_temp), rl=parseFloat(d.rl_temp), q=parseFloat(d.q_kw);
-    const dt=vl-rl, calc=(!isNaN(vl)&&!isNaN(rl)&&!isNaN(q)&&dt>0)?q/(1.163*dt):null;
+    const vl=parseFloat(d.vl_temp), rl=parseFloat(d.rl_temp), dt=vl-rl;
+    const calc = v ?? null; // V' kommt vom Backend
     return (
       <div style={panelSt}>
         <PT>Heizkreis</PT>
@@ -472,6 +257,11 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, onUpdate, onDelete
       <div style={panelSt}>
         <PT>Verteiler</PT>
         {fld('Bezeichnung','label','','','text')}
+        <label style={lbl}>Anzahl Abgänge</label>
+        <select style={{...inp,cursor:'pointer'}} value={parseInt(d.abgaenge)||4} onChange={e=>onSetAbgaenge(node.id, parseInt(e.target.value))}>
+          {[2,3,4,5,6,7,8].map(k=><option key={k} value={k}>{k}</option>)}
+        </select>
+        {fld('Abstand VL–RL Balken','hoehe','560 (Standard)','px')}
         {vr ? (
           <>
             <div style={{ fontSize:10, fontWeight:700, color:'#475569', marginTop:10, marginBottom:4, textTransform:'uppercase', letterSpacing:'0.05em' }}>Verteiler-Hydraulik (Primärseite)</div>
@@ -479,6 +269,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, onUpdate, onDelete
             {ro('RL Misch', vr.rl_misch != null ? vr.rl_misch.toFixed(1) : null, '°C')}
             {ro('Q total', vr.q_total != null ? vr.q_total.toFixed(2) : null, 'kW', true)}
             {ro('m_prim total', vr.m_prim_total != null ? vr.m_prim_total.toFixed(4) : null, 'm³/h', true)}
+            {ro('Δp ungünstigster Ast', vr.dp_max_ast != null ? `${vr.dp_max_ast.toFixed(1)} (Ast ${vr.dp_max_ast_nr})` : null, 'kPa')}
             {vr.warnings?.length > 0 && (
               <div style={{ ...warnSt, background:'#fef2f2', border:'1px solid #fca5a5', color:'#b91c1c', marginTop:6 }}>
                 ⚠ {vr.warnings.join(' · ')}
@@ -505,8 +296,9 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, onUpdate, onDelete
 
 // ── Auslegungs-Modal (Doppelklick auf ein Bauteil) ───────────
 const TITLES = {
-  heizkreis: 'Heizkreis', valve2: '2-Wege Regelventil', valve3: '3-Wege Mischventil',
-  pump: 'Pumpe', erzeuger: 'Wärmeerzeuger', verteiler: 'Verteiler', speicher: 'Speicher',
+  gruppe: 'Verbrauchergruppe', heizkreis: 'Heizkreis', valve2: '2-Wege Regelventil',
+  valve3: '3-Wege Mischventil', pump: 'Pumpe', erzeuger: 'Wärmeerzeuger',
+  verteiler: 'Verteiler', speicher: 'Speicher',
 };
 
 function BigVal({ label, value, unit = '', sub = '', color = '#1d4ed8' }) {
@@ -521,14 +313,112 @@ function BigVal({ label, value, unit = '', sub = '', color = '#1d4ed8' }) {
   );
 }
 
-function AuslegungModal({ node, v, onUpdate, onClose, navigate }) {
+function AuslegungModal({ node, v, gr, vr, onUpdate, onClose, navigate }) {
   const d = node.data;
   const set = (k, val) => onUpdate(node.id, k, val);
   let body;
 
-  if (node.type === 'heizkreis') {
-    const vl=parseFloat(d.vl_temp), rl=parseFloat(d.rl_temp), q=parseFloat(d.q_kw);
-    const dt=vl-rl, calc=(!isNaN(vl)&&!isNaN(rl)&&!isNaN(q)&&dt>0)?q/(1.163*dt):null;
+  if (node.type === 'gruppe') {
+    body = (
+      <div style={{ display:'grid', gap:12 }}>
+        <div><label style={lbl}>Typ (Wärmeabgabe)</label>
+          <select style={{...inp,cursor:'pointer'}} value={d.typ||''} onChange={e=>{
+            const s=WAERMEABGABE.find(x=>x.label===e.target.value);
+            set('typ',e.target.value); if(s){set('vl_temp',s.vl);set('rl_temp',s.rl);}
+          }}>
+            <option value="">— wählen —</option>
+            {WAERMEABGABE.map(x=><option key={x.label}>{x.label}</option>)}
+          </select></div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
+          <div><label style={lbl}>VL [°C]</label><input type="number" style={{...inp,borderColor:'#fca5a5'}} value={d.vl_temp??''} onChange={e=>set('vl_temp',e.target.value)} placeholder="35"/></div>
+          <div><label style={lbl}>RL [°C]</label><input type="number" style={{...inp,borderColor:'#93c5fd'}} value={d.rl_temp??''} onChange={e=>set('rl_temp',e.target.value)} placeholder="28"/></div>
+          <div><label style={lbl}>Q [kW]</label><input type="number" style={inp} value={d.q_kw??''} onChange={e=>set('q_kw',e.target.value)} placeholder="8.5"/></div>
+        </div>
+        <div><label style={lbl}>Druckverlust Ast [kPa] — für den ungünstigsten Ast am Verteiler</label>
+          <input type="number" style={inp} value={d.dp_kpa??''} onChange={e=>set('dp_kpa',e.target.value)} placeholder="20"/></div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+          <BigVal label="V' sekundär (Gruppenseite)" value={gr?.m_sek!=null?Number(gr.m_sek).toFixed(3):null} unit="m³/h" color="#15803d"
+            sub={gr?.dt_sek!=null?`ΔT sek = ${gr.dt_sek} K`:''}/>
+          <BigVal label="V' primär (Verteilerseite)" value={gr?.m_prim!=null?Number(gr.m_prim).toFixed(3):null} unit="m³/h" color="#1d4ed8"
+            sub={gr?.dt_prim!=null?`ΔT prim = ${gr.dt_prim} K`:''}/>
+        </div>
+        {gr?.einspritz
+          ? <div style={{ background:'#fef2f2', border:'1px solid #fca5a5', borderRadius:8, padding:'10px 12px', fontSize:11, color:'#b91c1c' }}>
+              <b>Einspritzung aktiv</b> (PHYSIK §4): Der Bypass im Block trägt {Number(gr.m_bypass).toFixed(3)} m³/h.
+              Die Gruppe mischt die Verteiler-VL auf {d.vl_temp} °C herunter.
+            </div>
+          : <div style={{ fontSize:11, color:'#94a3b8' }}>Keine Einspritzung — die Gruppe läuft direkt mit der Verteiler-Vorlauftemperatur (primär = sekundär).</div>}
+
+        {/* Ausrüstung im Strang: Pumpe + Ventil wie Einzelbauteile auslegen */}
+        <div style={{ display:'flex', gap:16, fontSize:12, color:'#374151' }}>
+          <label style={{ display:'flex', gap:5, alignItems:'center', cursor:'pointer' }}>
+            <input type="checkbox" checked={d.hat_pumpe!==false} onChange={e=>set('hat_pumpe',e.target.checked)}/> Pumpe im Strang
+          </label>
+          <label style={{ display:'flex', gap:5, alignItems:'center', cursor:'pointer' }}>
+            <input type="checkbox" checked={d.hat_ventil!==false} onChange={e=>set('hat_ventil',e.target.checked)}/> Ventil im Strang
+          </label>
+        </div>
+
+        {d.hat_pumpe !== false && (
+          <div style={{ border:'1px solid #e2e8f0', borderRadius:8, padding:'10px 12px' }}>
+            <div style={{ fontSize:11, fontWeight:700, color:'#1e293b', marginBottom:8 }}>Pumpe im Strang (Sekundärkreis, V' = {gr?.m_sek!=null?Number(gr.m_sek).toFixed(3):'—'} m³/h)</div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
+              <div><label style={lbl}>Rohr VL+RL [m]</label><input type="number" style={inp} value={d.pumpe_rohr_m??''} onChange={e=>set('pumpe_rohr_m',e.target.value)} placeholder="40"/></div>
+              <div><label style={lbl}>Auf [Pa/m]</label><input type="number" style={inp} value={d.pumpe_pam??''} onChange={e=>set('pumpe_pam',e.target.value)} placeholder="70"/></div>
+              <div><label style={lbl}>Apparate [kPa]</label><input type="number" style={inp} value={d.pumpe_apparate_kpa??''} onChange={e=>set('pumpe_apparate_kpa',e.target.value)} placeholder="15"/></div>
+            </div>
+            <div style={{ marginTop:8 }}>
+              <BigVal label="Förderhöhe" value={gr?.pumpe?.dp_kpa!=null?gr.pumpe.dp_kpa.toFixed(1):null} unit="kPa"
+                sub={gr?.pumpe?.dp_kpa!=null?`= ${gr.pumpe.mws.toFixed(2)} mWS · bei V' ${Number(gr.pumpe.v??0).toFixed(3)} m³/h`:'Rohrlänge/Apparate eingeben'}/>
+            </div>
+          </div>
+        )}
+
+        {d.hat_ventil !== false && (
+          <div style={{ border:'1px solid #e2e8f0', borderRadius:8, padding:'10px 12px' }}>
+            <div style={{ fontSize:11, fontWeight:700, color:'#1e293b', marginBottom:8 }}>Einspritz-/Regelventil (Primärseite, V' = {gr?.m_prim!=null?Number(gr.m_prim).toFixed(3):'—'} m³/h)</div>
+            <div><label style={lbl}>Δpvar — Druckabfall variabler Anlagenteil [kPa]</label>
+              <input type="number" style={inp} value={d.ventil_dp_var??''} onChange={e=>set('ventil_dp_var',e.target.value)} placeholder="26"/></div>
+            {gr?.ventil ? (
+              <>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginTop:8 }}>
+                  <BigVal label="kvs theoretisch" value={Number(gr.ventil.kvs_theor).toFixed(3)} color="#1e293b"/>
+                  <BigVal label="kvs Vorschlag" value={gr.ventil.kvs_vorschlag} color="#1d4ed8" sub="nächstgrösser, Norm-Reihe"/>
+                </div>
+                <div style={{ marginTop:8 }}><label style={lbl}>kvs gewählt</label>
+                  <select style={{...inp,cursor:'pointer'}} value={d.ventil_kvs_eff||gr.ventil.kvs_vorschlag||''} onChange={e=>set('ventil_kvs_eff',e.target.value)}>
+                    {KVS_REIHE.map(k=><option key={k} value={k}>{k}{k===gr.ventil.kvs_vorschlag?'  ← Vorschlag':''}</option>)}
+                  </select></div>
+                <PvBox pv={gr.ventil.pv} v={gr.ventil.v} kvs_eff={gr.ventil.kvs_eff}/>
+              </>
+            ) : (
+              <div style={{ ...warnSt, marginTop:8 }}>Δpvar eingeben — dann rechnet das Backend kvs + Ventilautorität.</div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  } else if (node.type === 'verteiler') {
+    body = vr ? (
+      <div style={{ display:'grid', gap:12 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+          <BigVal label="VL Verteiler" value={vr.vl_vt!=null?vr.vl_vt.toFixed(1):null} unit="°C" color="#dc2626" sub="höchste Gruppen-VL (PHYSIK §4)"/>
+          <BigVal label="RL Misch" value={vr.rl_misch!=null?vr.rl_misch.toFixed(1):null} unit="°C" color="#2563eb" sub="mengengewichtet über Primär-Flüsse"/>
+        </div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+          <BigVal label="Σ Leistung" value={vr.q_total!=null?vr.q_total.toFixed(2):null} unit="kW" color="#15803d"/>
+          <BigVal label="Σ V' primär" value={vr.m_prim_total!=null?vr.m_prim_total.toFixed(4):null} unit="m³/h" color="#15803d"/>
+        </div>
+        <BigVal label="Δp ungünstigster Ast" value={vr.dp_max_ast!=null?vr.dp_max_ast.toFixed(1):null} unit="kPa"
+          sub={vr.dp_max_ast_nr?`Ast ${vr.dp_max_ast_nr} ist massgebend — übrige Kreise über Ventile einregeln`:'Δp je Gruppe eingeben (Feld «Druckverlust Ast»)'}/>
+        {vr.warnings?.length > 0 && (
+          <div style={{ ...warnSt, background:'#fef2f2', border:'1px solid #fca5a5', color:'#b91c1c' }}>⚠ {vr.warnings.join(' · ')}</div>
+        )}
+      </div>
+    ) : <div style={warnSt}>Verbrauchergruppen an die Stutzen anschliessen — dann rechnet der Verteiler.</div>;
+  } else if (node.type === 'heizkreis') {
+    const vl=parseFloat(d.vl_temp), rl=parseFloat(d.rl_temp);
+    const dt=vl-rl, calc = v ?? null; // V' kommt vom Backend
     body = (
       <div style={{ display:'grid', gap:12 }}>
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
@@ -691,8 +581,34 @@ function EditorInner() {
   const [loaded, setLoaded]         = useState(false);
   const [saveState, setSaveState]   = useState('idle'); // idle | saving | saved | error
   const [auslegung, setAuslegung]   = useState(null);   // Bauteil für Doppelklick-Auslegung
+  const [showLegende, setShowLegende] = useState(false);
 
-  const { edgeFlows, nodeFlows, verteilerResults } = useHydraulicFlows(nodes, edges);
+  const [hydraulik, setHydraulik] = useState({ edge_flows: {}, node_flows: {}, verteiler_results: {}, gruppe_results: {} });
+
+  // Graph (debounced) ans Backend schicken — dort wird gerechnet
+  useEffect(() => {
+    if (!loaded) return;
+    let weg = false;
+    const t = setTimeout(async () => {
+      try {
+        const res = await hydraulikBerechnen({
+          nodes: nodes.map(n => ({ id: n.id, type: n.type, data: { ...n.data, _calc: undefined } })),
+          edges: edges.map(e => ({
+            id: e.id, source: e.source, target: e.target,
+            sourceHandle: e.sourceHandle || null, targetHandle: e.targetHandle || null,
+            stroke: e.style?.stroke || null,
+          })),
+        });
+        if (!weg) setHydraulik(res);
+      } catch { /* Backend nicht erreichbar — letzte Werte behalten */ }
+    }, 350);
+    return () => { weg = true; clearTimeout(t); };
+  }, [nodes, edges, loaded]);
+
+  const edgeFlows = hydraulik.edge_flows || {};
+  const nodeFlows = hydraulik.node_flows || {};
+  const verteilerResults = hydraulik.verteiler_results || {};
+  const gruppeResults = hydraulik.gruppe_results || {};
 
   // ── Schema aus Backend laden (oder anlegen, falls noch keins existiert) ──
   // Ref-Guard: pro Projekt nur EINMAL initialisieren. React-StrictMode führt
@@ -712,7 +628,12 @@ function EditorInner() {
         const s = list[0] || await createSchema(projectId, { name: 'Schema', graph: { nodes: [], edges: [] } });
         setSchemaId(s.id);
         setSchemaName(s.name || 'Schema');
-        setNodes(s.graph?.nodes || []);
+        // Fehlende Bauteil-Nummern nachtragen (ältere Schemas)
+        let geladen = s.graph?.nodes || [];
+        let maxNr = geladen.reduce((m, x) => Math.max(m, parseInt(x.data?.nr) || 0), 0);
+        geladen = geladen.map(n => (NUMMERIERT.includes(n.type) && n.data?.nr == null)
+          ? { ...n, data: { ...n.data, nr: ++maxNr } } : n);
+        setNodes(geladen);
         setEdges(s.graph?.edges || []);
       } catch (e) {
         console.error('Schema konnte nicht geladen werden', e);
@@ -804,6 +725,57 @@ function EditorInner() {
     return () => window.removeEventListener('keydown', handler);
   }, [undo, selected, snap]);
 
+  // Berechnete Werte (Backend) in die Node-Daten spiegeln — nur für die Anzeige.
+  // Verteiler-Rahmen: nur die Balken sind greifbar (dragHandle), die Lücke
+  // dazwischen lässt Klicks durch (pointerEvents none) und liegt hinter den
+  // Strängen (zIndex -10) — so lassen sich Gruppen zwischen die Balken stellen.
+  const displayNodes = useMemo(() => nodes.map(n => {
+    if (n.type === 'verteiler') {
+      const c = verteilerResults[n.id];
+      return {
+        ...n,
+        dragHandle: '.vt-bar',
+        zIndex: -10,
+        style: { ...n.style, pointerEvents: 'none' },
+        data: c ? { ...n.data, _calc: c } : n.data,
+      };
+    }
+    if (n.type === 'gruppe' || n.type === 'heizkreis') {
+      return { ...n, data: { ...n.data, _calc: { ...(gruppeResults[n.id] || {}), v: nodeFlows[n.id] } } };
+    }
+    return n;
+  }), [nodes, verteilerResults, gruppeResults, nodeFlows]);
+
+  // Legende: Nr · Bauteil · Bezeichnung · Kennwerte (reine Anzeige der
+  // Backend-Resultate — dieselben Zeilen erscheinen im PDF)
+  const legende = useMemo(() => {
+    const fx = (v, d = 3) => (v == null ? '—' : Number(v).toFixed(d));
+    return nodes
+      .filter(n => !['junction', 'label'].includes(n.type))
+      .slice()
+      .sort((a, b) => (parseInt(a.data?.nr) || 9999) - (parseInt(b.data?.nr) || 9999))
+      .map(n => {
+        const d = n.data || {};
+        let werte = '—';
+        if (n.type === 'gruppe') {
+          const c = gruppeResults[n.id] || {};
+          werte = `${d.q_kw ?? '—'} kW · ${d.vl_temp ?? '—'}/${d.rl_temp ?? '—'} °C · sek ${fx(c.m_sek)} / prim ${fx(c.m_prim)} m³/h${c.einspritz ? ' · Einspritz' : ''}${d.dp_kpa ? ` · Δp ${d.dp_kpa} kPa` : ''}`;
+        } else if (n.type === 'heizkreis') {
+          werte = `${d.q_kw ?? '—'} kW · ${d.vl_temp ?? '—'}/${d.rl_temp ?? '—'} °C · V' ${fx(nodeFlows[n.id])} m³/h`;
+        } else if (n.type === 'verteiler') {
+          const c = verteilerResults[n.id] || {};
+          werte = `VL ${fx(c.vl_vt, 1)} / RL ${fx(c.rl_misch, 1)} °C · Σ ${fx(c.q_total, 2)} kW · ${fx(c.m_prim_total)} m³/h${c.dp_max_ast != null ? ` · Δp Ast ${c.dp_max_ast_nr}: ${c.dp_max_ast} kPa` : ''}`;
+        } else if (n.type === 'pump') {
+          werte = `V' ${fx(nodeFlows[n.id])} m³/h`;
+        } else if (n.type === 'valve2' || n.type === 'valve3') {
+          werte = `V' ${fx(nodeFlows[n.id])} m³/h${d.dp_var ? ` · Δpvar ${d.dp_var} kPa` : ''}${d.kvs_eff ? ` · kvs ${d.kvs_eff}` : ''}`;
+        } else if (n.type === 'erzeuger') {
+          werte = [d.typ, d.leistung_kw ? `${d.leistung_kw} kW` : null].filter(Boolean).join(' · ') || '—';
+        }
+        return { nr: d.nr, bauteil: TITLES[n.type] || n.type, bez: d.label || '', werte };
+      });
+  }, [nodes, gruppeResults, verteilerResults, nodeFlows]);
+
   // Edges: VL durchgezogen, RL gestrichelt, V' als Label
   const displayEdges = useMemo(() => edges.map(edge => {
     const color = edge.style?.stroke || '#1e293b';
@@ -839,7 +811,11 @@ function EditorInner() {
     snap();
     const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
     const p = STD_PALETTE.find(p => p.type === raw);
-    setNodes(ns => [...ns, { id: newId(), type: raw, position: pos, data: { label: p?.label || raw } }]);
+    const extra = raw === 'verteiler' ? { abgaenge: 4 } : {};
+    setNodes(ns => [...ns, {
+      id: newId(), type: raw, position: pos,
+      data: { label: p?.label || raw, ...extra, ...(NUMMERIERT.includes(raw) ? { nr: naechsteNr(ns) } : {}) },
+    }]);
   }, [screenToFlowPosition, setNodes, snap]);
 
   const onNodeClick       = useCallback((_, n) => setSelected(n), []);
@@ -850,6 +826,17 @@ function EditorInner() {
 
   const updateNode = (id, key, val) =>
     setNodes(ns => ns.map(n => n.id === id ? { ...n, data: { ...n.data, [key]: val } } : n));
+
+  // Verteiler: Anzahl Abgänge ändern — Leitungen an wegfallenden Stutzen entfernen
+  const setAbgaenge = (id, count) => {
+    snap();
+    setNodes(ns => ns.map(n => n.id === id ? { ...n, data: { ...n.data, abgaenge: count } } : n));
+    setEdges(es => es.filter(e => {
+      const h = e.source === id ? e.sourceHandle : e.target === id ? e.targetHandle : null;
+      const m = h && h.match(/^(vl|rl)-(\d+)$/);
+      return !m || parseInt(m[2]) <= count;
+    }));
+  };
 
   const deleteNode = (id) => {
     snap();
@@ -877,6 +864,19 @@ function EditorInner() {
             {s.name}
           </button>
         ))}
+
+        <span style={{ fontSize:11, color:'#94a3b8', marginLeft:6 }}>PDF:</span>
+        {[['schema','Schema'],['berechnungen','Rechnung'],['beides','Beides']].map(([k,t])=>(
+          <button key={k} disabled={!schemaId}
+            onClick={()=>window.open(`${API_BASE}/api/v1/schemas/${schemaId}/pdf?inhalt=${k}`,'_blank')}
+            style={{ fontSize:11, padding:'3px 8px', borderRadius:4, border:'1px solid #bfdbfe', background:'#eff6ff', color:'#1d4ed8', cursor:'pointer', whiteSpace:'nowrap' }}>
+            ⤓ {t}
+          </button>
+        ))}
+        <button onClick={()=>setShowLegende(v=>!v)}
+          style={{ fontSize:11, padding:'3px 8px', borderRadius:4, border:'1px solid #e2e8f0', background: showLegende?'#1e293b':'#f8fafc', color: showLegende?'white':'#374151', cursor:'pointer', whiteSpace:'nowrap' }}>
+          Legende
+        </button>
 
         <div style={{ display:'flex', gap:4, alignItems:'center', marginLeft:'auto' }}>
           <span style={{ fontSize:11, color:'#94a3b8' }}>Linie:</span>
@@ -914,7 +914,7 @@ function EditorInner() {
         {/* Canvas */}
         <div style={{ flex:1, position:'relative' }}>
           <ReactFlow
-            nodes={nodes} edges={displayEdges}
+            nodes={displayNodes} edges={displayEdges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
@@ -943,6 +943,35 @@ function EditorInner() {
               </Panel>
             )}
           </ReactFlow>
+
+          {/* Legende (Pflichtenheft §10) — dieselben Zeilen landen im PDF */}
+          {showLegende && (
+            <div style={{ position:'absolute', left:0, right:0, bottom:0, background:'white', borderTop:'2px solid #e2e8f0', maxHeight:190, overflowY:'auto', zIndex:20, padding:'6px 14px 10px', boxShadow:'0 -6px 16px rgba(15,23,42,0.08)' }}>
+              <table style={{ width:'100%', fontSize:10, borderCollapse:'collapse' }}>
+                <thead>
+                  <tr style={{ textAlign:'left', color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.05em', fontSize:8 }}>
+                    <th style={{ padding:'4px 8px 4px 0', width:30 }}>Nr</th>
+                    <th style={{ padding:'4px 8px 4px 0', width:140 }}>Bauteil</th>
+                    <th style={{ padding:'4px 8px 4px 0', width:170 }}>Bezeichnung</th>
+                    <th style={{ padding:'4px 0' }}>Kennwerte</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {legende.map((z, i) => (
+                    <tr key={i} style={{ borderTop:'1px solid #f1f5f9' }}>
+                      <td style={{ padding:'3px 8px 3px 0', fontWeight:700, color:'#dc2626' }}>{z.nr ?? '—'}</td>
+                      <td style={{ padding:'3px 8px 3px 0', color:'#1e293b' }}>{z.bauteil}</td>
+                      <td style={{ padding:'3px 8px 3px 0', color:'#475569' }}>{z.bez}</td>
+                      <td style={{ padding:'3px 0', fontFamily:'monospace', color:'#334155' }}>{z.werte}</td>
+                    </tr>
+                  ))}
+                  {legende.length===0 && (
+                    <tr><td colSpan="4" style={{ padding:8, color:'#94a3b8' }}>Noch keine Bauteile im Schema.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {/* Properties */}
@@ -950,7 +979,7 @@ function EditorInner() {
           <div style={{ padding:'8px 12px 4px', fontSize:9, fontWeight:700, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.08em', borderBottom:'1px solid #f1f5f9' }}>
             Eigenschaften
           </div>
-          <PropertiesPanel node={selectedNode} nodeFlows={nodeFlows} verteilerResults={verteilerResults} onUpdate={updateNode} onDelete={deleteNode} navigate={navigate}/>
+          <PropertiesPanel node={selectedNode} nodeFlows={nodeFlows} verteilerResults={verteilerResults} gruppeResults={gruppeResults} onUpdate={updateNode} onDelete={deleteNode} onSetAbgaenge={setAbgaenge} navigate={navigate}/>
         </div>
       </div>
 
@@ -958,6 +987,8 @@ function EditorInner() {
         <AuslegungModal
           node={auslegungNode}
           v={nodeFlows[auslegungNode.id]}
+          gr={gruppeResults[auslegungNode.id]}
+          vr={verteilerResults[auslegungNode.id]}
           onUpdate={updateNode}
           onClose={() => setAuslegung(null)}
           navigate={navigate}

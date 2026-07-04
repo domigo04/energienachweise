@@ -39,6 +39,9 @@ from app.routers.hc_ventil import router as hc_ventil_router
 from app.routers.hc_druckverlust import router as hc_druckverlust_router
 from app.routers.hc_ravel import router as hc_ravel_router
 from app.routers.hc_schema import router as hc_schema_router
+from app.routers.hc_hydraulik import router as hc_hydraulik_router
+from app.routers.hc_bkp import router as hc_bkp_router
+from app.routers.hc_export import router as hc_export_router
 
 app.include_router(hc_projects_router)
 app.include_router(hc_groups_router)
@@ -46,11 +49,15 @@ app.include_router(hc_ventil_router)
 app.include_router(hc_druckverlust_router)
 app.include_router(hc_ravel_router)
 app.include_router(hc_schema_router)
+app.include_router(hc_hydraulik_router)
+app.include_router(hc_bkp_router)
+app.include_router(hc_export_router)
 
 # ---------- DB-Init & Seed ----------
 from app.database import Base, engine, SessionLocal
 from app.models.heizungscockpit import (  # noqa: F401 — Tabellen vor create_all importieren
     HcProject, HcProjectBaseData, HcGroupTemplate, HcHeatingGroup, HcCalculationResult, HcSchema,
+    BkpEintrag,
 )
 
 

@@ -22,6 +22,7 @@ class GraphEdge(BaseModel):
     targetHandle: Optional[str] = None
     stroke: Optional[str] = None    # '#ef4444' = VL, '#3b82f6' = RL
     style: Optional[dict] = None    # alternativ: style.stroke (gespeicherte Graphen)
+    data: Optional[dict] = None     # z.B. laenge_m (Leitungsdimensionierung)
 
 
 class GraphInput(BaseModel):

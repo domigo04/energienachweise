@@ -158,6 +158,106 @@ def test_strang_pumpe_und_ventil():
     assert r["gruppe_results"]["g1"]["pumpe"]["dp_kpa"] is None
 
 
+def test_schaltungsarten_regeln():
+    """PHYSIK §7: Drossel ohne Pumpe · Drossel kann nicht mischen ·
+    Beimisch nie mit Einspritz/Drossel am selben Verteiler."""
+    nodes, edges = _graph_3_kreise()
+    nodes[2]["data"]["schaltung"] = "beimisch"   # G1 (35/28)
+    nodes[3]["data"]["schaltung"] = "einspritz"  # G2
+    nodes[4]["data"]["schaltung"] = "drossel"    # G3 (60/45 = Verteiler-VL → ok)
+    r = berechne_schema(nodes, edges)
+
+    # Flüsse bleiben EXAKT gleich (Berechnungen nicht anfassen!)
+    vt = r["verteiler_results"]["vt"]
+    assert vt["m_prim_total"] == pytest.approx(1.1662, abs=0.001)
+    assert vt["rl_misch"] == pytest.approx(43.04, abs=0.05)
+
+    # Drossel: nie eine Gruppenpumpe, auch ohne explizites hat_pumpe=False
+    g3 = r["gruppe_results"]["g3"]
+    assert g3["schaltung"] == "drossel"
+    assert g3["hat_pumpe"] is False and g3["pumpe"] is None
+    # Beimisch/Einspritz behalten ihre Pumpe
+    assert r["gruppe_results"]["g1"]["hat_pumpe"] is True
+
+    # Beimisch + Einspritz/Drossel gemischt → Warnung
+    assert any("Beimischung" in w and "druckbehaftet" in w for w in vt["warnings"])
+
+    # Drossel mit VL unter Verteiler-VL → Warnung «kann nicht mischen».
+    # G1 auf Einspritz, G3 (Drossel) auf VL 50 → Verteiler-VL = max(35,55,50) = 55.
+    nodes[2]["data"]["schaltung"] = "einspritz"
+    nodes[4]["data"]["vl_temp"] = "50"
+    r2 = berechne_schema(nodes, edges)
+    assert any("Drossel kann nicht mischen" in w for w in r2["verteiler_results"]["vt"]["warnings"])
+    # Nur Einspritz + Drossel (beide druckbehaftet) → KEINE Misch-Warnung
+    assert not any("Beimischung" in w for w in r2["verteiler_results"]["vt"]["warnings"])
+    # Dominic-Feedback: alle Warnungen landen zusätzlich gesammelt in "warnungen"
+    # (fürs Report-Fenster im Editor) — dieselbe Drossel-Warnung erscheint dort auch.
+    assert any("Drossel kann nicht mischen" in w for w in r2["warnungen"])
+
+
+def test_anschluss_marker_verbindet_virtuell():
+    """Zwei Anschluss-Marker mit Buchstabe 'A' ersetzen eine lang gezeichnete
+    Leitung: Pumpe → Anschluss A #1 (kein Draht zu #2) → Anschluss A #2
+    → Heizkreis. Fluss muss trotzdem durchgereicht werden (PHYSIK §9)."""
+    nodes = [
+        {"id": "hk", "type": "heizkreis", "data": {"q_kw": "8.5", "vl_temp": "35", "rl_temp": "30"}},
+        {"id": "a1", "type": "anschluss", "data": {"buchstabe": "A"}},
+        {"id": "a2", "type": "anschluss", "data": {"buchstabe": "A"}},
+        {"id": "p", "type": "pump", "data": {}},
+    ]
+    edges = [
+        {"id": "e1", "source": "p", "target": "a1", "stroke": VL},
+        {"id": "e2", "source": "a2", "target": "hk", "stroke": VL},
+    ]
+    r = berechne_schema(nodes, edges)
+    assert r["node_flows"]["hk"] == pytest.approx(1.4617, abs=0.001)
+    # Ohne echte Kante zwischen a1/a2 muss die Pumpe trotzdem den Fluss sehen
+    assert r["node_flows"]["p"] == pytest.approx(1.4617, abs=0.001)
+    assert r["anschluss_warnings"] == []
+
+
+def test_anschluss_ohne_gegenstueck_warnt():
+    nodes = [
+        {"id": "hk", "type": "heizkreis", "data": {"q_kw": "5", "vl_temp": "35", "rl_temp": "28"}},
+        {"id": "a1", "type": "anschluss", "data": {"buchstabe": "B"}},
+    ]
+    edges = [{"id": "e1", "source": "hk", "target": "a1", "stroke": VL}]
+    r = berechne_schema(nodes, edges)
+    assert any("Anschluss B" in w and "kein Gegenstück" in w for w in r["anschluss_warnings"])
+
+
+def test_anschluss_mehr_als_zwei_warnt():
+    nodes = [{"id": f"a{i}", "type": "anschluss", "data": {"buchstabe": "C"}} for i in range(3)]
+    r = berechne_schema(nodes, [])
+    assert any("Anschluss C" in w and "3 Marker" in w for w in r["anschluss_warnings"])
+
+
+def test_leitung_automatische_dimension_und_laenge():
+    """Leitungsdimensionierung (PHYSIK §10): DN + Pa/m automatisch aus dem
+    Fluss, Δp zusätzlich wenn eine Länge eingetragen wurde."""
+    nodes = [
+        {"id": "hk", "type": "heizkreis", "data": {"q_kw": "8.5", "vl_temp": "35", "rl_temp": "30"}},
+        {"id": "p", "type": "pump", "data": {}},
+    ]
+    edges = [{"id": "e1", "source": "p", "target": "hk", "stroke": VL, "data": {"laenge_m": "12"}}]
+    r = berechne_schema(nodes, edges)
+    lg = r["leitung_results"]["e1"]
+    assert lg["dn"] == "DN32"  # 1.4617 m³/h = 1461.7 kg/h (> DN25-Kapazität bei 70 Pa/m)
+    assert lg["laenge_m"] == 12.0
+    assert lg["dp_kpa"] == pytest.approx(lg["pam"] * 12 / 1000, abs=0.01)
+
+
+def test_leitung_ohne_laenge_kein_dp():
+    nodes = [
+        {"id": "hk", "type": "heizkreis", "data": {"q_kw": "8.5", "vl_temp": "35", "rl_temp": "30"}},
+        {"id": "p", "type": "pump", "data": {}},
+    ]
+    edges = [{"id": "e1", "source": "p", "target": "hk", "stroke": VL}]
+    r = berechne_schema(nodes, edges)
+    assert r["leitung_results"]["e1"]["dp_kpa"] is None
+    assert r["leitung_results"]["e1"]["dn"] is not None
+
+
 def test_schema_freier_kreis_ohne_verteiler():
     """Heizkreis → Pumpe (VL) ohne Verteiler: Leitung trägt den Kreis-Fluss."""
     nodes = [

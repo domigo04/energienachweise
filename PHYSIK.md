@@ -66,8 +66,74 @@ Regeln am Verteiler:
 - **Pumpenförderhöhe = Δp gemeinsamer Teil + Δp ungünstigster Ast.**
   (Der Verteiler kennt seinen ungünstigsten Ast seit Loop A; die Pumpen-Verknüpfung folgt in Loop C.)
 
-## 6. Bauteil-Klassen
+## 6. Schaltungsarten der Verbrauchergruppen (Dominic, 2026-07-04)
+Jede Verbrauchergruppe hat genau EINE Schaltungsart:
+- **Einspritzschaltung** (Standard): **2-Weg-Ventil**, Bypass mündet **über** dem Ventil
+  in die Strangleitung. **Druckbehaftet** — braucht eine **Hauptpumpe** nach dem
+  Erzeuger/Speicher (die Hauptpumpe zeichnet Dominic selbst als eigenes Bauteil).
+  Gruppenpumpe im Strang: **ja**.
+- **Beimischschaltung**: **3-Weg-Ventil**, Bypass mündet **direkt in den dritten
+  Anschluss** des Ventils. **Drucklos** primärseitig — **keine Hauptpumpe**.
+  Gruppenpumpe im Strang: **ja**.
+- **Drosselschaltung**: **nur Ventil** (2-Weg), **keine Gruppenpumpe**, kein Bypass —
+  kann **nicht mischen** (Gruppen-VL = Verteiler-VL). Druckbehaftet.
+
+**Mischregeln am selben Verteiler:**
+- Einspritz + Drossel **dürfen** gemischt werden (beide druckbehaftet, Hauptpumpe).
+- Beimisch **NIE** mit Einspritz/Drossel mischen (drucklos vs. druckbehaftet).
+- Mehrere Gruppen derselben Art sind immer zulässig.
+
+Die Mengenbilanz (§4) gilt für Einspritz- **und** Beimischgruppen gleich;
+bei Drossel gilt m_prim = m_sek und VL_Gruppe = VL_Verteiler.
+
+## 7. Bauteil-Klassen
 - **Auszulegen**: Wärmepumpe, Umwälzpumpe, 2-/3-Weg-Ventil, Expansionsgefäss,
   technischer Speicher (grün), **Wärmezähler** (übernimmt den Durchfluss der Leitung,
-  in der er sitzt, + Typ).
+  in der er sitzt, + Typ). **BWW-Speicher** (grün, wie Speicher) — Auslegung nach
+  SIA 385 ist geplant, aktuell nur Symbol.
 - **Nur Symbol + Fabrikat** (nicht ausgelegt): STAD / Strangregulierventil, Temperaturfühler.
+
+## 8. Expansionsgefäss — Methode aus Dominics Excel («Expanion_dominic_goulon.xlsx»)
+_Quelle: Dominics eigene Berechnung (OneDrive → Planungshilfe/Berechnungen). Die frühere
+EN-12828-Annahme wurde durch diese Methode ersetzt._
+- **Ausdehnung e** aus Stufentabelle nach **Mitteltemperatur** und Medium (grösste Stufe ≤ t):
+  Heizungswasser: 15°→0.002 · 20°→0.0027 · 25°→0.0033 · 30°→0.004 · 35°→0.00575 · 40°→0.0075 ·
+  45°→0.00975 · 50°→0.012 · 55°→0.0145 · 60°→0.017 · 65°→0.02 · 70°→0.023 · 75°→0.026 · 80°→0.029 ·
+  85°→0.0325 · 90°→0.036 · 95°→0.0397 · 100°→0.0434 · 105°→0.0477 · 110°→0.052
+  (eigene Spalten für Frostschutz 30 %/40 %).
+- **Faktor X** (Wasserreserve) aus der Erzeugerleistung: ≤10 kW → **3.0**,
+  dann linear fallend (−1.5/140 pro kW) bis 150 kW → **1.5**, darüber konstant 1.5.
+- **EWS (Erdsonden):** e = **0.016** und X = **2.5** fix.
+- `Vex = Vsys · e` · `Vwr = Vex · (X − 1)` · **`Vex,tot = Vsys·e·X + Vsto·e`**
+  (Vsys = Anlageinhalt, Vsto = Speicherinhalt separat; bei EWS nur Vsys·e·X).
+- **pfin = pSV / 1.15** (Ventilgenauigkeit) · **p0 = Höhe · 9.81 · 1050 · 10⁻⁵ + 0.3 bar**.
+- **`VN,min = Vex,tot · (pfin + 1) / (pfin − p0)`** → nächstgrössere Norm-Grösse
+  (8, 12, 18, 25, 35, 50, 80, 100, 140, 200, 250, 300, 400, 500, 600, 800, 1000 l).
+- Beispiel aus dem Excel: Vsys 2133.2 l, 35 °C, 91 kW, Höhe 29 m, pSV 4 bar →
+  e 0.00575, X 2.132, Vex,tot 26.15 l, p0 3.287, pfin 3.478 → **VN ≈ 613 l**.
+- Fehlerfall: `pfin ≤ p0` → Warnung (SV-Ansprechdruck zu klein / Anlage zu hoch).
+- **Anschluss unten** am Gefäss (nicht oben) — Bauteil-Zeichnung entsprechend angepasst.
+
+## 9. Anschluss-Marker (Dominic-Feedback 2026-07-04)
+Ersetzt eine lang quer durchs Schema gezeichnete Leitung durch zwei kurze Pfeil-Marker
+(rot VL raus, blau RL rein, gleicher Buchstabe) — wie im CAD ein Verweis «geht weiter bei A».
+- **Echte hydraulische Verbindung**, kein reiner Zeichnungs-Schmuck: zwei Anschluss-Marker mit
+  demselben Buchstaben werden vom Backend **virtuell verbunden** (je eine VL- und eine
+  RL-farbige virtuelle Kante) — Fluss und Temperatur fliessen genau so durch, als wäre eine
+  echte Leitung gezeichnet (`_mit_virtuellen_anschluss_kanten` in `hydraulik.py`).
+- Ein Marker ohne Gegenstück (nur 1× derselbe Buchstabe) → Warnung «kein Gegenstück gefunden».
+- Mehr als 2 Marker mit demselben Buchstaben → nur die ersten beiden werden verbunden, Warnung.
+- Damit lassen sich auch Leitungen zeichnen, die an keinem realen Bauteil-Fangpunkt enden,
+  sondern an einem Anschluss-Marker (einem generischen, leichten Fangpunkt).
+
+## 10. Automatische Leitungsdimensionierung (Dominics Rohr-Tabelle)
+- Eingabe: Durchfluss der Leitung in m³/h (aus dem Schema) → **× 1000 = kg/h**
+  (Dominics Tabelle ist in kg/h).
+- Für jede DN-Stufe gibt die Tabelle die Kapazität [kg/h] bei R = 25…75 Pa/m (5er-Schritte).
+- **Regel:** kleinste DN wählen, bei der die Kapazität bei **R = 70 Pa/m** (Dominics Maximalwert,
+  nie darüber dimensionieren) ≥ tatsächlicher Durchfluss ist.
+- Der tatsächliche Pa/m-Wert wird zwischen den beiden nächsten Tabellen-Stufen linear interpoliert.
+- Beispiel (Dominic): 700 kg/h → **DN25**, interpoliert **≈ 65 Pa/m** (Tabellenwert bei R=65: 702 kg/h,
+  sehr nah an 700).
+- Leitung anklicken → Länge [m] eintragen → `Δp = Pa/m · Länge / 1000 [kPa]` (gleiche Formel wie
+  bei Pumpe/Gruppe, PHYSIK §5).

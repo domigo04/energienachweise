@@ -37,6 +37,10 @@ const STD_PALETTE = [
   { type: 'erzeuger',   label: 'Wärmeerzeuger (WE)',  desc: '→ M10 RAVEL' },
   { type: 'speicher',   label: 'Speicher',            desc: '' },
   { type: 'verteiler',  label: 'Verteiler',           desc: '' },
+  { type: 'waermezaehler', label: 'Wärmezähler',      desc: 'übernimmt Leitungs-Durchfluss' },
+  { type: 'expansion',  label: 'Expansionsgefäss',    desc: 'VN nach Dominics Excel-Methode' },
+  { type: 'bww',        label: 'BWW-Speicher',        desc: 'Brauchwarmwasser (grün) — SIA 385 folgt' },
+  { type: 'anschluss',  label: 'Anschluss-Marker',    desc: 'Ersetzt lange Leitung — Buchstabe koppeln' },
 ];
 
 const newId = () => `n_${Date.now()}_${Math.floor(Math.random() * 9999)}`;
@@ -44,6 +48,62 @@ const newId = () => `n_${Date.now()}_${Math.floor(Math.random() * 9999)}`;
 // Nächste freie Bauteil-Nummer (Nummerierung bleibt stabil, weil sie in
 // node.data.nr gespeichert wird — das Schema ist die Datenbank).
 const naechsteNr = (ns) => ns.reduce((m, x) => Math.max(m, parseInt(x.data?.nr) || 0), 0) + 1;
+
+// Nächster freier Buchstabe für Anschluss-Marker (A, B, C … PHYSIK §9)
+const naechsterBuchstabe = (ns) => {
+  const belegt = new Set(ns.filter(n => n.type === 'anschluss').map(n => n.data?.buchstabe));
+  for (let i = 0; i < 26; i++) {
+    const b = String.fromCharCode(65 + i);
+    if (!belegt.has(b)) return b;
+  }
+  return 'A';
+};
+
+// Schaltungsarten der Verbrauchergruppe (PHYSIK.md §6)
+const SCHALTUNGSARTEN = [
+  { wert: 'einspritz', name: 'Einspritzschaltung', hinweis: '2-Weg-Ventil · Bypass über dem Ventil · druckbehaftet (Hauptpumpe nötig)' },
+  { wert: 'beimisch',  name: 'Beimischschaltung',  hinweis: '3-Weg-Ventil · Bypass am Ventil · drucklos (keine Hauptpumpe)' },
+  { wert: 'drossel',   name: 'Drosselschaltung',   hinweis: 'Nur Ventil, keine Gruppenpumpe · kann nicht mischen' },
+];
+const schaltungVon = (d) => (['einspritz', 'beimisch', 'drossel'].includes(d?.schaltung) ? d.schaltung : 'einspritz');
+
+// ── Leitungs-Panel (Klick auf eine Leitung, PHYSIK §10) ───────
+// Zeigt die automatisch gewählte Dimension (DN + Pa/m aus Dominics Tabelle)
+// und lässt die Länge eintragen → Δp = Pa/m · Länge / 1000.
+function LeitungPanel({ edge, leitungResults, onUpdateEdge, onDelete }) {
+  const lg = leitungResults[edge.id];
+  const ro = (label, value, unit='', ok=false) => (
+    <div style={{ marginBottom: 6 }}>
+      <label style={lbl}>{label}</label>
+      <div style={{ ...inp, background: ok?'#f0fdf4':'#f8fafc', color: ok?'#15803d':'#374151', fontWeight: ok?700:400, fontFamily:'monospace', fontSize:12 }}>
+        {value!=null ? `${value}${unit?' '+unit:''}` : '—'}
+      </div>
+    </div>
+  );
+  return (
+    <div style={panelSt}>
+      <PT>Leitung</PT>
+      {lg ? (
+        <>
+          {ro('Dimension (automatisch)', lg.dn, '', true)}
+          {ro('Reibungsdruckverlust', lg.pam.toFixed(1), 'Pa/m', true)}
+          <div style={{ marginBottom: 7 }}>
+            <label style={lbl}>Länge [m]</label>
+            <input type="number" style={inp} value={edge.data?.laenge_m ?? ''}
+              onChange={e => onUpdateEdge(edge.id, 'laenge_m', e.target.value)} placeholder="z.B. 12" />
+          </div>
+          {lg.dp_kpa != null
+            ? ro('Δp dieser Leitung', lg.dp_kpa.toFixed(2), 'kPa', true)
+            : <div style={{ fontSize: 9, color: '#94a3b8' }}>Länge eingeben für Δp dieser Leitung.</div>}
+          {lg.warnung && <div style={{ ...warnSt, background:'#fef2f2', border:'1px solid #fca5a5', color:'#b91c1c', marginTop:6 }}>⚠ {lg.warnung}</div>}
+        </>
+      ) : (
+        <div style={warnSt}>Kein Durchfluss auf dieser Leitung — Dimensionierung erscheint, sobald sie Wasser führt.</div>
+      )}
+      <Div /><DelBtn onClick={() => onDelete(edge.id)} />
+    </div>
+  );
+}
 
 // ── Hydraulik-Berechnung: passiert im BACKEND (Goldene Regel) ──
 // Der Editor schickt den Graphen (debounced) an POST /api/v1/hydraulik/berechnen
@@ -53,7 +113,7 @@ const naechsteNr = (ns) => ns.reduce((m, x) => Math.max(m, parseInt(x.data?.nr) 
 // (Persönliche Schema-Vorlagen folgen in Phase 2 — jetzt lebt das Schema im Backend.)
 
 // ── Properties Panel ─────────────────────────────────────────
-function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, onUpdate, onDelete, onSetAbgaenge, navigate }) {
+function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ventilResults, pumpenResults, expansionResults, anschlussWarnungen, onUpdate, onDelete, onSetAbgaenge, navigate }) {
   if (!node) return (
     <div style={{ padding: 14, fontSize: 11, color: '#94a3b8', lineHeight: 1.7 }}>
       <div style={{ fontWeight: 700, color: '#64748b', marginBottom: 8 }}>Eigenschaften</div>
@@ -110,14 +170,17 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, onU
         {fld('Leistung Q','q_kw','z.B. 8.5','kW')}
         {fld('Druckverlust Ast','dp_kpa','z.B. 20','kPa')}
         {vl>0&&rl>0&&dt<=0&&<div style={warnSt}>⚠ VL muss grösser als RL sein</div>}
-        <div style={{ display:'flex', gap:12, marginTop:8, fontSize:11, color:'#374151' }}>
-          <label style={{ display:'flex', gap:4, alignItems:'center', cursor:'pointer' }}>
-            <input type="checkbox" checked={d.hat_pumpe!==false} onChange={e=>set('hat_pumpe',e.target.checked)}/> Pumpe
-          </label>
-          <label style={{ display:'flex', gap:4, alignItems:'center', cursor:'pointer' }}>
-            <input type="checkbox" checked={d.hat_ventil!==false} onChange={e=>set('hat_ventil',e.target.checked)}/> Ventil
-          </label>
+        <label style={lbl}>Schaltung</label>
+        <select style={{...inp,cursor:'pointer'}} value={schaltungVon(d)} onChange={e=>set('schaltung',e.target.value)}>
+          {SCHALTUNGSARTEN.map(s=><option key={s.wert} value={s.wert}>{s.name}</option>)}
+        </select>
+        <div style={{ fontSize:9, color:'#94a3b8', marginTop:2 }}>
+          {SCHALTUNGSARTEN.find(s=>s.wert===schaltungVon(d))?.hinweis}
         </div>
+        <label style={{ display:'flex', gap:5, alignItems:'center', cursor:'pointer', fontSize:11, color:'#374151', marginTop:8 }}>
+          <input type="checkbox" checked={!!d.hat_wz} onChange={e=>set('hat_wz',e.target.checked)}/>
+          Wärmezähler (mit VL-/RL-Fühler)
+        </label>
         {gr && gr.m_sek != null ? (
           <>
             <ResultBox v={gr.m_sek} label="V' sekundär (Gruppenseite)" unit="m³/h" />
@@ -171,64 +234,99 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, onU
     );
   }
 
-  // ── 2WV ──
-  if (node.type === 'valve2') {
-    const dp_kpa=parseFloat(d.dp_var), dp_bar=dp_kpa/100;
-    let kvs_theor=null, kvs_vorschlag=null, pv=null;
-    if(v&&dp_kpa>0){kvs_theor=v/Math.sqrt(dp_bar); kvs_vorschlag=KVS_REIHE.find(k=>k>=kvs_theor)||KVS_REIHE.at(-1);}
-    const kvs_eff=parseFloat(d.kvs_eff||kvs_vorschlag);
-    if(v&&kvs_eff>0){const dpv=(v/kvs_eff)**2; pv=dpv/(dpv+dp_bar)*100;}
+  // ── 2WV / 3WM — kvs + Ventilautorität kommen vom Backend ──
+  if (node.type === 'valve2' || node.type === 'valve3') {
+    const ver = ventilResults?.[node.id];
     return (
       <div style={panelSt}>
-        <PT>2-Wege Regelventil</PT>
+        <PT>{node.type === 'valve2' ? '2-Wege Regelventil' : '3-Wege Mischventil'}</PT>
         {fld('Bezeichnung','label','','','text')}
-        {v ? ro("V' (Topologie)",v,'m³/h',true) : <div style={warnSt}>Heizkreis verbinden</div>}
+        {v ? ro("V' (aus Leitung)",v,'m³/h',true) : <div style={warnSt}>In eine Leitung mit Durchfluss setzen</div>}
         {fld('Δpvar (variable Anlage)','dp_var','z.B. 26','kPa')}
-        {kvs_theor&&<>
-          {ro('KVS theoretisch',kvs_theor.toFixed(4),'m³/h·bar½')}
+        {ver ? <>
+          {ro('KVS theoretisch', ver.kvs_theor, 'm³/h·bar½')}
           <label style={lbl}>KVS gewählt (Norm-Reihe)</label>
-          <select style={{...inp,cursor:'pointer'}} value={d.kvs_eff||kvs_vorschlag||''} onChange={e=>set('kvs_eff',e.target.value)}>
-            {KVS_REIHE.map(k=><option key={k} value={k}>{k}{k===kvs_vorschlag?' ← Vorschlag':''}</option>)}
+          <select style={{...inp,cursor:'pointer'}} value={d.kvs_eff||ver.kvs_vorschlag||''} onChange={e=>set('kvs_eff',e.target.value)}>
+            {KVS_REIHE.map(k=><option key={k} value={k}>{k}{k===ver.kvs_vorschlag?' ← Vorschlag':''}</option>)}
           </select>
-          {pv!=null&&<PvBox pv={pv} v={v} kvs_eff={kvs_eff}/>}
-        </>}
+          <PvBox pv={ver.pv} v={ver.v} kvs_eff={ver.kvs_eff}/>
+        </> : <div style={{ fontSize:9, color:'#94a3b8', marginTop:4 }}>Δpvar eingeben — das Backend rechnet kvs + Autorität.</div>}
         <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
     );
   }
 
-  // ── PUMPE ──
+  // ── PUMPE (Hauptpumpe) — Förderhöhe = gemeinsamer Teil + ungünstigster Ast ──
   if (node.type === 'pump') {
-    const rohrL=parseFloat(d.rohr_m)||0, pam=parseFloat(d.pam)||70, app=parseFloat(d.apparate_kpa)||0;
-    const dpRohr=rohrL*pam/1000, dpTotal=dpRohr+app;
+    const pr = pumpenResults?.[node.id];
     return (
       <div style={panelSt}>
         <PT>Pumpe</PT>
         {fld('Bezeichnung','label','','','text')}
-        {v ? ro("V' (Topologie)",v,'m³/h',true) : <div style={warnSt}>Heizkreis verbinden</div>}
-        <div style={{fontSize:10,fontWeight:700,color:'#475569',marginTop:8,marginBottom:4,textTransform:'uppercase',letterSpacing:'0.05em'}}>Druckverlust approximativ</div>
-        {fld('Rohrlänge VL+RL','rohr_m','z.B. 120','m')}
+        {v ? ro("V' (aus Leitung)",v,'m³/h',true) : <div style={warnSt}>In eine Leitung mit Durchfluss setzen</div>}
+        <div style={{fontSize:10,fontWeight:700,color:'#475569',marginTop:8,marginBottom:4,textTransform:'uppercase',letterSpacing:'0.05em'}}>Δp gemeinsamer Teil</div>
+        {fld('Rohrlänge VL+RL','rohr_m','z.B. 60','m')}
         {fld('Dimensioniert auf','pam','70','Pa/m')}
-        {fld('Apparate gesamt','apparate_kpa','z.B. 22','kPa')}
-        {dpTotal>0&&<div style={{background:'#f0f9ff',border:'1px solid #7dd3fc',borderRadius:6,padding:'8px 10px',marginTop:4}}>
-          <div style={{fontSize:10,color:'#0369a1'}}>Rohrsystem: {dpRohr.toFixed(2)} kPa</div>
-          <div style={{fontSize:16,fontWeight:700,color:'#1d4ed8',marginTop:4}}>Förderhöhe: {dpTotal.toFixed(1)} kPa = {(dpTotal/10).toFixed(2)} mWS</div>
-        </div>}
-        {fld('Förderhöhe (manuell)','foerderh','kPa')}
+        {fld('Apparate gesamt','apparate_kpa','z.B. 10','kPa')}
+        {pr?.foerderhoehe_kpa != null && (
+          <div style={{background:'#f0f9ff',border:'1px solid #7dd3fc',borderRadius:6,padding:'8px 10px',marginTop:4}}>
+            <div style={{fontSize:10,color:'#0369a1'}}>
+              Gemeinsamer Teil {pr.dp_gemeinsam_kpa ?? 0} kPa{pr.dp_ast_kpa ? ` + ungünstigster Ast ${pr.dp_ast_kpa} kPa` : ' (kein Verteiler gefunden)'}
+            </div>
+            <div style={{fontSize:16,fontWeight:700,color:'#1d4ed8',marginTop:4}}>Förderhöhe: {pr.foerderhoehe_kpa.toFixed(1)} kPa = {pr.mws.toFixed(2)} mWS</div>
+          </div>
+        )}
         <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
     );
   }
 
-  // ── 3WM ──
-  if (node.type === 'valve3') {
+  // ── WÄRMEZÄHLER — übernimmt den Durchfluss der Leitung ──
+  if (node.type === 'waermezaehler') {
     return (
       <div style={panelSt}>
-        <PT>3-Wege Mischventil</PT>
+        <PT>Wärmezähler</PT>
         {fld('Bezeichnung','label','','','text')}
-        {v ? ro("V' (Topologie)",v,'m³/h',true) : <div style={warnSt}>Heizkreis verbinden</div>}
-        {fld('Δpvar','dp_var','26','kPa')}
-        {v&&d.dp_var>0&&ro('KVS Vorschlag',(KVS_REIHE.find(k=>k>=v/Math.sqrt(parseFloat(d.dp_var)/100))||KVS_REIHE.at(-1)).toString(),'m³/h·bar½')}
+        {fld('Typ','typ','z.B. Ultraschall','','text')}
+        {fld('Fabrikat','fabrikat','','','text')}
+        {v ? ro('Durchfluss (aus Leitung)', v, 'm³/h', true)
+           : <div style={warnSt}>In eine Leitung mit Durchfluss setzen — der Zähler übernimmt automatisch.</div>}
+        <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
+      </div>
+    );
+  }
+
+  // ── EXPANSIONSGEFÄSS (PHYSIK §8, Dominics Excel-Methode) ──
+  if (node.type === 'expansion') {
+    const xr = expansionResults?.[node.id];
+    const ews = d.medium === 'ews';
+    return (
+      <div style={panelSt}>
+        <PT>Expansionsgefäss</PT>
+        {fld('Bezeichnung','label','','','text')}
+        {fld('Anlageinhalt Vsys','anlageinhalt_l','z.B. 500','l')}
+        {fld('Speicherinhalt Vsto','speicher_l','optional','l')}
+        <label style={lbl}>Medium</label>
+        <select style={{...inp,cursor:'pointer'}} value={d.medium||'heizungswasser'} onChange={e=>set('medium',e.target.value)}>
+          <option value="heizungswasser">Heizungswasser</option>
+          <option value="frostschutz30">Frostschutz 30 %</option>
+          <option value="frostschutz40">Frostschutz 40 %</option>
+          <option value="ews">Erdsonden (EWS)</option>
+        </select>
+        {!ews && fld('Mitteltemperatur','t_mittel','z.B. 35','°C')}
+        {!ews && fld('Erzeugerleistung','leistung_kw','z.B. 91','kW')}
+        {fld('Statische Höhe','hoehe_m','z.B. 10','m')}
+        {fld('SV-Ansprechdruck','psv_bar','z.B. 3.0','bar')}
+        {parseFloat(d.hoehe_m) > 12 && <div style={warnSt}>⚠ Über 12 m Höhe: Expansionsgefäss mit Kompressor nötig.</div>}
+        {xr && !xr.fehler && (
+          <>
+            {ro('Nennvolumen VN,min', xr.vn_l.toFixed(1), 'l', true)}
+            {ro('Vorschlag Norm-Grösse', `${xr.vorschlag_l}`, 'l', true)}
+            <div style={{ fontSize:9, color:'#94a3b8', marginTop:2 }}>e {xr.e} · X {xr.x} · Vex,tot {xr.vex_tot_l} l · p0 {xr.p0_bar} / pfin {xr.pfin_bar} bar</div>
+          </>
+        )}
+        {xr?.fehler && <div style={{ ...warnSt, background:'#fef2f2', border:'1px solid #fca5a5', color:'#b91c1c' }}>⚠ {xr.fehler}</div>}
+        {!xr && <div style={{ fontSize:9, color:'#94a3b8', marginTop:4 }}>Alle vier Werte eingeben — das Backend rechnet nach EN 12828 (PHYSIK §8).</div>}
         <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
     );
@@ -284,6 +382,27 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, onU
     );
   }
 
+  // ── ANSCHLUSS-MARKER (PHYSIK §9) ──
+  if (node.type === 'anschluss') {
+    const eigeneWarnung = (anschlussWarnungen || []).find(w => w.startsWith(`Anschluss ${d.buchstabe}:`));
+    return (
+      <div style={panelSt}>
+        <PT>Anschluss-Marker</PT>
+        {fld('Bezeichnung','label','','','text')}
+        <label style={lbl}>Buchstabe</label>
+        <input maxLength={1} style={{...inp, textTransform:'uppercase', fontWeight:700}} value={d.buchstabe||''}
+          onChange={e=>set('buchstabe', e.target.value.slice(0,1).toUpperCase())}/>
+        <div style={{ fontSize:9, color:'#94a3b8', marginTop:4 }}>
+          Ein zweiter Marker mit demselben Buchstaben wird virtuell verbunden — Fluss und Temperatur werden durchgereicht.
+        </div>
+        {eigeneWarnung
+          ? <div style={{ ...warnSt, background:'#fef2f2', border:'1px solid #fca5a5', color:'#b91c1c', marginTop:6 }}>⚠ {eigeneWarnung}</div>
+          : <div style={{ fontSize:10, color:'#16a34a', marginTop:6 }}>✓ Gegenstück gefunden</div>}
+        <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
+      </div>
+    );
+  }
+
   // ── DEFAULT ──
   return (
     <div style={panelSt}>
@@ -299,6 +418,8 @@ const TITLES = {
   gruppe: 'Verbrauchergruppe', heizkreis: 'Heizkreis', valve2: '2-Wege Regelventil',
   valve3: '3-Wege Mischventil', pump: 'Pumpe', erzeuger: 'Wärmeerzeuger',
   verteiler: 'Verteiler', speicher: 'Speicher',
+  waermezaehler: 'Wärmezähler', expansion: 'Expansionsgefäss',
+  bww: 'Brauchwarmwasser-Speicher',
 };
 
 function BigVal({ label, value, unit = '', sub = '', color = '#1d4ed8' }) {
@@ -313,88 +434,108 @@ function BigVal({ label, value, unit = '', sub = '', color = '#1d4ed8' }) {
   );
 }
 
-function AuslegungModal({ node, v, gr, vr, onUpdate, onClose, navigate }) {
+function AuslegungModal({ node, v, gr, vr, ver, pr, xr, onUpdate, onClose, navigate }) {
   const d = node.data;
   const set = (k, val) => onUpdate(node.id, k, val);
+  const [tab, setTab] = useState('gruppe');
   let body;
 
   if (node.type === 'gruppe') {
+    // Sauber getrennte Auslegung: Tabs Gruppe / Pumpe / Ventil (Dominic-Feedback).
+    // Die Schaltung bestimmt die Ausrüstung: Drossel hat keine Gruppenpumpe.
+    const schaltung = schaltungVon(d);
+    const tabs = [['gruppe','Gruppe'], ...(schaltung !== 'drossel' ? [['pumpe','Pumpe']] : []), ['ventil','Ventil']];
+    const aktTab = tabs.some(([k]) => k === tab) ? tab : 'gruppe';
+    const ventilTitel = schaltung === 'beimisch' ? 'Beimischventil (3-Weg)' : schaltung === 'drossel' ? 'Drosselventil (2-Weg)' : 'Einspritzventil (2-Weg)';
     body = (
       <div style={{ display:'grid', gap:12 }}>
-        <div><label style={lbl}>Typ (Wärmeabgabe)</label>
-          <select style={{...inp,cursor:'pointer'}} value={d.typ||''} onChange={e=>{
-            const s=WAERMEABGABE.find(x=>x.label===e.target.value);
-            set('typ',e.target.value); if(s){set('vl_temp',s.vl);set('rl_temp',s.rl);}
-          }}>
-            <option value="">— wählen —</option>
-            {WAERMEABGABE.map(x=><option key={x.label}>{x.label}</option>)}
-          </select></div>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
-          <div><label style={lbl}>VL [°C]</label><input type="number" style={{...inp,borderColor:'#fca5a5'}} value={d.vl_temp??''} onChange={e=>set('vl_temp',e.target.value)} placeholder="35"/></div>
-          <div><label style={lbl}>RL [°C]</label><input type="number" style={{...inp,borderColor:'#93c5fd'}} value={d.rl_temp??''} onChange={e=>set('rl_temp',e.target.value)} placeholder="28"/></div>
-          <div><label style={lbl}>Q [kW]</label><input type="number" style={inp} value={d.q_kw??''} onChange={e=>set('q_kw',e.target.value)} placeholder="8.5"/></div>
+        <div style={{ display:'flex', gap:2, borderBottom:'2px solid #f1f5f9' }}>
+          {tabs.map(([k,t]) => (
+            <button key={k} onClick={()=>setTab(k)}
+              style={{ padding:'7px 18px', fontSize:12, fontWeight:600, cursor:'pointer', background:'none', border:'none',
+                borderBottom: aktTab===k?'2.5px solid #dc2626':'2.5px solid transparent',
+                color: aktTab===k?'#dc2626':'#64748b', marginBottom:-2 }}>
+              {t}
+            </button>
+          ))}
         </div>
-        <div><label style={lbl}>Druckverlust Ast [kPa] — für den ungünstigsten Ast am Verteiler</label>
-          <input type="number" style={inp} value={d.dp_kpa??''} onChange={e=>set('dp_kpa',e.target.value)} placeholder="20"/></div>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-          <BigVal label="V' sekundär (Gruppenseite)" value={gr?.m_sek!=null?Number(gr.m_sek).toFixed(3):null} unit="m³/h" color="#15803d"
-            sub={gr?.dt_sek!=null?`ΔT sek = ${gr.dt_sek} K`:''}/>
-          <BigVal label="V' primär (Verteilerseite)" value={gr?.m_prim!=null?Number(gr.m_prim).toFixed(3):null} unit="m³/h" color="#1d4ed8"
-            sub={gr?.dt_prim!=null?`ΔT prim = ${gr.dt_prim} K`:''}/>
-        </div>
-        {gr?.einspritz
-          ? <div style={{ background:'#fef2f2', border:'1px solid #fca5a5', borderRadius:8, padding:'10px 12px', fontSize:11, color:'#b91c1c' }}>
-              <b>Einspritzung aktiv</b> (PHYSIK §4): Der Bypass im Block trägt {Number(gr.m_bypass).toFixed(3)} m³/h.
-              Die Gruppe mischt die Verteiler-VL auf {d.vl_temp} °C herunter.
+
+        {aktTab === 'gruppe' && (
+          <>
+            <div><label style={lbl}>Schaltung</label>
+              <select style={{...inp,cursor:'pointer'}} value={schaltung} onChange={e=>set('schaltung',e.target.value)}>
+                {SCHALTUNGSARTEN.map(s=><option key={s.wert} value={s.wert}>{s.name}</option>)}
+              </select>
+              <div style={{ fontSize:10, color:'#94a3b8', marginTop:3 }}>{SCHALTUNGSARTEN.find(s=>s.wert===schaltung)?.hinweis}</div></div>
+            <div><label style={lbl}>Typ (Wärmeabgabe)</label>
+              <select style={{...inp,cursor:'pointer'}} value={d.typ||''} onChange={e=>{
+                const s=WAERMEABGABE.find(x=>x.label===e.target.value);
+                set('typ',e.target.value); if(s){set('vl_temp',s.vl);set('rl_temp',s.rl);}
+              }}>
+                <option value="">— wählen —</option>
+                {WAERMEABGABE.map(x=><option key={x.label}>{x.label}</option>)}
+              </select></div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
+              <div><label style={lbl}>VL [°C]</label><input type="number" style={{...inp,borderColor:'#fca5a5'}} value={d.vl_temp??''} onChange={e=>set('vl_temp',e.target.value)} placeholder="35"/></div>
+              <div><label style={lbl}>RL [°C]</label><input type="number" style={{...inp,borderColor:'#93c5fd'}} value={d.rl_temp??''} onChange={e=>set('rl_temp',e.target.value)} placeholder="28"/></div>
+              <div><label style={lbl}>Q [kW]</label><input type="number" style={inp} value={d.q_kw??''} onChange={e=>set('q_kw',e.target.value)} placeholder="8.5"/></div>
             </div>
-          : <div style={{ fontSize:11, color:'#94a3b8' }}>Keine Einspritzung — die Gruppe läuft direkt mit der Verteiler-Vorlauftemperatur (primär = sekundär).</div>}
+            <div><label style={lbl}>Druckverlust Ast [kPa] — für den ungünstigsten Ast am Verteiler</label>
+              <input type="number" style={inp} value={d.dp_kpa??''} onChange={e=>set('dp_kpa',e.target.value)} placeholder="20"/></div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+              <BigVal label="V' sekundär (Gruppenseite)" value={gr?.m_sek!=null?Number(gr.m_sek).toFixed(3):null} unit="m³/h" color="#15803d"
+                sub={gr?.dt_sek!=null?`ΔT sek = ${gr.dt_sek} K`:''}/>
+              <BigVal label="V' primär (Verteilerseite)" value={gr?.m_prim!=null?Number(gr.m_prim).toFixed(3):null} unit="m³/h" color="#1d4ed8"
+                sub={gr?.dt_prim!=null?`ΔT prim = ${gr.dt_prim} K`:''}/>
+            </div>
+            {gr?.einspritz
+              ? <div style={{ background:'#fef2f2', border:'1px solid #fca5a5', borderRadius:8, padding:'10px 12px', fontSize:11, color:'#b91c1c' }}>
+                  <b>Mischung aktiv</b> (PHYSIK §4): Der Bypass trägt {Number(gr.m_bypass).toFixed(3)} m³/h.
+                  Die Gruppe mischt die Verteiler-VL auf {d.vl_temp} °C herunter.
+                </div>
+              : <div style={{ fontSize:11, color:'#94a3b8' }}>Keine Mischung — die Gruppe läuft direkt mit der Verteiler-Vorlauftemperatur (primär = sekundär).</div>}
+            <label style={{ display:'flex', gap:6, alignItems:'center', cursor:'pointer', fontSize:12, color:'#374151' }}>
+              <input type="checkbox" checked={!!d.hat_wz} onChange={e=>set('hat_wz',e.target.checked)}/>
+              Wärmezähler im Strang (SIA-410-Symbol, mit Fühler im VL und RL)
+            </label>
+          </>
+        )}
 
-        {/* Ausrüstung im Strang: Pumpe + Ventil wie Einzelbauteile auslegen */}
-        <div style={{ display:'flex', gap:16, fontSize:12, color:'#374151' }}>
-          <label style={{ display:'flex', gap:5, alignItems:'center', cursor:'pointer' }}>
-            <input type="checkbox" checked={d.hat_pumpe!==false} onChange={e=>set('hat_pumpe',e.target.checked)}/> Pumpe im Strang
-          </label>
-          <label style={{ display:'flex', gap:5, alignItems:'center', cursor:'pointer' }}>
-            <input type="checkbox" checked={d.hat_ventil!==false} onChange={e=>set('hat_ventil',e.target.checked)}/> Ventil im Strang
-          </label>
-        </div>
-
-        {d.hat_pumpe !== false && (
-          <div style={{ border:'1px solid #e2e8f0', borderRadius:8, padding:'10px 12px' }}>
-            <div style={{ fontSize:11, fontWeight:700, color:'#1e293b', marginBottom:8 }}>Pumpe im Strang (Sekundärkreis, V' = {gr?.m_sek!=null?Number(gr.m_sek).toFixed(3):'—'} m³/h)</div>
+        {aktTab === 'pumpe' && (
+          <>
+            <div style={{ fontSize:12, fontWeight:700, color:'#1e293b' }}>{d.label ? `${d.label} — ` : ''}Pumpe (Sekundärkreis, V' = {gr?.m_sek!=null?Number(gr.m_sek).toFixed(3):'—'} m³/h)</div>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
               <div><label style={lbl}>Rohr VL+RL [m]</label><input type="number" style={inp} value={d.pumpe_rohr_m??''} onChange={e=>set('pumpe_rohr_m',e.target.value)} placeholder="40"/></div>
               <div><label style={lbl}>Auf [Pa/m]</label><input type="number" style={inp} value={d.pumpe_pam??''} onChange={e=>set('pumpe_pam',e.target.value)} placeholder="70"/></div>
               <div><label style={lbl}>Apparate [kPa]</label><input type="number" style={inp} value={d.pumpe_apparate_kpa??''} onChange={e=>set('pumpe_apparate_kpa',e.target.value)} placeholder="15"/></div>
             </div>
-            <div style={{ marginTop:8 }}>
-              <BigVal label="Förderhöhe" value={gr?.pumpe?.dp_kpa!=null?gr.pumpe.dp_kpa.toFixed(1):null} unit="kPa"
-                sub={gr?.pumpe?.dp_kpa!=null?`= ${gr.pumpe.mws.toFixed(2)} mWS · bei V' ${Number(gr.pumpe.v??0).toFixed(3)} m³/h`:'Rohrlänge/Apparate eingeben'}/>
-            </div>
-          </div>
+            <BigVal label="Förderhöhe" value={gr?.pumpe?.dp_kpa!=null?gr.pumpe.dp_kpa.toFixed(1):null} unit="kPa"
+              sub={gr?.pumpe?.dp_kpa!=null?`= ${gr.pumpe.mws.toFixed(2)} mWS · bei V' ${Number(gr.pumpe.v??0).toFixed(3)} m³/h`:'Rohrlänge/Apparate eingeben'}/>
+            <div style={{ fontSize:10, color:'#94a3b8' }}>Hinweis: Die Hauptpumpe nach dem Erzeuger zeichnest du selbst als eigenes Bauteil.</div>
+          </>
         )}
 
-        {d.hat_ventil !== false && (
-          <div style={{ border:'1px solid #e2e8f0', borderRadius:8, padding:'10px 12px' }}>
-            <div style={{ fontSize:11, fontWeight:700, color:'#1e293b', marginBottom:8 }}>Einspritz-/Regelventil (Primärseite, V' = {gr?.m_prim!=null?Number(gr.m_prim).toFixed(3):'—'} m³/h)</div>
+        {aktTab === 'ventil' && (
+          <>
+            <div style={{ fontSize:12, fontWeight:700, color:'#1e293b' }}>{d.label ? `${d.label} — ` : ''}{ventilTitel} · Primärseite, V' = {gr?.m_prim!=null?Number(gr.m_prim).toFixed(3):'—'} m³/h</div>
             <div><label style={lbl}>Δpvar — Druckabfall variabler Anlagenteil [kPa]</label>
               <input type="number" style={inp} value={d.ventil_dp_var??''} onChange={e=>set('ventil_dp_var',e.target.value)} placeholder="26"/></div>
             {gr?.ventil ? (
               <>
-                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginTop:8 }}>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
                   <BigVal label="kvs theoretisch" value={Number(gr.ventil.kvs_theor).toFixed(3)} color="#1e293b"/>
                   <BigVal label="kvs Vorschlag" value={gr.ventil.kvs_vorschlag} color="#1d4ed8" sub="nächstgrösser, Norm-Reihe"/>
                 </div>
-                <div style={{ marginTop:8 }}><label style={lbl}>kvs gewählt</label>
+                <div><label style={lbl}>kvs gewählt</label>
                   <select style={{...inp,cursor:'pointer'}} value={d.ventil_kvs_eff||gr.ventil.kvs_vorschlag||''} onChange={e=>set('ventil_kvs_eff',e.target.value)}>
                     {KVS_REIHE.map(k=><option key={k} value={k}>{k}{k===gr.ventil.kvs_vorschlag?'  ← Vorschlag':''}</option>)}
                   </select></div>
                 <PvBox pv={gr.ventil.pv} v={gr.ventil.v} kvs_eff={gr.ventil.kvs_eff}/>
               </>
             ) : (
-              <div style={{ ...warnSt, marginTop:8 }}>Δpvar eingeben — dann rechnet das Backend kvs + Ventilautorität.</div>
+              <div style={warnSt}>Δpvar eingeben — dann rechnet das Backend kvs + Ventilautorität automatisch aus dem Gruppen-Volumenstrom.</div>
             )}
-          </div>
+          </>
         )}
       </div>
     );
@@ -433,55 +574,88 @@ function AuslegungModal({ node, v, gr, vr, onUpdate, onClose, navigate }) {
           sub={calc!=null?`V' = Q / (1.163 · ΔT),  ΔT = ${dt} K  →  ${(calc*1000).toFixed(0)} l/h`:'Vorlauf, Rücklauf und Leistung eingeben'}/>
       </div>
     );
-  } else if (node.type === 'valve2') {
-    const dp_kpa=parseFloat(d.dp_var), dp_bar=dp_kpa/100;
-    let kvs_theor=null, kvs_vorschlag=null, pv=null;
-    if(v&&dp_kpa>0){kvs_theor=v/Math.sqrt(dp_bar); kvs_vorschlag=KVS_REIHE.find(k=>k>=kvs_theor)||KVS_REIHE.at(-1);}
-    const kvs_eff=parseFloat(d.kvs_eff||kvs_vorschlag);
-    if(v&&kvs_eff>0){const dpv=(v/kvs_eff)**2; pv=dpv/(dpv+dp_bar)*100;}
+  } else if (node.type === 'valve2' || node.type === 'valve3') {
     body = (
       <div style={{ display:'grid', gap:12 }}>
-        <BigVal label="Durchfluss V' (aus verbundenem Heizkreis)" value={v?v.toFixed(4):null} unit="m³/h" color="#15803d"
-          sub={v?'kommt automatisch aus der Topologie':'Bauteil mit einem Heizkreis verbinden'}/>
+        <BigVal label="Durchfluss V' (aus der Leitung)" value={v?v.toFixed(4):null} unit="m³/h" color="#15803d"
+          sub={v?'kommt automatisch aus dem Schema':'Bauteil in eine Leitung mit Durchfluss setzen'}/>
         <div><label style={lbl}>Δpvar — Druckabfall variabler Anlagenteil [kPa]</label>
           <input type="number" style={inp} value={d.dp_var??''} onChange={e=>set('dp_var',e.target.value)} placeholder="26"/></div>
-        {kvs_theor ? <>
+        {ver ? <>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-            <BigVal label="kvs theoretisch" value={kvs_theor.toFixed(3)} color="#1e293b"/>
-            <BigVal label="kvs Vorschlag" value={kvs_vorschlag} color="#1d4ed8" sub="nächstgrösser, Norm-Reihe"/>
+            <BigVal label="kvs theoretisch" value={Number(ver.kvs_theor).toFixed(3)} color="#1e293b"/>
+            <BigVal label="kvs Vorschlag" value={ver.kvs_vorschlag} color="#1d4ed8" sub="nächstgrösser, Norm-Reihe"/>
           </div>
           <div><label style={lbl}>kvs gewählt</label>
-            <select style={{...inp,cursor:'pointer'}} value={d.kvs_eff||kvs_vorschlag||''} onChange={e=>set('kvs_eff',e.target.value)}>
-              {KVS_REIHE.map(k=><option key={k} value={k}>{k}{k===kvs_vorschlag?'  ← Vorschlag':''}</option>)}
+            <select style={{...inp,cursor:'pointer'}} value={d.kvs_eff||ver.kvs_vorschlag||''} onChange={e=>set('kvs_eff',e.target.value)}>
+              {KVS_REIHE.map(k=><option key={k} value={k}>{k}{k===ver.kvs_vorschlag?'  ← Vorschlag':''}</option>)}
             </select></div>
-          {pv!=null && <PvBox pv={pv} v={v} kvs_eff={kvs_eff}/>}
-        </> : <div style={warnSt}>Δpvar eingeben und Heizkreis verbinden — dann erscheint die kvs-Auslegung.</div>}
-      </div>
-    );
-  } else if (node.type === 'valve3') {
-    const dp_kpa=parseFloat(d.dp_var), dp_bar=dp_kpa/100;
-    const kvs_vorschlag = (v&&dp_kpa>0) ? (KVS_REIHE.find(k=>k>=v/Math.sqrt(dp_bar))||KVS_REIHE.at(-1)) : null;
-    body = (
-      <div style={{ display:'grid', gap:12 }}>
-        <BigVal label="Durchfluss V' (aus Topologie)" value={v?v.toFixed(4):null} unit="m³/h" color="#15803d"/>
-        <div><label style={lbl}>Δpvar [kPa]</label>
-          <input type="number" style={inp} value={d.dp_var??''} onChange={e=>set('dp_var',e.target.value)} placeholder="26"/></div>
-        <BigVal label="kvs Vorschlag" value={kvs_vorschlag} color="#1d4ed8"/>
+          <PvBox pv={ver.pv} v={ver.v} kvs_eff={ver.kvs_eff}/>
+        </> : <div style={warnSt}>Δpvar eingeben — dann rechnet das Backend die kvs-Auslegung.</div>}
       </div>
     );
   } else if (node.type === 'pump') {
-    const rohrL=parseFloat(d.rohr_m)||0, pam=parseFloat(d.pam)||70, app=parseFloat(d.apparate_kpa)||0;
-    const dpRohr=rohrL*pam/1000, dpTotal=dpRohr+app;
     body = (
       <div style={{ display:'grid', gap:12 }}>
-        <BigVal label="Förder-Volumenstrom V' (aus Topologie)" value={v?v.toFixed(4):null} unit="m³/h" color="#15803d"/>
+        <BigVal label="Förder-Volumenstrom V' (aus der Leitung)" value={v?v.toFixed(4):null} unit="m³/h" color="#15803d"/>
+        <div style={{ fontSize:11, fontWeight:700, color:'#1e293b' }}>Δp gemeinsamer Teil (Rohr + Apparate)</div>
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
-          <div><label style={lbl}>Rohr VL+RL [m]</label><input type="number" style={inp} value={d.rohr_m??''} onChange={e=>set('rohr_m',e.target.value)} placeholder="120"/></div>
+          <div><label style={lbl}>Rohr VL+RL [m]</label><input type="number" style={inp} value={d.rohr_m??''} onChange={e=>set('rohr_m',e.target.value)} placeholder="60"/></div>
           <div><label style={lbl}>Auf [Pa/m]</label><input type="number" style={inp} value={d.pam??''} onChange={e=>set('pam',e.target.value)} placeholder="70"/></div>
-          <div><label style={lbl}>Apparate [kPa]</label><input type="number" style={inp} value={d.apparate_kpa??''} onChange={e=>set('apparate_kpa',e.target.value)} placeholder="22"/></div>
+          <div><label style={lbl}>Apparate [kPa]</label><input type="number" style={inp} value={d.apparate_kpa??''} onChange={e=>set('apparate_kpa',e.target.value)} placeholder="10"/></div>
         </div>
-        <BigVal label="Förderhöhe" value={dpTotal>0?dpTotal.toFixed(1):null} unit="kPa"
-          sub={dpTotal>0?`Rohr ${dpRohr.toFixed(1)} + Apparate ${app.toFixed(1)} kPa  =  ${(dpTotal/10).toFixed(2)} mWS`:'Rohrlänge und Apparate eingeben'}/>
+        <BigVal label="Förderhöhe = gemeinsamer Teil + ungünstigster Ast" value={pr?.foerderhoehe_kpa!=null?pr.foerderhoehe_kpa.toFixed(1):null} unit="kPa"
+          sub={pr?.foerderhoehe_kpa!=null
+            ? `${pr.dp_gemeinsam_kpa ?? 0} kPa gemeinsam${pr.dp_ast_kpa ? ` + ${pr.dp_ast_kpa} kPa ungünstigster Ast (Verteiler)` : ' — kein Verteiler mit Δp gefunden'}  =  ${pr.mws.toFixed(2)} mWS`
+            : 'Rohrlänge/Apparate eingeben; der ungünstigste Ast kommt automatisch vom Verteiler'}/>
+      </div>
+    );
+  } else if (node.type === 'waermezaehler') {
+    body = (
+      <div style={{ display:'grid', gap:12 }}>
+        <BigVal label="Durchfluss (aus der Leitung übernommen)" value={v?v.toFixed(4):null} unit="m³/h" color="#0f766e"
+          sub="Der Wärmezähler übernimmt automatisch den Durchfluss der Leitung, in der er sitzt."/>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+          <div><label style={lbl}>Typ</label><input style={inp} value={d.typ??''} onChange={e=>set('typ',e.target.value)} placeholder="z.B. Ultraschall"/></div>
+          <div><label style={lbl}>Fabrikat</label><input style={inp} value={d.fabrikat??''} onChange={e=>set('fabrikat',e.target.value)} placeholder=""/></div>
+        </div>
+      </div>
+    );
+  } else if (node.type === 'expansion') {
+    const ews = d.medium === 'ews';
+    body = (
+      <div style={{ display:'grid', gap:12 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+          <div><label style={lbl}>Anlageinhalt Vsys [l]</label><input type="number" style={inp} value={d.anlageinhalt_l??''} onChange={e=>set('anlageinhalt_l',e.target.value)} placeholder="500"/></div>
+          <div><label style={lbl}>Speicherinhalt Vsto [l]</label><input type="number" style={inp} value={d.speicher_l??''} onChange={e=>set('speicher_l',e.target.value)} placeholder="optional"/></div>
+          <div><label style={lbl}>Medium</label>
+            <select style={{...inp,cursor:'pointer'}} value={d.medium||'heizungswasser'} onChange={e=>set('medium',e.target.value)}>
+              <option value="heizungswasser">Heizungswasser</option>
+              <option value="frostschutz30">Frostschutz 30 %</option>
+              <option value="frostschutz40">Frostschutz 40 %</option>
+              <option value="ews">Erdsonden (EWS)</option>
+            </select></div>
+          {!ews && <div><label style={lbl}>Mitteltemperatur [°C]</label><input type="number" style={inp} value={d.t_mittel??''} onChange={e=>set('t_mittel',e.target.value)} placeholder="35"/></div>}
+          {!ews && <div><label style={lbl}>Erzeugerleistung [kW]</label><input type="number" style={inp} value={d.leistung_kw??''} onChange={e=>set('leistung_kw',e.target.value)} placeholder="91"/></div>}
+          <div><label style={lbl}>Statische Höhe [m]</label><input type="number" style={inp} value={d.hoehe_m??''} onChange={e=>set('hoehe_m',e.target.value)} placeholder="10"/></div>
+          <div><label style={lbl}>SV-Ansprechdruck [bar]</label><input type="number" style={inp} value={d.psv_bar??''} onChange={e=>set('psv_bar',e.target.value)} placeholder="3.0"/></div>
+        </div>
+        {parseFloat(d.hoehe_m) > 12 && <div style={warnSt}>⚠ Über 12 m Höhe: Expansionsgefäss mit Kompressor nötig (noch nicht als eigene Auslegung hinterlegt).</div>}
+        {xr && !xr.fehler ? (
+          <>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+              <BigVal label="Nennvolumen VN,min" value={xr.vn_l.toFixed(1)} unit="l" color="#15803d"/>
+              <BigVal label="Vorschlag Norm-Grösse" value={xr.vorschlag_l} unit="l" color="#1d4ed8" sub="nächstgrösser"/>
+            </div>
+            <div style={{ fontSize:11, color:'#64748b' }}>
+              e = {xr.e} · X = {xr.x} → Vex,tot = {xr.vex_tot_l} l · Vordruck p0 = {xr.p0_bar} bar · Enddruck pfin = {xr.pfin_bar} bar (Dominics Excel-Methode, PHYSIK §8)
+            </div>
+          </>
+        ) : xr?.fehler ? (
+          <div style={{ ...warnSt, background:'#fef2f2', border:'1px solid #fca5a5', color:'#b91c1c' }}>⚠ {xr.fehler}</div>
+        ) : (
+          <div style={warnSt}>Anlageinhalt, Mitteltemperatur, Leistung, Höhe und SV-Druck eingeben — das Backend rechnet VN und schlägt die Norm-Grösse vor.</div>
+        )}
       </div>
     );
   } else if (node.type === 'erzeuger') {
@@ -529,7 +703,7 @@ function AuslegungModal({ node, v, gr, vr, onUpdate, onClose, navigate }) {
 }
 
 const modalBackdrop = { position:'fixed', inset:0, background:'rgba(15,23,42,0.45)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:2000, padding:20 };
-const modalCard = { background:'white', borderRadius:12, width:'min(560px, 94vw)', maxHeight:'88vh', overflowY:'auto', boxShadow:'0 24px 60px rgba(0,0,0,0.35)' };
+const modalCard = { background:'white', borderRadius:12, width:'min(680px, 94vw)', maxHeight:'88vh', overflowY:'auto', boxShadow:'0 24px 60px rgba(0,0,0,0.35)' };
 const modalHeader = { display:'flex', alignItems:'flex-start', justifyContent:'space-between', padding:'18px 20px 8px' };
 const modalClose = { background:'none', border:'none', fontSize:26, lineHeight:1, color:'#94a3b8', cursor:'pointer', padding:0 };
 
@@ -574,6 +748,7 @@ function EditorInner() {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selected, setSelected]     = useState(null);
+  const [selectedEdgeId, setSelectedEdgeId] = useState(null);
   const [edgeColor, setEdgeColor]   = useState('#ef4444');
   const [schemaName, setSchemaName] = useState('Schema');
   const [projectName, setProjectName] = useState('');
@@ -582,8 +757,10 @@ function EditorInner() {
   const [saveState, setSaveState]   = useState('idle'); // idle | saving | saved | error
   const [auslegung, setAuslegung]   = useState(null);   // Bauteil für Doppelklick-Auslegung
   const [showLegende, setShowLegende] = useState(false);
+  const [showWarnungen, setShowWarnungen] = useState(false);
+  const [schaltungswahl, setSchaltungswahl] = useState(null); // {nodeId, x, y} — Menü nach Gruppe-Drop
 
-  const [hydraulik, setHydraulik] = useState({ edge_flows: {}, node_flows: {}, verteiler_results: {}, gruppe_results: {} });
+  const [hydraulik, setHydraulik] = useState({ edge_flows: {}, node_flows: {}, verteiler_results: {}, gruppe_results: {}, ventil_results: {}, pumpen_results: {}, expansion_results: {}, leitung_results: {}, anschluss_warnings: [], warnungen: [] });
 
   // Graph (debounced) ans Backend schicken — dort wird gerechnet
   useEffect(() => {
@@ -597,6 +774,7 @@ function EditorInner() {
             id: e.id, source: e.source, target: e.target,
             sourceHandle: e.sourceHandle || null, targetHandle: e.targetHandle || null,
             stroke: e.style?.stroke || null,
+            data: e.data ? { laenge_m: e.data.laenge_m } : null,
           })),
         });
         if (!weg) setHydraulik(res);
@@ -609,6 +787,12 @@ function EditorInner() {
   const nodeFlows = hydraulik.node_flows || {};
   const verteilerResults = hydraulik.verteiler_results || {};
   const gruppeResults = hydraulik.gruppe_results || {};
+  const ventilResults = hydraulik.ventil_results || {};
+  const pumpenResults = hydraulik.pumpen_results || {};
+  const expansionResults = hydraulik.expansion_results || {};
+  const leitungResults = hydraulik.leitung_results || {};
+  const anschlussWarnungen = hydraulik.anschluss_warnings || [];
+  const alleWarnungen = hydraulik.warnungen || [];
 
   // ── Schema aus Backend laden (oder anlegen, falls noch keins existiert) ──
   // Ref-Guard: pro Projekt nur EINMAL initialisieren. React-StrictMode führt
@@ -718,12 +902,13 @@ function EditorInner() {
         if (ev.key === 'b' || ev.key === 'B') setEdgeColor('#1e293b');
         if (ev.key === 'Delete' || ev.key === 'Backspace') {
           if (selected) { snap(); deleteNode(selected.id); }
+          else if (selectedEdgeId) { deleteEdge(selectedEdgeId); }
         }
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [undo, selected, snap]);
+  }, [undo, selected, selectedEdgeId, snap]);
 
   // Berechnete Werte (Backend) in die Node-Daten spiegeln — nur für die Anzeige.
   // Verteiler-Rahmen: nur die Balken sind greifbar (dragHandle), die Lücke
@@ -743,8 +928,15 @@ function EditorInner() {
     if (n.type === 'gruppe' || n.type === 'heizkreis') {
       return { ...n, data: { ...n.data, _calc: { ...(gruppeResults[n.id] || {}), v: nodeFlows[n.id] } } };
     }
+    if (n.type === 'waermezaehler') {
+      return { ...n, data: { ...n.data, _calc: { v: nodeFlows[n.id] } } };
+    }
+    if (n.type === 'expansion') {
+      const c = expansionResults[n.id];
+      return c ? { ...n, data: { ...n.data, _calc: c } } : n;
+    }
     return n;
-  }), [nodes, verteilerResults, gruppeResults, nodeFlows]);
+  }), [nodes, verteilerResults, gruppeResults, nodeFlows, expansionResults]);
 
   // Legende: Nr · Bauteil · Bezeichnung · Kennwerte (reine Anzeige der
   // Backend-Resultate — dieselben Zeilen erscheinen im PDF)
@@ -759,36 +951,47 @@ function EditorInner() {
         let werte = '—';
         if (n.type === 'gruppe') {
           const c = gruppeResults[n.id] || {};
-          werte = `${d.q_kw ?? '—'} kW · ${d.vl_temp ?? '—'}/${d.rl_temp ?? '—'} °C · sek ${fx(c.m_sek)} / prim ${fx(c.m_prim)} m³/h${c.einspritz ? ' · Einspritz' : ''}${d.dp_kpa ? ` · Δp ${d.dp_kpa} kPa` : ''}`;
+          const sn = { einspritz: 'Einspritz', beimisch: 'Beimisch', drossel: 'Drossel' }[schaltungVon(d)];
+          const bez = d.label || 'Gruppe';
+          werte = `${sn} · ${d.q_kw ?? '—'} kW · ${d.vl_temp ?? '—'}/${d.rl_temp ?? '—'} °C · sek ${fx(c.m_sek)} / prim ${fx(c.m_prim)} m³/h${d.dp_kpa ? ` · Δp ${d.dp_kpa} kPa` : ''}${d.hat_wz ? ' · WZ' : ''}${c.pumpe?.dp_kpa != null ? ` · ${bez} Pumpe ${c.pumpe.dp_kpa.toFixed(1)} kPa` : ''}${c.ventil ? ` · ${bez} Ventil kvs ${c.ventil.kvs_eff} (Pv ${c.ventil.pv.toFixed(1)}%)` : ''}`;
         } else if (n.type === 'heizkreis') {
           werte = `${d.q_kw ?? '—'} kW · ${d.vl_temp ?? '—'}/${d.rl_temp ?? '—'} °C · V' ${fx(nodeFlows[n.id])} m³/h`;
         } else if (n.type === 'verteiler') {
           const c = verteilerResults[n.id] || {};
           werte = `VL ${fx(c.vl_vt, 1)} / RL ${fx(c.rl_misch, 1)} °C · Σ ${fx(c.q_total, 2)} kW · ${fx(c.m_prim_total)} m³/h${c.dp_max_ast != null ? ` · Δp Ast ${c.dp_max_ast_nr}: ${c.dp_max_ast} kPa` : ''}`;
         } else if (n.type === 'pump') {
-          werte = `V' ${fx(nodeFlows[n.id])} m³/h`;
+          const p = pumpenResults[n.id] || {};
+          werte = `V' ${fx(p.v ?? nodeFlows[n.id])} m³/h${p.foerderhoehe_kpa != null ? ` · Förderhöhe ${p.foerderhoehe_kpa.toFixed(1)} kPa${p.dp_ast_kpa ? ` (gemeinsam ${p.dp_gemeinsam_kpa ?? 0} + Ast ${p.dp_ast_kpa})` : ''}` : ''}`;
         } else if (n.type === 'valve2' || n.type === 'valve3') {
-          werte = `V' ${fx(nodeFlows[n.id])} m³/h${d.dp_var ? ` · Δpvar ${d.dp_var} kPa` : ''}${d.kvs_eff ? ` · kvs ${d.kvs_eff}` : ''}`;
+          const ve = ventilResults[n.id];
+          werte = `V' ${fx(nodeFlows[n.id])} m³/h${ve ? ` · kvs ${ve.kvs_eff} · Pv ${ve.pv.toFixed(1)} %` : ''}`;
+        } else if (n.type === 'waermezaehler') {
+          werte = [d.typ, `V' ${fx(nodeFlows[n.id])} m³/h (aus Leitung)`].filter(Boolean).join(' · ');
+        } else if (n.type === 'expansion') {
+          const ex = expansionResults[n.id];
+          werte = ex && !ex.fehler ? `VN ${ex.vn_l} l → ${ex.vorschlag_l} l · p0 ${ex.p0_bar} / pe ${ex.pe_bar} bar` : ex?.fehler ? `⚠ ${ex.fehler}` : '—';
         } else if (n.type === 'erzeuger') {
           werte = [d.typ, d.leistung_kw ? `${d.leistung_kw} kW` : null].filter(Boolean).join(' · ') || '—';
         }
         return { nr: d.nr, bauteil: TITLES[n.type] || n.type, bez: d.label || '', werte };
       });
-  }, [nodes, gruppeResults, verteilerResults, nodeFlows]);
+  }, [nodes, gruppeResults, verteilerResults, nodeFlows, ventilResults, pumpenResults, expansionResults]);
 
   // Edges: VL durchgezogen, RL gestrichelt, V' als Label
   const displayEdges = useMemo(() => edges.map(edge => {
     const color = edge.style?.stroke || '#1e293b';
     const v = edgeFlows[edge.id];
+    const lg = leitungResults[edge.id];
+    const label = v ? `${v.toFixed(3)} m³/h${lg ? ` · ${lg.dn} · ${lg.pam.toFixed(0)} Pa/m` : ''}` : undefined;
     return {
       ...edge, type: 'flow', animated: false,
-      label: v ? `${v.toFixed(3)} m³/h` : undefined,
+      label,
       labelStyle:   { fontSize:9, fill:'#1e293b', fontFamily:'monospace', fontWeight:600 },
       labelBgStyle: { fill:'rgba(255,255,255,0.9)', borderRadius:3 },
       labelBgPadding: [3,5],
       style: { ...edge.style },
     };
-  }), [edges, edgeFlows]);
+  }), [edges, edgeFlows, leitungResults]);
 
   const loadSchema = (key) => {
     const s = SCHALTUNGEN[key];
@@ -811,21 +1014,40 @@ function EditorInner() {
     snap();
     const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
     const p = STD_PALETTE.find(p => p.type === raw);
-    const extra = raw === 'verteiler' ? { abgaenge: 4 } : {};
-    setNodes(ns => [...ns, {
-      id: newId(), type: raw, position: pos,
-      data: { label: p?.label || raw, ...extra, ...(NUMMERIERT.includes(raw) ? { nr: naechsteNr(ns) } : {}) },
-    }]);
+    const id = newId();
+    setNodes(ns => {
+      const extra = raw === 'verteiler' ? { abgaenge: 4 }
+        : raw === 'gruppe' ? { schaltung: 'einspritz' }
+        : raw === 'anschluss' ? { buchstabe: naechsterBuchstabe(ns) }
+        : {};
+      return [...ns, {
+        id, type: raw, position: pos,
+        data: { label: p?.label || raw, ...extra, ...(NUMMERIERT.includes(raw) ? { nr: naechsteNr(ns) } : {}) },
+      }];
+    });
+    // Verbrauchergruppe: direkt nach dem Ablegen die Schaltung wählen
+    if (raw === 'gruppe') setSchaltungswahl({ nodeId: id, x: e.clientX, y: e.clientY });
   }, [screenToFlowPosition, setNodes, snap]);
 
-  const onNodeClick       = useCallback((_, n) => setSelected(n), []);
+  const onNodeClick       = useCallback((_, n) => { setSelected(n); setSelectedEdgeId(null); }, []);
   const onNodeDoubleClick = useCallback((_, n) => setAuslegung(n), []);
-  const onPaneClick  = useCallback(() => setSelected(null), []);
+  const onEdgeClick       = useCallback((_, e) => { setSelectedEdgeId(e.id); setSelected(null); }, []);
+  const onPaneClick  = useCallback(() => { setSelected(null); setSelectedEdgeId(null); }, []);
   const selectedNode  = selected  ? nodes.find(n => n.id === selected.id)  || null : null;
+  const selectedEdge  = selectedEdgeId ? edges.find(e => e.id === selectedEdgeId) || null : null;
   const auslegungNode = auslegung ? nodes.find(n => n.id === auslegung.id) || null : null;
 
   const updateNode = (id, key, val) =>
     setNodes(ns => ns.map(n => n.id === id ? { ...n, data: { ...n.data, [key]: val } } : n));
+
+  const updateEdgeData = (id, key, val) =>
+    setEdges(es => es.map(e => e.id === id ? { ...e, data: { ...e.data, [key]: val } } : e));
+
+  const deleteEdge = (id) => {
+    snap();
+    setEdges(es => es.filter(e => e.id !== id));
+    setSelectedEdgeId(null);
+  };
 
   // Verteiler: Anzahl Abgänge ändern — Leitungen an wegfallenden Stutzen entfernen
   const setAbgaenge = (id, count) => {
@@ -873,9 +1095,18 @@ function EditorInner() {
             ⤓ {t}
           </button>
         ))}
-        <button onClick={()=>setShowLegende(v=>!v)}
+        <button onClick={()=>{ setShowLegende(v=>!v); setShowWarnungen(false); }}
           style={{ fontSize:11, padding:'3px 8px', borderRadius:4, border:'1px solid #e2e8f0', background: showLegende?'#1e293b':'#f8fafc', color: showLegende?'white':'#374151', cursor:'pointer', whiteSpace:'nowrap' }}>
           Legende
+        </button>
+        <button onClick={()=>{ setShowWarnungen(v=>!v); setShowLegende(false); }}
+          style={{ fontSize:11, padding:'3px 8px', borderRadius:4, border:`1px solid ${alleWarnungen.length?'#fca5a5':'#e2e8f0'}`, background: showWarnungen?'#b91c1c':(alleWarnungen.length?'#fef2f2':'#f8fafc'), color: showWarnungen?'white':(alleWarnungen.length?'#b91c1c':'#374151'), cursor:'pointer', whiteSpace:'nowrap', display:'flex', alignItems:'center', gap:5 }}>
+          Warnungen
+          {alleWarnungen.length>0 && (
+            <span style={{ background: showWarnungen?'white':'#dc2626', color: showWarnungen?'#b91c1c':'white', borderRadius:9, minWidth:16, height:16, fontSize:9, fontWeight:700, display:'inline-flex', alignItems:'center', justifyContent:'center', padding:'0 4px' }}>
+              {alleWarnungen.length}
+            </span>
+          )}
         </button>
 
         <div style={{ display:'flex', gap:4, alignItems:'center', marginLeft:'auto' }}>
@@ -922,6 +1153,7 @@ function EditorInner() {
             onDragOver={onDragOver}
             onNodeClick={onNodeClick}
             onNodeDoubleClick={onNodeDoubleClick}
+            onEdgeClick={onEdgeClick}
             onPaneClick={onPaneClick}
             nodeTypes={NODE_TYPES}
             edgeTypes={EDGE_TYPES}
@@ -972,6 +1204,27 @@ function EditorInner() {
               </table>
             </div>
           )}
+
+          {/* Warnungen-Report (Dominic-Feedback): alle Warnungen an einem Ort —
+              Verteiler-Mischregeln, Anschluss-Marker, Ventilautorität, Expansionsgefäss */}
+          {showWarnungen && (
+            <div style={{ position:'absolute', left:0, right:0, bottom:0, background:'white', borderTop:'2px solid #fca5a5', maxHeight:220, overflowY:'auto', zIndex:20, padding:'6px 14px 10px', boxShadow:'0 -6px 16px rgba(15,23,42,0.08)' }}>
+              <div style={{ fontSize:10, fontWeight:700, color:'#b91c1c', textTransform:'uppercase', letterSpacing:'0.05em', padding:'4px 0' }}>
+                Warnungen &amp; Fehler ({alleWarnungen.length})
+              </div>
+              {alleWarnungen.length === 0 ? (
+                <div style={{ fontSize:11, color:'#16a34a', padding:'6px 0' }}>✓ Keine Warnungen — Schema physikalisch plausibel.</div>
+              ) : (
+                <ul style={{ margin:0, padding:0, listStyle:'none' }}>
+                  {alleWarnungen.map((w, i) => (
+                    <li key={i} style={{ display:'flex', gap:8, alignItems:'flex-start', padding:'5px 0', borderTop: i>0 ? '1px solid #f1f5f9' : 'none', fontSize:11, color:'#7f1d1d' }}>
+                      <span>⚠</span><span>{w}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Properties */}
@@ -979,20 +1232,51 @@ function EditorInner() {
           <div style={{ padding:'8px 12px 4px', fontSize:9, fontWeight:700, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.08em', borderBottom:'1px solid #f1f5f9' }}>
             Eigenschaften
           </div>
-          <PropertiesPanel node={selectedNode} nodeFlows={nodeFlows} verteilerResults={verteilerResults} gruppeResults={gruppeResults} onUpdate={updateNode} onDelete={deleteNode} onSetAbgaenge={setAbgaenge} navigate={navigate}/>
+          {selectedEdge ? (
+            <LeitungPanel edge={selectedEdge} leitungResults={leitungResults} onUpdateEdge={updateEdgeData} onDelete={deleteEdge} />
+          ) : (
+            <PropertiesPanel node={selectedNode} nodeFlows={nodeFlows} verteilerResults={verteilerResults} gruppeResults={gruppeResults} ventilResults={ventilResults} pumpenResults={pumpenResults} expansionResults={expansionResults} anschlussWarnungen={anschlussWarnungen} onUpdate={updateNode} onDelete={deleteNode} onSetAbgaenge={setAbgaenge} navigate={navigate}/>
+          )}
         </div>
       </div>
 
       {auslegungNode && (
         <AuslegungModal
+          key={auslegungNode.id}
           node={auslegungNode}
           v={nodeFlows[auslegungNode.id]}
           gr={gruppeResults[auslegungNode.id]}
           vr={verteilerResults[auslegungNode.id]}
+          ver={ventilResults[auslegungNode.id]}
+          pr={pumpenResults[auslegungNode.id]}
+          xr={expansionResults[auslegungNode.id]}
           onUpdate={updateNode}
           onClose={() => setAuslegung(null)}
           navigate={navigate}
         />
+      )}
+
+      {/* Schaltungswahl direkt nach dem Ablegen einer Verbrauchergruppe */}
+      {schaltungswahl && (
+        <div onClick={() => setSchaltungswahl(null)} style={{ position:'fixed', inset:0, zIndex:3000 }}>
+          <div onClick={e=>e.stopPropagation()}
+            style={{ position:'fixed', left: Math.min(schaltungswahl.x, window.innerWidth-280), top: Math.min(schaltungswahl.y, window.innerHeight-180),
+              background:'white', border:'1px solid #e2e8f0', borderRadius:10, boxShadow:'0 12px 32px rgba(15,23,42,0.25)', padding:6, width:270 }}>
+            <div style={{ fontSize:10, fontWeight:700, color:'#94a3b8', padding:'4px 8px', textTransform:'uppercase', letterSpacing:'0.05em' }}>
+              Welche Schaltung?
+            </div>
+            {SCHALTUNGSARTEN.map(s => (
+              <button key={s.wert}
+                onClick={() => { updateNode(schaltungswahl.nodeId, 'schaltung', s.wert); setSchaltungswahl(null); }}
+                style={{ display:'block', width:'100%', textAlign:'left', padding:'7px 8px', background:'none', border:'none', borderRadius:6, cursor:'pointer' }}
+                onMouseEnter={e=>e.currentTarget.style.background='#fef2f2'}
+                onMouseLeave={e=>e.currentTarget.style.background='none'}>
+                <div style={{ fontSize:12, fontWeight:600, color:'#1e293b' }}>{s.name}</div>
+                <div style={{ fontSize:9, color:'#94a3b8', marginTop:1 }}>{s.hinweis}</div>
+              </button>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   );

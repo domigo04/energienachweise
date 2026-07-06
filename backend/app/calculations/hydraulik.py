@@ -13,6 +13,8 @@ Konventionen aus dem Editor:
 import re
 from typing import List, Optional
 
+from app.calculations.expansion import berechne_expansion
+from app.calculations.leitungsdimension import automatische_dimension
 from app.calculations.ventil import berechne_kvs
 
 VL_FARBE = "#ef4444"
@@ -99,6 +101,13 @@ def berechne_verteiler_gruppen(gruppen: List[dict]) -> dict:
     }
 
 
+# ── Schaltungsart der Verbrauchergruppe (PHYSIK §6) ─────────────────────────
+def schaltungsart(d: dict) -> str:
+    """einspritz (Standard) | beimisch | drossel."""
+    s = str(d.get("schaltung") or "einspritz").lower()
+    return s if s in ("einspritz", "beimisch", "drossel") else "einspritz"
+
+
 # ── Pumpe + Ventil IM Strang (Auslegung wie Einzelbauteile) ─────────────────
 def _strang_ausruestung(d: dict, res: dict) -> None:
     """Ergänzt gruppe_results um Pumpen- und Ventil-Auslegung im Strang.
@@ -106,8 +115,11 @@ def _strang_ausruestung(d: dict, res: dict) -> None:
     Die Pumpe läuft im Sekundärkreis (V' = m_sek), das Einspritz-/Regelventil
     sitzt primärseitig (V' = m_prim). Rechnet NUR zusätzlich — die bestehenden
     Flüsse/Temperaturen (PHYSIK §4) werden nicht verändert.
+    Drosselschaltung: NIE eine Gruppenpumpe (PHYSIK §6).
     """
-    hat_pumpe = d.get("hat_pumpe") is not False
+    schaltung = schaltungsart(d)
+    res["schaltung"] = schaltung
+    hat_pumpe = schaltung != "drossel" and d.get("hat_pumpe") is not False
     hat_ventil = d.get("hat_ventil") is not False
     res["hat_pumpe"] = hat_pumpe
     res["hat_ventil"] = hat_ventil
@@ -160,6 +172,66 @@ def _parse_handle(h):
     return t, (m.group(1) if m else None)
 
 
+# ── Anschluss-Marker (PHYSIK §9) ─────────────────────────────────────────────
+# Ersetzt eine lang quer durchs Schema gezeichnete Leitung: zwei Anschluss-
+# Marker mit demselben Buchstaben werden virtuell verbunden — Fluss und
+# Temperatur werden durchgereicht, als wäre eine echte Leitung gezeichnet.
+def _anschluss_gruppen(nodes: List[dict]) -> dict:
+    gruppen: dict = {}
+    for n in nodes:
+        if n.get("type") == "anschluss":
+            buchstabe = (n.get("data") or {}).get("buchstabe")
+            if buchstabe:
+                gruppen.setdefault(str(buchstabe).upper(), []).append(n["id"])
+    return gruppen
+
+
+def _mit_virtuellen_anschluss_kanten(nodes: List[dict], edges: List[dict]) -> List[dict]:
+    """Fügt für je zwei Anschluss-Marker mit gleichem Buchstaben zwei virtuelle
+    Kanten hinzu (eine VL-, eine RL-farbige) — alle bestehenden Traversierungen
+    (Verteiler-Äste, Hauptstrang, freie Topologie) funktionieren dadurch
+    unverändert weiter, ohne dass echte Leitungen gezeichnet werden müssen."""
+    ergaenzt = list(edges)
+    for buchstabe, ids in _anschluss_gruppen(nodes).items():
+        for a, b in zip(ids, ids[1:]):
+            ergaenzt.append({"id": f"virt_vl_{a}_{b}", "source": a, "target": b, "stroke": VL_FARBE})
+            ergaenzt.append({"id": f"virt_rl_{a}_{b}", "source": a, "target": b, "stroke": RL_FARBE})
+    return ergaenzt
+
+
+def _anschluss_warnungen(nodes: List[dict]) -> List[str]:
+    warnungen = []
+    for buchstabe, ids in _anschluss_gruppen(nodes).items():
+        if len(ids) == 1:
+            warnungen.append(f"Anschluss {buchstabe}: kein Gegenstück gefunden — Leitung bleibt offen")
+        elif len(ids) > 2:
+            warnungen.append(f"Anschluss {buchstabe}: {len(ids)} Marker gefunden — nur je 2 werden verbunden")
+    return warnungen
+
+
+# ── Warnungen-Report (Dominic-Feedback): alle Warnungen an einem Ort ────────
+# Sammelt Verteiler-, Anschluss-, Ventil- und Expansionsgefäss-Warnungen zu
+# einer flachen Liste, damit der Editor EIN Report-Fenster zeigen kann statt
+# dass Warnungen nur verstreut in einzelnen Bauteil-Panels auftauchen.
+def _sammle_warnungen(nodes, verteiler_results, anschluss_warnungen, ventil_results, expansion_results):
+    node_by_id = {n["id"]: n for n in nodes}
+
+    def label_von(nid, fallback):
+        return (node_by_id.get(nid, {}).get("data") or {}).get("label") or fallback
+
+    alle = list(anschluss_warnungen)
+    for vr in verteiler_results.values():
+        alle += vr.get("warnings", [])
+    for nid, v in ventil_results.items():
+        label = label_von(nid, "Ventil")
+        for w in v.get("warnings", []):
+            alle.append(f"{label}: {w}")
+    for nid, ex in expansion_results.items():
+        if ex.get("fehler"):
+            alle.append(f"{label_von(nid, 'Expansionsgefäss')}: {ex['fehler']}")
+    return alle
+
+
 def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
     """Kompletter Graph: Flüsse je Leitung/Knoten + Verteiler-/Gruppen-Resultate.
 
@@ -169,6 +241,8 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
     3. Freie Topologie (ohne Verteiler): Rückwärts-Propagierung, jede Kante
        nur einmal zählen (§2 — Doppelzählungs-Bug-Historie).
     """
+    edges = _mit_virtuellen_anschluss_kanten(nodes, edges)
+    anschluss_warnungen = _anschluss_warnungen(nodes)
     node_by_id = {n["id"]: n for n in nodes}
 
     def data(n):
@@ -185,8 +259,17 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
             if q and q > 0 and vl is not None and rl is not None and vl - rl > 0:
                 sek[n["id"]] = q / (1.163 * (vl - rl))
 
-    leer = {"edge_flows": {}, "node_flows": {}, "verteiler_results": {}, "gruppe_results": {}}
+    leer = {"edge_flows": {}, "node_flows": {}, "verteiler_results": {}, "gruppe_results": {},
+            "ventil_results": {}, "pumpen_results": {}, "expansion_results": {},
+            "leitung_results": {}, "anschluss_warnings": anschluss_warnungen, "warnungen": []}
     if not sek:
+        # Expansionsgefässe rechnen auch ohne Verbraucher (brauchen keine Flüsse)
+        for n in nodes:
+            if n.get("type") == "expansion":
+                r = berechne_expansion(n.get("data") or {})
+                if r is not None:
+                    leer["expansion_results"][n["id"]] = r
+        leer["warnungen"] = _sammle_warnungen(nodes, {}, anschluss_warnungen, {}, leer["expansion_results"])
         return leer
 
     edge_flows, node_flows = {}, {}
@@ -268,6 +351,7 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
         m_prim_total = rl_zaehler = q_total = 0.0
         warnungen = []
         dp_aeste = []
+        schaltungen = set()  # PHYSIK §6: Mischregeln prüfen
         for ast in ast_daten:
             ast_m = ast_q = 0.0
             ast_dps = []
@@ -277,6 +361,20 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
                 dp = _zahl(d.get("dp_kpa"))
                 if dp:
                     ast_dps.append(dp)
+                if node_by_id[cid].get("type") == "gruppe":
+                    s = schaltungsart(d)
+                    schaltungen.add(s)
+                    # Drossel kann nicht mischen: Gruppen-VL muss = Verteiler-VL sein.
+                    # Eine andere (heissere) Gruppe am selben Verteiler zwingt den
+                    # Verteiler-VL nach oben — die Drossel bekommt dann zu heisses
+                    # Wasser und kann es nicht selbst herunterregeln (Dominic-Feedback).
+                    if s == "drossel" and vl is not None and vl_vt is not None and vl < vl_vt:
+                        label = d.get("label") or "Verbrauchergruppe"
+                        warnungen.append(
+                            f"{label} (Drossel): kommt mit VL {vl_vt} °C an, braucht aber nur {vl} °C — "
+                            f"Drossel kann nicht mischen. Einspritz- oder Beimischschaltung nötig, "
+                            f"um die VL-Temperatur auf {vl} °C herunterzuregeln."
+                        )
                 if q is None or rl is None or vl_vt is None:
                     continue
                 nenner = 1.163 * (vl_vt - rl)
@@ -308,6 +406,11 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
             m_prim_total += ast_m
             q_total += ast_q
 
+        # PHYSIK §6: Beimischung (drucklos) NIE mit Einspritz/Drossel
+        # (druckbehaftet, Hauptpumpe) am selben Verteiler kombinieren
+        if "beimisch" in schaltungen and (schaltungen & {"einspritz", "drossel"}):
+            warnungen.append("Beimischung (drucklos) darf nicht mit Einspritz-/Drosselschaltungen (druckbehaftet) am selben Verteiler kombiniert werden")
+
         rl_misch = rl_zaehler / m_prim_total if m_prim_total > 0 else None
 
         # Hauptanschlüsse links: Summe (§4)
@@ -315,6 +418,33 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
         for e in main["vl"] + main["rl"]:
             edge_flows[e["id"]] = round(m_prim_total, 4)
             calc_edges.add(e["id"])
+
+        # Haupt-Strang weiterreichen: Bauteile ZWISCHEN Verteiler und Erzeuger
+        # (Hauptpumpe, Ventil, Wärmezähler …) tragen den Gesamt-Primärfluss.
+        # Jede Leitung nur einmal (§2); stoppt an Erzeuger/Verteiler/Verbrauchern.
+        def trunk_propagieren(start_id, rl_seite):
+            besucht = {start_id, vid}
+            queue = [start_id]
+            while queue:
+                cur = queue.pop(0)
+                if node_by_id.get(cur, {}).get("type") in BLOCK_TYPEN or cur in sek:
+                    continue
+                for e in edges:
+                    if (_stroke(e) == RL_FARBE) != rl_seite:
+                        continue
+                    other = e["target"] if e["source"] == cur else e["source"] if e["target"] == cur else None
+                    if other and other not in besucht:
+                        if e["id"] not in calc_edges:
+                            edge_flows[e["id"]] = round(m_prim_total, 4)
+                            calc_edges.add(e["id"])
+                        besucht.add(other)
+                        queue.append(other)
+
+        if m_prim_total > 0:
+            for e in main["vl"]:
+                trunk_propagieren(e["target"] if e["source"] == vid else e["source"], rl_seite=False)
+            for e in main["rl"]:
+                trunk_propagieren(e["target"] if e["source"] == vid else e["source"], rl_seite=True)
 
         dp_max = max(dp_aeste, key=lambda a: a["dp_kpa"]) if dp_aeste else None
         node_flows[vid] = round(m_prim_total, 4)
@@ -392,9 +522,90 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
         if n.get("type") == "gruppe" and n["id"] in gruppe_results:
             _strang_ausruestung(data(n), gruppe_results[n["id"]])
 
+    # ── 6. Einzelbauteile auslegen (Loop C) ──
+    ventil_results, pumpen_results, expansion_results = {}, {}, {}
+    for n in nodes:
+        t = n.get("type")
+        d = data(n)
+        if t in ("valve2", "valve3"):
+            # Ventil: kvs + Ventilautorität aus dem Leitungs-Durchfluss (PHYSIK §3)
+            v = node_flows.get(n["id"]) or 0
+            dp_var = _zahl(d.get("dp_var"))
+            if v > 0 and dp_var and dp_var > 0:
+                kv = berechne_kvs(v, dp_var, _zahl(d.get("kvs_eff")))
+                if "fehler" not in kv:
+                    ventil_results[n["id"]] = {
+                        "v": round(v, 4),
+                        "kvs_theor": kv["kvs_theor"],
+                        "kvs_vorschlag": kv["kvs_vorschlag"],
+                        "kvs_eff": kv["kvs_eff"],
+                        "dp_v_eff_kpa": kv["dp_v_eff_kpa"],
+                        "pv": kv["ventilautoritaet_pct"],
+                        "warnings": kv["warnings"],
+                    }
+        elif t == "pump":
+            # Hauptpumpe: Förderhöhe = Δp gemeinsamer Teil + Δp ungünstigster Ast
+            # des Verteilers, den sie speist (Pflichtenheft §5 / PHYSIK §5).
+            rohr = _zahl(d.get("rohr_m")) or 0
+            pam = _zahl(d.get("pam")) or 70
+            app = _zahl(d.get("apparate_kpa")) or 0
+            dp_gemeinsam = rohr * pam / 1000 + app
+            # Verteiler über VL-/neutrale Leitungen suchen (nicht durch Gruppen)
+            vt_id = None
+            besucht = {n["id"]}
+            queue = [n["id"]]
+            while queue and vt_id is None:
+                cur = queue.pop(0)
+                for e in edges:
+                    if _stroke(e) == RL_FARBE:
+                        continue
+                    other = e["target"] if e["source"] == cur else e["source"] if e["target"] == cur else None
+                    if other and other not in besucht:
+                        besucht.add(other)
+                        typ_o = node_by_id.get(other, {}).get("type")
+                        if typ_o == "verteiler":
+                            vt_id = other
+                            break
+                        if typ_o not in VERBRAUCHER_TYPEN:
+                            queue.append(other)
+            dp_ast = (verteiler_results.get(vt_id, {}) or {}).get("dp_max_ast") or 0
+            gesamt = dp_gemeinsam + dp_ast
+            pumpen_results[n["id"]] = {
+                "v": node_flows.get(n["id"]),
+                "dp_gemeinsam_kpa": round(dp_gemeinsam, 2) if dp_gemeinsam > 0 else None,
+                "dp_ast_kpa": round(dp_ast, 2) if dp_ast else None,
+                "verteiler_id": vt_id,
+                "foerderhoehe_kpa": round(gesamt, 2) if gesamt > 0 else None,
+                "mws": round(gesamt / 10, 2) if gesamt > 0 else None,
+            }
+        elif t == "expansion":
+            r = berechne_expansion(d)
+            if r is not None:
+                expansion_results[n["id"]] = r
+        # Wärmezähler braucht keine eigene Rechnung: er übernimmt den
+        # Durchfluss seiner Leitung (node_flows) — PHYSIK §7 Bauteil-Klassen.
+
+    # ── 7. Automatische Leitungsdimensionierung (PHYSIK §10, Dominics Tabelle) ──
+    leitung_results = {}
+    for e in edges:
+        if e["id"].startswith("virt_"):
+            continue  # virtuelle Anschluss-Kanten sind keine echten Leitungen
+        fluss = edge_flows.get(e["id"])
+        dims = automatische_dimension(fluss) if fluss else None
+        if dims:
+            laenge = _zahl((e.get("data") or {}).get("laenge_m"))
+            dp_kpa = round(dims["pam"] * laenge / 1000, 2) if laenge else None
+            leitung_results[e["id"]] = {**dims, "v": fluss, "laenge_m": laenge, "dp_kpa": dp_kpa}
+
     return {
         "edge_flows": edge_flows,
         "node_flows": node_flows,
         "verteiler_results": verteiler_results,
         "gruppe_results": gruppe_results,
+        "ventil_results": ventil_results,
+        "pumpen_results": pumpen_results,
+        "expansion_results": expansion_results,
+        "leitung_results": leitung_results,
+        "anschluss_warnings": anschluss_warnungen,
+        "warnungen": _sammle_warnungen(nodes, verteiler_results, anschluss_warnungen, ventil_results, expansion_results),
     }

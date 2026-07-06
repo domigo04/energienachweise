@@ -42,10 +42,12 @@ function Label({ text, color = '#475569' }) {
 
 // ── Pumpe ─────────────────────────────────────────────────────
 export function PumpNode({ data, selected: sel }) {
+  // Handles auf den Kreis-Mittelpunkt ausrichten (SymPump ist wegen des
+  // Motors rechts nicht mehr horizontal zentriert, viewBox 64x48 → 22/64).
   return (
     <div style={wrap(sel)}>
-      {H(Position.Top,    'top',    { top: -6 })}
-      {H(Position.Bottom, 'bottom', { bottom: -6 })}
+      {H(Position.Top,    'top',    { top: -6, left: '34%' })}
+      {H(Position.Bottom, 'bottom', { bottom: -6, left: '34%' })}
       <SymPump />
       <Label text={data.label} />
     </div>
@@ -113,16 +115,14 @@ export function ShutoffNode({ data, selected: sel }) {
   );
 }
 
-// ── Wärmeerzeuger (WE) ───────────────────────────────────────
+// ── Wärmeerzeuger (WE): VL oben, RL unten ────────────────────
 export function ErzeugerNode({ data, selected: sel }) {
   return (
     <div style={wrap(sel)}>
-      {H(Position.Top,    'top',    { top: -6 })}
-      {H(Position.Bottom, 'bottom', { bottom: -6 })}
-      {H(Position.Left,   'left',   { left: -6 })}
-      {H(Position.Right,  'right',  { right: -6 })}
-      {H(Position.Right,  'vl',     { right: -6, top: '25%', bottom: 'auto', background: '#ef4444' })}
-      {H(Position.Right,  'rl',     { right: -6, top: '75%', bottom: 'auto', background: '#3b82f6' })}
+      {H(Position.Top,    'vl',    { top: -6, background: '#ef4444' })}
+      {H(Position.Bottom, 'rl',    { bottom: -6, background: '#3b82f6' })}
+      {H(Position.Left,   'left',  { left: -6 })}
+      {H(Position.Right,  'right', { right: -6 })}
       <SymWE />
       <Label text={data.label} />
     </div>
@@ -282,7 +282,10 @@ export function VerteilerNode({ data, selected: sel }) {
 export function GruppeNode({ data, selected: sel }) {
   const c = data._calc || {};
   const einspritz = !!c.einspritz;
-  const hatPumpe = data.hat_pumpe !== false;
+  // Schaltungsart (PHYSIK §6): einspritz = 2WV + Bypass ÜBER dem Ventil ·
+  // beimisch = 3WV + Bypass in den dritten Anschluss · drossel = nur Ventil
+  const schaltung = ['einspritz', 'beimisch', 'drossel'].includes(data.schaltung) ? data.schaltung : 'einspritz';
+  const hatPumpe = schaltung !== 'drossel' && data.hat_pumpe !== false;
   const hatVentil = data.hat_ventil !== false;
   const W = 150, H = 400, cx = 75;
   const kg = (v) => (v == null ? '—' : `${Math.round(v * 1000).toLocaleString('de-CH')} kg/h`);
@@ -294,6 +297,16 @@ export function GruppeNode({ data, selected: sel }) {
     boxShadow: `0 0 0 1px ${bg}`,
     transform: 'translate(-50%, -50%)',
   });
+
+  // Absperrventil-Symbol (Kugelhahn-Vorlage): weiss gefüllte Dreiecke + kleiner
+  // unausgefüllter Kreis am Treffpunkt (nicht mehr schwarz gefüllt).
+  const Absperr = ({ cyMid }) => (
+    <>
+      <polygon points={`${cx - 9},${cyMid - 9} ${cx + 9},${cyMid - 9} ${cx},${cyMid}`} fill="white" stroke="#1e293b" strokeWidth="1.6" />
+      <polygon points={`${cx - 9},${cyMid + 9} ${cx + 9},${cyMid + 9} ${cx},${cyMid}`} fill="white" stroke="#1e293b" strokeWidth="1.6" />
+      <circle cx={cx} cy={cyMid} r="2.2" fill="white" stroke="#1e293b" strokeWidth="1.2" />
+    </>
+  );
 
   return (
     <div style={{ width: W, height: H, position: 'relative', cursor: 'grab' }}>
@@ -308,18 +321,32 @@ export function GruppeNode({ data, selected: sel }) {
         {/* Primär-Fluss am Strangkopf */}
         <text x={cx + 8} y="12" fontSize="9" fill="#1e293b" fontFamily="monospace">{`m': ${kg(c.m_prim)}`}</text>
         {/* Absperrventil oben */}
-        <polygon points={`${cx - 9},21 ${cx + 9},21 ${cx},30`} fill="#1e293b" />
-        <polygon points={`${cx - 9},39 ${cx + 9},39 ${cx},30`} fill="#1e293b" />
-        {/* Pumpe — Dreieck zeigt nach unten, zum roten Rechteck (Flussrichtung) */}
+        <Absperr cyMid={30} />
+        {/* Pumpe — Kreis + Durchmesserlinie + Dreieck nach unten (Flussrichtung) */}
         {hatPumpe && (
           <>
             <circle cx={cx} cy="64" r="15" fill="white" stroke="#1e293b" strokeWidth="2.2" />
-            <polygon points={`${cx - 8},57 ${cx + 8},57 ${cx},74`} fill="#1e293b" />
+            <line x1={cx - 15} y1="64" x2={cx + 15} y2="64" stroke="#1e293b" strokeWidth="1.8" />
+            <polygon points={`${cx - 15},64 ${cx + 15},64 ${cx},79`} fill="#1e293b" />
           </>
         )}
         {/* Thermometer */}
         <circle cx={cx} cy="98" r="6" fill="white" stroke="#1e293b" strokeWidth="1.4" />
         <text x={cx} y="101" textAnchor="middle" fontSize="7" fontWeight="700" fill="#1e293b">T</text>
+        {/* Wärmezähler (SIA 410): Rechteck mit Diagonale, halb schwarz —
+            plus je ein Fühler im VL und RL ausserhalb der Bypass-Schleife */}
+        {data.hat_wz && (
+          <>
+            <rect x={cx - 8} y="104" width="16" height="12" fill="white" stroke="#1e293b" strokeWidth="1.6" />
+            <polygon points={`${cx - 8},116 ${cx + 8},116 ${cx + 8},104`} fill="#1e293b" />
+            {[16, 352].map(fy => (
+              <g key={fy}>
+                <line x1={cx} y1={fy} x2={cx + 9} y2={fy} stroke="#1e293b" strokeWidth="1.4" />
+                <circle cx={cx + 12.5} cy={fy} r="3.5" fill="white" stroke="#1e293b" strokeWidth="1.4" />
+              </g>
+            ))}
+          </>
+        )}
         {/* Rotes Rechteck mit gedrehtem Text (wie im CAD) */}
         <rect x="52" y="120" width="46" height="165" fill="white" stroke="#ef4444" strokeWidth="2" />
         <text transform="translate(63 202) rotate(-90)" textAnchor="middle" fontSize="9" fontWeight="700" fill="#ef4444" fontFamily="monospace">
@@ -332,17 +359,21 @@ export function GruppeNode({ data, selected: sel }) {
           {`m': ${kg(c.m_sek)}`}
         </text>
         {/* STAD (Strangregulierventil) */}
-        <polygon points={`${cx - 9},294 ${cx + 9},294 ${cx},303`} fill="#1e293b" />
-        <polygon points={`${cx - 9},312 ${cx + 9},312 ${cx},303`} fill="#1e293b" />
+        <Absperr cyMid={303} />
         <line x1={cx + 9} y1="294" x2={cx + 20} y2="288" stroke="#1e293b" strokeWidth="1.6" />
         {/* Thermometer */}
         <circle cx={cx + 24} cy="320" r="6" fill="white" stroke="#1e293b" strokeWidth="1.4" />
         <text x={cx + 24} y="323" textAnchor="middle" fontSize="7" fontWeight="700" fill="#1e293b">T</text>
-        {/* 3-Weg-Mischventil (M orange = Einspritzung aktiv) */}
+        {/* Ventil unten: 2-Weg (Einspritz/Drossel) oder 3-Weg (Beimisch) —
+            weiss gefüllt + Kreis am Treffpunkt (Vorlage «2-Wege Ventil») */}
         {hatVentil && (
           <>
-            <polygon points={`${cx - 9},330 ${cx + 9},330 ${cx},338`} fill="#1e293b" />
-            <polygon points={`${cx - 9},346 ${cx + 9},346 ${cx},338`} fill="#1e293b" />
+            <polygon points={`${cx - 9},330 ${cx + 9},330 ${cx},338`} fill="white" stroke="#1e293b" strokeWidth="1.6" />
+            <polygon points={`${cx - 9},346 ${cx + 9},346 ${cx},338`} fill="white" stroke="#1e293b" strokeWidth="1.6" />
+            {schaltung === 'beimisch' && (
+              <polygon points={`${cx - 18},330 ${cx - 18},346 ${cx},338`} fill="white" stroke="#1e293b" strokeWidth="1.6" />
+            )}
+            <circle cx={cx} cy="338" r="2.2" fill="white" stroke="#1e293b" strokeWidth="1.2" />
             <rect x={cx + 12} y="331" width="14" height="14" rx="2" fill={einspritz ? '#f97316' : '#94a3b8'} />
             <text x={cx + 19} y="341" textAnchor="middle" fontSize="8" fontWeight="700" fill="white">M</text>
             {c.ventil && (
@@ -351,19 +382,117 @@ export function GruppeNode({ data, selected: sel }) {
           </>
         )}
         {/* Absperrventil unten */}
-        <polygon points={`${cx - 9},359 ${cx + 9},359 ${cx},368`} fill="#1e293b" />
-        <polygon points={`${cx - 9},377 ${cx + 9},377 ${cx},368`} fill="#1e293b" />
-        {/* Bypass-Schleife bei aktiver Einspritzung */}
-        {einspritz && (
+        <Absperr cyMid={368} />
+        {/* Bypass gehört zur Schaltung (Drossel hat keinen):
+            Einspritz → mündet ÜBER dem 2WV · Beimisch → in den 3WV-Anschluss */}
+        {schaltung !== 'drossel' && (
           <>
-            <path d={`M ${cx} 44 H 22 V 338 H ${cx - 9}`} fill="none" stroke="#3b82f6" strokeWidth="1.8" strokeDasharray="6,4" />
+            <path
+              d={schaltung === 'einspritz' ? `M ${cx} 44 H 22 V 320 H ${cx}` : `M ${cx} 44 H 22 V 338 H ${cx - 18}`}
+              fill="none" stroke="#3b82f6" strokeWidth="1.8" strokeDasharray="6,4" />
             <circle cx={cx} cy="44" r="3.5" fill="#3b82f6" />
-            <circle cx={cx} cy="338" r="3.5" fill="#3b82f6" />
-            <text x="16" y="210" transform="rotate(-90 16 210)" textAnchor="middle" fontSize="8" fill="#3b82f6" fontFamily="monospace">
-              {`Bypass ${c.m_bypass != null ? Number(c.m_bypass).toFixed(3) : '—'} m³/h`}
-            </text>
+            {schaltung === 'einspritz' && <circle cx={cx} cy="320" r="3.5" fill="#3b82f6" />}
+            {c.m_bypass > 0 && (
+              <text x="16" y="210" transform="rotate(-90 16 210)" textAnchor="middle" fontSize="8" fill="#3b82f6" fontFamily="monospace">
+                {`Bypass ${Number(c.m_bypass).toFixed(3)} m³/h`}
+              </text>
+            )}
           </>
         )}
+      </svg>
+    </div>
+  );
+}
+
+// ── Wärmezähler: übernimmt den Durchfluss seiner Leitung ─────
+export function WaermezaehlerNode({ data, selected: sel }) {
+  const v = data._calc?.v;
+  return (
+    <div style={wrap(sel)}>
+      {H(Position.Top,    'top',    { top: -6 })}
+      {H(Position.Bottom, 'bottom', { bottom: -6 })}
+      {H(Position.Left,   'left',   { left: -6 })}
+      {H(Position.Right,  'right',  { right: -6 })}
+      <svg viewBox="0 0 48 48" width="48" height="48">
+        <line x1="24" y1="0" x2="24" y2="8" stroke="#1e293b" strokeWidth="3" />
+        <line x1="24" y1="40" x2="24" y2="48" stroke="#1e293b" strokeWidth="3" />
+        <circle cx="24" cy="24" r="16" fill="white" stroke="#0f766e" strokeWidth="2.5" />
+        <text x="24" y="28" textAnchor="middle" fontSize="10" fontWeight="700" fill="#0f766e">WZ</text>
+      </svg>
+      <Label text={v != null ? `${Number(v).toFixed(3)} m³/h` : (data.label || 'WZ')} color="#0f766e" />
+    </div>
+  );
+}
+
+// ── Expansionsgefäss (Membran-Ausdehnungsgefäss, PHYSIK §8) ──
+// Stehender Zylinder mit rundem Kopf, orangem Sicherheitsventil-Nippel oben,
+// zwei Standfüssen — Anschluss unten (nicht oben, Dominic-Feedback).
+// Exakte Dominic-Vorlage («Behälter ohne Beschriftung, ohne Füsse, unten
+// rund»): Kapsel-Körper mit zwei Bund-Linien + mittigem Höcker/Schraube.
+// Anschluss unten (Dominic-Feedback) — Stutzen unterhalb des Körpers.
+export function ExpansionNode({ data, selected: sel }) {
+  const c = data._calc || {};
+  return (
+    <div style={wrap(sel)}>
+      {H(Position.Bottom, 'bottom', { bottom: -6, left: '48.8%' })}
+      <svg viewBox="0 0 248 408" width="76" height="125">
+        <g fill="none" stroke="#1e293b" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <path fill="#d9d9d9" d="M54 33 C54 15 84 1 121 1 C158 1 188 15 188 33 L188 297 C188 315 158 329 121 329 C84 329 54 315 54 297 Z" />
+          <line x1="54" y1="33" x2="188" y2="33" />
+          <path d="M54 166 H102 C103 155 109 148 121 148 C133 148 139 155 140 166 H188" />
+          <line x1="115" y1="158" x2="127" y2="158" />
+          <line x1="54" y1="300" x2="188" y2="300" />
+        </g>
+        <line x1="121" y1="329" x2="121" y2="400" stroke="#3b82f6" strokeWidth="6" strokeDasharray="10,8" />
+      </svg>
+      <Label text={c.vorschlag_l ? `EGF ${c.vorschlag_l} l` : (data.label || 'EGF')} />
+    </div>
+  );
+}
+
+// ── Brauchwarmwasser-Speicher: wie Speicher, aber GRÜN ───────
+export function BwwNode({ data, selected: sel }) {
+  return (
+    <div style={wrap(sel)}>
+      {H(Position.Top,    'top-l',  { top: -6,    left: '30%' })}
+      {H(Position.Top,    'top-r',  { top: -6,    left: '70%' })}
+      {H(Position.Bottom, 'bot-l',  { bottom: -6, left: '30%' })}
+      {H(Position.Bottom, 'bot-r',  { bottom: -6, left: '70%' })}
+      {H(Position.Left,   'left',   { left: -6 })}
+      {H(Position.Right,  'right',  { right: -6 })}
+      <svg viewBox="0 0 56 100" width="56" height="100">
+        <rect x="3" y="3" width="50" height="94" rx="6" fill="#f0fdf4" stroke="#16a34a" strokeWidth="2.5" />
+        <line x1="3" y1="35" x2="53" y2="35" stroke="#86efac" strokeWidth="1.2" strokeDasharray="5,3" />
+        <line x1="3" y1="65" x2="53" y2="65" stroke="#86efac" strokeWidth="1.2" strokeDasharray="5,3" />
+        <text x="28" y="54" textAnchor="middle" fontSize="11" fontWeight="700" fill="#15803d">BWW</text>
+      </svg>
+      <Label text={data.label || 'BWW'} color="#15803d" />
+    </div>
+  );
+}
+
+// ── Anschluss-Marker (PHYSIK §9) ──────────────────────────────
+// Ersetzt eine lang quer durchs Schema gezeichnete Leitung: roter Pfeil
+// (VL raus) + blauer Pfeil (RL rein), gemeinsamer Buchstabe. Zwei Marker mit
+// demselben Buchstaben werden vom Backend virtuell verbunden — Fluss und
+// Temperatur werden durchgereicht, als wäre eine echte Leitung gezeichnet.
+export function AnschlussNode({ data, selected: sel }) {
+  return (
+    <div style={{
+      width: 70, height: 40, position: 'relative', cursor: 'grab',
+      border: sel ? '2px solid #3b82f6' : '2px solid transparent', borderRadius: 6,
+    }}>
+      <Handle type="source" position={Position.Left} id="vl"
+        style={{ left: -6, top: '25%', background: '#ef4444', width: 12, height: 12, borderRadius: 2, border: '2px solid white', boxShadow: '0 0 0 1px #ef4444' }} />
+      <Handle type="source" position={Position.Left} id="rl"
+        style={{ left: -6, top: '75%', background: '#3b82f6', width: 12, height: 12, borderRadius: 2, border: '2px solid white', boxShadow: '0 0 0 1px #3b82f6' }} />
+      <svg viewBox="0 0 70 40" width="70" height="40">
+        <line x1="20" y1="10" x2="55" y2="10" stroke="#ef4444" strokeWidth="2.5" />
+        <polygon points="55,6 62,10 55,14" fill="#ef4444" />
+        <line x1="55" y1="30" x2="20" y2="30" stroke="#3b82f6" strokeWidth="2.5" />
+        <polygon points="20,26 13,30 20,34" fill="#3b82f6" />
+        <circle cx="5" cy="20" r="11" fill="white" stroke="#1e293b" strokeWidth="1.6" />
+        <text x="5" y="24" textAnchor="middle" fontSize="11" fontWeight="700" fill="#1e293b">{data.buchstabe || '?'}</text>
       </svg>
     </div>
   );
@@ -411,7 +540,7 @@ export function LabelNode({ data }) {
 
 // ── Bauteil-Nummern (Pflichtenheft §10: Nummerierung + Legende) ──────
 // Jedes nummerierbare Bauteil bekommt ein rotes Badge (data.nr) oben rechts.
-export const NUMMERIERT = ['gruppe', 'heizkreis', 'pump', 'valve2', 'valve3', 'checkvalve', 'shutoff', 'erzeuger', 'speicher', 'verteiler'];
+export const NUMMERIERT = ['gruppe', 'heizkreis', 'pump', 'valve2', 'valve3', 'checkvalve', 'shutoff', 'erzeuger', 'speicher', 'verteiler', 'waermezaehler', 'expansion', 'bww'];
 
 function mitNr(Comp) {
   function MitNr(props) {
@@ -446,7 +575,11 @@ const BASIS_TYPES = {
   erzeuger:    ErzeugerNode,
   verbraucher: VerbraucherNode,
   speicher:    SpeicherNode,
+  anschluss:   AnschlussNode,
   verteiler:   VerteilerNode,
+  waermezaehler: WaermezaehlerNode,
+  expansion:   ExpansionNode,
+  bww:         BwwNode,
   label:       LabelNode,
 };
 

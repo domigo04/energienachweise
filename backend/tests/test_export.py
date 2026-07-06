@@ -130,3 +130,30 @@ def test_pdf_nur_schema_und_nur_berechnungen(daten):
     text_berech = "\n".join(p.extract_text() or "" for p in nur_berech.pages)
     assert "Legende" in text_schema and "Berechnungen —" not in text_schema
     assert "Berechnungen —" in text_berech and "Legende" not in text_berech
+
+
+# ── Leitungsdimensionierung im SVG (PHYSIK §10) ─────────────────────────────
+def test_svg_zeigt_automatische_dn(daten):
+    nodes, edges, results = daten
+    svg = erzeuge_svg(nodes, edges, results)
+    # e_vlm/e_rlm tragen 1.1662 m³/h = 1166.2 kg/h → DN32 (DN25 reicht bei 70 Pa/m nicht)
+    assert "DN32" in svg
+    assert "Pa/m" in svg
+
+
+# ── Anschluss-Marker (PHYSIK §9) ─────────────────────────────────────────────
+def test_anschluss_in_legende_und_pdf():
+    nodes = [
+        {"id": "hk", "type": "heizkreis", "position": {"x": 0, "y": 0}, "data": {"q_kw": "5", "vl_temp": "35", "rl_temp": "28"}},
+        {"id": "a1", "type": "anschluss", "position": {"x": 100, "y": 0}, "data": {"buchstabe": "A"}},
+    ]
+    edges = [{"id": "e1", "source": "hk", "target": "a1", "stroke": VL}]
+    results = berechne_schema(nodes, edges)
+    zeilen = legende_zeilen(nodes, results)
+    a_zeile = next(z for z in zeilen if z["bauteil"] == "Anschluss-Marker")
+    assert "Buchstabe A" in a_zeile["werte"]
+
+    pdf = erzeuge_pdf("P", "S", "beides", nodes, edges, results)
+    reader = PdfReader(io.BytesIO(pdf))
+    text = "\n".join(p.extract_text() or "" for p in reader.pages)
+    assert "kein Gegenstück gefunden" in text

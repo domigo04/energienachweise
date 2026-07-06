@@ -1,11 +1,17 @@
 // SIA 410 Hydraulik-Symbole
 
+// Kreis (weiss) + Durchmesserlinie + gefülltes Dreieck (Flussrichtung nach
+// unten) + Motor rechts (Vorlage «pumpe_genau.svg», Dominic-Feedback).
 export function SymPump() {
-  // Schwarzer Kreis, weiss ausgefüllt, schwarzes Dreieck nach oben
   return (
-    <svg viewBox="0 0 44 44" width="44" height="44">
+    <svg viewBox="0 0 64 48" width="64" height="48">
       <circle cx="22" cy="22" r="18" fill="white" stroke="#1e293b" strokeWidth="2.5" />
-      <polygon points="13,31 31,31 22,11" fill="#1e293b" />
+      <line x1="4" y1="22" x2="40" y2="22" stroke="#1e293b" strokeWidth="2" />
+      <polygon points="4,22 40,22 22,38" fill="#1e293b" />
+      {/* Motor rechts */}
+      <line x1="40" y1="22" x2="47" y2="22" stroke="#1e293b" strokeWidth="1.8" />
+      <rect x="47" y="13" width="16" height="16" rx="2" fill="#ffd35c" stroke="#ef8b2d" strokeWidth="1.8" />
+      <path d="M52 25 L52 16 L58 21 L64 16 L64 25" fill="none" stroke="#ef8b2d" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" transform="translate(-2 0)" />
     </svg>
   );
 }
@@ -27,6 +33,8 @@ export function SymValve2V() {
         points="6,58 42,58 24,36"
         fill="none" stroke="#1d4ed8" strokeWidth="2.2" strokeLinejoin="round"
       />
+      {/* Kreis am Treffpunkt (Vorlage «2-Wege Ventil.svg») */}
+      <circle cx="24" cy="31" r="4" fill="none" stroke="#1d4ed8" strokeWidth="1.8" />
       {/* Motor-Stiel: vom Mittelpunkt (24,31) nach rechts */}
       <line x1="42" y1="31" x2="50" y2="31" stroke="#1d4ed8" strokeWidth="1.8" />
       {/* Motor-Box */}
@@ -79,22 +87,26 @@ export function SymCheckValve() {
   );
 }
 
+// Absperrventil / Kugelhahn — weiss gefüllte Dreiecke + Kreis am Treffpunkt
+// (Vorlage «Kugelhahn.svg», Dominic-Feedback: nicht mehr schwarz gefüllt).
 export function SymShutoff() {
   return (
     <svg viewBox="0 0 44 44" width="44" height="44">
-      {/* Oben gefüllt */}
-      <polygon points="10,6 34,6 22,22" fill="#1e293b" />
-      {/* Unten gefüllt */}
-      <polygon points="10,38 34,38 22,22" fill="#1e293b" />
+      <polygon points="10,6 34,6 22,22" fill="white" stroke="#1e293b" strokeWidth="2" />
+      <polygon points="10,38 34,38 22,22" fill="white" stroke="#1e293b" strokeWidth="2" />
+      <circle cx="22" cy="22" r="3" fill="white" stroke="#1e293b" strokeWidth="1.6" />
     </svg>
   );
 }
 
 export function SymWE() {
+  // Grösser (Dominic-Feedback); VL-Anschluss oben, RL unten
   return (
-    <svg viewBox="0 0 64 46" width="64" height="46">
-      <rect x="2" y="2" width="60" height="42" rx="3" fill="white" stroke="#1e293b" strokeWidth="2" />
-      <text x="32" y="28" textAnchor="middle" fontSize="15" fontWeight="700" fill="#1e293b">WE</text>
+    <svg viewBox="0 0 88 68" width="88" height="68">
+      <rect x="2" y="2" width="84" height="64" rx="4" fill="white" stroke="#1e293b" strokeWidth="2.5" />
+      <text x="44" y="41" textAnchor="middle" fontSize="17" fontWeight="700" fill="#1e293b">WE</text>
+      <rect x="36" y="0" width="16" height="5" rx="2" fill="#ef4444" />
+      <rect x="36" y="63" width="16" height="5" rx="2" fill="#3b82f6" />
     </svg>
   );
 }

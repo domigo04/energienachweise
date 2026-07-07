@@ -162,7 +162,7 @@ export function SymWE() {
   return (
     <svg viewBox="0 0 88 68" width="88" height="68">
       <rect x="2" y="2" width="84" height="64" rx="4" fill="white" stroke="#1e293b" strokeWidth="2.5" />
-      <text x="44" y="41" textAnchor="middle" fontSize="17" fontWeight="700" fill="#1e293b">WE</text>
+      <text x="44" y="41" textAnchor="middle" fontSize="17" fontWeight="700" fill="#1e293b">WP</text>
       <rect x="36" y="0" width="16" height="5" rx="2" fill="#ef4444" />
       <rect x="36" y="63" width="16" height="5" rx="2" fill="#3b82f6" />
     </svg>
@@ -190,7 +190,7 @@ export function SymSpeicher() {
       {/* Wasserstand-Füllung */}
       <rect x="4" y="66" width="48" height="30" rx="4" fill="rgba(252,165,165,0.25)" />
       {/* SP Label */}
-      <text x="28" y="54" textAnchor="middle" fontSize="13" fontWeight="700" fill="#dc2626">SP</text>
+      <text x="28" y="54" textAnchor="middle" fontSize="13" fontWeight="700" fill="#dc2626">TS</text>
       {/* Anschluss-Stutzen oben VL */}
       <rect x="20" y="0" width="16" height="6" rx="2" fill="#ef4444" />
       {/* Anschluss-Stutzen unten RL */}

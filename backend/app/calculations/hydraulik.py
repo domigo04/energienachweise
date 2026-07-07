@@ -305,6 +305,29 @@ def _expansion_auto(nodes):
     return auto_vl, auto_leistung
 
 
+def _pwt_primaer_gruppe(pid, edges, node_by_id, strict):
+    """Speisende Verbrauchergruppe eines PWT über VL/neutrale Kanten suchen.
+    strict=True: nur über die Primärseite (Anschlüsse left/bottom); sonst überall
+    (Fallback, falls der Anwender die Gruppe an einen anderen Anschluss gehängt hat)."""
+    besucht, queue = {pid}, [pid]
+    while queue:
+        cur = queue.pop(0)
+        for e in edges:
+            if _stroke(e) == RL_FARBE or str(e.get("id", "")).startswith("virt_"):
+                continue
+            if strict and cur == pid:
+                h = e.get("sourceHandle") if e["source"] == pid else e.get("targetHandle") if e["target"] == pid else None
+                if h not in ("left", "bottom"):
+                    continue
+            other = e["target"] if e["source"] == cur else e["source"] if e["target"] == cur else None
+            if other and other not in besucht:
+                besucht.add(other)
+                if node_by_id.get(other, {}).get("type") in VERBRAUCHER_TYPEN:
+                    return node_by_id[other]
+                queue.append(other)
+    return None
+
+
 def _pwt_transfer(nodes, edges, gruppe_results, node_flows, edge_flows):
     """Plattentauscher (Systemtrennung, Gegenstrom): Primärseite (links) kommt von
     einer Verbrauchergruppe — Leistung + VL/RL werden übernommen. Sekundärseite
@@ -317,23 +340,8 @@ def _pwt_transfer(nodes, edges, gruppe_results, node_flows, edge_flows):
         d = pwt.get("data") or {}
         pid = pwt["id"]
         # Primär-Gruppe: über VL/neutrale Kanten zur nächsten Verbrauchergruppe
-        gruppe, besucht, queue = None, {pid}, [pid]
-        while queue and gruppe is None:
-            cur = queue.pop(0)
-            for e in edges:
-                if _stroke(e) == RL_FARBE or str(e.get("id", "")).startswith("virt_"):
-                    continue
-                if cur == pid:  # vom PWT selbst nur über die Primärseite (links) hinaus
-                    h = e.get("sourceHandle") if e["source"] == pid else e.get("targetHandle") if e["target"] == pid else None
-                    if h not in ("left", "bottom"):
-                        continue
-                other = e["target"] if e["source"] == cur else e["source"] if e["target"] == cur else None
-                if other and other not in besucht:
-                    besucht.add(other)
-                    if node_by_id.get(other, {}).get("type") in VERBRAUCHER_TYPEN:
-                        gruppe = node_by_id[other]
-                        break
-                    queue.append(other)
+        gruppe = (_pwt_primaer_gruppe(pid, edges, node_by_id, True)
+                  or _pwt_primaer_gruppe(pid, edges, node_by_id, False))
         vl_sek, rl_sek = _zahl(d.get("vl_sek")), _zahl(d.get("rl_sek"))
         res = {"vl_sek": vl_sek, "rl_sek": rl_sek}
         if gruppe:

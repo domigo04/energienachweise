@@ -550,30 +550,21 @@ export function AnschlussNode({ data, selected: sel }) {
   );
 }
 
-// ── T-Stück — echtes T mit 3 Anschlüssen ─────────────────────
-export function JunctionNode({ selected: sel }) {
+// ── Fangpunkt / T-Stück — kleiner Punkt (rot am VL, blau am RL) ──────────────
+// Endpunkt freier Leitungen und T-Stelle, wenn zwei Leitungen sich berühren.
+export function JunctionNode({ data, selected: sel }) {
+  const farbe = data?.color || '#334155';
+  const hs = { width: 9, height: 9, background: 'transparent', border: 'none', minWidth: 0, minHeight: 0, zIndex: 5 };
   return (
-    <div style={{
-      width: 46, height: 46, position: 'relative', cursor: 'grab',
-      border: sel ? '2px solid #3b82f6' : '2px solid transparent',
-      borderRadius: 4,
-    }}>
-      {/* Links */}
-      <Handle type="source" position={Position.Left}   id="left"
-        style={{ left: -7, top: '65%', width: 14, height: 14, borderRadius: 2, background: '#1e293b', border: '2px solid white' }} />
-      {/* Rechts */}
-      <Handle type="source" position={Position.Right}  id="right"
-        style={{ right: -7, top: '65%', width: 14, height: 14, borderRadius: 2, background: '#1e293b', border: '2px solid white' }} />
-      {/* Oben (Abzweigung) */}
-      <Handle type="source" position={Position.Top}    id="top"
-        style={{ top: -7, left: '50%', transform: 'translateX(-50%)', width: 14, height: 14, borderRadius: 2, background: '#1e293b', border: '2px solid white' }} />
-      {/* T-Stück SVG */}
-      <svg viewBox="0 0 46 46" width="46" height="46">
-        {/* Horizontales Rohr */}
-        <line x1="0" y1="32" x2="46" y2="32" stroke="#1e293b" strokeWidth="7" strokeLinecap="round"/>
-        {/* Vertikale Abzweigung nach oben */}
-        <line x1="23" y1="32" x2="23" y2="4" stroke="#1e293b" strokeWidth="7" strokeLinecap="round"/>
-      </svg>
+    <div style={{ width: 12, height: 12, position: 'relative', cursor: 'grab' }}>
+      <Handle type="source" position={Position.Left}   id="left"   style={{ ...hs, left: 1 }} />
+      <Handle type="source" position={Position.Right}  id="right"  style={{ ...hs, right: 1 }} />
+      <Handle type="source" position={Position.Top}    id="top"    style={{ ...hs, top: 1 }} />
+      <Handle type="source" position={Position.Bottom} id="bottom" style={{ ...hs, bottom: 1 }} />
+      <div style={{
+        width: 12, height: 12, borderRadius: '50%', background: farbe,
+        border: sel ? '2px solid #3b82f6' : '1.5px solid white', boxShadow: '0 0 0 1px #94a3b8',
+      }} />
     </div>
   );
 }

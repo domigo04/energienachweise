@@ -394,7 +394,7 @@ def zeichne_standard(parts, node, results):
         if v:
             parts.append(f'<text x="{cx}" y="{cy + 12}" text-anchor="middle" font-size="8" fill="#166534" font-family="monospace">{v:.3f} m³/h</text>')
     elif t == "pump":
-        _pumpe(parts, cx, cy, 17)
+        _pumpe(parts, cx, cy, 17, nach_unten=True)  # gleiche Flussrichtung wie im Editor (Dreieck nach unten)
     elif t in ("valve2", "valve3", "shutoff", "stad", "temperatur", "sicherheitsventil", "pwt"):
         _sym(parts, x, y, w, t, SYM_INNER[t])
     elif t == "checkvalve":

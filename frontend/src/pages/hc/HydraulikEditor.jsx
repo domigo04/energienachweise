@@ -1011,13 +1011,29 @@ function EditorInner() {
     setTimeout(() => updateNodeInternals(id), 0);
   }, [setNodes, snap, updateNodeInternals]);
 
-  // Keyboard-Shortcuts: V = VL, R = RL, D = Drehen, Cmd+Z = Undo
+  const connectStart = useRef(null);
+  const clipboard = useRef(null);
+  const nodesRef = useRef([]);
+  nodesRef.current = nodes;
+
+  // Keyboard-Shortcuts: V = VL, R = RL, D = Drehen, Cmd+Z = Undo, Cmd+C/V = Kopieren/Einfügen
   React.useEffect(() => {
     const handler = (ev) => {
       const tag = document.activeElement?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if ((ev.metaKey || ev.ctrlKey) && ev.key === 'z') {
         ev.preventDefault(); undo();
+      }
+      if ((ev.metaKey || ev.ctrlKey) && (ev.key === 'c' || ev.key === 'C')) {
+        if (selected) { const n = nodesRef.current.find(x => x.id === selected.id); if (n) clipboard.current = n; }
+      }
+      if ((ev.metaKey || ev.ctrlKey) && (ev.key === 'v' || ev.key === 'V') && clipboard.current) {
+        ev.preventDefault();
+        const src = clipboard.current;
+        snap();
+        setNodes(ns => [...ns, { ...src, id: newId(), selected: false,
+          position: { x: (src.position?.x || 0) + 24, y: (src.position?.y || 0) + 24 },
+          data: { ...src.data, ...(NUMMERIERT.includes(src.type) ? { nr: naechsteNr(ns) } : {}) } }]);
       }
       if (!ev.metaKey && !ev.ctrlKey) {
         if (ev.key === 'v' || ev.key === 'V') setEdgeColor('#ef4444');
@@ -1137,6 +1153,29 @@ function EditorInner() {
     snap();
     setEdges(eds => addEdge({ ...params, type:'flow', style:{ stroke:edgeColor, strokeWidth:2.5 } }, eds));
   }, [edgeColor, setEdges, snap]);
+
+  const onConnectStart = useCallback((_, params) => { connectStart.current = params; }, []);
+
+  // Freie Leitung: endet die Verbindung im Leeren (nicht auf einem Anschluss),
+  // wird dort ein Fangpunkt gesetzt (rot am VL, blau am RL) — so lassen sich
+  // Leitungen frei zeichnen, ohne dass beide Enden an einem Bauteil hängen müssen.
+  const onConnectEnd = useCallback((event) => {
+    const cs = connectStart.current; connectStart.current = null;
+    if (!cs?.nodeId) return;
+    if (event.target?.closest?.('.react-flow__handle')) return;  // auf einem Bauteil gelandet → onConnect
+    const { clientX, clientY } = event.changedTouches ? event.changedTouches[0] : event;
+    const p = screenToFlowPosition({ x: clientX, y: clientY });
+    const jid = newId();
+    snap();
+    const farbe = edgeColor === '#ef4444' || edgeColor === '#3b82f6' ? edgeColor : '#334155';
+    setNodes(ns => [...ns, { id: jid, type: 'junction', position: { x: p.x - 6, y: p.y - 6 }, data: { color: farbe } }]);
+    const vonQuelle = cs.handleType !== 'target';
+    setEdges(es => addEdge({
+      source: vonQuelle ? cs.nodeId : jid, sourceHandle: vonQuelle ? cs.handleId : 'left',
+      target: vonQuelle ? jid : cs.nodeId, targetHandle: vonQuelle ? 'left' : cs.handleId,
+      type: 'flow', style: { stroke: edgeColor, strokeWidth: 2.5 },
+    }, es));
+  }, [screenToFlowPosition, setNodes, setEdges, snap, edgeColor]);
 
   const onDragOver = useCallback(e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }, []);
 
@@ -1286,6 +1325,8 @@ function EditorInner() {
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
+            onConnectStart={onConnectStart}
+            onConnectEnd={onConnectEnd}
             onDrop={onDrop}
             onDragOver={onDragOver}
             onNodeClick={onNodeClick}

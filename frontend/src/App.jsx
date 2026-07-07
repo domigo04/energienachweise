@@ -1,9 +1,11 @@
 import React from "react";
-import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import "./index.css";
 
 import Header from "./components/header";
 import Footer from "./components/footer";
+import Landing from "./pages/Landing";
+import Login from "./pages/Login";
 
 // Heizungscockpit
 import ProjectList      from "./pages/hc/ProjectList";
@@ -21,7 +23,8 @@ export default function App() {
         <Header />
         <main className="flex-grow">
           <Routes>
-            <Route path="/" element={<Navigate to="/heizungscockpit" replace />} />
+            <Route path="/" element={<Landing />} />
+            <Route path="/login" element={<Login />} />
 
             {/* ── Heizungscockpit ── */}
             <Route path="/heizungscockpit"                          element={<ProjectList />} />

@@ -1,24 +1,6 @@
 {
   "version": "0.0.1",
   "configurations": [
-    {
-      "name": "backend",
-      "runtimeExecutable": "bash",
-      "runtimeArgs": ["/Users/dominicgoulon/Desktop/SIREGO/Projekte/energienachweise/start_backend.sh"],
-      "port": 8000
-    },
-    {
-      "name": "frontend",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--prefix", "frontend"],
-      "port": 5173
-    },
-    {
-      "name": "frontend-preview",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--prefix", "frontend", "--", "--port", "5174"],
-      "port": 5174,
-      "autoPort": false
-    }
+    { "name": "frontend", "runtimeExecutable": "npm", "runtimeArgs": ["--prefix", "frontend", "run", "dev", "--", "--port", "5182", "--strictPort"], "port": 5182 }
   ]
 }

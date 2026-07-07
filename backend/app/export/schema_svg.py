@@ -462,18 +462,30 @@ def zeichne_edge(parts, edge, nodes_by_id, results):
     x2, y2 = handle_pos(ziel, edge.get("targetHandle"))
     stroke = edge.get("stroke") or (edge.get("style") or {}).get("stroke") or "#1e293b"
     dash = ' stroke-dasharray="8,5"' if stroke == RL_FARBE else ""
-    # CAD-Leitung wie FlowEdge.jsx: rechte Winkel (kein 45°), V-H-V bzw. H-V-H.
+    # CAD-Leitung wie FlowEdge.jsx: dünn, rechte Winkel mit kleinen runden Bögen (r=8).
     dx, dy = x2 - x1, y2 - y1
+    r = 8
     if abs(dx) < 0.5 or abs(dy) < 0.5:      # fluchtet → gerade
         pfad = f"M {x1} {y1} L {x2} {y2}"
-    elif abs(dy) >= abs(dx):
+    elif abs(dy) >= abs(dx):                 # V-H-V mit runden Ecken
         my = (y1 + y2) / 2
-        pfad = f"M {x1} {y1} V {my} H {x2} V {y2}"
-    else:
+        rr = min(r, abs(my - y1), abs(y2 - my), abs(dx) / 2)
+        s1 = 1 if my > y1 else -1
+        s2 = 1 if x2 > x1 else -1
+        s3 = 1 if y2 > my else -1
+        pfad = (f"M {x1} {y1} L {x1} {my - s1 * rr} Q {x1} {my} {x1 + s2 * rr} {my} "
+                f"L {x2 - s2 * rr} {my} Q {x2} {my} {x2} {my + s3 * rr} L {x2} {y2}")
+    else:                                    # H-V-H mit runden Ecken
         mx = (x1 + x2) / 2
-        pfad = f"M {x1} {y1} H {mx} V {y2} H {x2}"
+        rr = min(r, abs(mx - x1), abs(x2 - mx), abs(dy) / 2)
+        s1 = 1 if mx > x1 else -1
+        s2 = 1 if y2 > y1 else -1
+        s3 = 1 if x2 > mx else -1
+        pfad = (f"M {x1} {y1} L {mx - s1 * rr} {y1} Q {mx} {y1} {mx} {y1 + s2 * rr} "
+                f"L {mx} {y2 - s2 * rr} Q {mx} {y2} {mx + s3 * rr} {y2} L {x2} {y2}")
     lx, ly = (x1 + x2) / 2 + 6, (y1 + y2) / 2
-    parts.append(f'<path d="{pfad}" fill="none" stroke="{stroke}" stroke-width="2.5"{dash}/>')
+    sw = 1.6 if stroke == RL_FARBE else 2
+    parts.append(f'<path d="{pfad}" fill="none" stroke="{stroke}" stroke-width="{sw}"{dash}/>')
     fluss = (results.get("edge_flows") or {}).get(edge.get("id"))
     if fluss:
         # Neues Label-Format (Dominic 2026-07-06): DN gross oben, Massenstrom m' in

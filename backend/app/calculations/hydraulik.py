@@ -177,12 +177,19 @@ def _parse_handle(h):
 # Marker mit demselben Buchstaben werden virtuell verbunden — Fluss und
 # Temperatur werden durchgereicht, als wäre eine echte Leitung gezeichnet.
 def _anschluss_gruppen(nodes: List[dict]) -> dict:
+    """Marker je Buchstabe — Anschluss-Bauteile UND Verbrauchergruppen, die
+    «Anschluss für separate Gruppe» aktiviert haben (data.hat_anschluss)."""
     gruppen: dict = {}
     for n in nodes:
+        d = n.get("data") or {}
         if n.get("type") == "anschluss":
-            buchstabe = (n.get("data") or {}).get("buchstabe")
-            if buchstabe:
-                gruppen.setdefault(str(buchstabe).upper(), []).append(n["id"])
+            buchstabe = d.get("buchstabe")
+        elif n.get("type") == "gruppe" and d.get("hat_anschluss"):
+            buchstabe = d.get("anschluss_buchstabe") or "A"  # UI-Default 'A' auch ohne Tippen
+        else:
+            buchstabe = None
+        if buchstabe:
+            gruppen.setdefault(str(buchstabe).upper(), []).append(n["id"])
     return gruppen
 
 
@@ -190,13 +197,56 @@ def _mit_virtuellen_anschluss_kanten(nodes: List[dict], edges: List[dict]) -> Li
     """Fügt für je zwei Anschluss-Marker mit gleichem Buchstaben zwei virtuelle
     Kanten hinzu (eine VL-, eine RL-farbige) — alle bestehenden Traversierungen
     (Verteiler-Äste, Hauptstrang, freie Topologie) funktionieren dadurch
-    unverändert weiter, ohne dass echte Leitungen gezeichnet werden müssen."""
+    unverändert weiter, ohne dass echte Leitungen gezeichnet werden müssen.
+
+    Nur zwischen zwei echten Anschluss-Bauteilen. Ist ein Ende eine
+    Verbrauchergruppe («Anschluss für separate Gruppe»), wird der Fluss separat
+    und explizit übertragen (_uebertrage_gruppen_anschluss), damit die
+    Verteiler-Traversierung nicht über den Marker hinaus in fremde Kreise läuft."""
+    typ = {n["id"]: n.get("type") for n in nodes}
     ergaenzt = list(edges)
     for buchstabe, ids in _anschluss_gruppen(nodes).items():
         for a, b in zip(ids, ids[1:]):
-            ergaenzt.append({"id": f"virt_vl_{a}_{b}", "source": a, "target": b, "stroke": VL_FARBE})
-            ergaenzt.append({"id": f"virt_rl_{a}_{b}", "source": a, "target": b, "stroke": RL_FARBE})
+            if typ.get(a) == "anschluss" and typ.get(b) == "anschluss":
+                ergaenzt.append({"id": f"virt_vl_{a}_{b}", "source": a, "target": b, "stroke": VL_FARBE})
+                ergaenzt.append({"id": f"virt_rl_{a}_{b}", "source": a, "target": b, "stroke": RL_FARBE})
     return ergaenzt
+
+
+def _uebertrage_gruppen_anschluss(nodes, gruppe_results, edges, node_flows, edge_flows):
+    """«Anschluss für separate Gruppe» (serielle Untergruppe): eine Verbraucher-
+    gruppe reicht Fluss + Leistung + VL/RL an den gleichnamigen Anschluss-Marker
+    weiter. Die Leitung, die von dort z.B. auf einen Lufterhitzer gezeichnet wird,
+    bekommt so den richtigen Durchfluss (→ Dimensionierung) und die Kennwerte.
+    Gibt anschluss_results {marker_id: {m, q_kw, vl, rl, quelle}} zurück."""
+    quelle = {}  # Buchstabe → Kennwerte einer Gruppe mit aktiviertem Anschluss
+    for n in nodes:
+        d = n.get("data") or {}
+        if n.get("type") == "gruppe" and d.get("hat_anschluss"):
+            b = str(d.get("anschluss_buchstabe") or "A").upper()  # UI-Default 'A'
+            m = (gruppe_results.get(n["id"]) or {}).get("m_sek")
+            if b and m:
+                quelle[b] = {"m": round(m, 4), "q_kw": _zahl(d.get("q_kw")),
+                             "vl": _zahl(d.get("vl_temp")), "rl": _zahl(d.get("rl_temp")),
+                             "quelle": d.get("label") or "Gruppe"}
+    anschluss_results = {}
+    if not quelle:
+        return anschluss_results
+    for n in nodes:
+        if n.get("type") != "anschluss":
+            continue
+        b = str((n.get("data") or {}).get("buchstabe") or "").upper()
+        q = quelle.get(b)
+        if not q:
+            continue
+        node_flows[n["id"]] = q["m"]
+        anschluss_results[n["id"]] = dict(q)
+        for e in edges:
+            if str(e.get("id", "")).startswith("virt_"):
+                continue
+            if (e["source"] == n["id"] or e["target"] == n["id"]) and not edge_flows.get(e["id"]):
+                edge_flows[e["id"]] = q["m"]
+    return anschluss_results
 
 
 def _anschluss_warnungen(nodes: List[dict]) -> List[str]:
@@ -232,6 +282,81 @@ def _sammle_warnungen(nodes, verteiler_results, anschluss_warnungen, ventil_resu
     return alle
 
 
+def _expansion_auto(nodes):
+    """Automatik fürs Expansionsgefäss: höchste Verbraucher-VL (→ t_mittel) und
+    die Leistung aus dem Schema (Erzeuger-Nennleistung, sonst Summe Verbraucher-Q)."""
+    vls, q_sum, erz = [], 0.0, None
+    for n in nodes:
+        d = n.get("data") or {}
+        t = n.get("type")
+        if t in VERBRAUCHER_TYPEN:
+            vl = _zahl(d.get("vl_temp"))
+            if vl is not None:
+                vls.append(vl)
+            q = _zahl(d.get("q_kw"))
+            if q:
+                q_sum += q
+        elif t == "erzeuger":
+            le = _zahl(d.get("leistung_kw"))
+            if le:
+                erz = le
+    auto_vl = max(vls) if vls else None
+    auto_leistung = erz if erz else (round(q_sum, 2) if q_sum > 0 else None)
+    return auto_vl, auto_leistung
+
+
+def _pwt_transfer(nodes, edges, gruppe_results, node_flows, edge_flows):
+    """Plattentauscher (Systemtrennung, Gegenstrom): Primärseite (links) kommt von
+    einer Verbrauchergruppe — Leistung + VL/RL werden übernommen. Sekundärseite
+    (rechts) mit selbst gewählten Temperaturen; Q bleibt gleich →
+    m_sek = Q / (1.163 · ΔT_sek). Warnung, wenn Sekundär-VL > Primär-VL.
+    Gibt pwt_results {id: {q_kw, vl_prim, rl_prim, vl_sek, rl_sek, m_prim, m_sek, dt_sek, warnung}}."""
+    results = {}
+    node_by_id = {n["id"]: n for n in nodes}
+    for pwt in [n for n in nodes if n.get("type") == "pwt"]:
+        d = pwt.get("data") or {}
+        pid = pwt["id"]
+        # Primär-Gruppe: über VL/neutrale Kanten zur nächsten Verbrauchergruppe
+        gruppe, besucht, queue = None, {pid}, [pid]
+        while queue and gruppe is None:
+            cur = queue.pop(0)
+            for e in edges:
+                if _stroke(e) == RL_FARBE or str(e.get("id", "")).startswith("virt_"):
+                    continue
+                if cur == pid:  # vom PWT selbst nur über die Primärseite (links) hinaus
+                    h = e.get("sourceHandle") if e["source"] == pid else e.get("targetHandle") if e["target"] == pid else None
+                    if h not in ("left", "bottom"):
+                        continue
+                other = e["target"] if e["source"] == cur else e["source"] if e["target"] == cur else None
+                if other and other not in besucht:
+                    besucht.add(other)
+                    if node_by_id.get(other, {}).get("type") in VERBRAUCHER_TYPEN:
+                        gruppe = node_by_id[other]
+                        break
+                    queue.append(other)
+        vl_sek, rl_sek = _zahl(d.get("vl_sek")), _zahl(d.get("rl_sek"))
+        res = {"vl_sek": vl_sek, "rl_sek": rl_sek}
+        if gruppe:
+            gd = gruppe.get("data") or {}
+            q = _zahl(gd.get("q_kw"))
+            vl_prim, rl_prim = _zahl(gd.get("vl_temp")), _zahl(gd.get("rl_temp"))
+            res.update({"quelle": gd.get("label") or "Gruppe", "q_kw": q, "vl_prim": vl_prim,
+                        "rl_prim": rl_prim, "m_prim": (gruppe_results.get(gruppe["id"]) or {}).get("m_sek")})
+            if vl_sek is not None and vl_prim is not None and vl_sek > vl_prim:
+                res["warnung"] = (f"Sekundär-Vorlauf {vl_sek} °C höher als Primär-Vorlauf "
+                                  f"{vl_prim} °C — über den Plattentauscher nicht möglich")
+            if q and vl_sek is not None and rl_sek is not None and vl_sek - rl_sek > 0:
+                m_sek = q / (1.163 * (vl_sek - rl_sek))
+                res.update({"dt_sek": round(vl_sek - rl_sek, 1), "m_sek": round(m_sek, 4)})
+                node_flows[pid] = round(m_sek, 4)
+                for e in edges:  # Sekundär-Leitungen (rechte Anschlüsse) tragen m_sek
+                    h = e.get("sourceHandle") if e["source"] == pid else e.get("targetHandle") if e["target"] == pid else None
+                    if h in ("top", "right"):
+                        edge_flows[e["id"]] = round(m_sek, 4)
+        results[pid] = res
+    return results
+
+
 def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
     """Kompletter Graph: Flüsse je Leitung/Knoten + Verteiler-/Gruppen-Resultate.
 
@@ -261,12 +386,12 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
 
     leer = {"edge_flows": {}, "node_flows": {}, "verteiler_results": {}, "gruppe_results": {},
             "ventil_results": {}, "pumpen_results": {}, "expansion_results": {},
-            "leitung_results": {}, "anschluss_warnings": anschluss_warnungen, "warnungen": []}
+            "leitung_results": {}, "anschluss_results": {}, "pwt_results": {}, "anschluss_warnings": anschluss_warnungen, "warnungen": []}
     if not sek:
         # Expansionsgefässe rechnen auch ohne Verbraucher (brauchen keine Flüsse)
         for n in nodes:
             if n.get("type") == "expansion":
-                r = berechne_expansion(n.get("data") or {})
+                r = berechne_expansion(n.get("data") or {}, *_expansion_auto(nodes))
                 if r is not None:
                     leer["expansion_results"][n["id"]] = r
         leer["warnungen"] = _sammle_warnungen(nodes, {}, anschluss_warnungen, {}, leer["expansion_results"])
@@ -506,6 +631,11 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
                     besucht.add(to)
                     queue.append(to)
 
+    # Anschluss «für separate Gruppe»: Fluss der Gruppe an ihren Marker geben,
+    # bevor die Knoten-Flüsse verdichtet werden.
+    anschluss_results = _uebertrage_gruppen_anschluss(nodes, gruppe_results, edges, node_flows, edge_flows)
+    pwt_results = _pwt_transfer(nodes, edges, gruppe_results, node_flows, edge_flows)
+
     # ── 5. Knoten-Flüsse ──
     for n in nodes:
         nid = n["id"]
@@ -579,7 +709,7 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
                 "mws": round(gesamt / 10, 2) if gesamt > 0 else None,
             }
         elif t == "expansion":
-            r = berechne_expansion(d)
+            r = berechne_expansion(d, *_expansion_auto(nodes))
             if r is not None:
                 expansion_results[n["id"]] = r
         # Wärmezähler braucht keine eigene Rechnung: er übernimmt den
@@ -606,6 +736,9 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
         "pumpen_results": pumpen_results,
         "expansion_results": expansion_results,
         "leitung_results": leitung_results,
+        "anschluss_results": anschluss_results,
+        "pwt_results": pwt_results,
         "anschluss_warnings": anschluss_warnungen,
-        "warnungen": _sammle_warnungen(nodes, verteiler_results, anschluss_warnungen, ventil_results, expansion_results),
+        "warnungen": _sammle_warnungen(nodes, verteiler_results, anschluss_warnungen, ventil_results, expansion_results)
+                     + [f"Plattentauscher: {p['warnung']}" for p in pwt_results.values() if p.get("warnung")],
     }

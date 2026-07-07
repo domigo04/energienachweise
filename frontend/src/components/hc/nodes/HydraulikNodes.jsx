@@ -2,6 +2,7 @@ import { Handle, Position } from '@xyflow/react';
 import {
   SymPump, SymValve2V, SymValve3, SymCheckValve,
   SymShutoff, SymWE, SymVerbraucher, SymSpeicher, SymBypass,
+  SymSTAD, SymTemperatur, SymSicherheitsventil, SymPWT,
 } from './symbols';
 
 // Alle Handles als "source" + ConnectionMode.Loose → jeder mit jedem verbindbar
@@ -26,61 +27,49 @@ const wrap = (sel) => ({
   background: 'transparent',
   border: selBorder(sel),
   borderRadius: 6,
-  padding: 2,
+  padding: 0,   // kein Innenabstand → Fangpunkt-Prozente treffen exakt die Symbol-Mitte
   display: 'inline-block',
   position: 'relative',
 });
 
-function Label({ text, color = '#475569' }) {
-  if (!text) return null;
-  return (
-    <div style={{ fontSize: 9, textAlign: 'center', color, marginTop: 2, whiteSpace: 'nowrap' }}>
-      {text}
-    </div>
-  );
+// Bauteil-Namen unter dem Symbol entfernt (Dominic-Feedback): das Bauteil wird
+// übers Symbol + die Nummer (Legende) erkannt — kein Text-Untertitel nötig.
+function Label() {
+  return null;
 }
 
 // ── Pumpe ─────────────────────────────────────────────────────
 export function PumpNode({ data, selected: sel }) {
-  // Handles auf den Kreis-Mittelpunkt ausrichten (SymPump ist wegen des
-  // Motors rechts nicht mehr horizontal zentriert, viewBox 64x48 → 22/64).
+  // Ohne Motor ist der Kreis mittig → Anschlüsse oben/unten zentriert.
   return (
     <div style={wrap(sel)}>
-      {H(Position.Top,    'top',    { top: -6, left: '34%' })}
-      {H(Position.Bottom, 'bottom', { bottom: -6, left: '34%' })}
+      {H(Position.Top,    'top',    { top: -6 })}
+      {H(Position.Bottom, 'bottom', { bottom: -6 })}
       <SymPump />
       <Label text={data.label} />
     </div>
   );
 }
 
-// ── 2-Wege Regelventil (vertikal) ────────────────────────────
+// ── 2-Wege Regelventil (Flussachse rechts, Antrieb links → 75%) ──
 export function Valve2Node({ data, selected: sel }) {
   return (
     <div style={wrap(sel)}>
-      {H(Position.Top,    'top',    { top: -6,    background: '#1d4ed8' })}
-      {H(Position.Bottom, 'bottom', { bottom: -6, background: '#1d4ed8' })}
+      {H(Position.Top,    'top',    { top: -6,    left: '75%', background: '#1e293b' })}
+      {H(Position.Bottom, 'bottom', { bottom: -6, left: '75%', background: '#1e293b' })}
       <SymValve2V />
-      <Label text={data.label} color="#1d4ed8" />
+      <Label text={data.label} color="#1e293b" />
     </div>
   );
 }
 
-// ── 3-Wege Mischventil ───────────────────────────────────────
-// Handles: links=A, rechts=B, unten=AB, plus grosser Mittel-Handle
+// ── 3-Wege Mischventil (Flussachse ~63%, 3. Tor rechts) ──────
 export function Valve3Node({ data, selected: sel }) {
-  // SVG 66x84: Zentrum bei (33, 40) → ~50% breite, ~48% höhe
   return (
     <div style={{ ...wrap(sel), position: 'relative' }}>
-      {/* Port A – links */}
-      {H(Position.Left,   'left',   { left: -7,    top: '48%', background: '#1e293b' })}
-      {/* Port B – rechts */}
-      {H(Position.Right,  'right',  { right: -7,   top: '48%', background: '#1e293b' })}
-      {/* Port AB – unten */}
-      {H(Position.Bottom, 'bottom', { bottom: -7,  background: '#1e293b' })}
-      {/* Grosser transparenter Mittel-Handle für einfaches Verbinden */}
-      <Handle type="source" position={Position.Top} id="center"
-        style={{ top: '44%', left: '50%', width: 22, height: 22, borderRadius: '50%', background: 'transparent', border: '2px dashed rgba(124,58,237,0.4)', transform: 'translate(-50%,-50%)', cursor: 'crosshair' }} />
+      {H(Position.Top,    'top',    { top: -6,    left: '63%', background: '#1e293b' })}
+      {H(Position.Bottom, 'bottom', { bottom: -6, left: '63%', background: '#1e293b' })}
+      {H(Position.Right,  'right',  { right: -6,   top: '51%',  background: '#1e293b' })}
       <SymValve3 />
       <Label text={data.label} color="#1e293b" />
     </div>
@@ -111,6 +100,56 @@ export function ShutoffNode({ data, selected: sel }) {
       {H(Position.Right,  'right',  { right: -6 })}
       <SymShutoff />
       <Label text={data.label} />
+    </div>
+  );
+}
+
+// ── STAD-Strangregulierventil (nur Symbol + Fabrikat) ────────
+export function StadNode({ data, selected: sel }) {
+  return (
+    <div style={wrap(sel)}>
+      {H(Position.Top,    'top',    { top: -6 })}
+      {H(Position.Bottom, 'bottom', { bottom: -6 })}
+      <SymSTAD />
+      <Label text={data.label || 'STAD'} />
+    </div>
+  );
+}
+
+// ── Temperaturfühler (nur Symbol) ────────────────────────────
+export function TemperaturNode({ data, selected: sel }) {
+  return (
+    <div style={wrap(sel)}>
+      {H(Position.Left,   'left',   { left: -6, top: '55%' })}
+      {H(Position.Bottom, 'bottom', { bottom: -6, left: '38%' })}
+      <SymTemperatur />
+      <Label text={data.label} />
+    </div>
+  );
+}
+
+// ── Sicherheitsventil — ein Fangpunkt am roten Knoten (keine Leitung mehr) ───
+export function SicherheitsventilNode({ data, selected: sel }) {
+  return (
+    <div style={wrap(sel)}>
+      {H(Position.Left, 'an', { left: '12%', top: '61%', background: '#ef4444' })}
+      <SymSicherheitsventil />
+      <Label text={data.label || 'SV'} />
+    </div>
+  );
+}
+
+// ── Plattenwärmetauscher PWT (4 Tore an den Rauten-Ecken) ────
+export function PwtNode({ data, selected: sel }) {
+  return (
+    <div style={wrap(sel)}>
+      {/* Mitte der 4 Rauten-Seiten, oben/unten symmetrisch. Links = Primär
+          (oben EIN/VL, unten AUS/RL), rechts = Sekundär (oben AUS warm, unten EIN kalt). */}
+      {H(Position.Left,   'left',   { left: '27%', top: '35%', background: '#ef4444' })}
+      {H(Position.Bottom, 'bottom', { left: '27%', top: '77%', background: '#3b82f6' })}
+      {H(Position.Top,    'top',    { left: '59%', top: '35%', background: '#ef4444' })}
+      {H(Position.Right,  'right',  { left: '59%', top: '77%', background: '#3b82f6' })}
+      <SymPWT />
     </div>
   );
 }
@@ -304,7 +343,7 @@ export function GruppeNode({ data, selected: sel }) {
     <>
       <polygon points={`${cx - 9},${cyMid - 9} ${cx + 9},${cyMid - 9} ${cx},${cyMid}`} fill="white" stroke="#1e293b" strokeWidth="1.6" />
       <polygon points={`${cx - 9},${cyMid + 9} ${cx + 9},${cyMid + 9} ${cx},${cyMid}`} fill="white" stroke="#1e293b" strokeWidth="1.6" />
-      <circle cx={cx} cy={cyMid} r="2.2" fill="white" stroke="#1e293b" strokeWidth="1.2" />
+      <circle cx={cx} cy={cyMid} r="3" fill="#1e293b" />
     </>
   );
 
@@ -320,6 +359,18 @@ export function GruppeNode({ data, selected: sel }) {
         <line x1={cx} y1="285" x2={cx} y2={H} stroke="#3b82f6" strokeWidth="2.5" />
         {/* Primär-Fluss am Strangkopf */}
         <text x={cx + 8} y="12" fontSize="9" fill="#1e293b" fontFamily="monospace">{`m': ${kg(c.m_prim)}`}</text>
+        {/* Anschluss-Marker für separate Gruppe — beim roten Rechteck, auf Höhe
+            des Wärmeabgabe-Typs; koppelt über den Buchstaben (PHYSIK §9) */}
+        {data.hat_anschluss && (
+          <g>
+            <line x1="104" y1="192" x2="132" y2="192" stroke="#ef4444" strokeWidth="2.2" />
+            <polygon points="132,188 139,192 132,196" fill="#ef4444" />
+            <line x1="132" y1="208" x2="104" y2="208" stroke="#3b82f6" strokeWidth="2.2" />
+            <polygon points="104,204 97,208 104,212" fill="#3b82f6" />
+            <circle cx="122" cy="200" r="11" fill="white" stroke="#1e293b" strokeWidth="1.6" />
+            <text x="122" y="204" textAnchor="middle" fontSize="12" fontWeight="700" fill="#1e293b">{data.anschluss_buchstabe || 'A'}</text>
+          </g>
+        )}
         {/* Absperrventil oben */}
         <Absperr cyMid={30} />
         {/* Pumpe — Kreis + Durchmesserlinie + Dreieck nach unten (Flussrichtung) */}
@@ -482,17 +533,18 @@ export function AnschlussNode({ data, selected: sel }) {
       width: 70, height: 40, position: 'relative', cursor: 'grab',
       border: sel ? '2px solid #3b82f6' : '2px solid transparent', borderRadius: 6,
     }}>
-      <Handle type="source" position={Position.Left} id="vl"
-        style={{ left: -6, top: '25%', background: '#ef4444', width: 12, height: 12, borderRadius: 2, border: '2px solid white', boxShadow: '0 0 0 1px #ef4444' }} />
-      <Handle type="source" position={Position.Left} id="rl"
-        style={{ left: -6, top: '75%', background: '#3b82f6', width: 12, height: 12, borderRadius: 2, border: '2px solid white', boxShadow: '0 0 0 1px #3b82f6' }} />
+      {/* Anschlüsse vorne rechts (nicht beim Buchstaben) */}
+      <Handle type="source" position={Position.Right} id="vl"
+        style={{ right: -6, top: '28%', background: '#ef4444', width: 12, height: 12, borderRadius: 2, border: '2px solid white', boxShadow: '0 0 0 1px #ef4444' }} />
+      <Handle type="source" position={Position.Right} id="rl"
+        style={{ right: -6, top: '72%', background: '#3b82f6', width: 12, height: 12, borderRadius: 2, border: '2px solid white', boxShadow: '0 0 0 1px #3b82f6' }} />
       <svg viewBox="0 0 70 40" width="70" height="40">
-        <line x1="20" y1="10" x2="55" y2="10" stroke="#ef4444" strokeWidth="2.5" />
-        <polygon points="55,6 62,10 55,14" fill="#ef4444" />
-        <line x1="55" y1="30" x2="20" y2="30" stroke="#3b82f6" strokeWidth="2.5" />
-        <polygon points="20,26 13,30 20,34" fill="#3b82f6" />
-        <circle cx="5" cy="20" r="11" fill="white" stroke="#1e293b" strokeWidth="1.6" />
-        <text x="5" y="24" textAnchor="middle" fontSize="11" fontWeight="700" fill="#1e293b">{data.buchstabe || '?'}</text>
+        <circle cx="12" cy="20" r="11" fill="white" stroke="#1e293b" strokeWidth="1.6" />
+        <text x="12" y="24" textAnchor="middle" fontSize="11" fontWeight="700" fill="#1e293b">{data.buchstabe || '?'}</text>
+        <line x1="26" y1="11" x2="60" y2="11" stroke="#ef4444" strokeWidth="2.5" />
+        <polygon points="60,7 67,11 60,15" fill="#ef4444" />
+        <line x1="60" y1="29" x2="26" y2="29" stroke="#3b82f6" strokeWidth="2.5" />
+        <polygon points="26,25 19,29 26,33" fill="#3b82f6" />
       </svg>
     </div>
   );
@@ -540,7 +592,7 @@ export function LabelNode({ data }) {
 
 // ── Bauteil-Nummern (Pflichtenheft §10: Nummerierung + Legende) ──────
 // Jedes nummerierbare Bauteil bekommt ein rotes Badge (data.nr) oben rechts.
-export const NUMMERIERT = ['gruppe', 'heizkreis', 'pump', 'valve2', 'valve3', 'checkvalve', 'shutoff', 'erzeuger', 'speicher', 'verteiler', 'waermezaehler', 'expansion', 'bww'];
+export const NUMMERIERT = ['gruppe', 'heizkreis', 'pump', 'valve2', 'valve3', 'checkvalve', 'shutoff', 'erzeuger', 'speicher', 'verteiler', 'waermezaehler', 'expansion', 'bww', 'stad', 'sicherheitsventil', 'pwt'];
 
 function mitNr(Comp) {
   function MitNr(props) {
@@ -571,6 +623,10 @@ const BASIS_TYPES = {
   valve3:      Valve3Node,
   checkvalve:  CheckValveNode,
   shutoff:     ShutoffNode,
+  stad:        StadNode,
+  temperatur:  TemperaturNode,
+  sicherheitsventil: SicherheitsventilNode,
+  pwt:         PwtNode,
   junction:    JunctionNode,
   erzeuger:    ErzeugerNode,
   verbraucher: VerbraucherNode,
@@ -583,6 +639,30 @@ const BASIS_TYPES = {
   label:       LabelNode,
 };
 
+// ── Drehung um 90° (data.rotation) — nur für die Armaturen sinnvoll ──────────
+// Kreise (Zähler/HK) und beschriftete Kästen (WE/Speicher) bleiben aufrecht.
+export const ROTATABLE = new Set([
+  'pump', 'valve2', 'valve3', 'checkvalve', 'shutoff',
+  'stad', 'temperatur', 'sicherheitsventil', 'pwt',
+]);
+
+function mitRotation(Comp) {
+  function MitRotation(props) {
+    const rot = props.data?.rotation || 0;
+    if (!rot) return <Comp {...props} />;
+    return (
+      <div style={{ transform: `rotate(${rot}deg)`, transformOrigin: 'center center', display: 'inline-block' }}>
+        <Comp {...props} />
+      </div>
+    );
+  }
+  return MitRotation;
+}
+
 export const NODE_TYPES = Object.fromEntries(
-  Object.entries(BASIS_TYPES).map(([k, C]) => [k, NUMMERIERT.includes(k) ? mitNr(C) : C])
+  Object.entries(BASIS_TYPES).map(([k, C]) => {
+    let W = ROTATABLE.has(k) ? mitRotation(C) : C;
+    if (NUMMERIERT.includes(k)) W = mitNr(W);   // Nr-Badge liegt ausserhalb der Drehung
+    return [k, W];
+  })
 );

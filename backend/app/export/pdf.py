@@ -19,10 +19,12 @@ TITEL = {
     "gruppe": "Verbrauchergruppe", "heizkreis": "Heizkreis", "pump": "Pumpe",
     "valve2": "2-Wege Regelventil", "valve3": "3-Wege Mischventil",
     "erzeuger": "Wärmeerzeuger", "verteiler": "Verteiler", "speicher": "Speicher",
-    "checkvalve": "Rückschlagventil", "shutoff": "Absperrventil",
+    "checkvalve": "Rückschlagventil", "shutoff": "Kugelhahn / Absperrventil",
     "junction": "T-Stück", "verbraucher": "Verbraucher",
     "waermezaehler": "Wärmezähler", "expansion": "Expansionsgefäss",
     "bww": "Brauchwarmwasser-Speicher", "anschluss": "Anschluss-Marker",
+    "stad": "STAD-Strangregulierventil", "temperatur": "Temperaturfühler",
+    "sicherheitsventil": "Sicherheitsventil", "pwt": "Plattentauscher (PWT)",
 }
 INHALT_TEXT = {"schema": "Nur Schema", "berechnungen": "Nur Berechnungen", "beides": "Schema + Berechnungen"}
 
@@ -146,7 +148,7 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
                 resultate += [("Ventil: V' (primär)", _fmt(ve.get("v")), "m³/h"),
                               ("Ventil: kvs theoretisch", _fmt(ve.get("kvs_theor")), ""),
                               ("Ventil: kvs gewählt", ve.get("kvs_eff"), ""),
-                              ("Ventil: Δpv effektiv", _fmt(ve.get("dp_v_eff_kpa"), 2), "kPa"),
+                              ("Ventil: Δp Ventil", _fmt(ve.get("dp_v_eff_kpa"), 2), "kPa"),
                               ("Ventil: Autorität Pv", _fmt(ve.get("pv"), 1), "%")]
         elif t == "heizkreis":
             eingaben = [("Leistung Q", d.get("q_kw"), "kW"), ("Vorlauf VL", d.get("vl_temp"), "°C"),
@@ -168,7 +170,7 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
             if ve:
                 resultate = [("kvs theoretisch", _fmt(ve.get("kvs_theor")), "m³/h·bar^0.5"),
                              ("kvs Vorschlag (Norm-Reihe)", ve.get("kvs_vorschlag"), ""),
-                             ("Δpv effektiv", _fmt(ve.get("dp_v_eff_kpa"), 2), "kPa"),
+                             ("Δp Ventil", _fmt(ve.get("dp_v_eff_kpa"), 2), "kPa"),
                              ("Ventilautorität Pv", _fmt(ve.get("pv"), 1), "%")]
         elif t == "pump":
             p = (results.get("pumpen_results") or {}).get(n["id"], {})
@@ -186,9 +188,11 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
             ex = (results.get("expansion_results") or {}).get(n["id"])
             medium = {"heizungswasser": "Heizungswasser", "frostschutz30": "Frostschutz 30 %",
                       "frostschutz40": "Frostschutz 40 %", "ews": "Erdsonden (EWS)"}.get(d.get("medium") or "heizungswasser")
-            eingaben = [("Anlageinhalt Vsys", d.get("anlageinhalt_l"), "l"), ("Speicherinhalt Vsto", d.get("speicher_l") or 0, "l"),
-                        ("Medium", medium, ""), ("Mitteltemperatur", d.get("t_mittel"), "°C"),
-                        ("Erzeugerleistung", d.get("leistung_kw"), "kW"),
+            exv = ex if (ex and "fehler" not in ex) else {}
+            eingaben = [("Anlageinhalt Vsys (aus Rohrtabelle)", exv.get("vsys_l", d.get("anlageinhalt_l")), "l"),
+                        ("Speicherinhalt Vsto", d.get("speicher_l") or 0, "l"),
+                        ("Medium", medium, ""), ("Mitteltemperatur (auto: höchste VL)", exv.get("t_mittel", d.get("t_mittel")), "°C"),
+                        ("Erzeugerleistung (auto)", exv.get("leistung_kw", d.get("leistung_kw")), "kW"),
                         ("Statische Höhe", d.get("hoehe_m"), "m"), ("SV-Ansprechdruck pSV", d.get("psv_bar"), "bar")]
             if ex and "fehler" not in ex:
                 resultate = [("Ausdehnung e", ex["e"], ""), ("Faktor X (Wasserreserve)", ex["x"], ""),

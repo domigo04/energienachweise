@@ -137,3 +137,21 @@ Ersetzt eine lang quer durchs Schema gezeichnete Leitung durch zwei kurze Pfeil-
   sehr nah an 700).
 - Leitung anklicken → Länge [m] eintragen → `Δp = Pa/m · Länge / 1000 [kPa]` (gleiche Formel wie
   bei Pumpe/Gruppe, PHYSIK §5).
+
+## 11. Plattentauscher / Systemtrennung (Dominic-Feedback 2026-07-07)
+Der Plattentauscher (PWT) trennt zwei Kreise hydraulisch. **Links = Primär** (kommt von einer
+Verbrauchergruppe: oben Eintritt = Gruppen-VL, unten Austritt = Gruppen-RL). **Rechts = Sekundär**
+im **Gegenstrom** (unten Eintritt kalt, oben Austritt warm).
+- **Leistung Q wird von der Gruppe übernommen** (das PWT sucht über die Primärseite die speisende Gruppe).
+- **Sekundär-Temperaturen gibt der Anwender selbst ein** (mind. 1 K Verlust über den Tauscher).
+- **Q bleibt gleich** → Sekundär-Massenstrom `ṁ_sek = Q / (1.163 · (VL_sek − RL_sek))`.
+  Grösseres ΔT_sek → kleinerer Fluss, kleineres ΔT_sek → grösserer Fluss. Die Sekundär-Leitungen
+  tragen ṁ_sek (→ Dimensionierung).
+- **Warnung**, wenn Sekundär-VL > Primär-VL — über den Tauscher physikalisch nicht möglich.
+
+## 12. Untergruppe an einer Verbrauchergruppe (Anschluss-Marker, Dominic 2026-07-07)
+Eine Verbrauchergruppe kann «Anschluss für separate Gruppe» aktivieren (Buchstabe). Damit hängen
+hydraulisch **Hauptgruppe → Untergruppe(n) seriell** aneinander (z.B. Hauptlüftungsgruppe →
+mehrere Lufterhitzer-Monoblöcke). Fluss (ṁ_sek) **plus** Leistung Q und VL/RL der Gruppe werden an
+den gleichnamigen Anschluss-Marker übertragen; die Leitung ab dem Marker trägt diesen Fluss (→
+Dimensionierung), ohne dass eine lange Leitung quer durchs Schema gezeichnet werden muss.

@@ -137,8 +137,9 @@ def test_svg_zeigt_automatische_dn(daten):
     nodes, edges, results = daten
     svg = erzeuge_svg(nodes, edges, results)
     # e_vlm/e_rlm tragen 1.1662 m³/h = 1166.2 kg/h → DN32 (DN25 reicht bei 70 Pa/m nicht)
+    # Neues Label-Format: DN gross oben, Massenstrom m' in kg/h darunter (Pa/m nur im Klick-Panel)
     assert "DN32" in svg
-    assert "Pa/m" in svg
+    assert "1'166 kg/h" in svg
 
 
 # ── Anschluss-Marker (PHYSIK §9) ─────────────────────────────────────────────
@@ -157,3 +158,66 @@ def test_anschluss_in_legende_und_pdf():
     reader = PdfReader(io.BytesIO(pdf))
     text = "\n".join(p.extract_text() or "" for p in reader.pages)
     assert "kein Gegenstück gefunden" in text
+
+
+# ── Drehung um 90° (data.rotation) ──────────────────────────────────────────
+def test_drehung_dreht_anschluss_und_symbol():
+    from app.export.schema_svg import node_groesse
+    node = {"id": "kh", "type": "shutoff", "position": {"x": 100, "y": 100}, "data": {"rotation": 90}}
+    w, h = node_groesse(node)
+    cx, cy = 100 + w / 2, 100 + h / 2
+    # ungedreht sitzt «top» mittig oben …
+    assert handle_pos({**node, "data": {}}, "top") == (cx, 100)
+    # … nach 90° im Uhrzeigersinn wandert er auf die rechte Seite (halbe Höhe)
+    assert handle_pos(node, "top") == (cx + (cy - 100), cy)
+    # und das SVG dreht nur das Symbol (rotate-Transform vorhanden)
+    assert "rotate(90" in erzeuge_svg([node], [], {})
+
+
+# ── Anschluss «für separate Gruppe» direkt an der Verbrauchergruppe (§9) ─────
+def test_gruppe_anschluss_koppelt_und_zeichnet():
+    from app.calculations.hydraulik import _anschluss_gruppen, _anschluss_warnungen
+    g = {"id": "g", "type": "gruppe", "position": {"x": 0, "y": 0},
+         "data": {"q_kw": "5", "vl_temp": "35", "rl_temp": "28", "hat_anschluss": True, "anschluss_buchstabe": "A"}}
+    m = {"id": "m", "type": "anschluss", "position": {"x": 300, "y": 0}, "data": {"buchstabe": "A"}}
+    assert _anschluss_gruppen([g, m])["A"] == ["g", "m"]   # Gruppe zählt als Marker
+    assert _anschluss_warnungen([g, m]) == []              # Gegenstück gefunden → keine Warnung
+    assert _anschluss_warnungen([g])                       # allein → Warnung
+    svg = erzeuge_svg([g], [], berechne_schema([g], []))
+    assert ">A</text>" in svg                              # Buchstabe an der Gruppe gezeichnet
+
+
+def test_gruppen_anschluss_uebertraegt_fluss_und_kennwerte():
+    # Gruppe mit Häkchen, aber Buchstabe NICHT getippt (UI-Default 'A') → muss trotzdem koppeln
+    nodes = [
+        {"id": "g", "type": "gruppe", "position": {"x": 0, "y": 0},
+         "data": {"q_kw": "10", "vl_temp": "60", "rl_temp": "45", "hat_anschluss": True}},
+        {"id": "m", "type": "anschluss", "position": {"x": 300, "y": 0}, "data": {"buchstabe": "A"}},
+        {"id": "le", "type": "heizkreis", "position": {"x": 500, "y": 0}, "data": {"q_kw": "0"}},
+    ]
+    edges = [{"id": "e_out", "source": "m", "sourceHandle": "vl", "target": "le", "targetHandle": "vl", "stroke": VL}]
+    r = berechne_schema(nodes, edges)
+    m_sek = 10 / (1.163 * 15)                                   # ≈ 0.573 m³/h
+    assert r["node_flows"]["m"] == pytest.approx(m_sek, abs=1e-3)     # Marker trägt Gruppenfluss
+    assert r["edge_flows"]["e_out"] == pytest.approx(m_sek, abs=1e-3)  # Leitung ab Marker dimensioniert
+    ar = r["anschluss_results"]["m"]
+    assert ar["q_kw"] == 10 and ar["vl"] == 60 and ar["rl"] == 45      # Leistung + VL/RL übertragen
+    assert not any("kein Gegenstück" in w for w in r["anschluss_warnings"])  # Default 'A' koppelt
+
+
+def test_gruppen_anschluss_uebertraegt_fluss():
+    # Gruppe (Anschluss A) → separater Marker A → Leitung auf einen Lufterhitzer.
+    # Die Leitung ab dem Marker muss die Wassermenge der Gruppe tragen.
+    nodes = [
+        {"id": "g", "type": "gruppe", "position": {"x": 0, "y": 0},
+         "data": {"q_kw": "5", "vl_temp": "35", "rl_temp": "28", "hat_anschluss": True, "anschluss_buchstabe": "A"}},
+        {"id": "m", "type": "anschluss", "position": {"x": 400, "y": 0}, "data": {"buchstabe": "A"}},
+        {"id": "lh", "type": "verbraucher", "position": {"x": 520, "y": 0}, "data": {"label": "Lufterhitzer"}},
+    ]
+    edges = [{"id": "e_lh", "source": "m", "target": "lh", "stroke": VL}]
+    r = berechne_schema(nodes, edges)
+    m_sek = r["gruppe_results"]["g"]["m_sek"]               # 5/(1.163·7) = 0.6142 m³/h
+    assert m_sek == pytest.approx(0.6142, abs=0.001)
+    assert r["node_flows"]["m"] == pytest.approx(m_sek, abs=0.001)   # Marker trägt den Fluss
+    assert r["edge_flows"]["e_lh"] == pytest.approx(m_sek, abs=0.001)  # Leitung ab Marker auch
+    assert not any("kein Gegenstück" in w for w in r["anschluss_warnings"])

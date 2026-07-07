@@ -106,3 +106,44 @@ def test_expansion_stufen_faktoren_fehler():
     r2 = berechne_expansion({"anlageinhalt_l": "500", "t_mittel": "50", "leistung_kw": "10", "hoehe_m": "30", "psv_bar": "3"})
     assert "fehler" in r2
     assert berechne_expansion({"anlageinhalt_l": "500"}) is None  # Eingaben fehlen
+
+
+def test_expansion_rohrinhalt_und_automatik():
+    from app.calculations.expansion import anlageinhalt_vsys
+    from app.calculations.hydraulik import berechne_schema
+    # Rohrinhalt-Tabelle (l/m aus Excel) + Zusatz-Bauteil → Vsys
+    vs = anlageinhalt_vsys({"rohre": {"DN25": "10", "DN32": "20"}, "zusatz": [{"name": "Heizkessel", "liter": "50"}]})
+    assert vs == pytest.approx(10 * 0.581 + 20 * 1.122 + 50, abs=0.01)   # 78.25 l
+    # Override «Falls Volumen bekannt» schlägt die Tabelle
+    assert anlageinhalt_vsys({"anlageinhalt_l": "2133.2", "rohre": {"DN25": "10"}}) == 2133.2
+    # Automatik im Schema: t_mittel = höchste Gruppen-VL, Leistung = Erzeuger
+    nodes = [
+        {"id": "we", "type": "erzeuger", "position": {"x": 0, "y": 0}, "data": {"leistung_kw": "91"}},
+        {"id": "g", "type": "gruppe", "position": {"x": 0, "y": 0}, "data": {"q_kw": "40", "vl_temp": "60", "rl_temp": "45"}},
+        {"id": "ex", "type": "expansion", "position": {"x": 0, "y": 0}, "data": {"rohre": {"DN25": "100"}, "hoehe_m": "10", "psv_bar": "3"}},
+    ]
+    ex = berechne_schema(nodes, [])["expansion_results"]["ex"]
+    assert ex["t_mittel"] == 60 and ex["leistung_kw"] == 91          # automatisch übernommen
+    assert ex["vsys_l"] == pytest.approx(58.1, abs=0.1)              # 100 m DN25
+
+
+def test_pwt_systemtrennung():
+    from app.calculations.hydraulik import berechne_schema
+    VL = "#ef4444"
+    nodes = [
+        {"id": "g", "type": "gruppe", "position": {"x": 0, "y": 0}, "data": {"q_kw": "10", "vl_temp": "60", "rl_temp": "45"}},
+        {"id": "pwt", "type": "pwt", "position": {"x": 200, "y": 0}, "data": {"vl_sek": "50", "rl_sek": "40"}},
+        {"id": "le", "type": "heizkreis", "position": {"x": 400, "y": 0}, "data": {"q_kw": "0"}},
+    ]
+    edges = [
+        {"id": "prim", "source": "g", "sourceHandle": "vl", "target": "pwt", "targetHandle": "left", "stroke": VL},
+        {"id": "sek", "source": "pwt", "sourceHandle": "top", "target": "le", "targetHandle": "vl", "stroke": VL},
+    ]
+    pr = berechne_schema(nodes, edges)["pwt_results"]["pwt"]
+    assert pr["q_kw"] == 10 and pr["vl_prim"] == 60 and pr["rl_prim"] == 45     # Primär von Gruppe übernommen
+    m_sek = 10 / (1.163 * 10)                                                   # ΔT_sek 10 → 0.860 m³/h
+    assert pr["m_sek"] == pytest.approx(m_sek, abs=1e-3) and pr["dt_sek"] == 10
+    assert berechne_schema(nodes, edges)["edge_flows"]["sek"] == pytest.approx(m_sek, abs=1e-3)  # Leitung trägt m_sek
+    # Sekundär-VL höher als Primär-VL → Warnung
+    nodes[1]["data"] = {"vl_sek": "65", "rl_sek": "40"}
+    assert any("höher als Primär" in w for w in berechne_schema(nodes, edges)["warnungen"])

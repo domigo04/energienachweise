@@ -29,6 +29,38 @@ E_TABELLE = {
 # Handelsübliche Nenngrössen [Liter]
 NORM_GROESSEN = [8, 12, 18, 25, 35, 50, 80, 100, 140, 200, 250, 300, 400, 500, 600, 800, 1000]
 
+# Rohrinhalt [Liter/m] je Dimension — 1:1 aus Dominics Excel («Anlage - Inhalte»).
+# Reihenfolge = Anzeige-Reihenfolge im Editor; Schlüssel = das, was node.data.rohre trägt.
+ROHR_INHALT = {
+    "12/16": 0.113, "13/17": 0.133, "14/18": 0.154, "16/20": 0.201,
+    "DN10": 0.123, "DN15": 0.201, "DN20": 0.366, "DN25": 0.581,
+    "DN32": 1.122, "DN40": 1.499, "DN50": 2.332, "DN65": 3.880,
+    "DN80": 5.343, "DN100": 9.004, "DN125": 13.6, "DN150": 19.9, "DN200": 33.8,
+}
+
+# Zusatz-Bauteile mit festem Liter-Inhalt (Excel-Spalte «Bezeichnung»); Speicher
+# zählt separat als Vsto, darum hier NICHT enthalten.
+ZUSATZ_BEZEICHNUNGEN = ["Heizkessel", "Vorschaltgefäss", "WW-Erwärmer", "Heizkörper",
+                        "Plattentauscher", "Lufterhitzer", "Sonden", "Verteiler EWS"]
+
+
+def anlageinhalt_vsys(d: dict) -> Optional[float]:
+    """Vsys [l] = «Falls Volumen bekannt» (Override), sonst Summe aus Rohren
+    (Meter × l/m) plus frei definierten Zusatz-Bauteilen (Liter)."""
+    override = _f(d.get("anlageinhalt_l"))
+    if override and override > 0:
+        return override
+    total = 0.0
+    for dim, meter in (d.get("rohre") or {}).items():
+        m, lm = _f(meter), ROHR_INHALT.get(dim)
+        if m and lm:
+            total += m * lm
+    for z in (d.get("zusatz") or []):
+        liter = _f(z.get("liter")) if isinstance(z, dict) else _f(z)
+        if liter:
+            total += liter
+    return round(total, 2) if total > 0 else None
+
 
 def _f(x) -> Optional[float]:
     try:
@@ -57,17 +89,23 @@ def faktor_x(leistung_kw: float) -> float:
     return 3.0 - (kw - 10) * (1.5 / 140)
 
 
-def berechne_expansion(d: dict) -> Optional[dict]:
+def berechne_expansion(d: dict, auto_vl=None, auto_leistung_kw=None) -> Optional[dict]:
     """Nennvolumen VN nach Dominics Excel-Methode.
 
-    Eingaben (node.data): anlageinhalt_l (Vsys), speicher_l (Vsto, optional),
-    t_mittel, leistung_kw, medium (heizungswasser|frostschutz30|frostschutz40|ews),
-    hoehe_m (statische Höhe), psv_bar (SV-Ansprechdruck).
+    Vsys kommt aus der Rohrinhalt-Tabelle (rohre {Dimension: Meter}) + Zusatz-
+    Bauteilen (zusatz [{name, liter}]) — oder aus anlageinhalt_l als Override.
+    Fehlen t_mittel / leistung_kw am Bauteil, werden sie automatisch aus dem
+    Schema genommen (auto_vl = höchste Gruppen-VL, auto_leistung_kw = Erzeuger/ΣQ).
+    Weiter: speicher_l (Vsto), medium, hoehe_m (statische Höhe), psv_bar.
     """
-    vsys = _f(d.get("anlageinhalt_l"))
+    vsys = anlageinhalt_vsys(d)
     vsto = _f(d.get("speicher_l")) or 0.0
     t_mittel = _f(d.get("t_mittel"))
+    if t_mittel is None:
+        t_mittel = _f(auto_vl)              # automatisch: höchste Gruppen-VL
     leistung = _f(d.get("leistung_kw"))
+    if leistung is None:
+        leistung = _f(auto_leistung_kw)     # automatisch: aus dem Schema
     hoehe = _f(d.get("hoehe_m"))
     psv = _f(d.get("psv_bar"))
     medium = str(d.get("medium") or "heizungswasser")
@@ -91,6 +129,9 @@ def berechne_expansion(d: dict) -> Optional[dict]:
     vn = vex_tot * (pfin + 1) / (pfin - p0)
     vorschlag = next((g for g in NORM_GROESSEN if g >= vn), NORM_GROESSEN[-1])
     return {
+        "vsys_l": round(vsys, 2),
+        "t_mittel": t_mittel,
+        "leistung_kw": leistung,
         "e": round(e, 5),
         "x": round(x, 3),
         "vex_l": round(vsys * e, 2),

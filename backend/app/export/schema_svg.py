@@ -25,12 +25,13 @@ GR_W, GR_H, GR_CX = 150, 400, 75
 
 # Grössen der übrigen Bauteile (aus symbols.jsx)
 GROESSEN = {
-    "heizkreis": (74, 74), "pump": (48, 48), "valve2": (68, 66),
-    "valve3": (70, 88), "checkvalve": (48, 48), "shutoff": (48, 48),
+    "heizkreis": (74, 74), "pump": (48, 48), "valve2": (44, 40),
+    "valve3": (52, 40), "checkvalve": (48, 48), "shutoff": (19, 41),
     "erzeuger": (92, 72), "verbraucher": (68, 50), "speicher": (60, 104),
     "junction": (46, 46), "label": (120, 16),
     "waermezaehler": (48, 48), "expansion": (76, 125), "bww": (60, 104),
-    "anschluss": (60, 40),
+    "anschluss": (60, 40), "stad": (18, 41), "temperatur": (52, 38),
+    "sicherheitsventil": (80, 67), "pwt": (94, 68),
 }
 
 
@@ -82,6 +83,20 @@ def node_groesse(node):
 
 
 def handle_pos(node, handle: Optional[str]):
+    """Anschluss-Position inkl. optionaler Drehung (data.rotation) um die Bauteil-Mitte."""
+    px, py = _handle_pos_base(node, handle)
+    rot = int(_f((node.get("data") or {}).get("rotation")) or 0) % 360
+    if rot:
+        x = (node.get("position") or {}).get("x", 0)
+        y = (node.get("position") or {}).get("y", 0)
+        w, h = node_groesse(node)
+        cx, cy = x + w / 2, y + h / 2
+        for _ in range(rot // 90):
+            px, py = cx - (py - cy), cy + (px - cx)  # 90° im Uhrzeigersinn (wie CSS rotate)
+    return (px, py)
+
+
+def _handle_pos_base(node, handle: Optional[str]):
     """Absolute Position eines Anschlusses — gleiche Logik wie im Editor."""
     x = (node.get("position") or {}).get("x", 0)
     y = (node.get("position") or {}).get("y", 0)
@@ -114,11 +129,23 @@ def handle_pos(node, handle: Optional[str]):
         return {"top-l": (x + w * 0.3, y), "top-r": (x + w * 0.7, y),
                 "bot-l": (x + w * 0.3, y + h), "bot-r": (x + w * 0.7, y + h),
                 "left": (x, y + h / 2), "right": (x + w, y + h / 2)}.get(handle, (x + w / 2, y + h / 2))
-    if t == "anschluss":
-        return {"vl": (x, y + h * 0.3), "rl": (x, y + h * 0.7)}.get(handle, (x, y + h / 2))
+    if t == "anschluss":  # Anschlüsse vorne rechts (nicht beim Buchstaben)
+        return {"vl": (x + w, y + h * 0.28), "rl": (x + w, y + h * 0.72)}.get(handle, (x + w, y + h / 2))
     if t == "expansion":
         return {"bottom": (x + w * (121 / 248), y + h)}.get(handle, (x + w * (121 / 248), y + h / 2))
-    # pump, valve2, valve3, checkvalve, shutoff, default
+    if t == "valve2":  # Flussachse rechts (Antrieb links)
+        return {"top": (x + w * 0.75, y), "bottom": (x + w * 0.75, y + h)}.get(handle, (x + w * 0.75, y + h / 2))
+    if t == "valve3":  # Flussachse ~63 %, 3. Tor rechts
+        return {"top": (x + w * 0.63, y), "bottom": (x + w * 0.63, y + h),
+                "right": (x + w, y + h * 0.51)}.get(handle, (x + w * 0.63, y + h / 2))
+    if t == "sicherheitsventil":  # ein Fangpunkt am roten Knoten (x=24/199≈12%, y=102/167≈61%)
+        return (x + w * 0.12, y + h * 0.61)
+    if t == "pwt":  # Mitte der 4 Rauten-Seiten (eng am Rand), nicht an den Ecken
+        return {"left": (x + w * 0.274, y + h * 0.349), "top": (x + w * 0.594, y + h * 0.349),
+                "bottom": (x + w * 0.274, y + h * 0.768), "right": (x + w * 0.594, y + h * 0.768)}.get(handle, (x + w / 2, y + h / 2))
+    if t == "temperatur":
+        return {"left": (x, y + h * 0.55), "bottom": (x + w * 0.38, y + h)}.get(handle, (x + w / 2, y + h / 2))
+    # pump, stad, checkvalve, shutoff, default
     return {"top": (x + w / 2, y), "bottom": (x + w / 2, y + h),
             "left": (x, y + h / 2), "right": (x + w, y + h / 2)}.get(handle, (x + w / 2, y + h / 2))
 
@@ -136,30 +163,105 @@ def _absperr(parts, cx, cy, farbe="#1e293b"):
     (Vorlage «Kugelhahn.svg», Dominic-Feedback — nicht mehr schwarz gefüllt)."""
     parts.append(f'<polygon points="{cx - 9},{cy - 9} {cx + 9},{cy - 9} {cx},{cy}" fill="white" stroke="{farbe}" stroke-width="1.6"/>')
     parts.append(f'<polygon points="{cx - 9},{cy + 9} {cx + 9},{cy + 9} {cx},{cy}" fill="white" stroke="{farbe}" stroke-width="1.6"/>')
-    parts.append(f'<circle cx="{cx}" cy="{cy}" r="2.2" fill="white" stroke="{farbe}" stroke-width="1.2"/>')
+    parts.append(f'<circle cx="{cx}" cy="{cy}" r="3" fill="{farbe}"/>')
 
 
-def _pumpe(parts, cx, cy, r=15, nach_unten=False, mit_motor=False):
+def _pumpe(parts, cx, cy, r=15, nach_unten=False):
     """Kreis + Durchmesserlinie + gefülltes Dreieck (Vorlage «pumpe_genau.svg»).
-    `mit_motor` zeichnet zusätzlich den Motor rechts (nur für Einzelbauteile,
-    im schmalen Gruppen-Strang reicht die Pumpe ohne Motor)."""
+    Ohne Motor-Kasten (Dominic-Feedback: brauchen wir nicht)."""
     parts.append(f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="white" stroke="#1e293b" stroke-width="2.2"/>')
     parts.append(f'<line x1="{cx - r}" y1="{cy}" x2="{cx + r}" y2="{cy}" stroke="#1e293b" stroke-width="1.8"/>')
     if nach_unten:  # Dreieck zeigt in Flussrichtung nach unten (zum Verbraucher)
         parts.append(f'<polygon points="{cx - r},{cy} {cx + r},{cy} {cx},{cy + r}" fill="#1e293b"/>')
     else:
         parts.append(f'<polygon points="{cx - r},{cy} {cx + r},{cy} {cx},{cy - r}" fill="#1e293b"/>')
-    if mit_motor:
-        parts.append(f'<line x1="{cx + r}" y1="{cy}" x2="{cx + r + 7}" y2="{cy}" stroke="#1e293b" stroke-width="1.6"/>')
-        parts.append(f'<rect x="{cx + r + 7}" y="{cy - 8}" width="16" height="16" rx="2" fill="#ffd35c" stroke="#ef8b2d" stroke-width="1.6"/>')
-        mx = cx + r + 15
-        parts.append(f'<path d="M {mx - 5} {cy + 3} L {mx - 5} {cy - 6} L {mx} {cy - 1} L {mx + 5} {cy - 6} L {mx + 5} {cy + 3}" '
-                     f'fill="none" stroke="#ef8b2d" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>')
 
 
 def _thermometer(parts, cx, cy):
     parts.append(f'<circle cx="{cx}" cy="{cy}" r="6" fill="white" stroke="#1e293b" stroke-width="1.4"/>')
     parts.append(f'<text x="{cx}" y="{cy + 3}" text-anchor="middle" font-size="7" font-weight="700" fill="#1e293b">T</text>')
+
+
+# ── SVG-Bauteil-Symbole 1:1 aus Dominics Vorlagen (in Node-Box skaliert) ────
+# Innere SVG-Fragmente je Bauteil, gezeichnet im Original-Koordinatensystem
+# der Vorlage-SVG. `SYM_VIEWBOX` = (minX, minY, vbBreite) je Typ.
+SYM_VIEWBOX = {
+    "valve2": (8, 6, 128), "valve3": (8, 6, 152), "shutoff": (78, 10, 52),
+    "stad": (0, 0, 60), "temperatur": (10, 6, 90),
+    "sicherheitsventil": (0, 0, 199), "pwt": (0, 0, 472),
+}
+
+
+def _sym(parts, x, y, w, typ, inner):
+    """Bettet ein Vorlage-SVG (Original-Koordinaten) in die Node-Box ein."""
+    minx, miny, vbw = SYM_VIEWBOX[typ]
+    s = w / vbw
+    parts.append(f'<g transform="translate({x - minx * s:.3f},{y - miny * s:.3f}) scale({s:.4f})">')
+    parts.extend(inner)
+    parts.append("</g>")
+
+
+_VENTIL_BASIS = [
+    '<line x1="65" y1="65" x2="90" y2="65" stroke="#ff9f00" stroke-width="4" stroke-linecap="round"/>',
+    '<polygon points="79,14 130,14 104,65" fill="white" stroke="#000" stroke-width="3.2" stroke-linejoin="round"/>',
+    '<polygon points="79,116 130,116 104,65" fill="white" stroke="#000" stroke-width="3.2" stroke-linejoin="round"/>',
+    '<circle cx="104" cy="65" r="12" fill="#000"/>',
+]
+SYM_INNER = {
+    "valve2": [
+        '<rect x="15" y="40" width="50" height="50" fill="#ffd34d" stroke="#ff9f00" stroke-width="3" stroke-linejoin="round"/>',
+        '<path d="M29 54 H50 L37 65 L50 76 H29" fill="none" stroke="#ff9f00" stroke-width="3" stroke-linejoin="round"/>',
+    ] + _VENTIL_BASIS,
+    "valve3": [
+        '<rect x="15" y="40" width="50" height="50" fill="#ffd34d" stroke="#ff9f00" stroke-width="3" stroke-linejoin="round"/>',
+        '<path d="M15 40 L65 90" stroke="#ff9f00" stroke-width="3"/>',
+        '<path d="M65 40 L15 90" stroke="#ff9f00" stroke-width="3"/>',
+        '<path d="M29 54 H50 L37 65 L50 76 H29" fill="none" stroke="#ff9f00" stroke-width="3" stroke-linejoin="round"/>',
+    ] + _VENTIL_BASIS + [
+        '<polygon points="116,65 156,41 156,89" fill="white" stroke="#000" stroke-width="3.2" stroke-linejoin="round"/>',
+    ],
+    "shutoff": [
+        '<polygon points="79,14 130,14 104,65" fill="white" stroke="#000" stroke-width="3.2" stroke-linejoin="round"/>',
+        '<polygon points="79,116 130,116 104,65" fill="white" stroke="#000" stroke-width="3.2" stroke-linejoin="round"/>',
+        '<circle cx="104" cy="65" r="13" fill="#000"/>',
+    ],
+    "stad": [
+        '<g fill="none" stroke="#1e293b" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">',
+        '<line x1="12" y1="11" x2="50" y2="11"/><path d="M12 11 L50 105"/><path d="M50 11 L12 105"/>',
+        '<line x1="12" y1="105" x2="50" y2="105"/><circle cx="31" cy="91" r="6"/>',
+        '<path d="M18 125 L31 112 L44 125"/><line x1="31" y1="112" x2="31" y2="133"/></g>',
+    ],
+    "temperatur": [
+        '<g fill="none" stroke="#1e293b" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">',
+        '<circle cx="38" cy="36" r="12"/><line x1="18" y1="56" x2="56" y2="18"/></g>',
+        '<polygon points="56,18 48,20 54,26" fill="#1e293b"/>',
+        '<text x="60" y="51" font-family="Arial" font-size="18" fill="#1e293b">T</text>',
+    ],
+    "sicherheitsventil": [
+        '<g fill="none" stroke="#ff0000" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">',
+        '<line x1="24" y1="102" x2="104" y2="102"/>',
+        '<line x1="104" y1="102" x2="104" y2="47"/><line x1="104" y1="47" x2="168" y2="47"/>',
+        '<line x1="168" y1="47" x2="168" y2="77"/></g>',
+        '<circle cx="24" cy="102" r="8" fill="#ff0000" stroke="#000" stroke-width="2"/>',
+        '<path d="M98 14 L111 18 L98 22 L111 26 L98 30 L111 34 L104 39" fill="none" stroke="#000" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>',
+        '<path d="M104 47 L136 31 L136 63 Z" fill="#fff" stroke="#000" stroke-width="3" stroke-linejoin="round"/>',
+        '<path d="M88 79 L120 79 L104 47 Z" fill="#fff" stroke="#000" stroke-width="3" stroke-linejoin="round"/>',
+        '<circle cx="104" cy="47" r="9" fill="#000"/>',
+        '<g fill="none" stroke="#8b4a12" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">',
+        '<path d="M143 151 L143 102"/><path d="M143 102 L155 102"/><path d="M155 102 L155 119"/>',
+        '<path d="M155 119 L168 119"/><path d="M168 119 L168 102"/><path d="M168 102 L178 88"/>',
+        '<path d="M168 102 L159 88"/></g>',
+    ],
+    "pwt": [
+        '<g fill="none" stroke="#000" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">',
+        '<path d="M205 48 L356 191 L205 334 L54 191 Z"/><line x1="205" y1="48" x2="205" y2="334"/>',
+        '</g>',
+        '<g font-family="Arial" font-size="34" fill="#000">',
+        '<text x="164" y="135">+</text><text x="220" y="135">-</text>',
+        '<text x="8" y="98">EIN</text><text x="350" y="98">AUS</text>',
+        '<text x="6" y="302">AUS</text><text x="352" y="302">EIN</text></g>',
+    ],
+}
 
 
 def zeichne_verteiler(parts, node, results):
@@ -209,6 +311,15 @@ def zeichne_gruppe(parts, node, results):
     # Primär-Fluss oben
     if c.get("m_prim") is not None:
         parts.append(f'<text x="{cx + 8}" y="{y + 12}" font-size="9" fill="#1e293b" font-family="monospace">m\': {_kg_h(c.get("m_prim"))} kg/h</text>')
+    # Anschluss-Marker für separate Gruppe — koppelt über den Buchstaben (PHYSIK §9)
+    if d.get("hat_anschluss"):
+        buchstabe = _esc(d.get("anschluss_buchstabe") or "A")
+        parts.append(f'<line x1="{x + 104}" y1="{y + 192}" x2="{x + 132}" y2="{y + 192}" stroke="{VL_FARBE}" stroke-width="2.2"/>')
+        parts.append(f'<polygon points="{x + 132},{y + 188} {x + 139},{y + 192} {x + 132},{y + 196}" fill="{VL_FARBE}"/>')
+        parts.append(f'<line x1="{x + 132}" y1="{y + 208}" x2="{x + 104}" y2="{y + 208}" stroke="{RL_FARBE}" stroke-width="2.2"/>')
+        parts.append(f'<polygon points="{x + 104},{y + 204} {x + 97},{y + 208} {x + 104},{y + 212}" fill="{RL_FARBE}"/>')
+        parts.append(f'<circle cx="{x + 122}" cy="{y + 200}" r="11" fill="white" stroke="#1e293b" stroke-width="1.6"/>')
+        parts.append(f'<text x="{x + 122}" y="{y + 204}" text-anchor="middle" font-size="12" font-weight="700" fill="#1e293b">{buchstabe}</text>')
     _absperr(parts, cx, y + 30)
     if hat_pumpe:
         _pumpe(parts, cx, y + 64, nach_unten=True)  # Dreieck zeigt zum roten Rechteck
@@ -274,6 +385,7 @@ def zeichne_standard(parts, node, results):
     w, h = node_groesse(node)
     cx, cy = x + w / 2, y + h / 2
     label = d.get("label")
+    sym_start = len(parts)  # Merker für die optionale Drehung (nur das Symbol)
 
     if t == "heizkreis":
         parts.append(f'<circle cx="{cx}" cy="{cy}" r="{w / 2}" fill="#f0fdf4" stroke="#16a34a" stroke-width="2.5"/>')
@@ -282,15 +394,10 @@ def zeichne_standard(parts, node, results):
         if v:
             parts.append(f'<text x="{cx}" y="{cy + 12}" text-anchor="middle" font-size="8" fill="#166534" font-family="monospace">{v:.3f} m³/h</text>')
     elif t == "pump":
-        _pumpe(parts, cx, cy, 17, mit_motor=True)
-    elif t in ("valve2", "valve3"):
-        farbe = "#1d4ed8" if t == "valve2" else "#1e293b"
-        parts.append(f'<polygon points="{cx - 12},{cy - 12} {cx + 12},{cy - 12} {cx},{cy}" fill="none" stroke="{farbe}" stroke-width="2.2"/>')
-        parts.append(f'<polygon points="{cx - 12},{cy + 12} {cx + 12},{cy + 12} {cx},{cy}" fill="none" stroke="{farbe}" stroke-width="2.2"/>')
-        parts.append(f'<circle cx="{cx}" cy="{cy}" r="4" fill="none" stroke="{farbe}" stroke-width="1.8"/>')
-        parts.append(f'<rect x="{cx + 14}" y="{cy - 7}" width="14" height="14" rx="2" fill="white" stroke="{farbe}" stroke-width="1.6"/>')
-        parts.append(f'<text x="{cx + 21}" y="{cy + 3.5}" text-anchor="middle" font-size="8" font-weight="700" fill="{farbe}">M</text>')
-    elif t in ("checkvalve", "shutoff"):
+        _pumpe(parts, cx, cy, 17)
+    elif t in ("valve2", "valve3", "shutoff", "stad", "temperatur", "sicherheitsventil", "pwt"):
+        _sym(parts, x, y, w, t, SYM_INNER[t])
+    elif t == "checkvalve":
         _absperr(parts, cx, cy)
     elif t in ("erzeuger", "verbraucher"):
         farbe = "#1e293b" if t == "erzeuger" else "#f97316"
@@ -306,15 +413,10 @@ def zeichne_standard(parts, node, results):
     elif t == "waermezaehler":
         parts.append(f'<circle cx="{cx}" cy="{cy}" r="16" fill="white" stroke="#0f766e" stroke-width="2.5"/>')
         parts.append(f'<text x="{cx}" y="{cy + 3.5}" text-anchor="middle" font-size="10" font-weight="700" fill="#0f766e">WZ</text>')
-        v = (results.get("node_flows") or {}).get(node["id"])
-        if v:
-            parts.append(f'<text x="{cx}" y="{y + h + 12}" text-anchor="middle" font-size="8" fill="#0f766e" font-family="monospace">{v:.3f} m³/h</text>')
     elif t == "expansion":
         # Exakte Dominic-Vorlage («ohne Beschriftung, ohne Füsse, unten rund»):
         # Kapsel-Körper mit zwei Bund-Linien + mittigem Höcker. Anschluss unten.
         scale = w / 248
-        ex = (results.get("expansion_results") or {}).get(node["id"])
-        txt = f"EGF {ex['vorschlag_l']} l" if ex and "fehler" not in ex else "EGF"
         parts.append(f'<g transform="translate({x},{y}) scale({scale})">')
         parts.append('<g fill="none" stroke="#1e293b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">')
         parts.append('<path fill="#d9d9d9" d="M54 33 C54 15 84 1 121 1 C158 1 188 15 188 33 L188 297 '
@@ -326,17 +428,16 @@ def zeichne_standard(parts, node, results):
         parts.append('</g>')
         parts.append('<line x1="121" y1="329" x2="121" y2="400" stroke="#3b82f6" stroke-width="6" stroke-dasharray="10,8"/>')
         parts.append('</g>')
-        parts.append(f'<text x="{cx}" y="{y + h + 12}" text-anchor="middle" font-size="8" font-weight="700" fill="#1e293b" font-family="monospace">{txt}</text>')
     elif t == "anschluss":
         # Anschluss-Marker (PHYSIK §9): roter Pfeil VL raus, blauer Pfeil RL rein,
         # gemeinsamer Buchstabe — ersetzt eine lang gezeichnete Leitung
         buchstabe = _esc(d.get("buchstabe") or "?")
-        parts.append(f'<line x1="{x + 20}" y1="{y + 10}" x2="{x + 55}" y2="{y + 10}" stroke="{VL_FARBE}" stroke-width="2.5"/>')
-        parts.append(f'<polygon points="{x + 55},{y + 6} {x + 62},{y + 10} {x + 55},{y + 14}" fill="{VL_FARBE}"/>')
-        parts.append(f'<line x1="{x + 55}" y1="{y + 30}" x2="{x + 20}" y2="{y + 30}" stroke="{RL_FARBE}" stroke-width="2.5"/>')
-        parts.append(f'<polygon points="{x + 20},{y + 26} {x + 13},{y + 30} {x + 20},{y + 34}" fill="{RL_FARBE}"/>')
-        parts.append(f'<circle cx="{x + 5}" cy="{y + 20}" r="11" fill="white" stroke="#1e293b" stroke-width="1.6"/>')
-        parts.append(f'<text x="{x + 5}" y="{y + 24}" text-anchor="middle" font-size="11" font-weight="700" fill="#1e293b">{buchstabe}</text>')
+        parts.append(f'<circle cx="{x + 12}" cy="{y + 20}" r="11" fill="white" stroke="#1e293b" stroke-width="1.6"/>')
+        parts.append(f'<text x="{x + 12}" y="{y + 24}" text-anchor="middle" font-size="11" font-weight="700" fill="#1e293b">{buchstabe}</text>')
+        parts.append(f'<line x1="{x + 26}" y1="{y + 11}" x2="{x + 52}" y2="{y + 11}" stroke="{VL_FARBE}" stroke-width="2.5"/>')
+        parts.append(f'<polygon points="{x + 52},{y + 7} {x + 59},{y + 11} {x + 52},{y + 15}" fill="{VL_FARBE}"/>')
+        parts.append(f'<line x1="{x + 52}" y1="{y + 29}" x2="{x + 26}" y2="{y + 29}" stroke="{RL_FARBE}" stroke-width="2.5"/>')
+        parts.append(f'<polygon points="{x + 26},{y + 25} {x + 19},{y + 29} {x + 26},{y + 33}" fill="{RL_FARBE}"/>')
         return
     elif t == "junction":
         parts.append(f'<line x1="{x}" y1="{y + 30}" x2="{x + 46}" y2="{y + 30}" stroke="#1e293b" stroke-width="6" stroke-linecap="round"/>')
@@ -344,8 +445,11 @@ def zeichne_standard(parts, node, results):
     elif t == "label":
         parts.append(f'<text x="{x}" y="{y + 11}" font-size="10" fill="#64748b">{_esc(label)}</text>')
         return
-    if label and t not in ("heizkreis", "erzeuger", "verbraucher", "label", "waermezaehler", "expansion"):
-        parts.append(f'<text x="{cx}" y="{y + h + 12}" text-anchor="middle" font-size="9" fill="#475569">{_esc(label)}</text>')
+    # Drehung um 90° (data.rotation): nur das Symbol dreht — Nr-Badge bleibt aufrecht.
+    rot = int(_f(d.get("rotation")) or 0) % 360
+    if rot:
+        parts.insert(sym_start, f'<g transform="rotate({rot} {cx:.2f} {cy:.2f})">')
+        parts.append("</g>")
     _nr_badge(parts, x + w, y, d.get("nr"))
 
 
@@ -376,9 +480,15 @@ def zeichne_edge(parts, edge, nodes_by_id, results):
     parts.append(f'<path d="{pfad}" fill="none" stroke="{stroke}" stroke-width="2.5"{dash}/>')
     fluss = (results.get("edge_flows") or {}).get(edge.get("id"))
     if fluss:
+        # Neues Label-Format (Dominic 2026-07-06): DN gross oben, Massenstrom m' in
+        # kg/h darunter. Pa/m steht weiter im Klick-Panel (LeitungPanel), nicht am Strich.
         lg = (results.get("leitung_results") or {}).get(edge.get("id"))
-        dim_txt = f" · {lg['dn']} · {lg['pam']:.0f} Pa/m" if lg else ""
-        parts.append(f'<text x="{lx}" y="{ly}" font-size="9" font-weight="600" fill="#1e293b" font-family="monospace">{fluss:.3f} m³/h{dim_txt}</text>')
+        dn = str(lg["dn"]).split(" ")[0] if lg else None  # nur der DN-Token, z.B. «DN32»
+        if dn:
+            parts.append(f'<text x="{lx}" y="{ly}" font-size="12" font-weight="800" fill="#1e293b" font-family="monospace">{dn}</text>')
+            parts.append(f'<text x="{lx}" y="{ly + 10}" font-size="8" font-weight="600" fill="#475569" font-family="monospace">m\' {_kg_h(fluss)} kg/h</text>')
+        else:
+            parts.append(f'<text x="{lx}" y="{ly}" font-size="9" font-weight="600" fill="#1e293b" font-family="monospace">m\' {_kg_h(fluss)} kg/h</text>')
 
 
 def erzeuge_svg(nodes: list, edges: list, results: dict) -> str:

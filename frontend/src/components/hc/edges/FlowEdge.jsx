@@ -1,18 +1,17 @@
 import { BaseEdge, EdgeLabelRenderer } from '@xyflow/react';
 
-// CAD-Leitung (Dominic-Feedback): nur senkrecht / waagrecht / 45°, ein einziger
-// Knick. Fluchten die Punkte → gerade Linie; sonst gerade im dominanten Teil +
-// 45°-Diagonale bis zum Ziel. Keine schrägen Zufallswinkel, so wenig Bögen wie möglich.
+// CAD-Leitung: rechte Winkel (senkrecht/waagrecht), kein 45°. Fluchtet → gerade,
+// sonst V-H-V (senkrecht-dominant) bzw. H-V-H (waagrecht-dominant).
 function pfad(sourceX, sourceY, targetX, targetY) {
   const dx = targetX - sourceX, dy = targetY - sourceY;
   const adx = Math.abs(dx), ady = Math.abs(dy);
-  if (adx < 0.5 || ady < 0.5) {           // fluchtet → gerade
-    return `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`;
+  if (adx < 0.5 || ady < 0.5) return `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`;
+  if (ady >= adx) {
+    const my = (sourceY + targetY) / 2;
+    return `M ${sourceX} ${sourceY} V ${my} H ${targetX} V ${targetY}`;
   }
-  const diag = Math.min(adx, ady);
-  const kx = ady >= adx ? sourceX : targetX - Math.sign(dx) * diag;  // Knickpunkt
-  const ky = ady >= adx ? targetY - Math.sign(dy) * diag : sourceY;
-  return `M ${sourceX} ${sourceY} L ${kx} ${ky} L ${targetX} ${targetY}`;
+  const mx = (sourceX + targetX) / 2;
+  return `M ${sourceX} ${sourceY} H ${mx} V ${targetY} H ${targetX}`;
 }
 
 export function FlowEdge({ id, sourceX, sourceY, targetX, targetY, style = {}, label }) {

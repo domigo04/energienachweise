@@ -462,16 +462,16 @@ def zeichne_edge(parts, edge, nodes_by_id, results):
     x2, y2 = handle_pos(ziel, edge.get("targetHandle"))
     stroke = edge.get("stroke") or (edge.get("style") or {}).get("stroke") or "#1e293b"
     dash = ' stroke-dasharray="8,5"' if stroke == RL_FARBE else ""
-    # CAD-Leitung wie FlowEdge.jsx: nur senkrecht/waagrecht/45°, ein einziger Knick.
+    # CAD-Leitung wie FlowEdge.jsx: rechte Winkel (kein 45°), V-H-V bzw. H-V-H.
     dx, dy = x2 - x1, y2 - y1
-    adx, ady = abs(dx), abs(dy)
-    if adx < 0.5 or ady < 0.5:              # fluchtet → gerade
+    if abs(dx) < 0.5 or abs(dy) < 0.5:      # fluchtet → gerade
         pfad = f"M {x1} {y1} L {x2} {y2}"
+    elif abs(dy) >= abs(dx):
+        my = (y1 + y2) / 2
+        pfad = f"M {x1} {y1} V {my} H {x2} V {y2}"
     else:
-        diag = min(adx, ady)
-        kx = x1 if ady >= adx else x2 - (diag if dx > 0 else -diag)
-        ky = (y2 - (diag if dy > 0 else -diag)) if ady >= adx else y1
-        pfad = f"M {x1} {y1} L {kx} {ky} L {x2} {y2}"
+        mx = (x1 + x2) / 2
+        pfad = f"M {x1} {y1} H {mx} V {y2} H {x2}"
     lx, ly = (x1 + x2) / 2 + 6, (y1 + y2) / 2
     parts.append(f'<path d="{pfad}" fill="none" stroke="{stroke}" stroke-width="2.5"{dash}/>')
     fluss = (results.get("edge_flows") or {}).get(edge.get("id"))

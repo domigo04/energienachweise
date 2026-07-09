@@ -1,6 +1,6 @@
 // Gemeinsame Auswahllisten fürs KV-Tool (Auswertung + Kostenschätzung).
 export const PROJEKTARTEN = ["Neubau", "Umbau", "Sanierung", "Aufstockung", "Mischprojekt"];
-export const GEBAEUDETYPEN = ["MFH", "EFH", "Büro", "Gewerbe", "Schule", "Hotel", "Industrie"];
+export const GEBAEUDETYPEN = ["MFH", "EFH", "Büro", "Gewerbe", "Schule", "Hotel", "Industrie", "Restaurant", "Schwimmhalle", "Spital", "Werkstatt"];
 export const AUSBAUUMFAENGE = ["Vollausbau", "Grundausbau", "Mieterausbau", "nur Erzeugung", "nur Verteilung"];
 export const ZERTIFIZIERUNGEN = ["Gesetz", "Minergie", "Minergie-P", "Minergie-Eco", "SNBS", "LEED"];
 

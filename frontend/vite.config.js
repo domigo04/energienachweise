@@ -9,4 +9,8 @@ export default defineConfig({
     host: true,
     port: 5173,
   },
+  preview: {
+    host: true,
+    allowedHosts: ["energienachweise.com", "www.energienachweise.com", ".up.railway.app"],
+  },
 });

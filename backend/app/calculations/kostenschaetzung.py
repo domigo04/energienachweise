@@ -21,7 +21,6 @@ import math
 from datetime import date
 from typing import Optional
 
-from app.calculations.bkp import berechne_gewicht
 from app.data.bkp_positionen import BKP_POSITIONEN, KOMPLEXITAETS_BKP, TREIBER_LABEL, treiber_fuer_bkp
 
 _BKP_NAME = {p["bkp_nr"]: p["bezeichnung"] for p in BKP_POSITIONEN}
@@ -98,11 +97,6 @@ def jaccard(a, b) -> float:
     return (len(sa & sb) / len(union)) if union else 1.0
 
 
-def age_weight(d: Optional[date]) -> float:
-    """Alters-Gewicht (Baupreis-Idee): neuere Referenzen zählen mehr. Kein Datum → 1.0."""
-    return berechne_gewicht(d) if d else 1.0
-
-
 def index_faktor(ref_datum: Optional[date], ziel_datum: Optional[date], eintraege) -> float:
     """Baupreisindex-Verhältnis Ziel-/Referenzperiode (jeweils die nächstliegende
     hinterlegte Periode). Ohne Einträge oder Datum keine Anpassung (1.0)."""
@@ -132,7 +126,16 @@ def _index_angepasste_refs(refs: list, eintraege, aktiv: bool) -> list:
 
 
 def similarity(inp: dict, ref: dict) -> float:
-    """Gesamt-Ähnlichkeit 0..1, danach × Alters- × Qualitäts-Gewicht."""
+    """Gesamt-Ähnlichkeit 0..1, danach × Qualitäts-Gewicht.
+
+    Bewusst OHNE Alters-Gewichtung: das Alter/Ausschreibungsdatum einer
+    Referenz beeinflusst NICHT, wie ähnlich sie ist (nur Projektmerkmale +
+    Bezugsgrössen zählen dafür) — Alter wirkt sich einzig über den separaten
+    Baupreisindex auf die KOSTEN aus (siehe _index_angepasste_refs), wenn das
+    Häkchen gesetzt ist. Sonst würde ein sonst identisches, aber altes
+    Referenzprojekt fälschlich als "unähnlich" gelten (Dominic-Feedback
+    2026-07-09: Verschieben des Datums 10 Jahre zurück änderte die gewählte
+    Top-Referenz, obwohl alle Projektmerkmale gleich blieben)."""
     def eq(key, hit, miss):
         return hit if inp.get(key) and inp.get(key) == ref.get(key) else miss
 
@@ -151,7 +154,7 @@ def similarity(inp: dict, ref: dict) -> float:
     score = min(score, 1.0)
     q = ref.get("qualitaet")
     q = 1.0 if q is None else q
-    return score * age_weight(ref.get("datum")) * q
+    return score * q
 
 
 def effective_n(weights) -> float:
@@ -178,10 +181,12 @@ def quantile(values, q: float) -> float:
     return v[lo] + rest * (v[lo + 1] - v[lo]) if lo + 1 < len(v) else v[lo]
 
 
-def confidence_from(neff: float, dispersion: float) -> str:
-    if neff >= 5 and dispersion < 0.25:
+def confidence_from(neff: float) -> str:
+    """Validierung nach Anzahl effektiv ähnlicher Referenzen (Dominic-Vorgabe
+    2026-07-09): 0–3 → tief, 4–10 → mittel, über 10 → hoch."""
+    if neff > 10:
         return "hoch"
-    if neff >= 2.5 and dispersion < 0.45:
+    if neff >= 4:
         return "mittel"
     return "tief"
 
@@ -265,7 +270,6 @@ def berechne_kostenschaetzung(inp: dict, referenzen: list, bauindex_eintraege: l
         mean = weighted_mean(pairs)  # roh — bleibt Basis für den Boxplot
         neff = effective_n(weights)
         lo, hi = min(kennwerte), max(kennwerte)
-        dispersion = (hi - lo) / mean if mean else 1.0
 
         hinweis = None
         kennwert_geschaetzt = mean
@@ -279,7 +283,7 @@ def berechne_kostenschaetzung(inp: dict, referenzen: list, bauindex_eintraege: l
                 f"Komplexitätszuschlag geschätzt."
             )
         else:
-            conf = confidence_from(neff, dispersion)
+            conf = confidence_from(neff)
 
         band = _BAND[conf]
         estimate = kennwert_geschaetzt * dv_in
@@ -306,7 +310,7 @@ def berechne_kostenschaetzung(inp: dict, referenzen: list, bauindex_eintraege: l
     overall = "hoch" if avg >= 2.5 else "mittel" if avg >= 1.7 else "tief"
 
     referenzen_out = [{
-        "name": r.get("name"), "projektart": r.get("projektart"), "gebaeudetyp": r.get("gebaeudetyp"),
+        "id": r.get("id"), "name": r.get("name"), "projektart": r.get("projektart"), "gebaeudetyp": r.get("gebaeudetyp"),
         "anlagenkonfiguration": r.get("anlagenkonfiguration") or "monovalent",
         "waermeerzeuger": r.get("waermeerzeuger") or [], "waermeabgabe": r.get("waermeabgabe") or [],
         "ebf": r.get("ebf"), "heizleistung_kw": r.get("heizleistung_kw"), "gewicht": round(r["_w"], 3),

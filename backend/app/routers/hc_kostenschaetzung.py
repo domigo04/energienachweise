@@ -39,7 +39,7 @@ class KsInput(BaseModel):
 
 def _ref_to_calc_dict(r: RefProjekt) -> dict:
     return {
-        "name": r.name, "projektart": r.projektart, "gebaeudetyp": r.gebaeudetyp,
+        "id": r.id, "name": r.name, "projektart": r.projektart, "gebaeudetyp": r.gebaeudetyp,
         "ausbauumfang": r.ausbauumfang, "zertifizierung": r.zertifizierung,
         "anlagenkonfiguration": r.anlagenkonfiguration,
         "waermeerzeuger": r.waermeerzeuger or [], "waermeabgabe": r.waermeabgabe or [],

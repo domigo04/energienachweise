@@ -53,9 +53,11 @@ def test_quantile():
 
 
 def test_confidence_from():
-    assert confidence_from(6, 0.2) == "hoch"
-    assert confidence_from(3, 0.4) == "mittel"
-    assert confidence_from(1, 0.9) == "tief"
+    assert confidence_from(11) == "hoch"
+    assert confidence_from(10) == "mittel"
+    assert confidence_from(4) == "mittel"
+    assert confidence_from(3.9) == "tief"
+    assert confidence_from(0) == "tief"
 
 
 def test_similarity_identisch_hoeher_als_verschieden():
@@ -65,6 +67,17 @@ def test_similarity_identisch_hoeher_als_verschieden():
     anders = {"projektart": "Sanierung", "gebaeudetyp": "EFH", "waermeerzeuger": ["Gas"],
               "waermeabgabe": ["Heizkörper"], "ebf": 200, "heizleistung_kw": 8, "qualitaet": 1.0}
     assert similarity(inp, gleich) > similarity(inp, anders)
+
+
+def test_similarity_ignoriert_alter_der_referenz():
+    """Regressionstest (Dominic-Feedback 2026-07-09): ein zeitlich weit
+    zurückliegendes, sonst identisches Referenzprojekt darf NICHT als
+    unähnlicher gelten — Alter zählt nur über den Baupreisindex, nicht hier."""
+    inp = {"projektart": "Neubau", "gebaeudetyp": "MFH", "waermeerzeuger": ["Erdsonden-WP"],
+           "waermeabgabe": ["FBH"], "ebf": 1000, "heizleistung_kw": 40}
+    neu = {**inp, "qualitaet": 1.0, "datum": date.today()}
+    alt = {**inp, "qualitaet": 1.0, "datum": date(2016, 1, 1)}
+    assert similarity(inp, neu) == pytest.approx(similarity(inp, alt))
 
 
 def test_berechne_gewichteter_kennwert():

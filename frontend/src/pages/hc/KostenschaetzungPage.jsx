@@ -160,7 +160,7 @@ export default function KostenschaetzungPage() {
   const leer = !result || !result.rows || result.rows.length === 0;
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-8 lg:px-8">
+    <div className="mx-auto max-w-[1600px] px-4 py-8 lg:px-8">
       <div className="mb-6 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 text-sm text-slate-500">
           <Link to="/projekte" className="hover:text-brand-600">Projekte</Link><span>/</span>
@@ -311,7 +311,9 @@ export default function KostenschaetzungPage() {
                     <tbody className="divide-y divide-slate-100">
                       {result.referenzen.map((r, i) => (
                         <tr key={i}>
-                          <td className="p-3 font-medium text-slate-700">{r.name}</td>
+                          <td className="p-3 font-medium text-slate-700">
+                            {r.id ? <Link to={`/auswertung/${r.id}`} className="text-brand-600 hover:underline">{r.name}</Link> : r.name}
+                          </td>
                           <td className="p-3 text-slate-500">{[r.projektart, r.gebaeudetyp].filter(Boolean).join(" / ")}</td>
                           <td className="p-3 text-slate-500 capitalize">{r.anlagenkonfiguration}</td>
                           <td className="p-3 text-slate-500">{[...(r.waermeerzeuger || []), ...(r.waermeabgabe || [])].join(", ")}</td>

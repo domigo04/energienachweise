@@ -38,6 +38,18 @@ class RefProjekt(Base):
     heizleistung_kw = Column(Float, nullable=True)  # Erzeugerleistung
     anzahl_einheiten = Column(Integer, nullable=True)
 
+    # Weitere Bezugsgrössen (zusätzliche Ähnlichkeits-Faktoren, Dominic 2026-07-09,
+    # analog "Positionen" in der 3-Plan-Vorlage) — je feiner die Bezugsgrösse,
+    # desto stimmiger der Kennwert-Vergleich zwischen Referenzprojekten.
+    installierte_leistung_neu_kw = Column(Float, nullable=True)
+    flaeche_fbh_m2 = Column(Float, nullable=True)
+    flaeche_tabs_m2 = Column(Float, nullable=True)
+    flaeche_deckenstrahlplatten_m2 = Column(Float, nullable=True)
+    anzahl_heizkoerper = Column(Integer, nullable=True)
+    anzahl_waermemessungen = Column(Integer, nullable=True)
+    anzahl_schaltgeraetekombinationen = Column(Integer, nullable=True)
+    laufmeter_rohre_heizung = Column(Float, nullable=True)
+
     datum = Column(Date, nullable=True)             # bestimmt die Alters-Gewichtung
     qualitaet = Column(Float, default=1.0)          # 0..1, Vertrauen in die Referenz
     erstellt_von = Column(Integer, nullable=True)   # User-ID

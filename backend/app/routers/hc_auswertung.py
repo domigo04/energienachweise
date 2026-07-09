@@ -18,11 +18,11 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
-from app.calculations.kostenschaetzung import quantile
+from app.calculations.kostenschaetzung import netto_aus_brutto, quantile
 from app.data.bkp_positionen import BKP_GRUPPEN, BKP_POSITIONEN, TREIBER_LABEL, treiber_fuer_bkp
 from app.database import get_db
 from app.models.auth import User
-from app.models.kv import RefKostenzeile, RefProjekt
+from app.models.kv import RefKostenzeile, RefProjekt, RefProjektGewerk
 
 router = APIRouter(prefix="/api/v1/auswertung", tags=["KV – Auswertung (Referenzprojekte)"])
 
@@ -48,18 +48,45 @@ class RefProjektIn(BaseModel):
     bohrmeter: Optional[float] = None
     heizleistung_kw: Optional[float] = None
     anzahl_einheiten: Optional[int] = None
+    # Weitere Bezugsgrössen (Dominic 2026-07-09, aus der 3-Plan-Vorlage übernommen)
+    installierte_leistung_neu_kw: Optional[float] = None
+    flaeche_fbh_m2: Optional[float] = None
+    flaeche_tabs_m2: Optional[float] = None
+    flaeche_deckenstrahlplatten_m2: Optional[float] = None
+    anzahl_heizkoerper: Optional[int] = None
+    anzahl_waermemessungen: Optional[int] = None
+    anzahl_schaltgeraetekombinationen: Optional[int] = None
+    laufmeter_rohre_heizung: Optional[float] = None
+    # Rabatt/Skonto Heizung (Gewerk "heizung" — Grundlage für Brutto→Netto)
+    rabatt_pct: float = 0.0
+    skonto_pct: float = 0.0
     datum: Optional[date] = None
     qualitaet: float = 1.0
     kostenzeilen: List[KostenzeileIn] = []
 
 
+def _heizung_gewerk(r: RefProjekt) -> Optional[RefProjektGewerk]:
+    return next((g for g in r.gewerke if g.gewerk == "heizung"), None)
+
+
+def _brutto_netto(r: RefProjekt) -> dict:
+    brutto = sum(z.betrag_chf or 0 for z in r.kostenzeilen if z.gewerk == "heizung")
+    g = _heizung_gewerk(r)
+    rabatt, skonto, korrektur = (g.rabatt_pct, g.skonto_pct, g.korrektur_betrag_chf) if g else (0.0, 0.0, 0.0)
+    netto = netto_aus_brutto(brutto, rabatt, skonto) + korrektur
+    return {"brutto_chf": round(brutto), "netto_chf": round(netto),
+            "rabatt_pct": rabatt, "skonto_pct": skonto}
+
+
 def _summary(r: RefProjekt) -> dict:
+    bn = _brutto_netto(r)
     return {
         "id": r.id, "name": r.name, "projektart": r.projektart, "gebaeudetyp": r.gebaeudetyp,
         "anlagenkonfiguration": r.anlagenkonfiguration or "monovalent",
         "waermeerzeuger": r.waermeerzeuger or [], "waermeabgabe": r.waermeabgabe or [],
         "ebf_m2": r.ebf_m2, "heizleistung_kw": r.heizleistung_kw, "datum": r.datum,
-        "summe_kosten": round(sum(z.betrag_chf or 0 for z in r.kostenzeilen)),
+        **bn,
+        "summe_kosten": bn["netto_chf"],  # Rückwärtskompatibel: massgebend ist jetzt Netto
     }
 
 
@@ -68,9 +95,15 @@ def _out(r: RefProjekt) -> dict:
         **_summary(r),
         "ausbauumfang": r.ausbauumfang, "zertifizierung": r.zertifizierung,
         "bohrmeter": r.bohrmeter, "anzahl_einheiten": r.anzahl_einheiten, "qualitaet": r.qualitaet,
+        "installierte_leistung_neu_kw": r.installierte_leistung_neu_kw,
+        "flaeche_fbh_m2": r.flaeche_fbh_m2, "flaeche_tabs_m2": r.flaeche_tabs_m2,
+        "flaeche_deckenstrahlplatten_m2": r.flaeche_deckenstrahlplatten_m2,
+        "anzahl_heizkoerper": r.anzahl_heizkoerper, "anzahl_waermemessungen": r.anzahl_waermemessungen,
+        "anzahl_schaltgeraetekombinationen": r.anzahl_schaltgeraetekombinationen,
+        "laufmeter_rohre_heizung": r.laufmeter_rohre_heizung,
         "kostenzeilen": [
             {"id": z.id, "bkp_nr": z.bkp_nr, "bkp_name": z.bkp_name, "betrag_chf": z.betrag_chf}
-            for z in r.kostenzeilen
+            for z in r.kostenzeilen if z.gewerk == "heizung"
         ],
     }
 
@@ -88,12 +121,26 @@ def _apply(r: RefProjekt, body: RefProjektIn, user: User):
     r.bohrmeter = body.bohrmeter
     r.heizleistung_kw = body.heizleistung_kw
     r.anzahl_einheiten = body.anzahl_einheiten
+    r.installierte_leistung_neu_kw = body.installierte_leistung_neu_kw
+    r.flaeche_fbh_m2 = body.flaeche_fbh_m2
+    r.flaeche_tabs_m2 = body.flaeche_tabs_m2
+    r.flaeche_deckenstrahlplatten_m2 = body.flaeche_deckenstrahlplatten_m2
+    r.anzahl_heizkoerper = body.anzahl_heizkoerper
+    r.anzahl_waermemessungen = body.anzahl_waermemessungen
+    r.anzahl_schaltgeraetekombinationen = body.anzahl_schaltgeraetekombinationen
+    r.laufmeter_rohre_heizung = body.laufmeter_rohre_heizung
     r.datum = body.datum
     r.qualitaet = body.qualitaet
     r.kostenzeilen = [
-        RefKostenzeile(tenant_id=user.tenant_id, bkp_nr=z.bkp_nr, bkp_name=z.bkp_name, betrag_chf=z.betrag_chf)
+        RefKostenzeile(tenant_id=user.tenant_id, gewerk="heizung", bkp_nr=z.bkp_nr, bkp_name=z.bkp_name, betrag_chf=z.betrag_chf)
         for z in body.kostenzeilen
     ]
+    g = _heizung_gewerk(r)
+    if not g:
+        g = RefProjektGewerk(tenant_id=user.tenant_id, gewerk="heizung")
+        r.gewerke.append(g)
+    g.rabatt_pct = body.rabatt_pct
+    g.skonto_pct = body.skonto_pct
 
 
 # ── CSV Export/Import ───────────────────────────────────────────────────────

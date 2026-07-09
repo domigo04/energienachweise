@@ -13,6 +13,9 @@ const LEER = {
   name: "", projektart: "", gebaeudetyp: "", ausbauumfang: "", zertifizierung: "", anlagenkonfiguration: "",
   waermeerzeuger: [], waermeabgabe: [], ebf_m2: "", bohrmeter: "", heizleistung_kw: "",
   anzahl_einheiten: "", datum: "", qualitaet: 0.85,
+  installierte_leistung_neu_kw: "", flaeche_fbh_m2: "", flaeche_tabs_m2: "", flaeche_deckenstrahlplatten_m2: "",
+  anzahl_heizkoerper: "", anzahl_waermemessungen: "", anzahl_schaltgeraetekombinationen: "", laufmeter_rohre_heizung: "",
+  rabatt_pct: "", skonto_pct: "",
 };
 const QUALITAET = [
   { v: 1.0, l: "gesichert (Ist-Kosten)" },
@@ -54,6 +57,13 @@ export default function AuswertungForm() {
             waermeerzeuger: r.waermeerzeuger || [], waermeabgabe: r.waermeabgabe || [],
             ebf_m2: r.ebf_m2 ?? "", bohrmeter: r.bohrmeter ?? "", heizleistung_kw: r.heizleistung_kw ?? "",
             anzahl_einheiten: r.anzahl_einheiten ?? "", datum: r.datum || "", qualitaet: r.qualitaet ?? 0.85,
+            installierte_leistung_neu_kw: r.installierte_leistung_neu_kw ?? "",
+            flaeche_fbh_m2: r.flaeche_fbh_m2 ?? "", flaeche_tabs_m2: r.flaeche_tabs_m2 ?? "",
+            flaeche_deckenstrahlplatten_m2: r.flaeche_deckenstrahlplatten_m2 ?? "",
+            anzahl_heizkoerper: r.anzahl_heizkoerper ?? "", anzahl_waermemessungen: r.anzahl_waermemessungen ?? "",
+            anzahl_schaltgeraetekombinationen: r.anzahl_schaltgeraetekombinationen ?? "",
+            laufmeter_rohre_heizung: r.laufmeter_rohre_heizung ?? "",
+            rabatt_pct: r.rabatt_pct ?? "", skonto_pct: r.skonto_pct ?? "",
           });
           setBetraege(Object.fromEntries((r.kostenzeilen || []).map((z) => [z.bkp_nr, z.betrag_chf])));
         })
@@ -69,7 +79,10 @@ export default function AuswertungForm() {
     return Object.entries(g).sort((a, b) => a[0].localeCompare(b[0]));
   }, [katalog]);
 
-  const summe = Object.values(betraege).reduce((s, v) => s + (Number(v) || 0), 0);
+  const brutto = Object.values(betraege).reduce((s, v) => s + (Number(v) || 0), 0);
+  const rabatt = Number(form.rabatt_pct) || 0;
+  const skonto = Number(form.skonto_pct) || 0;
+  const netto = brutto * (1 - rabatt / 100) * (1 - skonto / 100);
   const erdsonde = hasErdsonde(form.waermeerzeuger);
 
   const save = async (e) => {
@@ -89,6 +102,13 @@ export default function AuswertungForm() {
       waermeerzeuger: form.waermeerzeuger, waermeabgabe: form.waermeabgabe,
       ebf_m2: num(form.ebf_m2), bohrmeter: erdsonde ? num(form.bohrmeter) : null,
       heizleistung_kw: num(form.heizleistung_kw), anzahl_einheiten: num(form.anzahl_einheiten),
+      installierte_leistung_neu_kw: num(form.installierte_leistung_neu_kw),
+      flaeche_fbh_m2: num(form.flaeche_fbh_m2), flaeche_tabs_m2: num(form.flaeche_tabs_m2),
+      flaeche_deckenstrahlplatten_m2: num(form.flaeche_deckenstrahlplatten_m2),
+      anzahl_heizkoerper: num(form.anzahl_heizkoerper), anzahl_waermemessungen: num(form.anzahl_waermemessungen),
+      anzahl_schaltgeraetekombinationen: num(form.anzahl_schaltgeraetekombinationen),
+      laufmeter_rohre_heizung: num(form.laufmeter_rohre_heizung),
+      rabatt_pct: rabatt, skonto_pct: skonto,
       datum: form.datum || null, qualitaet: Number(form.qualitaet),
       kostenzeilen,
     };
@@ -126,6 +146,24 @@ export default function AuswertungForm() {
       {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
       <form onSubmit={save} className="space-y-6">
+        {/* Zusammenstellung: Brutto/Netto live, Rabatt/Skonto — damit man beim
+            Erfassen laufend gegen das Leistungsverzeichnis des Unternehmers
+            prüfen kann, ob die Summe stimmt. */}
+        <div className="card p-6">
+          <h2 className="mb-4 font-semibold text-slate-800">Zusammenstellung Heizung</h2>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <div><label className="label">Rabatt [%]</label>
+              <input type="number" step="0.1" className="input" value={form.rabatt_pct} onChange={(e) => set("rabatt_pct", e.target.value)} /></div>
+            <div><label className="label">Skonto [%]</label>
+              <input type="number" step="0.1" className="input" value={form.skonto_pct} onChange={(e) => set("skonto_pct", e.target.value)} /></div>
+            <div><div className="label">Brutto (Summe LV)</div>
+              <div className="mt-2 text-lg font-bold text-slate-900">{chf(brutto)} CHF</div></div>
+            <div><div className="label">Netto (nach Rabatt/Skonto)</div>
+              <div className="mt-2 text-lg font-bold text-brand-600">{chf(netto)} CHF</div></div>
+          </div>
+          <p className="mt-3 text-xs text-slate-400">Gegen das Leistungsverzeichnis/Devis des Unternehmers prüfen — Brutto = Summe aller BKP-Positionen unten, Netto = Brutto × (1 − Rabatt%) × (1 − Skonto%).</p>
+        </div>
+
         {/* Merkmale */}
         <div className="card p-6">
           <h2 className="mb-4 font-semibold text-slate-800">Projekt-Merkmale</h2>
@@ -176,13 +214,24 @@ export default function AuswertungForm() {
               <div><label className="label">Bohrmeter</label><input type="number" className="input" value={form.bohrmeter} onChange={(e) => set("bohrmeter", e.target.value)} /></div>
             )}
           </div>
+          <p className="mb-1 mt-5 text-xs font-semibold uppercase tracking-wider text-slate-400">Weitere Bezugsgrössen (zusätzliche Ähnlichkeitsfaktoren)</p>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <div><label className="label">Erzeugerleistung neu [kW]</label><input type="number" className="input" value={form.installierte_leistung_neu_kw} onChange={(e) => set("installierte_leistung_neu_kw", e.target.value)} /></div>
+            <div><label className="label">Fläche FBH [m²]</label><input type="number" className="input" value={form.flaeche_fbh_m2} onChange={(e) => set("flaeche_fbh_m2", e.target.value)} /></div>
+            <div><label className="label">Fläche TABS [m²]</label><input type="number" className="input" value={form.flaeche_tabs_m2} onChange={(e) => set("flaeche_tabs_m2", e.target.value)} /></div>
+            <div><label className="label">Fläche Deckenstrahlplatten [m²]</label><input type="number" className="input" value={form.flaeche_deckenstrahlplatten_m2} onChange={(e) => set("flaeche_deckenstrahlplatten_m2", e.target.value)} /></div>
+            <div><label className="label">Anzahl Heizkörper</label><input type="number" className="input" value={form.anzahl_heizkoerper} onChange={(e) => set("anzahl_heizkoerper", e.target.value)} /></div>
+            <div><label className="label">Anzahl Wärmemessungen</label><input type="number" className="input" value={form.anzahl_waermemessungen} onChange={(e) => set("anzahl_waermemessungen", e.target.value)} /></div>
+            <div><label className="label">Anzahl Schaltgerätekombinationen</label><input type="number" className="input" value={form.anzahl_schaltgeraetekombinationen} onChange={(e) => set("anzahl_schaltgeraetekombinationen", e.target.value)} /></div>
+            <div><label className="label">Laufmeter Rohre Heizung</label><input type="number" className="input" value={form.laufmeter_rohre_heizung} onChange={(e) => set("laufmeter_rohre_heizung", e.target.value)} /></div>
+          </div>
         </div>
 
         {/* BKP-Kosten: alle Positionen da, nur ausfüllen was zutrifft */}
         <div className="card p-6">
           <div className="mb-1 flex items-center justify-between">
             <h2 className="font-semibold text-slate-800">BKP-Kosten</h2>
-            <span className="text-sm font-bold text-slate-900">Total {chf(summe)} CHF</span>
+            <span className="text-sm font-bold text-slate-900">Brutto {chf(brutto)} CHF</span>
           </div>
           <p className="mb-4 text-xs text-slate-400">Nur ausfüllen, was zutrifft — leere Positionen werden nicht gespeichert.</p>
           <div className="space-y-5">

@@ -181,14 +181,27 @@ def similarity(inp: dict, ref: dict) -> float:
 
     Bewusst OHNE Alters-Gewichtung: das Ausschreibungsdatum wirkt sich einzig
     über den separaten Baupreisindex auf die KOSTEN aus (siehe
-    _index_angepasste_refs), nicht auf die Ähnlichkeit."""
+    _index_angepasste_refs), nicht auf die Ähnlichkeit.
+
+    Feinere Bezugsgrössen (Dominic 2026-07-09, analog "Positionen" in der
+    3-Plan-Vorlage) fliessen mit kleinerem Gewicht zusätzlich ein — fehlen sie
+    auf einer Seite (z.B. noch nicht in der Kostenschätzung erfassbar), zählt
+    ratio_similarity() neutral (0.5), verzerrt also nichts."""
     score = 0.0
-    score += 0.35 * konfiguration_kompatibilitaet(inp.get("anlagenkonfiguration"), ref.get("anlagenkonfiguration"))
-    score += 0.25 * jaccard(inp.get("waermeabgabe"), ref.get("waermeabgabe"))
-    score += 0.15 * ratio_similarity(inp.get("ebf"), ref.get("ebf"))
-    score += 0.15 * ratio_similarity(inp.get("heizleistung_kw"), ref.get("heizleistung_kw"))
-    score += 0.06 * ratio_similarity(inp.get("anzahl_einheiten"), ref.get("anzahl_einheiten"))
-    score += 0.04 * ratio_similarity(inp.get("bohrmeter"), ref.get("bohrmeter"))
+    score += 0.30 * konfiguration_kompatibilitaet(inp.get("anlagenkonfiguration"), ref.get("anlagenkonfiguration"))
+    score += 0.22 * jaccard(inp.get("waermeabgabe"), ref.get("waermeabgabe"))
+    score += 0.12 * ratio_similarity(inp.get("ebf"), ref.get("ebf"))
+    score += 0.12 * ratio_similarity(inp.get("heizleistung_kw"), ref.get("heizleistung_kw"))
+    score += 0.05 * ratio_similarity(inp.get("anzahl_einheiten"), ref.get("anzahl_einheiten"))
+    score += 0.03 * ratio_similarity(inp.get("bohrmeter"), ref.get("bohrmeter"))
+    score += 0.03 * ratio_similarity(inp.get("installierte_leistung_neu_kw"), ref.get("installierte_leistung_neu_kw"))
+    score += 0.03 * ratio_similarity(inp.get("flaeche_fbh_m2"), ref.get("flaeche_fbh_m2"))
+    score += 0.02 * ratio_similarity(inp.get("flaeche_tabs_m2"), ref.get("flaeche_tabs_m2"))
+    score += 0.02 * ratio_similarity(inp.get("flaeche_deckenstrahlplatten_m2"), ref.get("flaeche_deckenstrahlplatten_m2"))
+    score += 0.02 * ratio_similarity(inp.get("anzahl_heizkoerper"), ref.get("anzahl_heizkoerper"))
+    score += 0.01 * ratio_similarity(inp.get("anzahl_waermemessungen"), ref.get("anzahl_waermemessungen"))
+    score += 0.01 * ratio_similarity(inp.get("anzahl_schaltgeraetekombinationen"), ref.get("anzahl_schaltgeraetekombinationen"))
+    score += 0.02 * ratio_similarity(inp.get("laufmeter_rohre_heizung"), ref.get("laufmeter_rohre_heizung"))
     score = min(score, 1.0)
     q = ref.get("qualitaet")
     q = 1.0 if q is None else q

@@ -89,7 +89,13 @@ def _ensure_columns():
     to_add = {
         "hc_project_base_data": [("gebaeudekategorie", "VARCHAR"), ("klimastation", "VARCHAR")],
         "hc_projects": [("erstellt_von", "INTEGER")],
-        "ref_projekte": [("anlagenkonfiguration", "VARCHAR")],
+        "ref_projekte": [
+            ("anlagenkonfiguration", "VARCHAR"),
+            ("installierte_leistung_neu_kw", "FLOAT"), ("flaeche_fbh_m2", "FLOAT"),
+            ("flaeche_tabs_m2", "FLOAT"), ("flaeche_deckenstrahlplatten_m2", "FLOAT"),
+            ("anzahl_heizkoerper", "INTEGER"), ("anzahl_waermemessungen", "INTEGER"),
+            ("anzahl_schaltgeraetekombinationen", "INTEGER"), ("laufmeter_rohre_heizung", "FLOAT"),
+        ],
         "hc_firmen": [("abo_plan", "VARCHAR")],
         "ref_kostenzeilen": [("gewerk", "VARCHAR")],
     }

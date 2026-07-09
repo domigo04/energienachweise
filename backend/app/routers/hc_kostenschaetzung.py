@@ -45,7 +45,15 @@ def _ref_to_calc_dict(r: RefProjekt) -> dict:
         "waermeerzeuger": r.waermeerzeuger or [], "waermeabgabe": r.waermeabgabe or [],
         "ebf": r.ebf_m2, "bohrmeter": r.bohrmeter, "heizleistung_kw": r.heizleistung_kw,
         "anzahl_einheiten": r.anzahl_einheiten, "datum": r.datum, "qualitaet": r.qualitaet,
-        "kosten": {z.bkp_nr: z.betrag_chf for z in r.kostenzeilen},
+        "installierte_leistung_neu_kw": r.installierte_leistung_neu_kw,
+        "flaeche_fbh_m2": r.flaeche_fbh_m2, "flaeche_tabs_m2": r.flaeche_tabs_m2,
+        "flaeche_deckenstrahlplatten_m2": r.flaeche_deckenstrahlplatten_m2,
+        "anzahl_heizkoerper": r.anzahl_heizkoerper, "anzahl_waermemessungen": r.anzahl_waermemessungen,
+        "anzahl_schaltgeraetekombinationen": r.anzahl_schaltgeraetekombinationen,
+        "laufmeter_rohre_heizung": r.laufmeter_rohre_heizung,
+        # nur Heizungs-BKP-Zeilen — Lüftung/Sanitär/Kälte fliessen (noch) nicht
+        # in die Heizungs-Kostenschätzung ein.
+        "kosten": {z.bkp_nr: z.betrag_chf for z in r.kostenzeilen if z.gewerk == "heizung"},
     }
 
 

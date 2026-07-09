@@ -15,11 +15,20 @@ from app.calculations.kostenschaetzung import (
     ist_monovalent,
     jaccard,
     konfiguration_kompatibilitaet,
+    netto_aus_brutto,
     quantile,
     ratio_similarity,
     similarity,
     weighted_mean,
 )
+
+
+def test_netto_aus_brutto():
+    assert netto_aus_brutto(1000, 0, 0) == pytest.approx(1000)
+    assert netto_aus_brutto(1000, 10, 0) == pytest.approx(900)
+    assert netto_aus_brutto(1000, 0, 2) == pytest.approx(980)
+    assert netto_aus_brutto(1000, 10, 2) == pytest.approx(900 * 0.98)
+    assert netto_aus_brutto(1000) == pytest.approx(1000)
 
 
 def test_ratio_similarity():

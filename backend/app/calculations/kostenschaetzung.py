@@ -135,6 +135,13 @@ def jaccard(a, b) -> float:
     return (len(sa & sb) / len(union)) if union else 1.0
 
 
+def netto_aus_brutto(brutto: float, rabatt_pct: float = 0.0, skonto_pct: float = 0.0) -> float:
+    """Netto = Brutto × (1 − Rabatt%) × (1 − Skonto%) — wie in der 3-Plan-
+    Vorlage (Gewerk-Erfassung: Rabatt und Skonto je Gewerk, nacheinander
+    angewendet)."""
+    return brutto * (1 - (rabatt_pct or 0) / 100) * (1 - (skonto_pct or 0) / 100)
+
+
 def index_faktor(ref_datum: Optional[date], ziel_datum: Optional[date], eintraege) -> float:
     """Baupreisindex-Verhältnis Ziel-/Referenzperiode (jeweils die nächstliegende
     hinterlegte Periode). Ohne Einträge oder Datum keine Anpassung (1.0)."""

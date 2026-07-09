@@ -77,7 +77,7 @@ from app.models.heizungscockpit import (  # noqa: F401 — Tabellen vor create_a
     BkpEintrag, HcGruppeTyp,
 )
 from app.models.auth import Firma, User, Role  # noqa: F401
-from app.models.kv import RefProjekt, RefKostenzeile, Kostenschaetzung, BauindexEintrag  # noqa: F401
+from app.models.kv import RefProjekt, RefKostenzeile, RefProjektGewerk, Kostenschaetzung, BauindexEintrag  # noqa: F401
 from app.auth import hash_password
 
 
@@ -91,6 +91,7 @@ def _ensure_columns():
         "hc_projects": [("erstellt_von", "INTEGER")],
         "ref_projekte": [("anlagenkonfiguration", "VARCHAR")],
         "hc_firmen": [("abo_plan", "VARCHAR")],
+        "ref_kostenzeilen": [("gewerk", "VARCHAR")],
     }
     with engine.connect() as conn:
         for table, cols in to_add.items():
@@ -102,6 +103,7 @@ def _ensure_columns():
         # ALTER TABLE trägt den SQLAlchemy-Python-Default nicht nach — bestehende
         # Zeilen hätten sonst z.B. abo_plan=NULL statt "kostenlos".
         conn.execute(text("UPDATE hc_firmen SET abo_plan = 'kostenlos' WHERE abo_plan IS NULL"))
+        conn.execute(text("UPDATE ref_kostenzeilen SET gewerk = 'heizung' WHERE gewerk IS NULL"))
         conn.commit()
 
 

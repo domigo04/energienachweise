@@ -47,6 +47,9 @@ class RefProjekt(Base):
     kostenzeilen = relationship(
         "RefKostenzeile", back_populates="ref_projekt", cascade="all, delete-orphan"
     )
+    gewerke = relationship(
+        "RefProjektGewerk", back_populates="ref_projekt", cascade="all, delete-orphan"
+    )
 
 
 class RefKostenzeile(Base):
@@ -55,11 +58,32 @@ class RefKostenzeile(Base):
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = Column(Integer, default=1, index=True)
     ref_projekt_id = Column(Integer, ForeignKey("ref_projekte.id"), index=True)
+    # Gewerk, zu dem diese BKP-Position gehört ("heizung" | "lueftung" | "sanitaer" | "kaelte").
+    # Default "heizung", damit bestehende Zeilen (vor der HLKS-Erweiterung) gültig bleiben.
+    gewerk = Column(String, nullable=False, default="heizung")
     bkp_nr = Column(String, nullable=False)         # z.B. "242.3"
     bkp_name = Column(String, nullable=True)
-    betrag_chf = Column(Float, nullable=False, default=0.0)
+    betrag_chf = Column(Float, nullable=False, default=0.0)  # Brutto-Betrag
 
     ref_projekt = relationship("RefProjekt", back_populates="kostenzeilen")
+
+
+class RefProjektGewerk(Base):
+    """Rabatt/Skonto/Korrektur je Gewerk eines Referenzprojekts (analog 3-Plan-
+    Vorlage). Netto wird daraus abgeleitet, nicht gespeichert:
+    netto = brutto × (1 − rabatt%) × (1 − skonto%) — siehe
+    calculations/kostenschaetzung.py netto_aus_brutto()."""
+    __tablename__ = "ref_projekt_gewerke"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, default=1, index=True)
+    ref_projekt_id = Column(Integer, ForeignKey("ref_projekte.id"), index=True)
+    gewerk = Column(String, nullable=False)  # "heizung" | "lueftung" | "sanitaer" | "kaelte"
+    rabatt_pct = Column(Float, nullable=False, default=0.0)
+    skonto_pct = Column(Float, nullable=False, default=0.0)
+    korrektur_betrag_chf = Column(Float, nullable=False, default=0.0)
+
+    ref_projekt = relationship("RefProjekt", back_populates="gewerke")
 
 
 class Kostenschaetzung(Base):

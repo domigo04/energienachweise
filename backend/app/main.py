@@ -1,5 +1,5 @@
 # app/main.py
-import os, json
+import os, json, traceback
 from fastapi import Depends, FastAPI
 from sqlalchemy import text
 from fastapi.middleware.cors import CORSMiddleware
@@ -152,19 +152,30 @@ def _seed_admin(db):
 def init_db_and_seed():
     try:
         Base.metadata.create_all(bind=engine)
-    except Exception as e:
-        print("DB init error:", e)
+    except Exception:
+        print("DB init error:")
+        traceback.print_exc()
 
     try:
         _ensure_columns()
-    except Exception as e:
-        print("Column migration error:", e)
+    except Exception:
+        print("Column migration error:")
+        traceback.print_exc()
 
     db = SessionLocal()
     try:
-        _seed_group_templates(db)
-        _seed_admin(db)
-    except Exception as e:
-        print("Seed error:", e)
+        try:
+            _seed_group_templates(db)
+        except Exception:
+            db.rollback()
+            print("Seed error (group templates):")
+            traceback.print_exc()
+        try:
+            _seed_admin(db)
+            print(f"[INIT] Admin-Konto sichergestellt: {os.getenv('ADMIN_EMAIL', 'dominicgoulon@icloud.com').lower().strip()}")
+        except Exception:
+            db.rollback()
+            print("Seed error (admin):")
+            traceback.print_exc()
     finally:
         db.close()

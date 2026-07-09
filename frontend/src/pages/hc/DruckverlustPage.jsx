@@ -123,7 +123,7 @@ export default function DruckverlustPage() {
   return (
     <div style={{ maxWidth: 800, margin: "0 auto", padding: "24px 16px", fontFamily: "sans-serif" }}>
       <div style={{ marginBottom: 16, fontSize: 13, color: "#6b7280" }}>
-        <Link to="/heizungscockpit" style={{ color: "#2563eb" }}>Heizungscockpit</Link>
+        <Link to="/projekte" style={{ color: "#2563eb" }}>Projekte</Link>
         {" / "}Druckverlust approximativ
       </div>
 

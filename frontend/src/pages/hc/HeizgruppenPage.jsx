@@ -171,9 +171,9 @@ export default function HeizgruppenPage() {
     <div className="max-w-6xl mx-auto px-4 py-8">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm text-gray-500 mb-6">
-        <Link to="/heizungscockpit" className="hover:text-blue-600">Heizungscockpit</Link>
+        <Link to="/projekte" className="hover:text-brand-600">Projekte</Link>
         <span>/</span>
-        <Link to={`/heizungscockpit/projekte/${id}`} className="hover:text-blue-600">{project?.name}</Link>
+        <Link to={`/projekte/${id}`} className="hover:text-brand-600">{project?.name}</Link>
         <span>/</span>
         <span className="text-gray-800">Heizgruppen</span>
       </div>

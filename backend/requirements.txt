@@ -15,3 +15,5 @@ pytest
 reportlab
 svglib
 pypdf
+psycopg2-binary  # Postgres-Treiber für Prod (DATABASE_URL=postgresql+psycopg2://…)
+httpx  # ausgehende Anfragen (Baupreisindex-Abruf gegen opendata.swiss)

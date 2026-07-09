@@ -1,22 +1,49 @@
 @import "tailwindcss";
 
+/* =========================================================================
+   Design-Tokens (Tailwind v4, CSS-first). Eine Farbwelt fürs ganze Cockpit:
+   Slate-Neutrale + SIREGO-Rot als einziger Marken-Akzent + abgestimmte
+   Diagramm-Palette. Farbe hier ändern = überall geändert.
+   ========================================================================= */
 @theme {
-  /* Deine Brand-Grays – Beispiele, passe gern an */
-  --color-sirego-gray-50:  #f9fafb;
-  --color-sirego-gray-100: #f3f4f6;
-  --color-sirego-gray-200: #e5e7eb;
-  --color-sirego-gray-300: #d1d5db;
-  --color-sirego-gray-400: #9ca3af;
-  --color-sirego-gray-500: #6b7280;
-  --color-sirego-gray-600: #4b5563;
-  --color-sirego-gray-700: #374151;
-  --color-sirego-gray-800: #1f2937;
-  --color-sirego-gray-900: #111827;
+  /* SIREGO-Marke (Rot) */
+  --color-brand-50:  #fef2f2;
+  --color-brand-100: #fee2e2;
+  --color-brand-200: #fecaca;
+  --color-brand-300: #fca5a5;
+  --color-brand-400: #f87171;
+  --color-brand-500: #ef4444;
+  --color-brand-600: #dc2626;
+  --color-brand-700: #b91c1c;
+  --color-brand-800: #991b1b;
+
+  /* Diagramm-Palette (hell-tauglich, gut unterscheidbar) */
+  --color-chart-1: #dc2626; /* Rot    – Marke      */
+  --color-chart-2: #d97706; /* Amber  – Erzeugung  */
+  --color-chart-3: #0d9488; /* Teal   – Verteilung */
+  --color-chart-4: #0284c7; /* Sky    – Dämmung    */
+  --color-chart-5: #4f46e5; /* Indigo – Diverses   */
+  --color-chart-6: #64748b; /* Slate  – Rest       */
 }
 
-/* falls du @apply irgendwo nutzt, dann in einem Layer */
+@layer base {
+  html { -webkit-text-size-adjust: 100%; }
+  body { @apply bg-slate-50 text-slate-900 antialiased; }
+}
+
+/* Wiederverwendbare Bausteine – damit alle Seiten dieselbe Sprache sprechen. */
 @layer components {
-  /* Beispiel:
-  .card { @apply bg-sirego-gray-100; }
-  */
+  .card { @apply rounded-2xl border border-slate-200 bg-white shadow-sm; }
+
+  .btn-primary   { @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition bg-brand-600 hover:bg-brand-500 disabled:cursor-not-allowed disabled:opacity-50; }
+  .btn-secondary { @apply inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50; }
+  .btn-ghost     { @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100; }
+
+  .input { @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-100; }
+  .label { @apply mb-1 block text-xs font-medium text-slate-500; }
+
+  .badge        { @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold; }
+  .badge-hoch   { @apply inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-semibold text-green-700; }
+  .badge-mittel { @apply inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700; }
+  .badge-tief   { @apply inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-semibold text-red-700; }
 }

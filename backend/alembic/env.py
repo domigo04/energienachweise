@@ -11,8 +11,10 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 from app.database import Base
-from app.models import user  # noqa: F401
-from app.models import projects  # noqa: F401
+# Alle aktuellen Modelle importieren, damit target_metadata vollständig ist.
+from app.models import heizungscockpit  # noqa: F401
+from app.models import auth  # noqa: F401
+from app.models import kv  # noqa: F401
 
 config = context.config
 config.set_main_option("sqlalchemy.url", os.getenv("DATABASE_URL", "sqlite:///./privcontrol.db"))

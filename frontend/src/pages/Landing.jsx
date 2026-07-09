@@ -33,7 +33,7 @@ export default function Landing() {
               className="rounded-lg bg-red-600 px-7 py-3 text-sm font-semibold text-white shadow-lg shadow-red-600/30 transition hover:bg-red-500">
               Anmelden / Registrieren
             </Link>
-            <Link to="/heizungscockpit"
+            <Link to="/start"
               className="rounded-lg border border-slate-600 px-7 py-3 text-sm font-semibold text-slate-200 transition hover:border-slate-400 hover:text-white">
               Zum Cockpit →
             </Link>

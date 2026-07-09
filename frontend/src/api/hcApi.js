@@ -58,3 +58,37 @@ export const hydraulikBerechnen = (graph) =>
 // --- BKP-Kostenschätzung (Phase 3, Katalog steht ab Tag 1) ---
 export const getBkpPositionen = (params) =>
   api.get(`${BASE}/bkp/positionen`, { params }).then(r => r.data);
+
+// --- Auth / Admin ---
+export const getUsers = () => api.get(`${BASE}/auth/admin/users`).then(r => r.data);
+export const updateUser = (id, data) => api.patch(`${BASE}/auth/admin/users/${id}`, data).then(r => r.data);
+
+// --- Auswertung (Referenzprojekte, firmenweit) ---
+export const getRefProjekte = () => api.get(`${BASE}/auswertung`).then(r => r.data);
+export const getRefKatalog = () => api.get(`${BASE}/auswertung/katalog`).then(r => r.data);
+export const getRefAnalyse = () => api.get(`${BASE}/auswertung/analyse`).then(r => r.data);
+export const getRef = (id) => api.get(`${BASE}/auswertung/${id}`).then(r => r.data);
+export const createRef = (data) => api.post(`${BASE}/auswertung`, data).then(r => r.data);
+export const updateRef = (id, data) => api.put(`${BASE}/auswertung/${id}`, data).then(r => r.data);
+export const deleteRef = (id) => api.delete(`${BASE}/auswertung/${id}`);
+export const exportRefsCsv = () => api.get(`${BASE}/auswertung/export.csv`, { responseType: "blob" }).then(r => r.data);
+export const exportRefCsv = (id) => api.get(`${BASE}/auswertung/${id}/export.csv`, { responseType: "blob" }).then(r => r.data);
+export const importRefsCsv = (file) => {
+  const fd = new FormData();
+  fd.append("file", file);
+  // Content-Type explizit entfernen: die api-Instanz setzt standardmässig
+  // application/json, das würde sonst den automatischen multipart-Header
+  // (inkl. Boundary) für den Datei-Upload überschreiben.
+  return api.post(`${BASE}/auswertung/import`, fd, { headers: { "Content-Type": null } }).then(r => r.data);
+};
+
+// --- Kostenschätzung (je Projekt) ---
+export const ksBerechnen = (inputs) => api.post(`${BASE}/kostenschaetzung/berechnen`, inputs).then(r => r.data);
+export const ksGet = (projectId) => api.get(`${BASE}/kostenschaetzung/projekt/${projectId}`).then(r => r.data);
+export const ksSave = (projectId, inputs) => api.put(`${BASE}/kostenschaetzung/projekt/${projectId}`, inputs).then(r => r.data);
+
+// --- Baupreisindex ---
+export const getBauindex = () => api.get(`${BASE}/bauindex`).then(r => r.data);
+export const addBauindex = (data) => api.post(`${BASE}/bauindex`, data).then(r => r.data);
+export const deleteBauindex = (id) => api.delete(`${BASE}/bauindex/${id}`);
+export const bauindexAutomatischAktualisieren = () => api.post(`${BASE}/bauindex/automatisch-aktualisieren`).then(r => r.data);

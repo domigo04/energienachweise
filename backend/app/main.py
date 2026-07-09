@@ -1,6 +1,6 @@
 # app/main.py
 import os, json
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from sqlalchemy import text
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -32,7 +32,8 @@ app.add_middleware(
 def healthz():
     return {"ok": True}
 
-# ---------- Heizungscockpit-Router ----------
+# ---------- Router ----------
+from app.routers.hc_auth import router as hc_auth_router
 from app.routers.hc_projects import router as hc_projects_router
 from app.routers.hc_groups import router as hc_groups_router
 from app.routers.hc_ventil import router as hc_ventil_router
@@ -42,27 +43,54 @@ from app.routers.hc_schema import router as hc_schema_router
 from app.routers.hc_hydraulik import router as hc_hydraulik_router
 from app.routers.hc_bkp import router as hc_bkp_router
 from app.routers.hc_export import router as hc_export_router
+from app.routers.hc_auswertung import router as hc_auswertung_router
+from app.routers.hc_kostenschaetzung import router as hc_kostenschaetzung_router
+from app.routers.hc_bauindex import router as hc_bauindex_router
 
-app.include_router(hc_projects_router)
-app.include_router(hc_groups_router)
-app.include_router(hc_ventil_router)
-app.include_router(hc_druckverlust_router)
-app.include_router(hc_ravel_router)
-app.include_router(hc_schema_router)
-app.include_router(hc_hydraulik_router)
-app.include_router(hc_bkp_router)
+from app.auth import get_current_user
+
+_auth = [Depends(get_current_user)]  # verlangt gültiges Login
+
+# Öffentlich: Registrieren/Login (Profil/Admin schützen sich selbst)
+app.include_router(hc_auth_router)
+
+# Geschützt: alles rund um Projekte, Auswertung, Rechner
+app.include_router(hc_projects_router, dependencies=_auth)
+app.include_router(hc_groups_router, dependencies=_auth)
+app.include_router(hc_ventil_router, dependencies=_auth)
+app.include_router(hc_druckverlust_router, dependencies=_auth)
+app.include_router(hc_ravel_router, dependencies=_auth)
+app.include_router(hc_schema_router, dependencies=_auth)
+app.include_router(hc_hydraulik_router, dependencies=_auth)
+app.include_router(hc_bkp_router, dependencies=_auth)
+app.include_router(hc_auswertung_router, dependencies=_auth)
+app.include_router(hc_kostenschaetzung_router, dependencies=_auth)
+app.include_router(hc_bauindex_router, dependencies=_auth)  # Schreib-Endpunkte schützen sich zusätzlich selbst (require_admin)
+
+# PDF-Export wird per window.open() geöffnet (kann kein Bearer-Token mitgeben) → offen.
 app.include_router(hc_export_router)
 
 # ---------- DB-Init & Seed ----------
 from app.database import Base, engine, SessionLocal
 from app.models.heizungscockpit import (  # noqa: F401 — Tabellen vor create_all importieren
     HcProject, HcProjectBaseData, HcGroupTemplate, HcHeatingGroup, HcCalculationResult, HcSchema,
-    BkpEintrag,
+    BkpEintrag, HcGruppeTyp,
 )
+from app.models.auth import Firma, User, Role  # noqa: F401
+from app.models.kv import RefProjekt, RefKostenzeile, Kostenschaetzung, BauindexEintrag  # noqa: F401
+from app.auth import hash_password
 
 
 def _ensure_columns():
-    to_add = {"hc_project_base_data": [("gebaeudekategorie", "VARCHAR"), ("klimastation", "VARCHAR")]}
+    """Fehlende Spalten auf bestehenden SQLite-Dev-Tabellen ergänzen.
+    (Auf frischem Postgres unnötig — create_all legt alles korrekt an.)"""
+    if not engine.url.get_backend_name().startswith("sqlite"):
+        return
+    to_add = {
+        "hc_project_base_data": [("gebaeudekategorie", "VARCHAR"), ("klimastation", "VARCHAR")],
+        "hc_projects": [("erstellt_von", "INTEGER")],
+        "ref_projekte": [("anlagenkonfiguration", "VARCHAR")],
+    }
     with engine.connect() as conn:
         for table, cols in to_add.items():
             existing = {r[1] for r in conn.execute(text(f"PRAGMA table_info({table})"))}
@@ -70,6 +98,43 @@ def _ensure_columns():
                 if name not in existing:
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {typ}"))
         conn.commit()
+
+
+def _seed_group_templates(db):
+    if db.query(HcGroupTemplate).count() > 0:
+        return
+    templates = [
+        HcGroupTemplate(name="Fussbodenheizung (FBH)", typ=HcGruppeTyp.fbh, standard_vl=35.0, standard_rl=28.0, beschreibung="VL 35 / RL 28 °C", is_system=True),
+        HcGroupTemplate(name="Heizkörper modern (HK)", typ=HcGruppeTyp.hk, standard_vl=55.0, standard_rl=45.0, beschreibung="VL 55 / RL 45 °C", is_system=True),
+        HcGroupTemplate(name="Heizkörper alt (HK)", typ=HcGruppeTyp.hk, standard_vl=70.0, standard_rl=55.0, beschreibung="VL 70 / RL 55 °C", is_system=True),
+        HcGroupTemplate(name="Lufterhitzer", typ=HcGruppeTyp.lufterhitzer, standard_vl=60.0, standard_rl=45.0, beschreibung="VL 60 / RL 45 °C", is_system=True),
+        HcGroupTemplate(name="Brauchwarmwasser (BWW)", typ=HcGruppeTyp.bww, standard_vl=65.0, standard_rl=55.0, beschreibung="VL 65 / RL 55 °C", is_system=True),
+        HcGroupTemplate(name="Lüftungsregister", typ=HcGruppeTyp.lueftungsregister, standard_vl=60.0, standard_rl=45.0, beschreibung="VL 60 / RL 45 °C", is_system=True),
+        HcGroupTemplate(name="Wandheizung", typ=HcGruppeTyp.wandheizung, standard_vl=35.0, standard_rl=28.0, beschreibung="VL 35 / RL 28 °C", is_system=True),
+        HcGroupTemplate(name="TABS (Betonkernaktivierung)", typ=HcGruppeTyp.tabs, standard_vl=30.0, standard_rl=25.0, beschreibung="VL 30 / RL 25 °C", is_system=True),
+        HcGroupTemplate(name="Konvektoren", typ=HcGruppeTyp.konvektoren, standard_vl=55.0, standard_rl=45.0, beschreibung="VL 55 / RL 45 °C", is_system=True),
+    ]
+    db.add_all(templates)
+    db.commit()
+    print(f"[INIT] {len(templates)} Gruppen-Vorlagen angelegt")
+
+
+def _seed_admin(db):
+    """Firma (SIREGO) + Erst-Admin sicherstellen. Ohne diesen Admin könnte
+    niemand freischalten. Zugangsdaten aus .env (ADMIN_EMAIL/ADMIN_INITIAL_PASSWORD)."""
+    firma = db.query(Firma).filter(Firma.id == 1).first()
+    if not firma:
+        db.add(Firma(id=1, name="SIREGO GmbH"))
+        db.commit()
+    admin_email = os.getenv("ADMIN_EMAIL", "dominicgoulon@icloud.com").lower().strip()
+    admin_pw = os.getenv("ADMIN_INITIAL_PASSWORD", "Sirego2004!")
+    if not db.query(User).filter(User.email == admin_email).first():
+        db.add(User(
+            tenant_id=1, email=admin_email, password_hash=hash_password(admin_pw),
+            name="Dominic Goulon", role=Role.admin, is_verified=True, is_active=True,
+        ))
+        db.commit()
+        print(f"[INIT] Admin angelegt: {admin_email}")
 
 
 @app.on_event("startup")
@@ -84,26 +149,11 @@ def init_db_and_seed():
     except Exception as e:
         print("Column migration error:", e)
 
-    # Heizungscockpit: Gruppen-Vorlagen einmalig anlegen
-    from app.models.heizungscockpit import HcGroupTemplate, HcGruppeTyp
     db = SessionLocal()
     try:
-        if db.query(HcGroupTemplate).count() == 0:
-            templates = [
-                HcGroupTemplate(name="Fussbodenheizung (FBH)", typ=HcGruppeTyp.fbh, standard_vl=35.0, standard_rl=28.0, beschreibung="VL 35 / RL 28 °C", is_system=True),
-                HcGroupTemplate(name="Heizkörper modern (HK)", typ=HcGruppeTyp.hk, standard_vl=55.0, standard_rl=45.0, beschreibung="VL 55 / RL 45 °C", is_system=True),
-                HcGroupTemplate(name="Heizkörper alt (HK)", typ=HcGruppeTyp.hk, standard_vl=70.0, standard_rl=55.0, beschreibung="VL 70 / RL 55 °C", is_system=True),
-                HcGroupTemplate(name="Lufterhitzer", typ=HcGruppeTyp.lufterhitzer, standard_vl=60.0, standard_rl=45.0, beschreibung="VL 60 / RL 45 °C", is_system=True),
-                HcGroupTemplate(name="Brauchwarmwasser (BWW)", typ=HcGruppeTyp.bww, standard_vl=65.0, standard_rl=55.0, beschreibung="VL 65 / RL 55 °C", is_system=True),
-                HcGroupTemplate(name="Lüftungsregister", typ=HcGruppeTyp.lueftungsregister, standard_vl=60.0, standard_rl=45.0, beschreibung="VL 60 / RL 45 °C", is_system=True),
-                HcGroupTemplate(name="Wandheizung", typ=HcGruppeTyp.wandheizung, standard_vl=35.0, standard_rl=28.0, beschreibung="VL 35 / RL 28 °C", is_system=True),
-                HcGroupTemplate(name="TABS (Betonkernaktivierung)", typ=HcGruppeTyp.tabs, standard_vl=30.0, standard_rl=25.0, beschreibung="VL 30 / RL 25 °C", is_system=True),
-                HcGroupTemplate(name="Konvektoren", typ=HcGruppeTyp.konvektoren, standard_vl=55.0, standard_rl=45.0, beschreibung="VL 55 / RL 45 °C", is_system=True),
-            ]
-            db.add_all(templates)
-            db.commit()
-            print(f"[INIT] {len(templates)} Gruppen-Vorlagen angelegt")
+        _seed_group_templates(db)
+        _seed_admin(db)
     except Exception as e:
-        print("Gruppen-Vorlagen seed error:", e)
+        print("Seed error:", e)
     finally:
         db.close()

@@ -4,7 +4,9 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.auth import get_current_user
 from app.database import get_db
+from app.models.auth import Role, User
 from app.models.heizungscockpit import HcHeatingGroup, HcProject, HcProjectBaseData
 from app.schemas.hc_schemas import (
     HeatingGroupOut,
@@ -16,8 +18,6 @@ from app.schemas.hc_schemas import (
 from app.calculations.heizgruppen import berechne_rl_gemischt, pruefe_plausibilitaet
 
 router = APIRouter(prefix="/api/v1/projects", tags=["Heizungscockpit – Projekte"])
-
-TENANT_ID = 1
 
 
 def _group_to_out(g: HcHeatingGroup) -> HeatingGroupOut:
@@ -60,20 +60,31 @@ def _build_detail(project: HcProject) -> ProjectDetailOut:
     )
 
 
+def _owned_query(db: Session, user: User):
+    """Projekte der Firma; Nicht-Admins sehen nur ihre eigenen (Projekte pro User)."""
+    q = db.query(HcProject).filter(HcProject.tenant_id == user.tenant_id)
+    if user.role != Role.admin:
+        q = q.filter(HcProject.erstellt_von == user.id)
+    return q
+
+
+def _get_owned(db: Session, user: User, project_id: int) -> HcProject:
+    project = _owned_query(db, user).filter(HcProject.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Projekt nicht gefunden")
+    return project
+
+
 @router.get("", response_model=List[ProjectOut])
-def list_projects(db: Session = Depends(get_db)):
-    return (
-        db.query(HcProject)
-        .filter(HcProject.tenant_id == TENANT_ID)
-        .order_by(HcProject.created_at.desc())
-        .all()
-    )
+def list_projects(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return _owned_query(db, user).order_by(HcProject.created_at.desc()).all()
 
 
 @router.post("", response_model=ProjectDetailOut, status_code=201)
-def create_project(body: ProjectCreate, db: Session = Depends(get_db)):
+def create_project(body: ProjectCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     project = HcProject(
-        tenant_id=TENANT_ID,
+        tenant_id=user.tenant_id,
+        erstellt_von=user.id,
         name=body.name,
         standort=body.standort,
         kunde=body.kunde,
@@ -84,7 +95,7 @@ def create_project(body: ProjectCreate, db: Session = Depends(get_db)):
 
     bd_in = body.base_data
     bd = HcProjectBaseData(
-        tenant_id=TENANT_ID,
+        tenant_id=user.tenant_id,
         project_id=project.id,
         t_aussen=bd_in.t_aussen if bd_in else -8.0,
         t_innen=bd_in.t_innen if bd_in else 20.0,
@@ -100,26 +111,13 @@ def create_project(body: ProjectCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/{project_id}", response_model=ProjectDetailOut)
-def get_project(project_id: int, db: Session = Depends(get_db)):
-    project = (
-        db.query(HcProject)
-        .filter(HcProject.id == project_id, HcProject.tenant_id == TENANT_ID)
-        .first()
-    )
-    if not project:
-        raise HTTPException(status_code=404, detail="Projekt nicht gefunden")
-    return _build_detail(project)
+def get_project(project_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return _build_detail(_get_owned(db, user, project_id))
 
 
 @router.patch("/{project_id}", response_model=ProjectDetailOut)
-def update_project(project_id: int, body: ProjectUpdate, db: Session = Depends(get_db)):
-    project = (
-        db.query(HcProject)
-        .filter(HcProject.id == project_id, HcProject.tenant_id == TENANT_ID)
-        .first()
-    )
-    if not project:
-        raise HTTPException(status_code=404, detail="Projekt nicht gefunden")
+def update_project(project_id: int, body: ProjectUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    project = _get_owned(db, user, project_id)
 
     for field in ("name", "standort", "kunde", "beschreibung", "status"):
         val = getattr(body, field, None)
@@ -129,7 +127,7 @@ def update_project(project_id: int, body: ProjectUpdate, db: Session = Depends(g
 
     if body.base_data:
         if not project.base_data:
-            bd = HcProjectBaseData(tenant_id=TENANT_ID, project_id=project.id)
+            bd = HcProjectBaseData(tenant_id=user.tenant_id, project_id=project.id)
             db.add(bd)
             db.flush()
         for field in ("t_aussen", "t_innen", "heizungssystem", "warmwasser_bedarf_kw", "gebaeudekategorie", "klimastation"):
@@ -144,14 +142,8 @@ def update_project(project_id: int, body: ProjectUpdate, db: Session = Depends(g
 
 
 @router.delete("/{project_id}", status_code=204)
-def archive_project(project_id: int, db: Session = Depends(get_db)):
-    project = (
-        db.query(HcProject)
-        .filter(HcProject.id == project_id, HcProject.tenant_id == TENANT_ID)
-        .first()
-    )
-    if not project:
-        raise HTTPException(status_code=404, detail="Projekt nicht gefunden")
+def archive_project(project_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    project = _get_owned(db, user, project_id)
     project.status = "archiviert"
     project.updated_at = datetime.utcnow()
     db.commit()

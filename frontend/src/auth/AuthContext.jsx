@@ -1,32 +1,45 @@
 import { createContext, useContext, useState } from "react";
+import { api, setToken } from "../api";
 
-// Auth-Zustand fürs ganze Frontend. VORERST prüft das Login im Frontend (Admin-
-// Gate), damit man nicht ohne Anmeldung ins Cockpit kommt. Wird im nächsten
-// Schritt durch echtes Backend-Login (Registrierung → Freischaltung durch Admin,
-// Passwort-Hash, Token, User-/Firmen-Trennung) ersetzt — die Schnittstelle
-// (login/logout/user) bleibt dann gleich.
+// Auth-Zustand fürs ganze Frontend. Jetzt echtes Backend-Login (JWT):
+// login/register rufen /api/v1/auth/*, der Token hängt via Interceptor an jede
+// Anfrage. Die Schnittstelle (user/login/logout) blieb wie vorher.
 const AuthCtx = createContext(null);
-const KEY = "hc_auth";
-const ADMIN = { email: "dominicgoulon@icloud.com", password: "Sirego2004!" };
+const USER_KEY = "hc_auth";
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(KEY)) || null; } catch { return null; }
+    try { return JSON.parse(localStorage.getItem(USER_KEY)) || null; } catch { return null; }
   });
 
-  const login = (email, password) => {
-    if (email.trim().toLowerCase() === ADMIN.email && password === ADMIN.password) {
-      const u = { email: ADMIN.email, name: "Dominic Goulon", role: "admin" };
-      localStorage.setItem(KEY, JSON.stringify(u));
-      setUser(u);
+  const login = async (email, password) => {
+    try {
+      const { data } = await api.post("/api/v1/auth/login", { email, password });
+      setToken(data.access_token);
+      localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+      setUser(data.user);
       return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e?.response?.data?.detail || "Anmeldung fehlgeschlagen." };
     }
-    return { ok: false, error: "E-Mail oder Passwort falsch — oder das Konto ist noch nicht freigeschaltet." };
   };
 
-  const logout = () => { localStorage.removeItem(KEY); setUser(null); };
+  const register = async (email, password, name) => {
+    try {
+      const { data } = await api.post("/api/v1/auth/register", { email, password, name: name || null });
+      return { ok: true, message: data.message };
+    } catch (e) {
+      return { ok: false, error: e?.response?.data?.detail || "Registrierung fehlgeschlagen." };
+    }
+  };
 
-  return <AuthCtx.Provider value={{ user, login, logout }}>{children}</AuthCtx.Provider>;
+  const logout = () => {
+    setToken(null);
+    localStorage.removeItem(USER_KEY);
+    setUser(null);
+  };
+
+  return <AuthCtx.Provider value={{ user, login, register, logout }}>{children}</AuthCtx.Provider>;
 }
 
 export const useAuth = () => useContext(AuthCtx);

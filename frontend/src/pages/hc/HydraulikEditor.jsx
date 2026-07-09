@@ -378,7 +378,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         {fld('Nennleistung','leistung_kw','','kW')}
         {fld('VL Temperatur','vl_temp','','°C')}
         {fld('RL Temperatur','rl_temp','','°C')}
-        <button style={btnBlue} onClick={()=>navigate('/heizungscockpit/rechner/ravel')}>→ RAVEL Wirtschaftlichkeit</button>
+        <button style={btnBlue} onClick={()=>navigate('/rechner/ravel')}>→ RAVEL Wirtschaftlichkeit</button>
         <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
     );
@@ -778,7 +778,7 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, onUpdate, onClose, navig
           <div><label style={lbl}>VL [°C]</label><input type="number" style={inp} value={d.vl_temp??''} onChange={e=>set('vl_temp',e.target.value)}/></div>
           <div><label style={lbl}>RL [°C]</label><input type="number" style={inp} value={d.rl_temp??''} onChange={e=>set('rl_temp',e.target.value)}/></div>
         </div>
-        <button style={btnBlue} onClick={()=>navigate('/heizungscockpit/rechner/ravel')}>→ RAVEL Wirtschaftlichkeit</button>
+        <button style={btnBlue} onClick={()=>navigate('/rechner/ravel')}>→ RAVEL Wirtschaftlichkeit</button>
       </div>
     );
   } else {
@@ -1240,10 +1240,10 @@ function EditorInner() {
   };
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', height:'calc(100vh - 64px)', fontFamily:'system-ui,sans-serif' }}>
+    <div style={{ display:'flex', flexDirection:'column', height:'100vh', fontFamily:'system-ui,sans-serif' }}>
       {/* Topbar */}
       <div style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 14px', background:'white', borderBottom:'1px solid #e2e8f0', flexShrink:0, flexWrap:'wrap' }}>
-        <Link to={`/heizungscockpit/projekte/${projectId}`} style={{ fontSize:12, color:'#2563eb', whiteSpace:'nowrap' }}>← {projectName || 'Projekt'}</Link>
+        <Link to={`/projekte/${projectId}`} style={{ fontSize:12, color:'#2563eb', whiteSpace:'nowrap' }}>← {projectName || 'Projekt'}</Link>
         <span style={{ color:'#e2e8f0' }}>|</span>
         <input value={schemaName} onChange={e=>setSchemaName(e.target.value)}
           style={{ fontSize:13, fontWeight:700, border:'1px solid #f1f5f9', borderRadius:4, padding:'2px 8px', color:'#1e293b', minWidth:160 }}/>

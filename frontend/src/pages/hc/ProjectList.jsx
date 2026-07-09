@@ -1,20 +1,22 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { Plus, MapPin, User, CalendarDays } from "lucide-react";
 import { getProjects, createProject } from "../../api/hcApi";
 import { GEBAEUDEKATEGORIEN, KLIMASTATIONEN } from "../../data/sia";
 
-const statusBadge = (status) => {
-  if (status === "archiviert")
-    return <span className="px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-500">Archiviert</span>;
-  return <span className="px-2 py-0.5 rounded text-xs bg-green-100 text-green-700">Aktiv</span>;
-};
+const LEER_FORM = { name: "", standort: "", kunde: "", beschreibung: "", gebaeudekategorie: "", klimastation: "", t_aussen: -8 };
+
+function StatusBadge({ status }) {
+  if (status === "archiviert") return <span className="badge bg-slate-100 text-slate-500">Archiviert</span>;
+  return <span className="badge bg-green-100 text-green-700">Aktiv</span>;
+}
 
 export default function ProjectList() {
   const navigate = useNavigate();
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: "", standort: "", kunde: "", beschreibung: "", gebaeudekategorie: "", klimastation: "", t_aussen: -8 });
+  const [form, setForm] = useState(LEER_FORM);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -42,7 +44,7 @@ export default function ProjectList() {
           klimastation: form.klimastation || null,
         },
       });
-      navigate(`/heizungscockpit/projekte/${project.id}`);
+      navigate(`/projekte/${project.id}`);
     } catch {
       setError("Projekt konnte nicht erstellt werden");
       setSaving(false);
@@ -50,123 +52,82 @@ export default function ProjectList() {
   };
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+    <div className="mx-auto max-w-5xl px-4 py-8 lg:px-8">
+      {/* Kopf */}
+      <div className="mb-8 flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Heizungscockpit</h1>
-          <p className="text-gray-500 text-sm mt-1">Engineering-Plattform für Heizungsplanung</p>
+          <h1 className="text-2xl font-bold text-slate-900">Projekte</h1>
+          <p className="mt-1 text-sm text-slate-500">Deine Heizungsplanungen — Schema, Auslegung und Kostenschätzung.</p>
         </div>
-        <button
-          onClick={() => setShowForm(true)}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition"
-        >
-          + Neues Projekt
-        </button>
+        {!showForm && (
+          <button onClick={() => setShowForm(true)} className="btn-primary">
+            <Plus className="size-4" /> Neues Projekt
+          </button>
+        )}
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-3 mb-6 text-sm">
-          {error}
-        </div>
+        <div className="mb-6 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
       )}
 
-      {/* Neues Projekt Formular */}
+      {/* Neues-Projekt-Formular */}
       {showForm && (
-        <div className="bg-white border border-gray-200 rounded-xl p-6 mb-6 shadow-sm">
-          <h2 className="font-semibold text-gray-800 mb-4">Neues Projekt anlegen</h2>
-          <form onSubmit={handleCreate} className="space-y-3">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="card mb-6 p-6">
+          <h2 className="mb-4 font-semibold text-slate-800">Neues Projekt anlegen</h2>
+          <form onSubmit={handleCreate} className="space-y-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Projektname *</label>
-                <input
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="z.B. EFH Muster, Winterthur"
-                  value={form.name}
-                  onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                  required
-                />
+                <label className="label">Projektname *</label>
+                <input className="input" placeholder="z.B. EFH Muster, Winterthur" value={form.name}
+                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} required />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Standort</label>
-                <input
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="z.B. Winterthur"
-                  value={form.standort}
-                  onChange={e => setForm(f => ({ ...f, standort: e.target.value }))}
-                />
+                <label className="label">Standort</label>
+                <input className="input" placeholder="z.B. Winterthur" value={form.standort}
+                  onChange={(e) => setForm((f) => ({ ...f, standort: e.target.value }))} />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Kunde / Bauherr</label>
-                <input
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="z.B. Familie Muster"
-                  value={form.kunde}
-                  onChange={e => setForm(f => ({ ...f, kunde: e.target.value }))}
-                />
+                <label className="label">Kunde / Bauherr</label>
+                <input className="input" placeholder="z.B. Familie Muster" value={form.kunde}
+                  onChange={(e) => setForm((f) => ({ ...f, kunde: e.target.value }))} />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Beschreibung</label>
-                <input
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Kurze Beschreibung"
-                  value={form.beschreibung}
-                  onChange={e => setForm(f => ({ ...f, beschreibung: e.target.value }))}
-                />
+                <label className="label">Beschreibung</label>
+                <input className="input" placeholder="Kurze Beschreibung" value={form.beschreibung}
+                  onChange={(e) => setForm((f) => ({ ...f, beschreibung: e.target.value }))} />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Gebäudekategorie (SIA 380/1)</label>
-                <select
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                  value={form.gebaeudekategorie}
-                  onChange={e => setForm(f => ({ ...f, gebaeudekategorie: e.target.value }))}
-                >
+                <label className="label">Gebäudekategorie (SIA 380/1)</label>
+                <select className="input" value={form.gebaeudekategorie}
+                  onChange={(e) => setForm((f) => ({ ...f, gebaeudekategorie: e.target.value }))}>
                   <option value="">— bitte wählen —</option>
-                  {GEBAEUDEKATEGORIEN.map(k => (
-                    <option key={k.value} value={k.value}>{k.label}</option>
-                  ))}
+                  {GEBAEUDEKATEGORIEN.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Klimastation (SIA 2028)</label>
-                <select
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                  value={form.klimastation}
-                  onChange={e => {
-                    const station = KLIMASTATIONEN.find(s => s.name === e.target.value);
-                    setForm(f => ({ ...f, klimastation: e.target.value, t_aussen: station ? station.theta_e : f.t_aussen }));
-                  }}
-                >
+                <label className="label">Klimastation (SIA 2028)</label>
+                <select className="input" value={form.klimastation}
+                  onChange={(e) => {
+                    const station = KLIMASTATIONEN.find((s) => s.name === e.target.value);
+                    setForm((f) => ({ ...f, klimastation: e.target.value, t_aussen: station ? station.theta_e : f.t_aussen }));
+                  }}>
                   <option value="">— bitte wählen —</option>
-                  {KLIMASTATIONEN.map(s => (
-                    <option key={s.name} value={s.name}>{s.name} ({s.theta_e} °C)</option>
-                  ))}
+                  {KLIMASTATIONEN.map((s) => <option key={s.name} value={s.name}>{s.name} ({s.theta_e} °C)</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Auslegungstemperatur aussen [°C]</label>
-                <input
-                  type="number"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  value={form.t_aussen}
-                  onChange={e => setForm(f => ({ ...f, t_aussen: e.target.value }))}
-                />
-                <p className="text-xs text-gray-400 mt-1">aus SIA 2028, überschreibbar</p>
+                <label className="label">Auslegungstemperatur aussen [°C]</label>
+                <input type="number" className="input" value={form.t_aussen}
+                  onChange={(e) => setForm((f) => ({ ...f, t_aussen: e.target.value }))} />
+                <p className="mt-1 text-xs text-slate-400">aus SIA 2028, überschreibbar</p>
               </div>
             </div>
-            <div className="flex gap-2 pt-2">
-              <button
-                type="submit"
-                disabled={saving}
-                className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white px-4 py-2 rounded-lg text-sm font-medium transition"
-              >
+            <div className="flex gap-2 pt-1">
+              <button type="submit" disabled={saving} className="btn-primary">
                 {saving ? "Erstelle…" : "Projekt erstellen"}
               </button>
-              <button
-                type="button"
-                onClick={() => { setShowForm(false); setForm({ name: "", standort: "", kunde: "", beschreibung: "", gebaeudekategorie: "", klimastation: "", t_aussen: -8 }); }}
-                className="border border-gray-300 text-gray-600 hover:bg-gray-50 px-4 py-2 rounded-lg text-sm transition"
-              >
+              <button type="button" className="btn-secondary"
+                onClick={() => { setShowForm(false); setForm(LEER_FORM); }}>
                 Abbrechen
               </button>
             </div>
@@ -174,42 +135,31 @@ export default function ProjectList() {
         </div>
       )}
 
-      {/* Projektliste */}
+      {/* Liste */}
       {loading ? (
-        <div className="text-gray-400 text-sm py-12 text-center">Lade Projekte…</div>
+        <div className="py-16 text-center text-sm text-slate-400">Lade Projekte…</div>
       ) : projects.length === 0 ? (
-        <div className="bg-gray-50 rounded-xl p-12 text-center">
-          <div className="text-gray-400 text-4xl mb-3">🔥</div>
-          <p className="text-gray-600 font-medium">Noch keine Projekte vorhanden</p>
-          <p className="text-gray-400 text-sm mt-1">Erstelle dein erstes Projekt mit dem Button oben.</p>
+        <div className="card flex flex-col items-center gap-2 border-dashed p-12 text-center">
+          <div className="text-4xl">🔥</div>
+          <p className="font-medium text-slate-700">Noch keine Projekte vorhanden</p>
+          <p className="text-sm text-slate-400">Erstelle dein erstes Projekt mit dem Button oben rechts.</p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {projects.map(p => (
-            <div
-              key={p.id}
-              onClick={() => navigate(`/heizungscockpit/projekte/${p.id}`)}
-              className="bg-white border border-gray-200 rounded-xl p-5 hover:border-blue-300 hover:shadow-sm cursor-pointer transition group"
-            >
-              <div className="flex items-start justify-between">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <h3 className="font-semibold text-gray-900 group-hover:text-blue-700 truncate">
-                      {p.name}
-                    </h3>
-                    {statusBadge(p.status)}
-                  </div>
-                  <div className="flex gap-4 text-xs text-gray-500">
-                    {p.standort && <span>📍 {p.standort}</span>}
-                    {p.kunde && <span>👤 {p.kunde}</span>}
-                    {p.beschreibung && <span className="truncate max-w-xs">{p.beschreibung}</span>}
-                  </div>
-                </div>
-                <div className="text-xs text-gray-400 ml-4 shrink-0">
-                  {new Date(p.created_at).toLocaleDateString("de-CH")}
-                </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {projects.map((p) => (
+            <button key={p.id} onClick={() => navigate(`/projekte/${p.id}`)}
+              className="card group p-5 text-left transition hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md">
+              <div className="mb-2 flex items-start justify-between gap-3">
+                <h3 className="truncate font-semibold text-slate-900 group-hover:text-brand-700">{p.name}</h3>
+                <StatusBadge status={p.status} />
               </div>
-            </div>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+                {p.standort && <span className="inline-flex items-center gap-1"><MapPin className="size-3.5" /> {p.standort}</span>}
+                {p.kunde && <span className="inline-flex items-center gap-1"><User className="size-3.5" /> {p.kunde}</span>}
+                <span className="inline-flex items-center gap-1"><CalendarDays className="size-3.5" /> {new Date(p.created_at).toLocaleDateString("de-CH")}</span>
+              </div>
+              {p.beschreibung && <p className="mt-2 line-clamp-2 text-sm text-slate-500">{p.beschreibung}</p>}
+            </button>
           ))}
         </div>
       )}

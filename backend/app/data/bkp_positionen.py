@@ -68,6 +68,37 @@ BKP_POSITIONEN = [
 ]
 
 
+# ── Treiber je BKP (welche Bezugsgrösse bestimmt den Kennwert) ──────────────
+# 241 Erdsonden → CHF/Bohrmeter · 242 Erzeugung → CHF/kW ·
+# 243.2* Heizkörper → CHF/Einheit · alles übrige → CHF/m² EBF.
+TREIBER_LABEL = {
+    "bohrmeter": "CHF/Bohrmeter",
+    "kw": "CHF/kW",
+    "einheiten": "CHF/Einheit",
+    "ebf": "CHF/m² EBF",
+}
+
+
+def treiber_fuer_bkp(bkp_nr: str) -> str:
+    """Gibt den Treiber-Schlüssel ('bohrmeter'|'kw'|'einheiten'|'ebf') zurück."""
+    gruppe = bkp_nr.split(".")[0]
+    if gruppe == "241":
+        return "bohrmeter"
+    if gruppe == "242":
+        return "kw"
+    if bkp_nr.startswith("243.2"):
+        return "einheiten"
+    return "ebf"
+
+
+# ── Komplexitäts-Positionen (Anlagenkonfiguration) ──────────────────────────
+# Diese Positionen hängen nicht vom einzelnen Erzeuger ab, sondern davon, wie
+# komplex die ANLAGE als Ganzes ist (Regelung/Armaturen/Schaltschrank/Koordination
+# für z.B. bivalente oder hybride Systeme). Ein monovalentes Referenzprojekt darf
+# hier nicht wie ein Volltreffer zählen — siehe calculations/kostenschaetzung.py.
+KOMPLEXITAETS_BKP = {"243.5", "243.6", "243.8", "249.8"}
+
+
 def filter_positionen(wp_typ: str = None, kategorie: str = None) -> list:
     """Nur die relevanten Positionen für WP-Typ + Gebäudekategorie."""
     out = []

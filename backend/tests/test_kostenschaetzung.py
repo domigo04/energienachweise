@@ -9,7 +9,9 @@ from app.calculations.kostenschaetzung import (
     bkp_relevant,
     confidence_from,
     effective_n,
+    harte_kriterien_erfuellt,
     index_faktor,
+    ist_abgabe_spezifisch,
     ist_monovalent,
     jaccard,
     konfiguration_kompatibilitaet,
@@ -177,11 +179,11 @@ def test_komplexitaet_mit_passender_referenz_kein_zuschlag():
 
 
 def test_komplexitaet_ohne_passende_referenz_zuschlag_und_tief():
-    # Zielprojekt bivalent, aber NUR monovalente Referenzen vorhanden → Fallback
+    # Zielprojekt bivalent, aber NUR monovalente Referenzen vorhanden → Fallback.
+    # Wärmeerzeuger MUSS mit _BASE übereinstimmen (harter Filter) — nur die
+    # Anlagenkonfiguration weicht ab, das ist genau das, was hier getestet wird.
     inp = {**_BASE, "anlagenkonfiguration": "bivalent"}
-    monovalent = {"waermeerzeuger": ["Erdsonden-WP"], "waermeabgabe": ["FBH"], "ebf": 1000,
-                  "heizleistung_kw": 40, "bohrmeter": 400, "anzahl_einheiten": 8,
-                  "anlagenkonfiguration": "monovalent", "datum": None, "qualitaet": 1.0,
+    monovalent = {**_BASE, "anlagenkonfiguration": "monovalent", "datum": None, "qualitaet": 1.0,
                   "kosten": {"243.6": 20000}}
     ref1, ref2 = {**monovalent, "name": "M1"}, {**monovalent, "name": "M2"}
     res = berechne_kostenschaetzung(inp, [ref1, ref2])
@@ -195,11 +197,10 @@ def test_komplexitaet_ohne_passende_referenz_zuschlag_und_tief():
 
 def test_bauteil_position_unbeeinflusst_von_konfiguration():
     # Bauteil-Position (242.3, reine WP) darf monovalente Referenz normal nutzen,
-    # auch wenn das Zielprojekt bivalent ist.
+    # auch wenn das Zielprojekt bivalent ist. Wärmeerzeuger muss trotzdem mit
+    # _BASE übereinstimmen (harter Filter).
     inp = {**_BASE, "anlagenkonfiguration": "bivalent"}
-    ref = {"waermeerzeuger": ["Erdsonden-WP"], "waermeabgabe": ["FBH"], "ebf": 1000,
-           "heizleistung_kw": 40, "bohrmeter": 400, "anzahl_einheiten": 8,
-           "anlagenkonfiguration": "monovalent", "name": "M", "datum": None, "qualitaet": 1.0,
+    ref = {**_BASE, "anlagenkonfiguration": "monovalent", "name": "M", "datum": None, "qualitaet": 1.0,
            "kosten": {"242.3": 80000}}
     res = berechne_kostenschaetzung(inp, [ref])
     row = next(r for r in res["rows"] if r["bkp_nr"] == "242.3")
@@ -246,6 +247,96 @@ def test_aehnlichkeit_stufe():
     assert aehnlichkeit_stufe(0.5) == "mittel"
     assert aehnlichkeit_stufe(0.4) == "mittel"
     assert aehnlichkeit_stufe(0.1) == "tief"
+
+
+# ── Harte Fix-Kriterien (Dominic-Vorgabe 2026-07-09) ────────────────────────
+
+def test_harte_kriterien_erfuellt_exakte_uebereinstimmung():
+    inp = {"projektart": "Neubau", "gebaeudetyp": "MFH", "ausbauumfang": "Vollausbau",
+           "zertifizierung": "Gesetz", "waermeerzeuger": ["Erdsonden-WP"]}
+    gleich = dict(inp)
+    assert harte_kriterien_erfuellt(inp, gleich) is True
+
+
+def test_harte_kriterien_erfuellt_scheitert_bei_abweichung():
+    inp = {"projektart": "Neubau", "gebaeudetyp": "MFH", "ausbauumfang": "Vollausbau",
+           "zertifizierung": "Gesetz", "waermeerzeuger": ["Erdsonden-WP"]}
+    # Ausbauumfang weicht ab
+    anders_ausbau = {**inp, "ausbauumfang": "nur Erzeugung"}
+    assert harte_kriterien_erfuellt(inp, anders_ausbau) is False
+    # ... aber ohne Ausbauumfang-Pflicht (Erzeugungs-Positionen) zählt es wieder
+    assert harte_kriterien_erfuellt(inp, anders_ausbau, ausbauumfang_pflicht=False) is True
+    # Anderer Wärmeerzeuger-Set
+    anderer_erzeuger = {**inp, "waermeerzeuger": ["Luft/Wasser-WP"]}
+    assert harte_kriterien_erfuellt(inp, anderer_erzeuger) is False
+
+
+def test_ist_abgabe_spezifisch():
+    assert ist_abgabe_spezifisch("243.2a") is True
+    assert ist_abgabe_spezifisch("243.3a") is True
+    assert ist_abgabe_spezifisch("243.4a") is True
+    assert ist_abgabe_spezifisch("243.1") is False
+    assert ist_abgabe_spezifisch("242.3") is False
+
+
+_FIX = {"projektart": "Neubau", "gebaeudetyp": "MFH", "ausbauumfang": "Vollausbau",
+        "zertifizierung": "Gesetz", "waermeerzeuger": ["Erdsonden-WP"]}
+
+
+def test_unpassende_referenz_wird_fuer_verteilung_nicht_gemischt():
+    """Genau Dominics Beispiel: ein Referenzprojekt mit anderem Ausbauumfang
+    (nur Erzeugung statt Vollausbau) darf für eine Wärmeverteilungs-Position
+    (243.1) NICHT als Grundlage zählen — auch wenn sonst alles passt."""
+    inp = {**_FIX, "waermeabgabe": ["FBH"], "ebf": 1000, "heizleistung_kw": 40}
+    unpassend = {**_FIX, "ausbauumfang": "nur Erzeugung", "waermeabgabe": ["FBH"],
+                 "ebf": 1000, "heizleistung_kw": 40, "datum": None, "qualitaet": 1.0,
+                 "name": "Unpassend", "kosten": {"243.1": 50000}}
+    res = berechne_kostenschaetzung(inp, [unpassend])
+    nrs = {r["bkp_nr"] for r in res["rows"]}
+    assert "243.1" not in nrs  # Position weggelassen statt mit falscher Basis geschätzt
+
+
+def test_ausbauumfang_ausnahme_fuer_erzeugung():
+    """Ein 'nur Erzeugung'-Referenzprojekt darf für Erzeugungs-Positionen
+    (242.x) trotzdem zählen, auch wenn das Zielprojekt Vollausbau ist —
+    genau die Erzeugungskosten sind ja identisch erfasst."""
+    inp = {**_FIX, "waermeabgabe": ["FBH"], "ebf": 1000, "heizleistung_kw": 40}
+    nur_erzeugung = {**_FIX, "ausbauumfang": "nur Erzeugung", "waermeabgabe": ["FBH"],
+                      "ebf": 1000, "heizleistung_kw": 40, "datum": None, "qualitaet": 1.0,
+                      "name": "NurErzeugung", "kosten": {"242.3": 80000}}
+    res = berechne_kostenschaetzung(inp, [nur_erzeugung])
+    nrs = {r["bkp_nr"] for r in res["rows"]}
+    assert "242.3" in nrs
+
+
+def test_abgabe_spezifisch_fallback_auf_anderes_projekt_mit_hinweis():
+    """Kein fix-kriterien-konformes Projekt hat FBH (nur Heizkörper) — Fallback
+    auf ein Projekt mit anderen Fix-Kriterien, aber passendem Abgabesystem."""
+    inp = {**_FIX, "waermeabgabe": ["FBH"], "ebf": 1000, "heizleistung_kw": 40}
+    konform_aber_heizkoerper = {**_FIX, "waermeabgabe": ["Heizkörper"], "ebf": 1000,
+                                 "heizleistung_kw": 40, "datum": None, "qualitaet": 1.0,
+                                 "name": "Konform-HK", "kosten": {"243.3a": 30000}}
+    andere_fixkriterien_aber_fbh = {"projektart": "Sanierung", "gebaeudetyp": "EFH",
+                                     "ausbauumfang": "Grundausbau", "zertifizierung": "Minergie",
+                                     "waermeerzeuger": ["Gas"], "waermeabgabe": ["FBH"],
+                                     "ebf": 500, "heizleistung_kw": 20, "datum": None, "qualitaet": 1.0,
+                                     "name": "Andere-FBH", "kosten": {"243.3a": 25000}}
+    res = berechne_kostenschaetzung(inp, [konform_aber_heizkoerper, andere_fixkriterien_aber_fbh])
+    row = next(r for r in res["rows"] if r["bkp_nr"] == "243.3a")
+    assert row["hinweis"] is not None and "Abgabesystem" in row["hinweis"]
+    # nur aus dem FBH-Projekt: 25'000 CHF / 500 m² EBF = 50 CHF/m² × 1000 m² (Ziel-EBF) = 50'000
+    assert row["estimate"] == pytest.approx(50000, abs=1)
+
+
+def test_abgabe_spezifisch_ohne_jede_passende_referenz_position_weggelassen():
+    """Kein einziges ausgewertetes Projekt hat FBH → Position komplett
+    weggelassen, keine Schätzung mit falscher Grundlage."""
+    inp = {**_FIX, "waermeabgabe": ["FBH"], "ebf": 1000, "heizleistung_kw": 40}
+    nur_heizkoerper = {**_FIX, "waermeabgabe": ["Heizkörper"], "ebf": 1000, "heizleistung_kw": 40,
+                       "datum": None, "qualitaet": 1.0, "name": "NurHK", "kosten": {"243.3a": 30000}}
+    res = berechne_kostenschaetzung(inp, [nur_heizkoerper])
+    nrs = {r["bkp_nr"] for r in res["rows"]}
+    assert "243.3a" not in nrs
 
 
 def test_ein_sehr_aehnlicher_treffer_gibt_hohe_aehnlichkeit_aber_tiefe_validierung():

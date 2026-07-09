@@ -1,15 +1,32 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Info } from "lucide-react";
+import { FileDown, Info } from "lucide-react";
+import { API_BASE } from "../../api";
 import { getProject, ksGet, ksSave } from "../../api/hcApi";
 import CheckboxGruppe from "../../components/kv/CheckboxGruppe";
 import AnlagenkonfigurationAuswahl from "../../components/kv/AnlagenkonfigurationAuswahl";
 import BoxPlot from "../../components/charts/BoxPlot";
 import BarPlot from "../../components/charts/BarPlot";
+import InfoTip from "../../components/ui/InfoTip";
 import {
   AUSBAUUMFAENGE, GEBAEUDETYPEN, PROJEKTARTEN, WAERMEABGABE, WAERMEERZEUGER, ZERTIFIZIERUNGEN, hasErdsonde,
   konfigurationVorschlag, siaZuGebaeudetyp,
 } from "../../data/kv";
+
+// Erklärungstexte für die "i"-Icons — Formel/Herleitung statt nur der Zahl,
+// damit Nutzer dem Ergebnis vertrauen können, ohne es blind zu übernehmen.
+const ERKL = {
+  total: "Summe aller geschätzten BKP-Positionen. Reine Kontrollzahl — massgebend sind die einzelnen Positionen in der Tabelle unten.",
+  bandbreiteTief: "Schätzung je Position minus einem Sicherheitsabschlag (12–35 %, abhängig vom Vertrauen dieser Position: hoch = ±12 %, mittel = ±22 %, tief = ±35 %), aufsummiert.",
+  bandbreiteHoch: "Schätzung je Position plus demselben Sicherheitszuschlag wie bei der Bandbreite tief.",
+  aehnlichkeit: "Wie gut passt die BESTE einzelne Referenz zu deinen Eingaben? Berechnet aus Übereinstimmung bei Gebäudetyp, Anlagenkonfiguration, Wärmeerzeuger/-abgabe sowie Verhältnis-Ähnlichkeit von EBF/Leistung. Sagt nichts darüber aus, wie viele Referenzen insgesamt vorhanden sind — das ist die Validierung.",
+  validierung: "Wie viele unabhängige Referenzprojekte bestätigen die Schätzung mit ähnlichen Kennwerten? Aus der effektiven Anzahl ähnlicher Referenzen (n_eff) und deren Streuung — viele, sich einige Referenzen ergeben «hoch», wenige oder stark streuende Werte «tief».",
+  kennwert: "Gewichteter Mittelwert aus (Kosten der Referenz ÷ deren Bezugsgrösse, z.B. CHF/kW oder CHF/m²) über alle passenden Referenzprojekte — je ähnlicher ein Referenzprojekt, desto stärker zählt es.",
+  schaetzung: "Kennwert × deine eigene Bezugsgrösse (z.B. CHF/kW × deine kW). Bei fehlenden passenden Referenzen (siehe ⚠-Hinweis) zusätzlich mit einem groben Komplexitätszuschlag versehen.",
+  bandbreitePosition: "Kennwert-Schätzung ± Sicherheitsmarge (12 % bei hohem, 22 % bei mittlerem, 35 % bei tiefem Vertrauen dieser Position).",
+  vertrauen: "Vertrauen dieser einzelnen BKP-Position: hoch braucht mind. 5 effektive Referenzen mit wenig Streuung, mittel mind. 2.5 mit mässiger Streuung, sonst tief.",
+  baupreisindex: "Skaliert die Kosten jedes Referenzprojekts auf das heutige Preisniveau, bevor der Kennwert berechnet wird — mit dem Verhältnis (heutiger Index ÷ Index zum Zeitpunkt des Referenzprojekts). Ohne hinterlegte Indexwerte hat das Häkchen keine Wirkung.",
+};
 
 const DEFAULT = {
   projektart: "", gebaeudetyp: "", ausbauumfang: "", zertifizierung: "", anlagenkonfiguration: "",
@@ -150,9 +167,20 @@ export default function KostenschaetzungPage() {
           <Link to={`/projekte/${id}`} className="hover:text-brand-600">Projekt</Link><span>/</span>
           <span className="text-slate-800">Kostenschätzung</span>
         </div>
-        <span className="text-xs text-slate-400">
-          {saveState === "saving" ? "● Rechne…" : saveState === "error" ? "● Fehler" : saveState === "saved" ? "● Gespeichert" : ""}
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-slate-400">
+            {saveState === "saving" ? "● Rechne…" : saveState === "error" ? "● Fehler" : saveState === "saved" ? "● Gespeichert" : ""}
+          </span>
+          {!leer && (
+            <button
+              type="button"
+              className="btn-secondary inline-flex items-center gap-1.5 text-sm"
+              onClick={() => window.open(`${API_BASE}/api/v1/kostenschaetzung/projekt/${id}/pdf`, "_blank")}
+            >
+              <FileDown className="size-4" /> PDF exportieren
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[360px_minmax(0,1fr)]">
@@ -190,6 +218,7 @@ export default function KostenschaetzungPage() {
               <input type="checkbox" checked={!!inp.baupreisindex_beruecksichtigen}
                 onChange={(e) => set("baupreisindex_beruecksichtigen", e.target.checked)} />
               Baupreisindex berücksichtigen
+              <InfoTip text={ERKL.baupreisindex} />
             </label>
           </div>
         </div>
@@ -197,11 +226,11 @@ export default function KostenschaetzungPage() {
         {/* Ergebnis */}
         <div className="space-y-6">
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-            <div className="card p-4"><div className="text-xs text-slate-400">Summe (Kontrollzahl)</div><div className="mt-1 text-xl font-bold text-slate-900">{chf(result?.total)}</div></div>
-            <div className="card p-4"><div className="text-xs text-slate-400">Bandbreite tief</div><div className="mt-1 text-lg font-semibold text-slate-700">{chf(result?.total_low)}</div></div>
-            <div className="card p-4"><div className="text-xs text-slate-400">Bandbreite hoch</div><div className="mt-1 text-lg font-semibold text-slate-700">{chf(result?.total_high)}</div></div>
-            <div className="card p-4"><div className="text-xs text-slate-400">Ähnlichkeit</div><div className="mt-1">{result ? <span className={CONF[result.aehnlichkeit?.stufe]}>{result.aehnlichkeit?.stufe}</span> : "—"}</div></div>
-            <div className="card p-4"><div className="text-xs text-slate-400">Validierung</div><div className="mt-1">{result ? <span className={CONF[result.overall_confidence]}>{result.overall_confidence}</span> : "—"}</div></div>
+            <div className="card p-4"><div className="flex items-center gap-1 text-xs text-slate-400">Summe (Kontrollzahl)<InfoTip text={ERKL.total} /></div><div className="mt-1 text-xl font-bold text-slate-900">{chf(result?.total)}</div></div>
+            <div className="card p-4"><div className="flex items-center gap-1 text-xs text-slate-400">Bandbreite tief<InfoTip text={ERKL.bandbreiteTief} /></div><div className="mt-1 text-lg font-semibold text-slate-700">{chf(result?.total_low)}</div></div>
+            <div className="card p-4"><div className="flex items-center gap-1 text-xs text-slate-400">Bandbreite hoch<InfoTip text={ERKL.bandbreiteHoch} /></div><div className="mt-1 text-lg font-semibold text-slate-700">{chf(result?.total_high)}</div></div>
+            <div className="card p-4"><div className="flex items-center gap-1 text-xs text-slate-400">Ähnlichkeit<InfoTip text={ERKL.aehnlichkeit} /></div><div className="mt-1">{result ? <span className={CONF[result.aehnlichkeit?.stufe]}>{result.aehnlichkeit?.stufe}</span> : "—"}</div></div>
+            <div className="card p-4"><div className="flex items-center gap-1 text-xs text-slate-400">Validierung<InfoTip text={ERKL.validierung} /></div><div className="mt-1">{result ? <span className={CONF[result.overall_confidence]}>{result.overall_confidence}</span> : "—"}</div></div>
           </div>
           <p className="-mt-3 text-xs text-slate-400">
             Massgebend sind die einzelnen BKP-Positionen unten — die Summe oben ist nur eine Kontrollzahl.
@@ -226,8 +255,11 @@ export default function KostenschaetzungPage() {
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead><tr className="bg-slate-50 text-left text-xs font-semibold text-slate-500">
-                      <th className="p-3">BKP</th><th className="p-3">Position</th><th className="p-3 text-right">Kennwert</th>
-                      <th className="p-3 text-right">Schätzung</th><th className="p-3 text-right">tief–hoch</th><th className="p-3">Vertrauen</th>
+                      <th className="p-3">BKP</th><th className="p-3">Position</th>
+                      <th className="p-3 text-right"><span className="inline-flex items-center justify-end gap-1">Kennwert<InfoTip text={ERKL.kennwert} /></span></th>
+                      <th className="p-3 text-right"><span className="inline-flex items-center justify-end gap-1">Schätzung<InfoTip text={ERKL.schaetzung} /></span></th>
+                      <th className="p-3 text-right"><span className="inline-flex items-center justify-end gap-1">tief–hoch<InfoTip text={ERKL.bandbreitePosition} /></span></th>
+                      <th className="p-3"><span className="inline-flex items-center gap-1">Vertrauen<InfoTip text={ERKL.vertrauen} /></span></th>
                     </tr></thead>
                     <tbody className="divide-y divide-slate-100">
                       {result.rows.map((r) => (

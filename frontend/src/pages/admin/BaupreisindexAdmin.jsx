@@ -65,8 +65,9 @@ export default function BaupreisindexAdmin() {
           </button>
         </div>
         <p className="text-xs text-slate-400">
-          Bestmöglicher Versuch gegen die offizielle Quelle — noch nicht live verifiziert. Schlägt er fehl,
-          bleibt alles beim Alten; die manuelle Eingabe unten funktioniert immer.
+          Ruft die offizielle Quelle (BFS via opendata.swiss) ab — Region Schweiz, Baugewerbe Total.
+          Schlägt er ausnahmsweise fehl (Quelle geändert), bleibt alles beim Alten; die manuelle Eingabe
+          unten funktioniert immer zusätzlich.
         </p>
         {meldung && (
           <div className={"mt-3 rounded-lg p-3 text-sm " + (meldung.erfolg ? "bg-green-50 text-green-800" : "bg-amber-50 text-amber-800")}>
@@ -77,6 +78,13 @@ export default function BaupreisindexAdmin() {
 
       <div className="card mb-6 p-5">
         <h2 className="mb-3 font-semibold text-slate-800">Manuell erfassen</h2>
+        <p className="mb-3 text-xs text-slate-400">
+          Falls die Automatik einmal nicht klappt: aktueller Indexwert auf der{" "}
+          <a href="https://www.bfs.admin.ch/bfs/de/home/statistiken/preise/baupreise/baupreisindex.html"
+            target="_blank" rel="noopener noreferrer" className="text-brand-600 hover:underline">
+            offiziellen BFS-Seite
+          </a>{" "}nachschauen und hier eintragen.
+        </p>
         <form onSubmit={add} className="flex flex-wrap items-end gap-3">
           <div>
             <label className="label">Periode</label>

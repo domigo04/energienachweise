@@ -190,6 +190,20 @@ _BAND = {"hoch": 0.12, "mittel": 0.22, "tief": 0.35}
 _CONF_SCORE = {"hoch": 3, "mittel": 2, "tief": 1}
 
 
+def aehnlichkeit_stufe(gewicht: float) -> str:
+    """Ähnlichkeit ist eine ANDERE Frage als Vertrauen/Validierung: sie fragt
+    nur «wie gut passt die BESTE Referenz?», unabhängig davon, wie viele
+    Referenzen insgesamt vorhanden sind. Ein einzelner Volltreffer kann darum
+    hohe Ähnlichkeit UND gleichzeitig tiefe Validierung haben (siehe
+    confidence_from — die bewertet die Menge/Übereinstimmung, nicht die Güte
+    des besten Treffers)."""
+    if gewicht >= 0.65:
+        return "hoch"
+    if gewicht >= 0.4:
+        return "mittel"
+    return "tief"
+
+
 def _driver_value(obj: dict, driver: str) -> float:
     return obj.get(_DRIVER_FIELD[driver]) or 0.0
 
@@ -298,6 +312,11 @@ def berechne_kostenschaetzung(inp: dict, referenzen: list, bauindex_eintraege: l
         "ebf": r.get("ebf"), "heizleistung_kw": r.get("heizleistung_kw"), "gewicht": round(r["_w"], 3),
     } for r in refs[:8]]
 
+    # Ähnlichkeit ≠ Vertrauen: wie gut passt die BESTE Referenz, unabhängig von
+    # der Anzahl. Details zu dieser Referenz stehen in referenzen_out[0].
+    top_gewicht = refs[0]["_w"] if refs else 0.0
+    aehnlichkeit = {"stufe": aehnlichkeit_stufe(top_gewicht), "gewicht": round(top_gewicht, 3)}
+
     if verwende_bauindex:
         baupreisindex = {
             "aktiv": True,
@@ -309,7 +328,7 @@ def berechne_kostenschaetzung(inp: dict, referenzen: list, bauindex_eintraege: l
 
     return {
         "total": round(total), "total_low": round(low_total), "total_high": round(high_total),
-        "overall_confidence": overall, "rows": rows, "boxplot": boxplot,
+        "overall_confidence": overall, "aehnlichkeit": aehnlichkeit, "rows": rows, "boxplot": boxplot,
         "referenzen": referenzen_out, "anzahl_referenzen": len(referenzen),
         "baupreisindex": baupreisindex,
     }

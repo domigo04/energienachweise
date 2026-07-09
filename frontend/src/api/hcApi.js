@@ -12,6 +12,8 @@ export const getProject = (id) => api.get(`${BASE}/projects/${id}`).then(r => r.
 export const updateProject = (id, data) => api.patch(`${BASE}/projects/${id}`, data).then(r => r.data);
 
 export const archiveProject = (id) => api.delete(`${BASE}/projects/${id}`);
+export const deleteProjectPermanent = (id) => api.delete(`${BASE}/projects/${id}/endgueltig`);
+export const deleteAllArchived = () => api.delete(`${BASE}/projects/archiviert/alle`).then(r => r.data);
 
 // --- Gruppen-Vorlagen ---
 export const getGroupTemplates = () => api.get(`${BASE}/group-templates`).then(r => r.data);
@@ -62,6 +64,10 @@ export const getBkpPositionen = (params) =>
 // --- Auth / Admin ---
 export const getUsers = () => api.get(`${BASE}/auth/admin/users`).then(r => r.data);
 export const updateUser = (id, data) => api.patch(`${BASE}/auth/admin/users/${id}`, data).then(r => r.data);
+
+// --- Eigenes Konto ---
+export const getMe = () => api.get(`${BASE}/auth/me`).then(r => r.data);
+export const updateMe = (data) => api.patch(`${BASE}/auth/me`, data).then(r => r.data);
 
 // --- Auswertung (Referenzprojekte, firmenweit) ---
 export const getRefProjekte = () => api.get(`${BASE}/auswertung`).then(r => r.data);

@@ -8,6 +8,7 @@ from app.auth import get_current_user
 from app.database import get_db
 from app.models.auth import Role, User
 from app.models.heizungscockpit import HcHeatingGroup, HcProject, HcProjectBaseData
+from app.models.kv import Kostenschaetzung
 from app.schemas.hc_schemas import (
     HeatingGroupOut,
     ProjectCreate,
@@ -146,4 +147,30 @@ def archive_project(project_id: int, user: User = Depends(get_current_user), db:
     project = _get_owned(db, user, project_id)
     project.status = "archiviert"
     project.updated_at = datetime.utcnow()
+    db.commit()
+
+
+@router.delete("/archiviert/alle")
+def delete_all_archived(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Löscht alle EIGENEN archivierten Projekte endgültig (kein firmenweiter
+    Nuke-Knopf — jeder räumt nur seine eigenen archivierten Projekte weg)."""
+    archivierte = _owned_query(db, user).filter(HcProject.status == "archiviert").all()
+    ids = [p.id for p in archivierte]
+    if ids:
+        db.query(Kostenschaetzung).filter(Kostenschaetzung.project_id.in_(ids)).delete(synchronize_session=False)
+        for p in archivierte:
+            db.delete(p)
+        db.commit()
+    return {"geloescht": len(ids)}
+
+
+@router.delete("/{project_id}/endgueltig", status_code=204)
+def delete_project_permanent(project_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Löscht ein Projekt wirklich (nicht nur archivieren). Eine evtl.
+    verknüpfte Kostenschätzung wird zuerst gelöscht — dafür gibt es keine
+    ORM-Kaskade (Kostenschaetzung.project_id ist ein reiner FK ohne
+    relationship auf HcProject)."""
+    project = _get_owned(db, user, project_id)
+    db.query(Kostenschaetzung).filter(Kostenschaetzung.project_id == project_id).delete()
+    db.delete(project)
     db.commit()

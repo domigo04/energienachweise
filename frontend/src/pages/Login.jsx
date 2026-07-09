@@ -13,6 +13,8 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
   const [pw2, setPw2] = useState("");
+  const [kontoTyp, setKontoTyp] = useState("einzelperson");
+  const [firmenname, setFirmenname] = useState("");
   const [error, setError] = useState("");
   const [gesendet, setGesendet] = useState("");
   const [busy, setBusy] = useState(false);
@@ -27,7 +29,8 @@ export default function Login() {
     try {
       if (modus === "register") {
         if (pw !== pw2) { setError("Die Passwörter stimmen nicht überein."); return; }
-        const r = await register(email, pw, name);
+        if (kontoTyp === "firma" && !firmenname.trim()) { setError("Bitte einen Firmennamen angeben."); return; }
+        const r = await register(email, pw, name, kontoTyp, firmenname);
         if (r.ok) setGesendet(r.message || "Anfrage gesendet. Du wirst nach kurzer Prüfung freigeschaltet.");
         else setError(r.error);
       } else {
@@ -60,10 +63,37 @@ export default function Login() {
         ) : (
           <form className="mt-6 space-y-3" onSubmit={submit}>
             {modus === "register" && (
-              <div>
-                <label className="label">Name</label>
-                <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Vor- und Nachname" className="input" />
-              </div>
+              <>
+                <div>
+                  <label className="label">Name</label>
+                  <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Vor- und Nachname" className="input" />
+                </div>
+                <div>
+                  <label className="label">Konto-Typ</label>
+                  <div className="flex gap-1 rounded-xl bg-slate-100 p-1">
+                    <button type="button" onClick={() => setKontoTyp("einzelperson")}
+                      className={"flex-1 rounded-lg py-1.5 text-xs font-semibold transition " + (kontoTyp === "einzelperson" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500")}>
+                      Einzelperson
+                    </button>
+                    <button type="button" onClick={() => setKontoTyp("firma")}
+                      className={"flex-1 rounded-lg py-1.5 text-xs font-semibold transition " + (kontoTyp === "firma" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500")}>
+                      Firma
+                    </button>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-400">
+                    {kontoTyp === "einzelperson"
+                      ? "Deine Auswertungsdaten bleiben privat, nur für dich sichtbar."
+                      : "Alle Mitglieder derselben Firma teilen sich die Auswertungsdaten."}
+                  </p>
+                </div>
+                {kontoTyp === "firma" && (
+                  <div>
+                    <label className="label">Firmenname</label>
+                    <input value={firmenname} onChange={(e) => setFirmenname(e.target.value)} placeholder="z.B. SIREGO GmbH" className="input" />
+                    <p className="mt-1 text-xs text-slate-400">Gibt es die Firma schon, trittst du automatisch bei.</p>
+                  </div>
+                )}
+              </>
             )}
             <div>
               <label className="label">E-Mail</label>

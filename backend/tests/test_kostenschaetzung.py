@@ -4,6 +4,7 @@ from datetime import date
 import pytest
 
 from app.calculations.kostenschaetzung import (
+    aehnlichkeit_stufe,
     berechne_kostenschaetzung,
     bkp_relevant,
     confidence_from,
@@ -222,3 +223,29 @@ def test_baupreisindex_inaktiv_ohne_flag():
     row = next(r for r in res["rows"] if r["bkp_nr"] == "242.3")
     assert row["estimate"] == pytest.approx(80000, abs=1)  # unverändert, Häkchen nicht gesetzt
     assert res["baupreisindex"]["aktiv"] is False
+
+
+# ── Ähnlichkeit vs. Validierung (zwei getrennte Fragen) ─────────────────────
+
+def test_aehnlichkeit_stufe():
+    assert aehnlichkeit_stufe(0.71) == "hoch"
+    assert aehnlichkeit_stufe(0.65) == "hoch"
+    assert aehnlichkeit_stufe(0.5) == "mittel"
+    assert aehnlichkeit_stufe(0.4) == "mittel"
+    assert aehnlichkeit_stufe(0.1) == "tief"
+
+
+def test_ein_sehr_aehnlicher_treffer_gibt_hohe_aehnlichkeit_aber_tiefe_validierung():
+    # Genau Dominics Fall: 1 Referenz, fast identisch zum Zielprojekt → das
+    # Projekt IST ähnlich (hohe Ähnlichkeit), aber es gibt zu wenige
+    # unabhängige Referenzen, um das breit zu validieren (tiefe Validierung/
+    # Vertrauen) — beides muss GLEICHZEITIG und GETRENNT sichtbar sein.
+    inp = {**_BASE, "projektart": "Neubau", "gebaeudetyp": "MFH", "ausbauumfang": "Vollausbau"}
+    ref = {**_BASE, "name": "Fast identisch", "projektart": "Neubau", "gebaeudetyp": "MFH",
+           "ausbauumfang": "Vollausbau", "datum": None, "qualitaet": 1.0, "kosten": {"242.3": 80000}}
+    res = berechne_kostenschaetzung(inp, [ref])
+    assert res["aehnlichkeit"]["stufe"] == "hoch"
+    assert res["aehnlichkeit"]["gewicht"] >= 0.65
+    row = next(r for r in res["rows"] if r["bkp_nr"] == "242.3")
+    assert row["confidence"] == "tief"  # nur 1 Referenz → Validierung bleibt tief
+    assert res["overall_confidence"] == "tief"

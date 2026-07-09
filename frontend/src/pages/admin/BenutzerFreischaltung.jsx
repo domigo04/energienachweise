@@ -47,6 +47,7 @@ export default function BenutzerFreischaltung() {
                     <div className="min-w-0">
                       <div className="truncate font-medium text-slate-800">{u.name || u.email}</div>
                       <div className="truncate text-xs text-slate-400">{u.email}</div>
+                      {u.firma_name && <div className="mt-1 badge bg-slate-100 text-slate-600">{u.firma_name}</div>}
                     </div>
                     <button onClick={() => patch(u.id, { is_verified: true })} className="btn-primary shrink-0">
                       <Check className="size-4" /> Freischalten
@@ -73,7 +74,7 @@ export default function BenutzerFreischaltung() {
                         {u.role === "admin" && <span className="badge bg-brand-50 text-brand-700"><ShieldCheck className="mr-1 size-3" /> Admin</span>}
                         {!u.is_active && <span className="badge bg-slate-100 text-slate-500">Deaktiviert</span>}
                       </div>
-                      <div className="truncate text-xs text-slate-400">{u.email}</div>
+                      <div className="truncate text-xs text-slate-400">{u.email} {u.firma_name && `· ${u.firma_name}`}</div>
                     </div>
                   </div>
                   <div className="flex shrink-0 gap-2">

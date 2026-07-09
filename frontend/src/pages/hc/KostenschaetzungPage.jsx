@@ -25,19 +25,56 @@ const ERKL_STYLE = {
   tief: "border-slate-200 bg-slate-100 text-slate-700",
 };
 
-// Ein Satz, der das Ergebnis in Alltagssprache einordnet (gut / brauchbar / grob).
-function erklaerung(r) {
+// Vergleicht Eingabe und beste Referenz konkret — Grundlage für den
+// dynamischen Erklärungssatz (welche Merkmale stimmen überein/ab).
+function vergleicheMitReferenz(inp, ref) {
+  if (!ref) return "";
+  const punkte = [];
+  if (inp.anlagenkonfiguration && inp.anlagenkonfiguration === ref.anlagenkonfiguration) {
+    punkte.push("gleiche Anlagenkonfiguration");
+  }
+  if (inp.gebaeudetyp && inp.gebaeudetyp === ref.gebaeudetyp) {
+    punkte.push(`gleicher Gebäudetyp (${ref.gebaeudetyp})`);
+  }
+  const ebfIn = Number(inp.ebf), ebfRef = Number(ref.ebf);
+  if (ebfIn > 0 && ebfRef > 0) {
+    const diff = Math.abs(ebfIn - ebfRef) / Math.max(ebfIn, ebfRef);
+    punkte.push(diff < 0.15 ? `ähnliche Fläche (${ebfRef} vs. deine ${ebfIn} m²)` : `unterschiedliche Fläche (${ebfRef} vs. deine ${ebfIn} m²)`);
+  }
+  const kwIn = Number(inp.heizleistung_kw), kwRef = Number(ref.heizleistung_kw);
+  if (kwIn > 0 && kwRef > 0) {
+    const diff = Math.abs(kwIn - kwRef) / Math.max(kwIn, kwRef);
+    punkte.push(diff < 0.15 ? `ähnliche Leistung (${kwRef} vs. deine ${kwIn} kW)` : `unterschiedliche Leistung (${kwRef} vs. deine ${kwIn} kW)`);
+  }
+  const erzInp = new Set(inp.waermeerzeuger || []);
+  const erzRef = new Set(ref.waermeerzeuger || []);
+  if (erzInp.size > 0 && erzInp.size === erzRef.size && [...erzInp].every((e) => erzRef.has(e))) {
+    punkte.push("gleiche Wärmeerzeuger");
+  }
+  return punkte.join(", ");
+}
+
+// Ein Satz, der das Ergebnis in Alltagssprache einordnet — Ähnlichkeit (passt
+// die beste Referenz?) und Validierung (bestätigen das genug Referenzen?)
+// sind bewusst getrennte Aussagen, dynamisch aus der jeweils besten Referenz.
+function erklaerung(r, inp) {
   if (!r || !r.rows?.length) return "";
   const n = r.anzahl_referenzen || 0;
   const total = Math.round(r.total).toLocaleString("de-CH") + " CHF";
-  const spanne = r.total ? Math.round(((r.total_high - r.total_low) / r.total) * 100) : 0;
-  let satz;
+  const topRef = r.referenzen?.[0];
+
+  let satz = "";
+  if (r.aehnlichkeit && topRef) {
+    const vergleich = vergleicheMitReferenz(inp, topRef);
+    satz = `Die ähnlichste Referenz ist «${topRef.name}» (Ähnlichkeit ${r.aehnlichkeit.stufe}, Gewicht ${r.aehnlichkeit.gewicht})${vergleich ? " — " + vergleich : ""}. `;
+  }
+
   if (r.overall_confidence === "hoch")
-    satz = `Solide Schätzung: Sie stützt sich auf ${n} gut passende Referenzprojekte mit geringer Streuung. Die ${total} sind als Richtwert gut brauchbar (Bandbreite rund ±${Math.round(spanne / 2)} %).`;
+    satz += `Validierung hoch: ${n} Referenzen bestätigen das mit ähnlichen Zahlen — die ${total} sind als Richtwert gut brauchbar.`;
   else if (r.overall_confidence === "mittel")
-    satz = `Brauchbare Orientierung: ${n} Referenzen passen einigermassen, die Streuung ist mittel. Nimm die ${total} als Hausnummer und schau dir die grössten Positionen genauer an.`;
+    satz += `Validierung mittel: ${n} Referenzen passen einigermassen. Nimm die ${total} als Hausnummer und schau dir die grössten Positionen genauer an.`;
   else
-    satz = `Grobe Orientierung: erst wenige oder recht unterschiedliche Referenzen (${n}) — darum Vertrauen «tief». Behandle die ${total} als groben Anhaltspunkt und erfasse in der Auswertung mehr ähnliche Projekte, damit es verlässlicher wird.`;
+    satz += `Validierung tief: erst ${n} vergleichbare Referenz${n === 1 ? "" : "en"} — sei mit der Bandbreite vorsichtig, auch wenn die Ähnlichkeit gut ist. Erfasse in der Auswertung mehr ähnliche Projekte, damit es verlässlicher wird.`;
 
   const zuschlagZeilen = r.rows.filter((row) => row.hinweis);
   if (zuschlagZeilen.length > 0) {
@@ -68,6 +105,11 @@ export default function KostenschaetzungPage() {
     Promise.all([ksGet(id), getProject(id).catch(() => null)])
       .then(([d, proj]) => {
         const base = { ...DEFAULT, ...(d.inputs || {}) };
+        // Gespeicherte null-Werte (nicht gesetzte Optional-Felder) auf "" normalisieren,
+        // sonst beschwert sich React über <select value={null}>.
+        ["projektart", "gebaeudetyp", "ausbauumfang", "zertifizierung", "anlagenkonfiguration"].forEach((k) => {
+          if (base[k] == null) base[k] = "";
+        });
         // Gebäudetyp aus dem Projekt übernehmen, falls noch nicht gesetzt
         if (!base.gebaeudetyp && proj?.base_data?.gebaeudekategorie) {
           base.gebaeudetyp = siaZuGebaeudetyp(proj.base_data.gebaeudekategorie);
@@ -154,12 +196,18 @@ export default function KostenschaetzungPage() {
 
         {/* Ergebnis */}
         <div className="space-y-6">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <div className="card p-4"><div className="text-xs text-slate-400">Total plausibel</div><div className="mt-1 text-xl font-bold text-slate-900">{chf(result?.total)}</div></div>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+            <div className="card p-4"><div className="text-xs text-slate-400">Summe (Kontrollzahl)</div><div className="mt-1 text-xl font-bold text-slate-900">{chf(result?.total)}</div></div>
             <div className="card p-4"><div className="text-xs text-slate-400">Bandbreite tief</div><div className="mt-1 text-lg font-semibold text-slate-700">{chf(result?.total_low)}</div></div>
             <div className="card p-4"><div className="text-xs text-slate-400">Bandbreite hoch</div><div className="mt-1 text-lg font-semibold text-slate-700">{chf(result?.total_high)}</div></div>
-            <div className="card p-4"><div className="text-xs text-slate-400">Vertrauen</div><div className="mt-1">{result ? <span className={CONF[result.overall_confidence]}>{result.overall_confidence}</span> : "—"}</div></div>
+            <div className="card p-4"><div className="text-xs text-slate-400">Ähnlichkeit</div><div className="mt-1">{result ? <span className={CONF[result.aehnlichkeit?.stufe]}>{result.aehnlichkeit?.stufe}</span> : "—"}</div></div>
+            <div className="card p-4"><div className="text-xs text-slate-400">Validierung</div><div className="mt-1">{result ? <span className={CONF[result.overall_confidence]}>{result.overall_confidence}</span> : "—"}</div></div>
           </div>
+          <p className="-mt-3 text-xs text-slate-400">
+            Massgebend sind die einzelnen BKP-Positionen unten — die Summe oben ist nur eine Kontrollzahl.
+            <b> Ähnlichkeit</b> zeigt, wie gut die beste Referenz passt; <b>Validierung</b>, wie viele
+            unabhängige Referenzen das mit ähnlichen Zahlen bestätigen — beides kann unterschiedlich ausfallen.
+          </p>
 
           {leer ? (
             <div className="card border-dashed p-10 text-center">
@@ -171,7 +219,7 @@ export default function KostenschaetzungPage() {
           ) : (
             <>
               <div className={"rounded-xl border p-4 text-sm leading-relaxed " + (ERKL_STYLE[result.overall_confidence] || ERKL_STYLE.tief)}>
-                {erklaerung(result)}
+                {erklaerung(result, inp)}
               </div>
               <div className="card overflow-hidden">
                 <div className="border-b border-slate-100 p-4 text-sm font-semibold text-slate-700">Schätzung je BKP-Position</div>
@@ -206,18 +254,18 @@ export default function KostenschaetzungPage() {
                 </div>
               </div>
 
-              <div className="grid gap-6 xl:grid-cols-2">
-                <div className="card p-4">
-                  <h3 className="mb-2 text-sm font-semibold text-slate-700">Kennwert-Streuung je BKP</h3>
-                  <div className="overflow-x-auto"><BoxPlot data={result.boxplot} /></div>
-                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
-                    <span>Box = P25–P75</span><span>Strich = Median</span><span>Punkt = gewichteter Kennwert</span>
-                  </div>
+              <div className="card p-5">
+                <h3 className="mb-2 text-sm font-semibold text-slate-700">Kennwert-Streuung je BKP</h3>
+                <p className="mb-2 text-xs text-slate-400">Zeig auf eine Box, um die genauen Zahlen zu sehen.</p>
+                <div className="overflow-x-auto"><BoxPlot data={result.boxplot} /></div>
+                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
+                  <span>Box = P25–P75</span><span>Strich = Median</span><span>Punkt = gewichteter Kennwert</span>
                 </div>
-                <div className="card p-4">
-                  <h3 className="mb-2 text-sm font-semibold text-slate-700">Kosten je BKP (mit Bandbreite)</h3>
-                  <div className="overflow-x-auto"><BarPlot data={result.rows} /></div>
-                </div>
+              </div>
+              <div className="card p-5">
+                <h3 className="mb-2 text-sm font-semibold text-slate-700">Kosten je BKP (mit Bandbreite)</h3>
+                <p className="mb-2 text-xs text-slate-400">Zeig auf einen Balken, um tief/Schätzung/hoch zu sehen.</p>
+                <div className="overflow-x-auto"><BarPlot data={result.rows} /></div>
               </div>
 
               <div className="card overflow-hidden">

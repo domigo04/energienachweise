@@ -9,6 +9,7 @@ import AppLayout from "./components/AppLayout";
 
 // Angemeldeter Bereich
 import Home from "./pages/Home";
+import KontoPage from "./pages/KontoPage";
 import ProjectList from "./pages/hc/ProjectList";
 import ProjectDashboard from "./pages/hc/ProjectDashboard";
 import HeizgruppenPage from "./pages/hc/HeizgruppenPage";
@@ -35,6 +36,7 @@ export default function App() {
           {/* Angemeldet: App-Shell mit Seiten-Navigation */}
           <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
             <Route path="/start" element={<Home />} />
+            <Route path="/konto" element={<KontoPage />} />
 
             <Route path="/projekte" element={<ProjectList />} />
             <Route path="/projekte/:id" element={<ProjectDashboard />} />

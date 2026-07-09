@@ -19,6 +19,9 @@ class Firma(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
+    # Platzhalter fürs künftige Abomodell (z.B. Tarif nach Anzahl auswertbarer
+    # Projekte) — noch keine Durchsetzung/Zahlungslogik, nur die Spalte.
+    abo_plan = Column(String, default="kostenlos")
     created_at = Column(DateTime, default=datetime.utcnow)
 
     users = relationship("User", back_populates="firma", cascade="all, delete-orphan")

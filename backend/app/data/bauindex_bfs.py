@@ -1,105 +1,108 @@
-"""Automatischer Abruf-Versuch des Schweizer Baupreisindex (BFS) über
-opendata.swiss (CKAN-API).
+"""Automatischer Abruf des Schweizer Baupreisindex (BFS) über opendata.swiss.
 
-WICHTIG — ehrlich deklariert: Diese Funktion wurde nicht gegen eine echte,
-erfolgreiche Live-Antwort verifiziert (der Testzugriff während der Entwicklung
-wurde von opendata.swiss mit HTTP 403 blockiert). Sie ist bewusst defensiv
-geschrieben: jeder Fehler (Netzwerk, Format, unerwartete Spalten) führt zu
-einem klaren `erfolg=False` mit Meldung — nie zu stillschweigend falschen
-Zahlen in der Datenbank. Die manuelle Eingabe (hc_bauindex.py) bleibt der
-zuverlässige Normalfall, dieser Abruf ist ein Bonus-Versuch obendrauf.
-
-Datensatz: "Schweizerischer Baupreisindex" (BFS), halbjährlich (April/Oktober).
+Verifiziert (2026-07-09, live getestet): die genaue Datensatz-ID auf
+opendata.swiss ändert sich je nach BFS-Aktualisierung/Sprachversion (z.B.
+"...-u1" / "...-u2" / "...-u3-1") — darum Suche per `package_search` statt
+eine feste ID (bricht nicht bei der nächsten Umbenennung). Die Rohdaten
+liegen als Excel-Datei vor (XLSX, mehrere Tabellenblätter "Basis <Jahr> = 100"),
+nicht als CSV. Kennwert: Region "Schweiz", Kategorie "Baugewerbe : Total"
+(nationaler Gesamtindex, halbjährlich April/Oktober).
 """
-from datetime import date, datetime
+import io
+from datetime import date
 from typing import Optional
 
-CKAN_PACKAGE_SHOW = "https://ckan.opendata.swiss/api/3/action/package_show"
-DATASET_ID = "schweizerischer-baupreisindex-entwicklung-der-baupreise-multibasen-indexwerte-pro-grossregion-u1"
-
+CKAN_SEARCH = "https://ckan.opendata.swiss/api/3/action/package_search"
+SUCHBEGRIFF = "Baupreisindex"
 _HEADERS = {"User-Agent": "Mozilla/5.0 (Heizungscockpit/1.0; +https://energienachweise.com)"}
-
-# Mögliche Spaltennamen in der BFS-CSV — wird der Reihe nach probiert, da das
-# exakte Format nicht live geprüft werden konnte.
-_PERIODEN_SPALTEN = ["Jahr", "Periode", "Datum", "Date", "Erhebung", "Erhebungsperiode"]
-_WERT_SPALTEN = ["Wert", "Value", "Index", "Indexwert", "OBS_VALUE"]
+_MONAT = {"Oktober": 10, "April": 4}
 
 
-def _parse_periode(text: str) -> Optional[date]:
-    text = (text or "").strip()
-    for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%Y"):
-        try:
-            d = datetime.strptime(text, fmt)
-            return d.date() if fmt != "%Y" else date(d.year, 10, 1)  # Jahr allein → Oktober-Erhebung
-        except ValueError:
-            continue
+def _finde_xlsx_url(client) -> Optional[str]:
+    resp = client.get(CKAN_SEARCH, params={"q": SUCHBEGRIFF, "rows": 5})
+    resp.raise_for_status()
+    payload = resp.json()
+    if not payload.get("success"):
+        return None
+    for result in payload.get("result", {}).get("results", []):
+        for resource in result.get("resources", []):
+            if "xls" in (resource.get("format") or "").lower():
+                return resource.get("url") or resource.get("download_url")
     return None
 
 
-def _finde_spalte(fieldnames, kandidaten) -> Optional[str]:
-    for k in kandidaten:
-        for f in fieldnames or []:
-            if f.strip().lower() == k.lower():
-                return f
-    return None
+def _lies_schweiz_gesamtindex(xlsx_bytes: bytes) -> list:
+    """Liest Periode+Wert für Region 'Schweiz' / Kategorie 'Baugewerbe : Total'.
+
+    Struktur (mehrfach live geprüft): eines der numerisch benannten
+    Tabellenblätter ("1998"/"2010"/.../"2020" = Basisjahr) enthält eine Zeile
+    mit den Monatsnamen ("Oktober"/"April") — direkt darunter die Jahreszahlen,
+    je eine Spalte ab Spalte D pro Erhebungsperiode. "Schweiz" markiert den
+    Beginn des nationalen Blocks; die Zeile direkt danach ist der Gesamtindex.
+    """
+    import openpyxl
+
+    wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes), data_only=True, read_only=True)
+    basis_sheets = sorted((s for s in wb.sheetnames if s.isdigit()), key=int)
+    if not basis_sheets:
+        return []
+    ws = wb[basis_sheets[0]]
+
+    monat_zeile = jahr_zeile = None
+    for r in range(1, 15):
+        werte = [ws.cell(row=r, column=c).value for c in range(1, ws.max_column + 1)]
+        if any(w in _MONAT for w in werte):
+            monat_zeile, jahr_zeile = r, r + 1
+            break
+    if monat_zeile is None:
+        return []
+
+    schweiz_zeile = None
+    for r in range(monat_zeile, ws.max_row + 1):
+        if ws.cell(row=r, column=2).value == "Schweiz":
+            schweiz_zeile = r + 1
+            break
+    if schweiz_zeile is None:
+        return []
+
+    eintraege = []
+    for c in range(4, ws.max_column + 1):
+        monat = ws.cell(row=monat_zeile, column=c).value
+        jahr = ws.cell(row=jahr_zeile, column=c).value
+        wert = ws.cell(row=schweiz_zeile, column=c).value
+        if monat in _MONAT and isinstance(jahr, (int, float)) and isinstance(wert, (int, float)):
+            eintraege.append({"periode": date(int(jahr), _MONAT[monat], 1), "wert": float(wert)})
+    return eintraege
 
 
 def fetch_bfs_baupreisindex() -> dict:
     """Bestmöglicher Abruf. Gibt immer {"erfolg", "meldung", "eintraege"} zurück,
     wirft nie ungefangen. eintraege: Liste von {"periode": date, "wert": float}."""
-    import csv
-    import io
-
     try:
         import httpx
     except ImportError:
         return {"erfolg": False, "meldung": "httpx ist nicht installiert.", "eintraege": []}
 
     try:
-        with httpx.Client(timeout=15, headers=_HEADERS, follow_redirects=True) as client:
-            meta = client.get(CKAN_PACKAGE_SHOW, params={"id": DATASET_ID})
-            meta.raise_for_status()
-            payload = meta.json()
-            if not payload.get("success"):
-                return {"erfolg": False, "meldung": "opendata.swiss meldet keinen Erfolg (package_show).", "eintraege": []}
-
-            ressourcen = payload.get("result", {}).get("resources", [])
-            csv_url = next(
-                (r.get("url") or r.get("download_url") for r in ressourcen
-                 if "csv" in (r.get("format") or "").lower()),
-                None,
-            )
-            if not csv_url:
-                return {"erfolg": False, "meldung": "Keine CSV-Ressource im Datensatz gefunden.", "eintraege": []}
-
-            resp = client.get(csv_url)
+        with httpx.Client(timeout=20, headers=_HEADERS, follow_redirects=True) as client:
+            xlsx_url = _finde_xlsx_url(client)
+            if not xlsx_url:
+                return {"erfolg": False, "meldung": "Keine Excel-Ressource beim BFS-Datensatz gefunden.", "eintraege": []}
+            resp = client.get(xlsx_url)
             resp.raise_for_status()
-            text = resp.content.decode("utf-8-sig", errors="replace")
+            xlsx_bytes = resp.content
     except Exception as e:
         return {"erfolg": False, "meldung": f"Abruf fehlgeschlagen: {e}", "eintraege": []}
 
     try:
-        reader = csv.DictReader(io.StringIO(text))
-        periode_spalte = _finde_spalte(reader.fieldnames, _PERIODEN_SPALTEN)
-        wert_spalte = _finde_spalte(reader.fieldnames, _WERT_SPALTEN)
-        if not periode_spalte or not wert_spalte:
-            return {
-                "erfolg": False,
-                "meldung": f"Spalten nicht erkannt (gefunden: {reader.fieldnames}). "
-                           "Bitte Indexwerte manuell erfassen.",
-                "eintraege": [],
-            }
-        eintraege = []
-        for row in reader:
-            periode = _parse_periode(row.get(periode_spalte))
-            try:
-                wert = float(str(row.get(wert_spalte)).replace(",", "."))
-            except (TypeError, ValueError):
-                continue
-            if periode and wert > 0:
-                eintraege.append({"periode": periode, "wert": wert})
-        if not eintraege:
-            return {"erfolg": False, "meldung": "Keine auswertbaren Zeilen in der CSV gefunden.", "eintraege": []}
-        return {"erfolg": True, "meldung": f"{len(eintraege)} Indexwerte gefunden.", "eintraege": eintraege}
+        eintraege = _lies_schweiz_gesamtindex(xlsx_bytes)
     except Exception as e:
-        return {"erfolg": False, "meldung": f"CSV konnte nicht gelesen werden: {e}", "eintraege": []}
+        return {"erfolg": False, "meldung": f"Excel-Datei konnte nicht gelesen werden: {e}", "eintraege": []}
+
+    if not eintraege:
+        return {"erfolg": False, "meldung": "Keine auswertbaren Indexwerte gefunden (Struktur unerwartet).", "eintraege": []}
+    return {
+        "erfolg": True,
+        "meldung": f"{len(eintraege)} Indexwerte gefunden (Schweiz, Baugewerbe Total, {eintraege[0]['periode'].year}–{eintraege[-1]['periode'].year}).",
+        "eintraege": eintraege,
+    }

@@ -75,8 +75,9 @@ def delete_eintrag(eintrag_id: int, admin: User = Depends(require_admin), db: Se
 
 @router.post("/automatisch-aktualisieren")
 def automatisch_aktualisieren(admin: User = Depends(require_admin), db: Session = Depends(get_db)):
-    """Best-Effort-Abruf gegen die BFS-Quelle. Schlägt er fehl, ändert sich an
-    der Datenbank nichts — die manuelle Eingabe bleibt der zuverlässige Weg."""
+    """Abruf gegen die BFS-Quelle (opendata.swiss), live verifiziert. Schlägt er
+    trotzdem fehl (Netzwerk/Format geändert), ändert sich an der Datenbank
+    nichts — die manuelle Eingabe bleibt zusätzlich immer möglich."""
     ergebnis = fetch_bfs_baupreisindex()
     if not ergebnis["erfolg"]:
         return {"erfolg": False, "meldung": ergebnis["meldung"], "neue_eintraege": 0}

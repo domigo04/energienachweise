@@ -90,6 +90,7 @@ def _ensure_columns():
         "hc_project_base_data": [("gebaeudekategorie", "VARCHAR"), ("klimastation", "VARCHAR")],
         "hc_projects": [("erstellt_von", "INTEGER")],
         "ref_projekte": [("anlagenkonfiguration", "VARCHAR")],
+        "hc_firmen": [("abo_plan", "VARCHAR")],
     }
     with engine.connect() as conn:
         for table, cols in to_add.items():
@@ -97,6 +98,10 @@ def _ensure_columns():
             for name, typ in cols:
                 if name not in existing:
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {typ}"))
+        conn.commit()
+        # ALTER TABLE trägt den SQLAlchemy-Python-Default nicht nach — bestehende
+        # Zeilen hätten sonst z.B. abo_plan=NULL statt "kostenlos".
+        conn.execute(text("UPDATE hc_firmen SET abo_plan = 'kostenlos' WHERE abo_plan IS NULL"))
         conn.commit()
 
 
@@ -120,21 +125,27 @@ def _seed_group_templates(db):
 
 
 def _seed_admin(db):
-    """Firma (SIREGO) + Erst-Admin sicherstellen. Ohne diesen Admin könnte
-    niemand freischalten. Zugangsdaten aus .env (ADMIN_EMAIL/ADMIN_INITIAL_PASSWORD)."""
+    """Firma (SIREGO) + Erst-Admin sicherstellen. Zugangsdaten aus .env
+    (ADMIN_EMAIL/ADMIN_INITIAL_PASSWORD). Synchronisiert Passwort/Rolle/
+    Freischaltung bei JEDEM Start auf die aktuelle Umgebungsvariable — nicht
+    nur beim ersten Anlegen. Grund: ohne das bleibt ein einmal gesetztes altes
+    Passwort für immer aktiv, egal was später in .env geändert wird (genau das
+    Problem, das den Login auf dem Server blockiert hat)."""
     firma = db.query(Firma).filter(Firma.id == 1).first()
     if not firma:
         db.add(Firma(id=1, name="SIREGO GmbH"))
         db.commit()
     admin_email = os.getenv("ADMIN_EMAIL", "dominicgoulon@icloud.com").lower().strip()
     admin_pw = os.getenv("ADMIN_INITIAL_PASSWORD", "Sirego2004!")
-    if not db.query(User).filter(User.email == admin_email).first():
-        db.add(User(
-            tenant_id=1, email=admin_email, password_hash=hash_password(admin_pw),
-            name="Dominic Goulon", role=Role.admin, is_verified=True, is_active=True,
-        ))
-        db.commit()
-        print(f"[INIT] Admin angelegt: {admin_email}")
+    admin = db.query(User).filter(User.email == admin_email).first()
+    if not admin:
+        admin = User(tenant_id=1, email=admin_email, name="Dominic Goulon")
+        db.add(admin)
+    admin.password_hash = hash_password(admin_pw)
+    admin.role = Role.admin
+    admin.is_verified = True
+    admin.is_active = True
+    db.commit()
 
 
 @app.on_event("startup")

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, MapPin, User, CalendarDays } from "lucide-react";
-import { getProjects, createProject } from "../../api/hcApi";
+import { Plus, MapPin, User, CalendarDays, Trash2 } from "lucide-react";
+import { getProjects, createProject, deleteProjectPermanent, deleteAllArchived } from "../../api/hcApi";
 import { GEBAEUDEKATEGORIEN, KLIMASTATIONEN } from "../../data/sia";
 
 const LEER_FORM = { name: "", standort: "", kunde: "", beschreibung: "", gebaeudekategorie: "", klimastation: "", t_aussen: -8 };
@@ -21,11 +21,32 @@ export default function ProjectList() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    getProjects()
-      .then(setProjects)
-      .catch(() => setError("Verbindung zum Backend fehlgeschlagen"))
-      .finally(() => setLoading(false));
+    loadProjects().finally(() => setLoading(false));
   }, []);
+
+  const loadProjects = () => getProjects().then(setProjects).catch(() => setError("Verbindung zum Backend fehlgeschlagen"));
+
+  const handleDeletePermanent = async (e, id) => {
+    e.stopPropagation();
+    if (!confirm("Projekt endgültig löschen? Das kann nicht rückgängig gemacht werden.")) return;
+    try {
+      await deleteProjectPermanent(id);
+      await loadProjects();
+    } catch {
+      setError("Löschen fehlgeschlagen");
+    }
+  };
+
+  const handleDeleteAllArchived = async () => {
+    const anzahl = projects.filter((p) => p.status === "archiviert").length;
+    if (!confirm(`${anzahl} archivierte Projekt(e) endgültig löschen? Das kann nicht rückgängig gemacht werden.`)) return;
+    try {
+      await deleteAllArchived();
+      await loadProjects();
+    } catch {
+      setError("Löschen fehlgeschlagen");
+    }
+  };
 
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -59,11 +80,18 @@ export default function ProjectList() {
           <h1 className="text-2xl font-bold text-slate-900">Projekte</h1>
           <p className="mt-1 text-sm text-slate-500">Deine Heizungsplanungen — Schema, Auslegung und Kostenschätzung.</p>
         </div>
-        {!showForm && (
-          <button onClick={() => setShowForm(true)} className="btn-primary">
-            <Plus className="size-4" /> Neues Projekt
-          </button>
-        )}
+        <div className="flex gap-2">
+          {projects.some((p) => p.status === "archiviert") && (
+            <button onClick={handleDeleteAllArchived} className="btn-ghost text-slate-400 hover:text-red-500">
+              <Trash2 className="size-4" /> Alle archivierten endgültig löschen
+            </button>
+          )}
+          {!showForm && (
+            <button onClick={() => setShowForm(true)} className="btn-primary">
+              <Plus className="size-4" /> Neues Projekt
+            </button>
+          )}
+        </div>
       </div>
 
       {error && (
@@ -147,11 +175,18 @@ export default function ProjectList() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           {projects.map((p) => (
-            <button key={p.id} onClick={() => navigate(`/projekte/${p.id}`)}
-              className="card group p-5 text-left transition hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md">
+            <div key={p.id} onClick={() => navigate(`/projekte/${p.id}`)}
+              className="card group cursor-pointer p-5 text-left transition hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md">
               <div className="mb-2 flex items-start justify-between gap-3">
                 <h3 className="truncate font-semibold text-slate-900 group-hover:text-brand-700">{p.name}</h3>
-                <StatusBadge status={p.status} />
+                <div className="flex shrink-0 items-center gap-2">
+                  <StatusBadge status={p.status} />
+                  {p.status === "archiviert" && (
+                    <button onClick={(e) => handleDeletePermanent(e, p.id)} className="text-slate-300 hover:text-red-500" title="Endgültig löschen">
+                      <Trash2 className="size-4" />
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
                 {p.standort && <span className="inline-flex items-center gap-1"><MapPin className="size-3.5" /> {p.standort}</span>}
@@ -159,7 +194,7 @@ export default function ProjectList() {
                 <span className="inline-flex items-center gap-1"><CalendarDays className="size-3.5" /> {new Date(p.created_at).toLocaleDateString("de-CH")}</span>
               </div>
               {p.beschreibung && <p className="mt-2 line-clamp-2 text-sm text-slate-500">{p.beschreibung}</p>}
-            </button>
+            </div>
           ))}
         </div>
       )}

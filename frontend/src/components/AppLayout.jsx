@@ -74,7 +74,7 @@ function SidebarContent({ user, onLogout, onNavigate }) {
 
       {/* Benutzer + Abmelden */}
       <div className="border-t border-slate-200 p-3">
-        <div className="flex items-center gap-3 rounded-lg px-2 py-2">
+        <NavLink to="/konto" onClick={onNavigate} className="flex items-center gap-3 rounded-lg px-2 py-2 transition hover:bg-slate-100">
           <div className="flex size-9 items-center justify-center rounded-full bg-brand-100 text-sm font-bold text-brand-700">
             {initial}
           </div>
@@ -82,7 +82,7 @@ function SidebarContent({ user, onLogout, onNavigate }) {
             <div className="truncate text-sm font-medium text-slate-800">{user?.name || "Angemeldet"}</div>
             <div className="truncate text-xs text-slate-400">{user?.email}</div>
           </div>
-        </div>
+        </NavLink>
         <button
           onClick={onLogout}
           className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"

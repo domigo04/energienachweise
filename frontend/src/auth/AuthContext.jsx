@@ -24,9 +24,13 @@ export function AuthProvider({ children }) {
     }
   };
 
-  const register = async (email, password, name) => {
+  const register = async (email, password, name, kontoTyp, firmenname) => {
     try {
-      const { data } = await api.post("/api/v1/auth/register", { email, password, name: name || null });
+      const { data } = await api.post("/api/v1/auth/register", {
+        email, password, name: name || null,
+        konto_typ: kontoTyp || "einzelperson",
+        firmenname: firmenname || null,
+      });
       return { ok: true, message: data.message };
     } catch (e) {
       return { ok: false, error: e?.response?.data?.detail || "Registrierung fehlgeschlagen." };
@@ -39,7 +43,14 @@ export function AuthProvider({ children }) {
     setUser(null);
   };
 
-  return <AuthCtx.Provider value={{ user, login, register, logout }}>{children}</AuthCtx.Provider>;
+  const refreshUser = async () => {
+    const { data } = await api.get("/api/v1/auth/me");
+    localStorage.setItem(USER_KEY, JSON.stringify(data));
+    setUser(data);
+    return data;
+  };
+
+  return <AuthCtx.Provider value={{ user, login, register, logout, refreshUser }}>{children}</AuthCtx.Provider>;
 }
 
 export const useAuth = () => useContext(AuthCtx);

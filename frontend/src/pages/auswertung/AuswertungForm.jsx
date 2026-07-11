@@ -136,7 +136,7 @@ export default function AuswertungForm() {
   };
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8 lg:px-8">
+    <div className="mx-auto max-w-[1600px] px-4 py-8 lg:px-8">
       <div className="mb-6 flex items-center gap-2 text-sm text-slate-500">
         <Link to="/auswertung" className="hover:text-brand-600">Auswertung</Link>
         <span>/</span>
@@ -145,138 +145,144 @@ export default function AuswertungForm() {
 
       {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
-      <form onSubmit={save} className="space-y-6">
-        {/* Zusammenstellung: Brutto/Netto live, Rabatt/Skonto — damit man beim
-            Erfassen laufend gegen das Leistungsverzeichnis des Unternehmers
-            prüfen kann, ob die Summe stimmt. */}
-        <div className="card p-6">
-          <h2 className="mb-4 font-semibold text-slate-800">Zusammenstellung Heizung</h2>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <div><label className="label">Rabatt [%]</label>
-              <input type="number" step="0.1" className="input" value={form.rabatt_pct} onChange={(e) => set("rabatt_pct", e.target.value)} /></div>
-            <div><label className="label">Skonto [%]</label>
-              <input type="number" step="0.1" className="input" value={form.skonto_pct} onChange={(e) => set("skonto_pct", e.target.value)} /></div>
-            <div><div className="label">Brutto (Summe LV)</div>
-              <div className="mt-2 text-lg font-bold text-slate-900">{chf(brutto)} CHF</div></div>
-            <div><div className="label">Netto (nach Rabatt/Skonto)</div>
-              <div className="mt-2 text-lg font-bold text-brand-600">{chf(netto)} CHF</div></div>
-          </div>
-          <p className="mt-3 text-xs text-slate-400">Gegen das Leistungsverzeichnis/Devis des Unternehmers prüfen — Brutto = Summe aller BKP-Positionen unten, Netto = Brutto × (1 − Rabatt%) × (1 − Skonto%).</p>
-        </div>
-
-        {/* Merkmale */}
-        <div className="card p-6">
-          <h2 className="mb-4 font-semibold text-slate-800">Projekt-Merkmale</h2>
-          <div className="space-y-4">
-            <div><label className="label">Name / Bezeichnung *</label>
-              <input className="input" value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="z.B. MFH Lindenhof, Winterthur" /></div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div><label className="label">Projektart</label>
-                <select className="input" value={form.projektart} onChange={(e) => set("projektart", e.target.value)}>
-                  <option value="">—</option>{PROJEKTARTEN.map((o) => <option key={o}>{o}</option>)}
-                </select></div>
-              <div><label className="label">Gebäudetyp</label>
-                <select className="input" value={form.gebaeudetyp} onChange={(e) => set("gebaeudetyp", e.target.value)}>
-                  <option value="">—</option>{GEBAEUDETYPEN.map((o) => <option key={o}>{o}</option>)}
-                </select></div>
-              <div><label className="label">Ausbauumfang</label>
-                <select className="input" value={form.ausbauumfang} onChange={(e) => set("ausbauumfang", e.target.value)}>
-                  <option value="">—</option>{AUSBAUUMFAENGE.map((o) => <option key={o}>{o}</option>)}
-                </select></div>
-              <div><label className="label">Zertifizierung</label>
-                <select className="input" value={form.zertifizierung} onChange={(e) => set("zertifizierung", e.target.value)}>
-                  <option value="">—</option>{ZERTIFIZIERUNGEN.map((o) => <option key={o}>{o}</option>)}
-                </select></div>
+      <form onSubmit={save}>
+        <div className="grid gap-6 lg:grid-cols-[380px_minmax(0,1fr)]">
+          {/* Links */}
+          <div className="space-y-6">
+            {/* Zusammenstellung: bleibt beim Scrollen sichtbar (sticky) —
+                Brutto/Netto live, Rabatt/Skonto, damit man beim Erfassen
+                laufend gegen das Leistungsverzeichnis des Unternehmers
+                prüfen kann, ob die Summe stimmt. */}
+            <div className="card sticky top-6 z-10 p-6">
+              <h2 className="mb-4 font-semibold text-slate-800">Zusammenstellung Heizung</h2>
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className="label">Rabatt [%]</label>
+                  <input type="number" step="0.1" className="input" value={form.rabatt_pct} onChange={(e) => set("rabatt_pct", e.target.value)} /></div>
+                <div><label className="label">Skonto [%]</label>
+                  <input type="number" step="0.1" className="input" value={form.skonto_pct} onChange={(e) => set("skonto_pct", e.target.value)} /></div>
+                <div><div className="label">Brutto (Summe LV)</div>
+                  <div className="mt-2 text-lg font-bold text-slate-900">{chf(brutto)} CHF</div></div>
+                <div><div className="label">Netto (nach Rabatt/Skonto)</div>
+                  <div className="mt-2 text-lg font-bold text-brand-600">{chf(netto)} CHF</div></div>
+              </div>
+              <p className="mt-3 text-xs text-slate-400">Gegen das Leistungsverzeichnis/Devis des Unternehmers prüfen — Brutto = Summe aller BKP-Positionen rechts, Netto = Brutto × (1 − Rabatt%) × (1 − Skonto%).</p>
             </div>
-            <CheckboxGruppe label="Wärmeerzeuger (mehrere möglich)" options={WAERMEERZEUGER} value={form.waermeerzeuger} onChange={setWaermeerzeuger} />
-            <CheckboxGruppe label="Wärmeabgabe (mehrere möglich)" options={WAERMEABGABE} value={form.waermeabgabe} onChange={(v) => set("waermeabgabe", v)} />
-            <AnlagenkonfigurationAuswahl value={form.anlagenkonfiguration} onChange={(v) => set("anlagenkonfiguration", v)} />
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div><label className="label">Datum (Devis / Ausführung)</label>
-                <input type="date" className="input" value={form.datum || ""} onChange={(e) => set("datum", e.target.value)} /></div>
-              <div><label className="label">Datenqualität</label>
-                <select className="input" value={form.qualitaet} onChange={(e) => set("qualitaet", e.target.value)}>
-                  {QUALITAET.map((q) => <option key={q.v} value={q.v}>{q.l}</option>)}
-                </select></div>
-            </div>
-          </div>
-        </div>
 
-        {/* Bezugsgrössen */}
-        <div className="card p-6">
-          <h2 className="mb-1 font-semibold text-slate-800">Bezugsgrössen</h2>
-          <p className="mb-4 text-xs text-slate-400">Zahlen, auf die die Kosten bezogen werden (Kennwerte). Nur ausfüllen, was bekannt ist.</p>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <div><label className="label">EBF [m²]</label><input type="number" className="input" value={form.ebf_m2} onChange={(e) => set("ebf_m2", e.target.value)} /></div>
-            <div><label className="label">Erzeugerleistung [kW]</label><input type="number" className="input" value={form.heizleistung_kw} onChange={(e) => set("heizleistung_kw", e.target.value)} /></div>
-            <div><label className="label">Anzahl Einheiten</label><input type="number" className="input" value={form.anzahl_einheiten} onChange={(e) => set("anzahl_einheiten", e.target.value)} /></div>
-            {erdsonde && (
-              <div><label className="label">Bohrmeter</label><input type="number" className="input" value={form.bohrmeter} onChange={(e) => set("bohrmeter", e.target.value)} /></div>
-            )}
-          </div>
-          <p className="mb-1 mt-5 text-xs font-semibold uppercase tracking-wider text-slate-400">Weitere Bezugsgrössen (zusätzliche Ähnlichkeitsfaktoren)</p>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <div><label className="label">Erzeugerleistung neu [kW]</label><input type="number" className="input" value={form.installierte_leistung_neu_kw} onChange={(e) => set("installierte_leistung_neu_kw", e.target.value)} /></div>
-            <div><label className="label">Fläche FBH [m²]</label><input type="number" className="input" value={form.flaeche_fbh_m2} onChange={(e) => set("flaeche_fbh_m2", e.target.value)} /></div>
-            <div><label className="label">Fläche TABS [m²]</label><input type="number" className="input" value={form.flaeche_tabs_m2} onChange={(e) => set("flaeche_tabs_m2", e.target.value)} /></div>
-            <div><label className="label">Fläche Deckenstrahlplatten [m²]</label><input type="number" className="input" value={form.flaeche_deckenstrahlplatten_m2} onChange={(e) => set("flaeche_deckenstrahlplatten_m2", e.target.value)} /></div>
-            <div><label className="label">Anzahl Heizkörper</label><input type="number" className="input" value={form.anzahl_heizkoerper} onChange={(e) => set("anzahl_heizkoerper", e.target.value)} /></div>
-            <div><label className="label">Anzahl Wärmemessungen</label><input type="number" className="input" value={form.anzahl_waermemessungen} onChange={(e) => set("anzahl_waermemessungen", e.target.value)} /></div>
-            <div><label className="label">Anzahl Schaltgerätekombinationen</label><input type="number" className="input" value={form.anzahl_schaltgeraetekombinationen} onChange={(e) => set("anzahl_schaltgeraetekombinationen", e.target.value)} /></div>
-            <div><label className="label">Laufmeter Rohre Heizung</label><input type="number" className="input" value={form.laufmeter_rohre_heizung} onChange={(e) => set("laufmeter_rohre_heizung", e.target.value)} /></div>
-          </div>
-        </div>
-
-        {/* BKP-Kosten: alle Positionen da, nur ausfüllen was zutrifft */}
-        <div className="card p-6">
-          <div className="mb-1 flex items-center justify-between">
-            <h2 className="font-semibold text-slate-800">BKP-Kosten</h2>
-            <span className="text-sm font-bold text-slate-900">Brutto {chf(brutto)} CHF</span>
-          </div>
-          <p className="mb-4 text-xs text-slate-400">Nur ausfüllen, was zutrifft — leere Positionen werden nicht gespeichert.</p>
-          <div className="space-y-5">
-            {gruppen.map(([nr, g]) => (
-              <div key={nr}>
-                <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">{nr} · {g.name}</div>
-                <div className="space-y-1.5">
-                  {g.items.map((p) => {
-                    const gefuellt = Number(betraege[p.bkp_nr]) > 0;
-                    return (
-                      <div key={p.bkp_nr} className="flex items-center gap-3">
-                        <div className="min-w-0 flex-1">
-                          <span className="text-sm font-medium text-slate-700">{p.bkp_nr}</span>
-                          <span className="ml-2 text-sm text-slate-500">{p.bezeichnung}</span>
-                        </div>
-                        <div className="relative w-36 shrink-0">
-                          <input
-                            type="number"
-                            className={"input pr-10 text-right " + (gefuellt ? "border-brand-300 bg-brand-50/40" : "")}
-                            value={betraege[p.bkp_nr] ?? ""}
-                            onChange={(e) => setBetrag(p.bkp_nr, e.target.value)}
-                            placeholder="—"
-                          />
-                          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400">CHF</span>
-                        </div>
-                      </div>
-                    );
-                  })}
+            {/* Merkmale */}
+            <div className="card p-6">
+              <h2 className="mb-4 font-semibold text-slate-800">Projekt-Merkmale</h2>
+              <div className="space-y-4">
+                <div><label className="label">Name / Bezeichnung *</label>
+                  <input className="input" value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="z.B. MFH Lindenhof, Winterthur" /></div>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div><label className="label">Projektart</label>
+                    <select className="input" value={form.projektart} onChange={(e) => set("projektart", e.target.value)}>
+                      <option value="">—</option>{PROJEKTARTEN.map((o) => <option key={o}>{o}</option>)}
+                    </select></div>
+                  <div><label className="label">Gebäudetyp</label>
+                    <select className="input" value={form.gebaeudetyp} onChange={(e) => set("gebaeudetyp", e.target.value)}>
+                      <option value="">—</option>{GEBAEUDETYPEN.map((o) => <option key={o}>{o}</option>)}
+                    </select></div>
+                  <div><label className="label">Ausbauumfang</label>
+                    <select className="input" value={form.ausbauumfang} onChange={(e) => set("ausbauumfang", e.target.value)}>
+                      <option value="">—</option>{AUSBAUUMFAENGE.map((o) => <option key={o}>{o}</option>)}
+                    </select></div>
+                  <div><label className="label">Zertifizierung</label>
+                    <select className="input" value={form.zertifizierung} onChange={(e) => set("zertifizierung", e.target.value)}>
+                      <option value="">—</option>{ZERTIFIZIERUNGEN.map((o) => <option key={o}>{o}</option>)}
+                    </select></div>
+                </div>
+                <CheckboxGruppe label="Wärmeerzeuger (mehrere möglich)" options={WAERMEERZEUGER} value={form.waermeerzeuger} onChange={setWaermeerzeuger} />
+                <CheckboxGruppe label="Wärmeabgabe (mehrere möglich)" options={WAERMEABGABE} value={form.waermeabgabe} onChange={(v) => set("waermeabgabe", v)} />
+                <AnlagenkonfigurationAuswahl value={form.anlagenkonfiguration} onChange={(v) => set("anlagenkonfiguration", v)} />
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div><label className="label">Datum (Devis / Ausführung)</label>
+                    <input type="date" className="input" value={form.datum || ""} onChange={(e) => set("datum", e.target.value)} /></div>
+                  <div><label className="label">Datenqualität</label>
+                    <select className="input" value={form.qualitaet} onChange={(e) => set("qualitaet", e.target.value)}>
+                      {QUALITAET.map((q) => <option key={q.v} value={q.v}>{q.l}</option>)}
+                    </select></div>
                 </div>
               </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between">
-          <div className="flex gap-2">
-            <button type="submit" disabled={saving} className="btn-primary">{saving ? "Speichere…" : "Speichern"}</button>
-            <Link to="/auswertung" className="btn-secondary">Abbrechen</Link>
-          </div>
-          {isEdit && (
-            <div className="flex gap-2">
-              <button type="button" onClick={exportCsv} className="btn-secondary"><Download className="size-4" /> CSV</button>
-              <button type="button" onClick={remove} className="btn-ghost text-red-500 hover:bg-red-50"><Trash2 className="size-4" /> Löschen</button>
             </div>
-          )}
+
+            {/* Bezugsgrössen */}
+            <div className="card p-6">
+              <h2 className="mb-1 font-semibold text-slate-800">Bezugsgrössen</h2>
+              <p className="mb-4 text-xs text-slate-400">Zahlen, auf die die Kosten bezogen werden (Kennwerte). Nur ausfüllen, was bekannt ist.</p>
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className="label">EBF [m²]</label><input type="number" className="input" value={form.ebf_m2} onChange={(e) => set("ebf_m2", e.target.value)} /></div>
+                <div><label className="label">Erzeugerleistung [kW]</label><input type="number" className="input" value={form.heizleistung_kw} onChange={(e) => set("heizleistung_kw", e.target.value)} /></div>
+                <div><label className="label">Anzahl Einheiten</label><input type="number" className="input" value={form.anzahl_einheiten} onChange={(e) => set("anzahl_einheiten", e.target.value)} /></div>
+                {erdsonde && (
+                  <div><label className="label">Bohrmeter</label><input type="number" className="input" value={form.bohrmeter} onChange={(e) => set("bohrmeter", e.target.value)} /></div>
+                )}
+              </div>
+              <p className="mb-1 mt-5 text-xs font-semibold uppercase tracking-wider text-slate-400">Weitere Bezugsgrössen (zusätzliche Ähnlichkeitsfaktoren)</p>
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className="label">Erzeugerleistung neu [kW]</label><input type="number" className="input" value={form.installierte_leistung_neu_kw} onChange={(e) => set("installierte_leistung_neu_kw", e.target.value)} /></div>
+                <div><label className="label">Fläche FBH [m²]</label><input type="number" className="input" value={form.flaeche_fbh_m2} onChange={(e) => set("flaeche_fbh_m2", e.target.value)} /></div>
+                <div><label className="label">Fläche TABS [m²]</label><input type="number" className="input" value={form.flaeche_tabs_m2} onChange={(e) => set("flaeche_tabs_m2", e.target.value)} /></div>
+                <div><label className="label">Fläche Deckenstrahlplatten [m²]</label><input type="number" className="input" value={form.flaeche_deckenstrahlplatten_m2} onChange={(e) => set("flaeche_deckenstrahlplatten_m2", e.target.value)} /></div>
+                <div><label className="label">Anzahl Heizkörper</label><input type="number" className="input" value={form.anzahl_heizkoerper} onChange={(e) => set("anzahl_heizkoerper", e.target.value)} /></div>
+                <div><label className="label">Anzahl Wärmemessungen</label><input type="number" className="input" value={form.anzahl_waermemessungen} onChange={(e) => set("anzahl_waermemessungen", e.target.value)} /></div>
+                <div><label className="label">Anzahl Schaltgerätekombinationen</label><input type="number" className="input" value={form.anzahl_schaltgeraetekombinationen} onChange={(e) => set("anzahl_schaltgeraetekombinationen", e.target.value)} /></div>
+                <div><label className="label">Laufmeter Rohre Heizung</label><input type="number" className="input" value={form.laufmeter_rohre_heizung} onChange={(e) => set("laufmeter_rohre_heizung", e.target.value)} /></div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div className="flex gap-2">
+                <button type="submit" disabled={saving} className="btn-primary">{saving ? "Speichere…" : "Speichern"}</button>
+                <Link to="/auswertung" className="btn-secondary">Abbrechen</Link>
+              </div>
+              {isEdit && (
+                <div className="flex gap-2">
+                  <button type="button" onClick={exportCsv} className="btn-secondary"><Download className="size-4" /> CSV</button>
+                  <button type="button" onClick={remove} className="btn-ghost text-red-500 hover:bg-red-50"><Trash2 className="size-4" /> Löschen</button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Rechts: BKP-Kosten — alle Positionen da, nur ausfüllen was zutrifft */}
+          <div className="card p-6">
+            <div className="mb-1 flex items-center justify-between">
+              <h2 className="font-semibold text-slate-800">BKP-Kosten</h2>
+              <span className="text-sm font-bold text-slate-900">Brutto {chf(brutto)} CHF</span>
+            </div>
+            <p className="mb-4 text-xs text-slate-400">Nur ausfüllen, was zutrifft — leere Positionen werden nicht gespeichert.</p>
+            <div className="space-y-5">
+              {gruppen.map(([nr, g]) => (
+                <div key={nr}>
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">{nr} · {g.name}</div>
+                  <div className="space-y-1.5">
+                    {g.items.map((p) => {
+                      const gefuellt = Number(betraege[p.bkp_nr]) > 0;
+                      return (
+                        <div key={p.bkp_nr} className="flex items-center gap-3">
+                          <div className="min-w-0 flex-1">
+                            <span className="text-sm font-medium text-slate-700">{p.bkp_nr}</span>
+                            <span className="ml-2 text-sm text-slate-500">{p.bezeichnung}</span>
+                          </div>
+                          <div className="relative w-36 shrink-0">
+                            <input
+                              type="number"
+                              className={"input pr-10 text-right " + (gefuellt ? "border-brand-300 bg-brand-50/40" : "")}
+                              value={betraege[p.bkp_nr] ?? ""}
+                              onChange={(e) => setBetrag(p.bkp_nr, e.target.value)}
+                              placeholder="—"
+                            />
+                            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400">CHF</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </form>
     </div>

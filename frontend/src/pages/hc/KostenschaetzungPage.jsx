@@ -104,9 +104,11 @@ function erklaerung(r, inp) {
 export default function KostenschaetzungPage() {
   const { id } = useParams();
   const [inp, setInp] = useState(DEFAULT);
-  const [result, setResult] = useState(null);
+  const [resultAll, setResultAll] = useState(null); // { brutto, netto }
+  const [variante, setVariante] = useState("netto");
   const [loaded, setLoaded] = useState(false);
   const [saveState, setSaveState] = useState("");
+  const result = resultAll?.[variante] || null;
 
   const set = (k, v) => setInp((f) => ({ ...f, [k]: v }));
   const erdsonde = hasErdsonde(inp.waermeerzeuger);
@@ -132,7 +134,7 @@ export default function KostenschaetzungPage() {
           base.gebaeudetyp = siaZuGebaeudetyp(proj.base_data.gebaeudekategorie);
         }
         setInp(base);
-        if (d.result) setResult(d.result);
+        if (d.result) setResultAll(d.result);
       })
       .finally(() => setLoaded(true));
   }, [id]);
@@ -151,7 +153,7 @@ export default function KostenschaetzungPage() {
         heizleistung_kw: num(inp.heizleistung_kw), anzahl_einheiten: num(inp.anzahl_einheiten),
         baupreisindex_beruecksichtigen: !!inp.baupreisindex_beruecksichtigen,
       };
-      try { const d = await ksSave(id, payload); setResult(d.result); setSaveState("saved"); }
+      try { const d = await ksSave(id, payload); setResultAll(d.result); setSaveState("saved"); }
       catch { setSaveState("error"); }
     }, 500);
     return () => clearTimeout(t);
@@ -165,23 +167,40 @@ export default function KostenschaetzungPage() {
         <div className="flex items-center gap-2 text-sm text-slate-500">
           <Link to="/projekte" className="hover:text-brand-600">Projekte</Link><span>/</span>
           <Link to={`/projekte/${id}`} className="hover:text-brand-600">Projekt</Link><span>/</span>
-          <span className="text-slate-800">Kostenschätzung</span>
+          <span className="text-slate-800">Grobkostenschätzung</span>
         </div>
         <div className="flex items-center gap-3">
           <span className="text-xs text-slate-400">
             {saveState === "saving" ? "● Rechne…" : saveState === "error" ? "● Fehler" : saveState === "saved" ? "● Gespeichert" : ""}
           </span>
+          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 text-sm">
+            {[["brutto", "Brutto"], ["netto", "Netto"]].map(([v, label]) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setVariante(v)}
+                className={"rounded-md px-3 py-1 font-medium transition " + (variante === v ? "bg-brand-600 text-white" : "text-slate-500 hover:text-slate-800")}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           {!leer && (
             <button
               type="button"
               className="btn-secondary inline-flex items-center gap-1.5 text-sm"
-              onClick={() => window.open(`${API_BASE}/api/v1/kostenschaetzung/projekt/${id}/pdf`, "_blank")}
+              onClick={() => window.open(`${API_BASE}/api/v1/kostenschaetzung/projekt/${id}/pdf?variante=${variante}`, "_blank")}
             >
               <FileDown className="size-4" /> PDF exportieren
             </button>
           )}
         </div>
       </div>
+      <p className="mb-6 -mt-4 text-xs text-slate-400">
+        {variante === "brutto"
+          ? "Brutto: Kosten wie im Leistungsverzeichnis der Referenzprojekte erfasst, ohne deren Rabatt/Skonto."
+          : "Netto: Kosten der Referenzprojekte nach deren eigenem Rabatt/Skonto — realistischer, aber abhängig von sauber erfassten Werten in der Auswertung."}
+      </p>
 
       <div className="grid gap-6 lg:grid-cols-[360px_minmax(0,1fr)]">
         {/* Eingaben */}

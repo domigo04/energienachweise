@@ -10,13 +10,20 @@ from app.routers.hc_auswertung import _bkp_fieldnames, _num, _pdate, _pint, _ref
 
 def _mock_ref(**kw):
     zeilen = kw.pop("kostenzeilen", [])
+    gewerke = kw.pop("gewerke", [])
     base = dict(
         name="Test", projektart=None, gebaeudetyp=None, ausbauumfang=None, zertifizierung=None,
         anlagenkonfiguration=None, waermeerzeuger=[], waermeabgabe=[], ebf_m2=None, bohrmeter=None,
         heizleistung_kw=None, anzahl_einheiten=None, datum=None, qualitaet=1.0,
+        installierte_leistung_neu_kw=None, flaeche_fbh_m2=None, flaeche_tabs_m2=None,
+        flaeche_deckenstrahlplatten_m2=None, anzahl_heizkoerper=None, anzahl_waermemessungen=None,
+        anzahl_schaltgeraetekombinationen=None, laufmeter_rohre_heizung=None,
     )
     base.update(kw)
-    return SimpleNamespace(kostenzeilen=[SimpleNamespace(bkp_nr=b, betrag_chf=v) for b, v in zeilen], **base)
+    return SimpleNamespace(
+        kostenzeilen=[SimpleNamespace(bkp_nr=b, betrag_chf=v, gewerk="heizung") for b, v in zeilen],
+        gewerke=gewerke, **base,
+    )
 
 
 def test_num_pint_pdate_parsen_leer_als_none():

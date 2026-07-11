@@ -150,7 +150,9 @@ def _apply(r: RefProjekt, body: RefProjektIn, user: User):
 _CSV_BASE_FIELDS = [
     "name", "projektart", "gebaeudetyp", "ausbauumfang", "zertifizierung", "anlagenkonfiguration",
     "waermeerzeuger", "waermeabgabe", "ebf_m2", "bohrmeter", "heizleistung_kw",
-    "anzahl_einheiten", "datum", "qualitaet",
+    "anzahl_einheiten", "datum", "qualitaet", "rabatt_pct", "skonto_pct",
+    "installierte_leistung_neu_kw", "flaeche_fbh_m2", "flaeche_tabs_m2", "flaeche_deckenstrahlplatten_m2",
+    "anzahl_heizkoerper", "anzahl_waermemessungen", "anzahl_schaltgeraetekombinationen", "laufmeter_rohre_heizung",
 ]
 
 
@@ -158,7 +160,12 @@ def _bkp_fieldnames() -> List[str]:
     return [f"bkp_{p['bkp_nr']}" for p in BKP_POSITIONEN]
 
 
+def _num_or_leer(v):
+    return v if v is not None else ""
+
+
 def _ref_to_row(r) -> dict:
+    g = next((x for x in r.gewerke if x.gewerk == "heizung"), None)
     row = {
         "name": r.name,
         "projektart": r.projektart or "",
@@ -168,14 +175,24 @@ def _ref_to_row(r) -> dict:
         "anlagenkonfiguration": r.anlagenkonfiguration or "",
         "waermeerzeuger": ";".join(r.waermeerzeuger or []),
         "waermeabgabe": ";".join(r.waermeabgabe or []),
-        "ebf_m2": r.ebf_m2 if r.ebf_m2 is not None else "",
-        "bohrmeter": r.bohrmeter if r.bohrmeter is not None else "",
-        "heizleistung_kw": r.heizleistung_kw if r.heizleistung_kw is not None else "",
-        "anzahl_einheiten": r.anzahl_einheiten if r.anzahl_einheiten is not None else "",
+        "ebf_m2": _num_or_leer(r.ebf_m2),
+        "bohrmeter": _num_or_leer(r.bohrmeter),
+        "heizleistung_kw": _num_or_leer(r.heizleistung_kw),
+        "anzahl_einheiten": _num_or_leer(r.anzahl_einheiten),
         "datum": r.datum.isoformat() if r.datum else "",
         "qualitaet": r.qualitaet if r.qualitaet is not None else "",
+        "rabatt_pct": g.rabatt_pct if g else 0,
+        "skonto_pct": g.skonto_pct if g else 0,
+        "installierte_leistung_neu_kw": _num_or_leer(r.installierte_leistung_neu_kw),
+        "flaeche_fbh_m2": _num_or_leer(r.flaeche_fbh_m2),
+        "flaeche_tabs_m2": _num_or_leer(r.flaeche_tabs_m2),
+        "flaeche_deckenstrahlplatten_m2": _num_or_leer(r.flaeche_deckenstrahlplatten_m2),
+        "anzahl_heizkoerper": _num_or_leer(r.anzahl_heizkoerper),
+        "anzahl_waermemessungen": _num_or_leer(r.anzahl_waermemessungen),
+        "anzahl_schaltgeraetekombinationen": _num_or_leer(r.anzahl_schaltgeraetekombinationen),
+        "laufmeter_rohre_heizung": _num_or_leer(r.laufmeter_rohre_heizung),
     }
-    kosten = {z.bkp_nr: z.betrag_chf for z in r.kostenzeilen}
+    kosten = {z.bkp_nr: z.betrag_chf for z in r.kostenzeilen if z.gewerk == "heizung"}
     for p in BKP_POSITIONEN:
         betrag = kosten.get(p["bkp_nr"])
         row[f"bkp_{p['bkp_nr']}"] = betrag if betrag else ""
@@ -305,13 +322,24 @@ async def import_csv(file: UploadFile = File(...), user: User = Depends(get_curr
                 ebf_m2=_num(row.get("ebf_m2")), bohrmeter=_num(row.get("bohrmeter")),
                 heizleistung_kw=_num(row.get("heizleistung_kw")), anzahl_einheiten=_pint(row.get("anzahl_einheiten")),
                 datum=_pdate(row.get("datum")), qualitaet=_num(row.get("qualitaet")) or 1.0,
+                installierte_leistung_neu_kw=_num(row.get("installierte_leistung_neu_kw")),
+                flaeche_fbh_m2=_num(row.get("flaeche_fbh_m2")), flaeche_tabs_m2=_num(row.get("flaeche_tabs_m2")),
+                flaeche_deckenstrahlplatten_m2=_num(row.get("flaeche_deckenstrahlplatten_m2")),
+                anzahl_heizkoerper=_pint(row.get("anzahl_heizkoerper")),
+                anzahl_waermemessungen=_pint(row.get("anzahl_waermemessungen")),
+                anzahl_schaltgeraetekombinationen=_pint(row.get("anzahl_schaltgeraetekombinationen")),
+                laufmeter_rohre_heizung=_num(row.get("laufmeter_rohre_heizung")),
             )
             db.add(r)
             db.flush()
+            r.gewerke.append(RefProjektGewerk(
+                tenant_id=user.tenant_id, gewerk="heizung",
+                rabatt_pct=_num(row.get("rabatt_pct")) or 0.0, skonto_pct=_num(row.get("skonto_pct")) or 0.0,
+            ))
             for nr, bkp_name in bkp_namen.items():
                 betrag = _num(row.get(f"bkp_{nr}"))
                 if betrag and betrag > 0:
-                    db.add(RefKostenzeile(tenant_id=user.tenant_id, ref_projekt_id=r.id, bkp_nr=nr, bkp_name=bkp_name, betrag_chf=betrag))
+                    db.add(RefKostenzeile(tenant_id=user.tenant_id, ref_projekt_id=r.id, gewerk="heizung", bkp_nr=nr, bkp_name=bkp_name, betrag_chf=betrag))
             created += 1
         except Exception as e:
             fehler.append(f"Zeile {i}: {e}")

@@ -50,7 +50,7 @@ export default function BaupreisindexAdmin() {
         <h1 className="text-2xl font-bold text-slate-900">Baupreisindex</h1>
         <p className="mt-1 text-sm text-slate-500">
           Periodenwerte für die Umrechnung älterer Referenz-Kosten auf heutiges Preisniveau
-          (Häkchen «Baupreisindex berücksichtigen» in der Kostenschätzung).
+          (Häkchen «Baupreisindex berücksichtigen» in der Grobkostenschätzung).
         </p>
       </header>
 

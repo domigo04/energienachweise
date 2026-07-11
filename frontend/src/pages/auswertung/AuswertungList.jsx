@@ -82,7 +82,7 @@ export default function AuswertungList() {
         <div className="card flex flex-col items-center gap-2 border-dashed p-12 text-center">
           <div className="text-4xl">📊</div>
           <p className="font-medium text-slate-700">Noch keine Referenzprojekte</p>
-          <p className="max-w-md text-sm text-slate-400">Erfasse abgeschlossene Projekte mit ihren echten BKP-Kosten — oder importiere eine CSV. Je mehr Referenzen, desto verlässlicher die Kostenschätzung.</p>
+          <p className="max-w-md text-sm text-slate-400">Erfasse abgeschlossene Projekte mit ihren echten BKP-Kosten — oder importiere eine CSV. Je mehr Referenzen, desto verlässlicher die Grobkostenschätzung.</p>
           <Link to="/auswertung/neu" className="btn-primary mt-2"><Plus className="size-4" /> Erstes Referenzprojekt</Link>
         </div>
       ) : (

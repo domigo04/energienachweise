@@ -7,7 +7,7 @@ const FEATURES = [
   { icon: "🗺️", titel: "Lebendes Anlagenschema", text: "Zeichne die Heizung einmal — das Schema ist die Datenbank. Bauteile tragen ihre Auslegung selbst." },
   { icon: "💧", titel: "Hydraulik automatisch", text: "Volumenströme, Ventile, Pumpen, Expansionsgefäss und Leitungs-Dimension rechnen im Hintergrund." },
   { icon: "📄", titel: "PDF-Dokumentation", text: "Deckblatt, Vektor-Schema, Legende und Berechnungen — auf Knopfdruck als sauberes PDF." },
-  { icon: "💰", titel: "Kostenschätzung (KV)", text: "Reale Devis nach Gebäudekategorie auswerten und daraus schnelle, belegte Kostenschätzungen ziehen." },
+  { icon: "💰", titel: "Grobkostenschätzung (KV)", text: "Reale Devis nach Gebäudekategorie auswerten und daraus schnelle, belegte Grobkostenschätzungen ziehen." },
 ];
 
 export default function Landing() {

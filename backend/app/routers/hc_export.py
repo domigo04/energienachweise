@@ -54,8 +54,10 @@ def schema_pdf(schema_id: int, inhalt: str = "beides", db: Session = Depends(get
 
 
 @router.get("/kostenschaetzung/projekt/{project_id}/pdf")
-def kostenschaetzung_pdf(project_id: int, db: Session = Depends(get_db)):
-    """PDF-Export der gespeicherten Kostenschätzung eines Projekts."""
+def kostenschaetzung_pdf(project_id: int, variante: str = "netto", db: Session = Depends(get_db)):
+    """PDF-Export der gespeicherten Grobkostenschätzung eines Projekts.
+    variante = brutto | netto (Standard netto — der reale, nach Rabatt/
+    Skonto der Referenzen bereinigte Betrag)."""
     p = (db.query(HcProject)
          .filter(HcProject.id == project_id, HcProject.tenant_id == TENANT_ID)
          .first())
@@ -65,10 +67,11 @@ def kostenschaetzung_pdf(project_id: int, db: Session = Depends(get_db)):
           .filter(Kostenschaetzung.project_id == project_id, Kostenschaetzung.tenant_id == TENANT_ID)
           .first())
     if not ks or not ks.result_json:
-        raise HTTPException(status_code=404, detail="Noch keine Kostenschätzung für dieses Projekt vorhanden")
+        raise HTTPException(status_code=404, detail="Noch keine Grobkostenschätzung für dieses Projekt vorhanden")
 
     inputs = json.loads(ks.inputs_json or "{}")
-    result = json.loads(ks.result_json or "{}")
+    gespeichert = json.loads(ks.result_json or "{}")
+    result = gespeichert.get(variante) or gespeichert.get("brutto") or gespeichert
     pdf = erzeuge_kostenschaetzung_pdf(p.name, inputs, result)
     sicher = re.sub(r"[^A-Za-z0-9_-]+", "_", p.name).strip("_") or "Projekt"
     dateiname = f"{sicher}_Kostenschaetzung.pdf"

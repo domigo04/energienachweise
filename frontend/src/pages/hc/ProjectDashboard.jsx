@@ -60,7 +60,7 @@ export default function ProjectDashboard() {
 
   const TOOLS = [
     { to: `/projekte/${id}/schema`, icon: Share2, title: "Anlagenschema", text: "Schema zeichnen — Berechnungen leben in den Bauteilen.", primary: true },
-    { to: `/projekte/${id}/kostenschaetzung`, icon: Calculator, title: "Kostenschätzung", text: "Ähnlichkeitsgewichtete Schätzung aus Referenzprojekten." },
+    { to: `/projekte/${id}/kostenschaetzung`, icon: Calculator, title: "Grobkostenschätzung", text: "Ähnlichkeitsgewichtete Schätzung aus Referenzprojekten." },
     { to: `/projekte/${id}/heizgruppen`, icon: Layers, title: "Heizgruppen", text: "Heizgruppen-Generator mit Volumenstrom." },
   ];
 

@@ -78,7 +78,7 @@ export default function ProjectList() {
       <div className="mb-8 flex items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Projekte</h1>
-          <p className="mt-1 text-sm text-slate-500">Deine Heizungsplanungen — Schema, Auslegung und Kostenschätzung.</p>
+          <p className="mt-1 text-sm text-slate-500">Deine Heizungsplanungen — Schema, Auslegung und Grobkostenschätzung.</p>
         </div>
         <div className="flex gap-2">
           {projects.some((p) => p.status === "archiviert") && (

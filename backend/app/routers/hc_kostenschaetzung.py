@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
-from app.calculations.kostenschaetzung import berechne_kostenschaetzung
+from app.calculations.kostenschaetzung import berechne_kostenschaetzung, netto_aus_brutto
 from app.database import get_db
 from app.models.auth import User
 from app.models.heizungscockpit import HcProject
@@ -38,6 +38,10 @@ class KsInput(BaseModel):
 
 
 def _ref_to_calc_dict(r: RefProjekt) -> dict:
+    heizung_gewerk = next((g for g in r.gewerke if g.gewerk == "heizung"), None)
+    rabatt = heizung_gewerk.rabatt_pct if heizung_gewerk else 0.0
+    skonto = heizung_gewerk.skonto_pct if heizung_gewerk else 0.0
+    kosten_brutto = {z.bkp_nr: z.betrag_chf for z in r.kostenzeilen if z.gewerk == "heizung"}
     return {
         "id": r.id, "name": r.name, "projektart": r.projektart, "gebaeudetyp": r.gebaeudetyp,
         "ausbauumfang": r.ausbauumfang, "zertifizierung": r.zertifizierung,
@@ -52,8 +56,9 @@ def _ref_to_calc_dict(r: RefProjekt) -> dict:
         "anzahl_schaltgeraetekombinationen": r.anzahl_schaltgeraetekombinationen,
         "laufmeter_rohre_heizung": r.laufmeter_rohre_heizung,
         # nur Heizungs-BKP-Zeilen — Lüftung/Sanitär/Kälte fliessen (noch) nicht
-        # in die Heizungs-Kostenschätzung ein.
-        "kosten": {z.bkp_nr: z.betrag_chf for z in r.kostenzeilen if z.gewerk == "heizung"},
+        # in die Heizungs-Kostenschätzung ein. Brutto = wie im LV erfasst.
+        "kosten": kosten_brutto,
+        "kosten_netto": {nr: netto_aus_brutto(betrag, rabatt, skonto) for nr, betrag in kosten_brutto.items()},
     }
 
 
@@ -62,14 +67,29 @@ def _refs(db: Session, tenant_id: int) -> list:
     return [_ref_to_calc_dict(r) for r in refs]
 
 
+def _als_netto(refs: list) -> list:
+    """Referenzen mit Netto- statt Brutto-Kosten (jede Referenz nach ihrem
+    EIGENEN Rabatt/Skonto) — für den Brutto/Netto-Umschalter im Frontend."""
+    return [{**r, "kosten": r["kosten_netto"]} for r in refs]
+
+
 def _bauindex(db: Session, tenant_id: int) -> list:
     eintraege = db.query(BauindexEintrag).filter(BauindexEintrag.tenant_id == tenant_id).all()
     return [{"periode": e.periode, "wert": e.wert} for e in eintraege]
 
 
+def _berechne_brutto_und_netto(inputs: dict, refs: list, bauindex: list) -> dict:
+    """Zwei komplette Ergebnisse (gleiche Ähnlichkeits-Logik, unterschiedliche
+    Kostenbasis) — das Frontend schaltet nur um, ohne neu zu rechnen."""
+    return {
+        "brutto": berechne_kostenschaetzung(inputs, refs, bauindex),
+        "netto": berechne_kostenschaetzung(inputs, _als_netto(refs), bauindex),
+    }
+
+
 @router.post("/berechnen")
 def berechnen(body: KsInput, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return berechne_kostenschaetzung(body.model_dump(), _refs(db, user.tenant_id), _bauindex(db, user.tenant_id))
+    return _berechne_brutto_und_netto(body.model_dump(), _refs(db, user.tenant_id), _bauindex(db, user.tenant_id))
 
 
 @router.get("/projekt/{project_id}")
@@ -95,7 +115,7 @@ def compute_and_save(project_id: int, body: KsInput, user: User = Depends(get_cu
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Projekt nicht gefunden")
 
     inputs = body.model_dump()
-    result = berechne_kostenschaetzung(inputs, _refs(db, user.tenant_id), _bauindex(db, user.tenant_id))
+    result = _berechne_brutto_und_netto(inputs, _refs(db, user.tenant_id), _bauindex(db, user.tenant_id))
 
     ks = db.query(Kostenschaetzung).filter(Kostenschaetzung.project_id == project_id).first()
     if not ks:

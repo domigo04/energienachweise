@@ -7,7 +7,7 @@ const CARDS = [
     to: "/projekte",
     icon: FolderKanban,
     title: "Projekte",
-    text: "Anlagen planen: Schema zeichnen, Heizgruppen auslegen und je Projekt eine Kostenschätzung erstellen.",
+    text: "Anlagen planen: Schema zeichnen, Heizgruppen auslegen und je Projekt eine Grobkostenschätzung erstellen.",
     cta: "Zu den Projekten",
   },
   {
@@ -72,7 +72,7 @@ export default function Home() {
             </p>
           </div>
           <div className="rounded-xl bg-slate-50 p-4">
-            <div className="text-sm font-bold text-slate-800">2 · Kostenschätzung ziehen</div>
+            <div className="text-sm font-bold text-slate-800">2 · Grobkostenschätzung ziehen</div>
             <p className="mt-1 text-sm text-slate-500">
               In einem Projekt vergleicht das Tool deine Eingaben mit ähnlichen Referenzen und zeigt Bandbreite und Vertrauen.
             </p>

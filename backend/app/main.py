@@ -78,14 +78,19 @@ from app.models.heizungscockpit import (  # noqa: F401 — Tabellen vor create_a
 )
 from app.models.auth import Firma, User, Role  # noqa: F401
 from app.models.kv import RefProjekt, RefKostenzeile, RefProjektGewerk, Kostenschaetzung, BauindexEintrag  # noqa: F401
+from app.models.grobkostenschaetzung import ReferenzProjekt, BkpBetrag, Korrekturfaktor  # noqa: F401
 from app.auth import hash_password
 
 
 def _ensure_columns():
-    """Fehlende Spalten auf bestehenden SQLite-Dev-Tabellen ergänzen.
-    (Auf frischem Postgres unnötig — create_all legt alles korrekt an.)"""
-    if not engine.url.get_backend_name().startswith("sqlite"):
-        return
+    """Fehlende Spalten auf bestehenden Tabellen ergänzen — SQLite-Dev UND
+    Postgres-Prod. Bei frisch angelegten Tabellen unnötig (create_all legt die
+    schon vollständig an); nötig, sobald eine Tabelle schon vor einer neuen
+    Spalte im Modell existierte. Früher lief das nur auf SQLite (früher return
+    bei Postgres) — dadurch blieben auf dem Server nach jedem Modell-Update
+    Spalten wie hc_firmen.abo_plan dauerhaft fehlend, was den Start-Seed
+    (_seed_admin) mit einer stillen SQL-Exception abbrechen liess und so den
+    Produktions-Login blockierte."""
     to_add = {
         "hc_project_base_data": [("gebaeudekategorie", "VARCHAR"), ("klimastation", "VARCHAR")],
         "hc_projects": [("erstellt_von", "INTEGER")],
@@ -99,12 +104,19 @@ def _ensure_columns():
         "hc_firmen": [("abo_plan", "VARCHAR")],
         "ref_kostenzeilen": [("gewerk", "VARCHAR")],
     }
+    is_sqlite = engine.url.get_backend_name().startswith("sqlite")
     with engine.connect() as conn:
         for table, cols in to_add.items():
-            existing = {r[1] for r in conn.execute(text(f"PRAGMA table_info({table})"))}
-            for name, typ in cols:
-                if name not in existing:
-                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {typ}"))
+            if is_sqlite:
+                existing = {r[1] for r in conn.execute(text(f"PRAGMA table_info({table})"))}
+                for name, typ in cols:
+                    if name not in existing:
+                        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {typ}"))
+            else:
+                # Postgres 9.6+: ADD COLUMN IF NOT EXISTS macht die separate
+                # Existenzprüfung überflüssig und ist bei jedem Neustart idempotent.
+                for name, typ in cols:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {name} {typ}"))
         conn.commit()
         # ALTER TABLE trägt den SQLAlchemy-Python-Default nicht nach — bestehende
         # Zeilen hätten sonst z.B. abo_plan=NULL statt "kostenlos".
@@ -130,6 +142,19 @@ def _seed_group_templates(db):
     db.add_all(templates)
     db.commit()
     print(f"[INIT] {len(templates)} Gruppen-Vorlagen angelegt")
+
+
+def _seed_korrekturfaktoren(db):
+    if db.query(Korrekturfaktor).count() > 0:
+        return
+    faktoren = [
+        Korrekturfaktor(name="Sanierung", faktor=1.20, aktiv=True),
+        Korrekturfaktor(name="Weiterbetrieb", faktor=1.10, aktiv=True),
+        Korrekturfaktor(name="Etappierung", faktor=1.08, aktiv=True),
+    ]
+    db.add_all(faktoren)
+    db.commit()
+    print(f"[INIT] {len(faktoren)} Korrekturfaktoren angelegt")
 
 
 def _seed_admin(db):
@@ -184,6 +209,12 @@ def init_db_and_seed():
         except Exception:
             db.rollback()
             print("Seed error (admin):")
+            traceback.print_exc()
+        try:
+            _seed_korrekturfaktoren(db)
+        except Exception:
+            db.rollback()
+            print("Seed error (korrekturfaktoren):")
             traceback.print_exc()
     finally:
         db.close()

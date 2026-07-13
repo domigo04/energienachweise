@@ -18,3 +18,4 @@ pypdf
 psycopg2-binary  # Postgres-Treiber für Prod (DATABASE_URL=postgresql+psycopg2://…)
 httpx  # ausgehende Anfragen (Baupreisindex-Abruf gegen opendata.swiss)
 openpyxl  # liest die BFS-Baupreisindex-Excel-Datei
+numpy  # Potenzfunktion-Regression (Grobkostenschätzung BKP)

@@ -1,6 +1,4 @@
-"""Grobkostenschätzung (BKP) — Tests. Kern rechnet auf Ebene der BKP-Einzel-
-positionen; die entscheidende Regel «fehlende Position = 0» ist eigens getestet
-(test_schaetze_position_fehlende_position_zaehlt_null, test_..._summe_bleibt_...)."""
+"""Grobkostenschätzung (BKP) — Tests auf Ebene der BKP-Einzelpositionen."""
 from datetime import date
 from types import SimpleNamespace
 
@@ -293,18 +291,22 @@ def _pos(bkp_nr="243.1", bezeichnung="Rohrleitungen"):
     return {"bkp_nr": bkp_nr, "bezeichnung": bezeichnung, "gruppe_nr": bkp_nr.split(".")[0]}
 
 
-def test_schaetze_position_fehlende_position_zaehlt_null():
-    """Position in nur 1 von 5 Referenzen (je 1000 m²): die anderen 4 zählen mit
-    0 → Kennwert (50 + 0+0+0+0)/5 = 10 CHF/m², für 1000 m² also 10'000 — NICHT
-    50'000 (das war der alte Aufblähungs-Fehler)."""
-    segment = [{"ebf_m2": 1000, "rang": 1.0, "positionen": ({"243.1": 50000} if i == 0 else {})}
-               for i in range(5)]
+def test_schaetze_position_fehlende_positionen_werden_ausgeschlossen():
+    """Drei Angaben und zwei unbekannte Werte ergeben den Mittelwert der drei
+    Angaben. Unbekannt ist fachlich nicht dasselbe wie 0 CHF."""
+    kosten = [20000, 24000, 22000, None, None]
+    segment = [
+        {"ebf_m2": 1000, "rang": 1.0,
+         "positionen": ({"243.1": betrag} if betrag is not None else {})}
+        for betrag in kosten
+    ]
     e = schaetze_position(_pos(), segment, {"ebf_m2": 1000})
-    assert e["kennwert"] == pytest.approx(10.0)
-    assert e["betrag"] == pytest.approx(10000)
-    assert e["abdeckung"] == 1
-    assert e["n_referenzen"] == 5
-    assert e["vertrauen"] == "niedrig"
+    assert e["kennwert"] == pytest.approx(22.0)
+    assert e["betrag"] == pytest.approx(22000)
+    assert e["abdeckung"] == 3
+    assert e["n_referenzen"] == 3
+    assert len(e["herkunft"]) == 3
+    assert all(r["verwendet"] for r in e["herkunft"])
 
 
 def test_schaetze_position_volle_abdeckung():
@@ -354,7 +356,7 @@ def test_berechne_liefert_positionen_gruppen_und_total():
     assert gruppen_nr == sorted(gruppen_nr)
     g243 = next(g for g in r["gruppen"] if g["gruppe_nr"] == "243")
     assert any(p["bkp_nr"] == "243.1" for p in g243["positionen"])
-    assert g243["betrag"] == pytest.approx(sum(p["betrag"] for p in g243["positionen"]))
+    assert g243["betrag"] == pytest.approx(sum(p["betrag"] for p in g243["positionen"] if p["betrag"] is not None))
     assert r["gesamt_betrag"] == pytest.approx(sum(g["betrag"] for g in r["gruppen"]))
     assert r["gesamt_betrag"] > 0
 
@@ -582,9 +584,45 @@ def test_keine_angaben_bei_null_kostenangaben():
     e = schaetze_position(_pos(), segment, {"ebf_m2": 1000})
     assert e["mit_kostenangabe"] == 0
     assert e["status_datenbasis"] == "Keine Angaben"
+    assert e["kennwert"] is None
+    assert e["betrag"] is None
+    assert e["bandbreite"] is None
 
 
-def test_berechne_haengt_quercheck_an_243():
+def test_manueller_betrag_vervollstaendigt_position_ohne_referenzwert():
+    r = berechne_grobkostenschaetzung(
+        _ZIEL, [], faktoren=[], heute=date(2026, 7, 14),
+        manuelle_betraege={"243.1": 12345},
+    )
+    p = next(p for g in r["gruppen"] for p in g["positionen"] if p["bkp_nr"] == "243.1")
+    assert p["berechneter_betrag"] is None
+    assert p["betrag"] == pytest.approx(12345)
+    assert p["quelle"] == "manuell"
+    assert "243.1" not in r["fehlende_positionen"]
+    assert "243.1" in r["positionen_ohne_referenz"]
+
+
+def test_gesamt_resultat_meldet_fehlende_positionen():
+    r = berechne_grobkostenschaetzung(_ZIEL, [], faktoren=[], heute=date(2026, 7, 14))
+    assert r["ist_unvollstaendig"] is True
+    assert r["fehlende_positionen"]
+
+
+def test_gemeinsame_position_gewichtet_ohne_waermeabgabe():
+    ziel = {**_ZIEL, "waermeabgabe": ["Heizkörper"]}
+    refs = [
+        {"name": "HK", "ebf_m2": 800, "leistung_kw": 32, "anzahl_ne": 8,
+         "abgabe_klassen": {"koerper"}, "zeitgewicht": 1.0,
+         "positionen": {"242.3": 40000}},
+        {"name": "FBH", "ebf_m2": 800, "leistung_kw": 32, "anzahl_ne": 8,
+         "abgabe_klassen": {"flaeche"}, "zeitgewicht": 1.0,
+         "positionen": {"242.3": 60000}},
+    ]
+    p = schaetze_position(_pos("242.3", "Wärmeerzeugung"), refs, ziel)
+    assert p["betrag"] == pytest.approx(50000)
+
+
+def test_berechne_laesst_unvollstaendigen_quercheck_weg():
     refs = [
         _ref("A", 1000, 40, {"243.1": 50000, "242.3": 90000}, anzahl_ne=8),
         _ref("B", 500, 20, {"243.1": 26000, "242.3": 48000}, datum=date(2024, 6, 1), anzahl_ne=4),
@@ -592,5 +630,6 @@ def test_berechne_haengt_quercheck_an_243():
     ziel = {**_ZIEL, "anzahl_ne": 6}
     r = berechne_grobkostenschaetzung(ziel, refs, faktoren=[], heute=date(2026, 7, 14))
     g243 = next(g for g in r["gruppen"] if g["gruppe_nr"] == "243")
-    assert "quercheck_einheit" in g243
-    assert g243["quercheck_einheit"] is not None
+    # Die Referenzen enthalten nicht jede Position der Zielgruppe. Diese
+    # fehlenden Angaben dürfen im CHF/Einheit-Quercheck nicht als 0 einfliessen.
+    assert g243["quercheck_einheit"] is None

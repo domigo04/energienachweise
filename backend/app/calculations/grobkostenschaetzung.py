@@ -6,16 +6,13 @@ rechnet auf den Referenzprojekten der Auswertung; der Router übersetzt die
 Auswertungs-Daten (siehe hc_grobkostenschaetzung.py::_ref_to_calc_dict).
 
 Ausgabe auf Ebene der BKP-EINZELPOSITIONEN (Norm-Leistungsverzeichnis, Dominic
-2026-07-14) statt Gruppen-Summen. Kernidee gegen die frühere Überschätzung:
-**eine Position, die in einer Referenz fehlt, zählt als 0 Franken** — sie kostete
-in jenem Projekt real nichts, ist nicht «unbekannt». Dadurch bekommen selten
-vorkommende Positionen einen tiefen Mittelwert statt hochgerechnet zu werden, und
-die Summe aller Positionen bleibt in der Grössenordnung der Referenz-Totale.
+2026-07-14) statt Gruppen-Summen. Fehlende Kostenzeilen sind unbekannte Werte und
+dürfen den Kennwert deshalb nicht als fiktive 0 Franken nach unten ziehen.
 
 Ablauf:
 1. Ähnlichkeitssuche (Hard-Filter + Score + Zeitgewicht) — unverändert.
-2. Je Position: gewichteter Kennwert (Betrag ÷ Bezugsgrösse) über ALLE
-   Segment-Referenzen, fehlende Position = 0 → × Bezugsgrösse des Zielprojekts.
+2. Je Position: gewichteter Kennwert (Betrag ÷ Bezugsgrösse) nur über
+   Referenzen mit einer positiven Kostenangabe → × Bezugsgrösse des Zielprojekts.
 3. Korrekturfaktoren (Sanierung/Weiterbetrieb/Etappierung) und Baupreisindex.
 """
 import math
@@ -171,20 +168,27 @@ def abgabe_naehe(ref_klassen, ziel_klassen) -> float:
     return 0.25
 
 
-def aehnlichkeits_score(kandidat: dict, ziel: dict) -> float:
+def aehnlichkeits_score(kandidat: dict, ziel: dict,
+                         waermeabgabe_beruecksichtigen: bool = True) -> float:
     """Gewichtete Summe (0..1) der WEICHEN Ähnlichkeits-Merkmale (Summe = 1.0).
     Nutzung/WP-Art/Projektart/Erdsonden sind HART (raus aus dem Score). Die
     Wärmeabgabe steuert weiterhin die Kosten-Positionen UND ist seit 2026-07-19
     zusätzlich ein starker Score-Faktor (0.20) — sonst wirkte ein Projekt mit
     anderem Abgabesystem fast gleich ähnlich (verwirrend, Dominic)."""
-    return (
+    score = (
         0.25 * groessennaehe(kandidat.get("ebf_m2"), ziel.get("ebf_m2"))
         + 0.22 * groessennaehe(kandidat.get("leistung_kw"), ziel.get("leistung_kw"))
-        + 0.20 * abgabe_naehe(kandidat.get("abgabe_klassen"), _ziel_abgabe_klassen(ziel))
         + 0.13 * zertifizierungs_naehe(kandidat.get("zertifizierung"), ziel.get("zertifizierung"))
         + 0.12 * einheiten_naehe(kandidat.get("anzahl_ne"), ziel.get("anzahl_ne"))
         + 0.08 * bww_naehe(kandidat.get("bww_bei_heizung"), ziel.get("bww_bei_heizung"))
     )
+    if waermeabgabe_beruecksichtigen:
+        return score + 0.20 * abgabe_naehe(
+            kandidat.get("abgabe_klassen"), _ziel_abgabe_klassen(ziel)
+        )
+    # Bei gemeinsamen Positionen und der Wärmeerzeugung ist die Abgabe fachlich
+    # irrelevant. Die verbleibenden Gewichte werden wieder auf 1.0 normiert.
+    return score / 0.80
 
 
 def finde_referenzen(kandidaten: list, ziel: dict, top_n: Optional[int] = 5, heute: Optional[date] = None) -> list:
@@ -305,8 +309,8 @@ def _effektiver_treiber(bkp_nr: str, ziel: dict) -> str:
 
 def schaetze_position(pos: dict, segment: list, ziel: dict) -> dict:
     """Eine BKP-Einzelposition schätzen: gewichteter Kennwert (Betrag ÷
-    Bezugsgrösse) über die passenden Segment-Referenzen — Referenz ohne diese
-    Position zählt mit 0 — × Bezugsgrösse des Zielprojekts.
+    Bezugsgrösse) über passende Segment-Referenzen mit positiver Kostenangabe
+    × Bezugsgrösse des Zielprojekts.
 
     Wärmeabgabe-Position (243.2*/3*/4*, `pos["abgabe"]` gesetzt): es zählen NUR
     Referenzen, die genau diese Abgabe hatten (Dominic 2026-07-19). Eine reine
@@ -319,6 +323,7 @@ def schaetze_position(pos: dict, segment: list, ziel: dict) -> dict:
     ziel_treiber = ziel.get(feld)
 
     kennwerte, gewichte = [], []
+    herkunft = []
     abdeckung = 0  # Referenzen, die diese Position tatsächlich hatten (>0)
     grundsegment = len(segment)
     passende_abgabe = 0  # Referenzen mit passender Abgabe (für diese Position)
@@ -327,17 +332,35 @@ def schaetze_position(pos: dict, segment: list, ziel: dict) -> dict:
             continue  # Abgabe-Position: nur Referenzen mit genau dieser Wärmeabgabe
         passende_abgabe += 1
         drv = r.get(feld)
+        betrag = (r.get("positionen") or {}).get(bkp_nr)
+        zeit = r.get("zeitgewicht", 1.0) or 0.0
+        positionsgewicht = aehnlichkeits_score(
+            r, ziel, waermeabgabe_beruecksichtigen=pos_abgabe is not None
+        ) * zeit
+        detail = {
+            "id": r.get("id"), "name": r.get("name"),
+            "datum_abrechnung": r.get("datum_abrechnung"),
+            "ebf_m2": r.get("ebf_m2"), "leistung_kw": r.get("leistung_kw"),
+            "anzahl_ne": r.get("anzahl_ne"),
+            "abgabe_klassen": sorted(r.get("abgabe_klassen") or []),
+            "treiber_wert": drv, "kosten": betrag,
+            "kennwert": None, "gewicht": round(positionsgewicht, 4),
+            "verwendet": False, "ausschlussgrund": None,
+        }
         if not drv or drv <= 0:
             continue  # Referenz ohne diese Bezugsgrösse — nicht normierbar
-        betrag = (r.get("positionen") or {}).get(bkp_nr) or 0.0
+        if betrag is None or betrag <= 0:
+            continue
         kennwerte.append(betrag / drv)
-        gewichte.append(r.get("rang", 1.0) or 0.0)
-        if betrag > 0:
-            abdeckung += 1
+        gewichte.append(positionsgewicht)
+        abdeckung += 1
+        detail.update({"kennwert": betrag / drv, "verwendet": True})
+        herkunft.append(detail)
 
     basis = {
         "bkp_nr": bkp_nr, "bezeichnung": pos["bezeichnung"], "gruppe_nr": pos["gruppe_nr"],
-        "einheit": _TREIBER_EINHEIT[treiber], "kennwert": 0.0, "betrag": 0.0,
+        "einheit": _TREIBER_EINHEIT[treiber], "kennwert": None, "betrag": None,
+        "berechneter_betrag": None, "manueller_betrag": None, "quelle": "keine_angaben",
         "abdeckung": abdeckung, "n_referenzen": len(kennwerte),
         "segment_groesse": len(segment),  # Gesamtzahl passender Referenzen (Nenner für «X von Y»)
         # Transparenz: wie zuverlässig ist diese Position? (Dominic 2026-07-20)
@@ -346,7 +369,7 @@ def schaetze_position(pos: dict, segment: list, ziel: dict) -> dict:
         "mit_kostenangabe": abdeckung,
         "status_datenbasis": _status_datenbasis(abdeckung),
         "vertrauen": _vertrauen_aus_abdeckung(abdeckung), "ziel_treiber": ziel_treiber,
-        "bandbreite": None,
+        "bandbreite": None, "herkunft": herkunft,
     }
     sw = sum(gewichte)
     if not kennwerte or sw <= 0 or not ziel_treiber or ziel_treiber <= 0:
@@ -357,7 +380,8 @@ def schaetze_position(pos: dict, segment: list, ziel: dict) -> dict:
     lo = perzentil(kennwerte, 0.25) * ziel_treiber
     hi = perzentil(kennwerte, 0.75) * ziel_treiber
     basis.update({
-        "kennwert": kennwert, "betrag": betrag,
+        "kennwert": kennwert, "betrag": betrag, "berechneter_betrag": betrag,
+        "quelle": "referenzen",
         "bandbreite": (min(lo, betrag), max(hi, betrag)),
     })
     return basis
@@ -377,6 +401,9 @@ def quercheck_chf_pro_einheit(positionen_der_gruppe: list, segment: list, ziel: 
     ziel_ne = ziel.get("anzahl_ne")
     if not ziel_ne or ziel_ne <= 0:
         return None  # ohne Anzahl Einheiten kein Quercheck
+    # Ein Quercheck mit einer unvollständigen Zielsumme wäre irreführend.
+    if any(p.get("betrag") is None for p in positionen_der_gruppe):
+        return None
     betrag_flaeche = sum(p["betrag"] for p in positionen_der_gruppe)
     if betrag_flaeche <= 0:
         return None
@@ -386,9 +413,11 @@ def quercheck_chf_pro_einheit(positionen_der_gruppe: list, segment: list, ziel: 
         ne = r.get("anzahl_ne")
         if not ne or ne <= 0:
             continue
-        summe = sum((r.get("positionen") or {}).get(nr, 0.0) or 0.0 for nr in nrs)
-        if summe <= 0:
+        werte = [(r.get("positionen") or {}).get(nr) for nr in nrs]
+        # Nur vollständige Referenzsummen sind mit der Zielsumme vergleichbar.
+        if any(v is None or v <= 0 for v in werte):
             continue
+        summe = sum(werte)
         kennwerte.append(summe / ne)
         gewichte.append(r.get("rang", 1.0) or 0.0)
     sw = sum(gewichte)
@@ -412,7 +441,8 @@ def quercheck_chf_pro_einheit(positionen_der_gruppe: list, segment: list, ziel: 
 
 def berechne_grobkostenschaetzung(ziel: dict, referenzen_roh: list, faktoren: list,
                                   bauindex_eintraege: Optional[list] = None,
-                                  heute: Optional[date] = None) -> dict:
+                                  heute: Optional[date] = None,
+                                  manuelle_betraege: Optional[dict] = None) -> dict:
     """Hauptfunktion: Zielprojekt-Eckdaten (`ziel`), alle Referenzprojekte
     (`referenzen_roh`, je mit `positionen`={bkp_nr: betrag} und
     `datum_abrechnung`) und die aktiven Korrekturfaktoren rein — Schätzung je
@@ -436,20 +466,35 @@ def berechne_grobkostenschaetzung(ziel: dict, referenzen_roh: list, faktoren: li
     )
 
     gruppen_map = {}
+    manuelle_betraege = manuelle_betraege or {}
     for pos in positionen:
         e = schaetze_position(pos, segment, ziel)
         if faktor != 1.0 and e["betrag"]:
             e["betrag"] *= faktor
+            e["berechneter_betrag"] = e["betrag"]
             if e["bandbreite"]:
                 e["bandbreite"] = (e["bandbreite"][0] * faktor, e["bandbreite"][1] * faktor)
+        manuell = manuelle_betraege.get(e["bkp_nr"])
+        if manuell is not None and manuell >= 0:
+            e["manueller_betrag"] = float(manuell)
+            e["betrag"] = float(manuell)
+            e["quelle"] = "manuell"
         g = gruppen_map.setdefault(e["gruppe_nr"], {"gruppe_nr": e["gruppe_nr"],
                                                     "name": BKP_GRUPPEN.get(e["gruppe_nr"], ""),
                                                     "positionen": [], "betrag": 0.0})
         g["positionen"].append(e)
-        g["betrag"] += e["betrag"]
+        if e["betrag"] is not None:
+            g["betrag"] += e["betrag"]
 
     gruppen = [gruppen_map[nr] for nr in BKP_GRUPPEN_ALLE if nr in gruppen_map]
     gesamt_betrag = sum(g["betrag"] for g in gruppen)
+    fehlende_positionen = [
+        p["bkp_nr"] for g in gruppen for p in g["positionen"] if p["betrag"] is None
+    ]
+    positionen_ohne_referenz = [
+        p["bkp_nr"] for g in gruppen for p in g["positionen"]
+        if p["berechneter_betrag"] is None
+    ]
 
     # CHF/Einheit-Gegencheck auf der Wärmeverteilung (243) — Ausreisser-Erkennung
     # (Dominic 2026-07-19). Rein informativ, ändert die Schätzung nicht.
@@ -459,6 +504,9 @@ def berechne_grobkostenschaetzung(ziel: dict, referenzen_roh: list, faktoren: li
 
     return {
         "gesamt_betrag": gesamt_betrag,
+        "ist_unvollstaendig": bool(fehlende_positionen),
+        "fehlende_positionen": fehlende_positionen,
+        "positionen_ohne_referenz": positionen_ohne_referenz,
         "gruppen": gruppen,
         "korrekturfaktoren": korr["angewendet"],
         "referenzen_gefunden": len(top),

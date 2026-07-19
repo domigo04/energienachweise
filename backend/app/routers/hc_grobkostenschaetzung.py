@@ -15,11 +15,11 @@ bereits auf Positions-Ebene erfasst (RefKostenzeile.bkp_nr = z.B. «243.1»), de
 Adapter reicht sie brutto und netto durch.
 """
 import json
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.encoders import jsonable_encoder
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
@@ -55,6 +55,10 @@ class SchaetzungIn(BaseModel):
     rohrmeter: Optional[float] = None
     bohrmeter: Optional[float] = None
     hk_anzahl: Optional[int] = None
+    # Redaktionelle Fertigstellung der Schätzung. Je Variante getrennt, damit
+    # eine manuelle Nettozahl nicht versehentlich auch als Bruttozahl erscheint.
+    manuelle_betraege: Dict[str, Dict[str, float]] = Field(default_factory=dict)
+    ignorierte_warnungen: List[str] = Field(default_factory=list)
 
 
 class KorrekturfaktorPatch(BaseModel):
@@ -155,7 +159,11 @@ def _berechne(body: SchaetzungIn, user: User, db: Session) -> tuple:
 
     def rechne(variante_feld: str) -> dict:
         referenzen = [{**m, "positionen": m[variante_feld]} for m in refs]
-        return berechne_grobkostenschaetzung(ziel, referenzen, faktoren, bauindex_eintraege=bauindex)
+        variante = "brutto" if variante_feld == "positionen_brutto" else "netto"
+        return berechne_grobkostenschaetzung(
+            ziel, referenzen, faktoren, bauindex_eintraege=bauindex,
+            manuelle_betraege=body.manuelle_betraege.get(variante, {}),
+        )
 
     result = {"brutto": rechne("positionen_brutto"), "netto": rechne("positionen_netto")}
     # date-Objekte (Abrechnungsdaten der Referenzen) JSON-tauglich machen —

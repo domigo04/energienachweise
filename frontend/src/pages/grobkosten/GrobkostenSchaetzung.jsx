@@ -3,9 +3,9 @@
 // BKP-Einzelposition, gruppiert mit Zwischentotalen und Gesamttotal. Eingaben
 // (Wärmeerzeuger/-abgabe als Mehrfach-Auswahl, wie in der Auswertung) und
 // Ergebnis bleiben pro Projekt gespeichert.
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { AlertTriangle, Calculator, ChevronRight, Database, RefreshCw } from "lucide-react";
+import { AlertTriangle, Calculator, ChevronRight, Database, RefreshCw, RotateCcw } from "lucide-react";
 import {
   bauindexAutomatischAktualisieren, getBauindex, getProject,
   gkProjektGet, gkProjektSave,
@@ -23,10 +23,11 @@ const LEER = {
   bww_bei_heizung: false, baupreisindex_beruecksichtigen: false,
   weiterbetrieb_umbau: false, etappierung: false,
   rohrmeter: "", bohrmeter: "", hk_anzahl: "",
+  manuelle_betraege: {}, ignorierte_warnungen: [],
 };
 
 const ERKL = {
-  kennwert: "Aus den Referenzprojekten gewichtet gemittelter Preis pro Bezugsgrösse dieser Position (CHF pro Bohrmeter / kW / m² EBF / Heizkörper). Eine Referenz, in der die Position nicht vorkam, zählt mit 0 — so wird nichts hochgerechnet, was real nicht vorhanden war.",
+  kennwert: "Aus den Referenzprojekten mit tatsächlicher Kostenangabe gewichteter Preis pro Bezugsgrösse dieser Position (CHF pro Bohrmeter / kW / m² EBF / Heizkörper). Fehlende Angaben werden nicht als 0 CHF gerechnet.",
   vertrauen: "Wie viele der passenden Referenzprojekte diese Position überhaupt hatten. Viele → verlässlich (hoch), wenige → vorsichtig sein.",
   baupreisindex: "Skaliert die Kosten jedes Referenzprojekts auf das heutige Preisniveau, bevor gerechnet wird (heutiger Index ÷ Index zum Zeitpunkt des Referenzprojekts). Ohne hinterlegte Indexwerte hat das Häkchen keine Wirkung.",
   bww: "Ist das Brauchwarmwasser Teil der Heizungs-Kosten (Schnittstelle bei der Heizung) oder läuft es beim Sanitär? Weiches Kriterium: Referenzen mit anderer Schnittstelle bleiben brauchbar, zählen nur etwas weniger.",
@@ -133,9 +134,25 @@ export default function GrobkostenSchaetzung() {
 
   const aktiv = result?.[variante];
   const refsVerwendet = aktiv?.referenzen_verwendet || [];
-  // Gesamtschätzung ist unvollständig, wenn mindestens eine Position komplett
-  // ohne Kostenangabe blieb — die Summe unterschätzt dann real (Dominic 2026-07-20).
-  const positionenOhneAngabe = aktiv?.gruppen.flatMap((g) => g.positionen).filter((p) => p.status_datenbasis === "Keine Angaben") || [];
+  const positionenOhneAngabe = aktiv?.gruppen.flatMap((g) => g.positionen)
+    .filter((p) => p.betrag == null) || [];
+  const ignorierteWarnungen = new Set(form.ignorierte_warnungen || []);
+  const warnungIgnorieren = (warnungId) => setForm((f) => ({
+    ...f,
+    ignorierte_warnungen: [...new Set([...(f.ignorierte_warnungen || []), warnungId])],
+  }));
+  const warnungWiederherstellen = (warnungId) => setForm((f) => ({
+    ...f,
+    ignorierte_warnungen: (f.ignorierte_warnungen || []).filter((x) => x !== warnungId),
+  }));
+  const manuellenBetragSetzen = (bkpNr, wert) => setForm((f) => {
+    const alle = { ...(f.manuelle_betraege || {}) };
+    const aktuell = { ...(alle[variante] || {}) };
+    if (wert === "") delete aktuell[bkpNr];
+    else aktuell[bkpNr] = wert;
+    alle[variante] = aktuell;
+    return { ...f, manuelle_betraege: alle };
+  });
 
   return (
     <div className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8">
@@ -267,16 +284,24 @@ export default function GrobkostenSchaetzung() {
             </div>
           )}
 
-          {aktiv && aktiv.referenzen_gefunden > 0 && (
+          {aktiv && (
             <>
-              {positionenOhneAngabe.length > 0 && (
+              {positionenOhneAngabe.length > 0 && !ignorierteWarnungen.has("gesamt:unvollstaendig") && (
                 <div className="card flex items-start gap-2 border-amber-200 bg-amber-50/60 px-4 py-3 text-sm text-amber-800">
                   <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-                  <span>
+                  <span className="flex-1">
                     <b>Schätzung unvollständig:</b> für {positionenOhneAngabe.length} Position{positionenOhneAngabe.length > 1 ? "en" : ""} ({positionenOhneAngabe.map((p) => p.bkp_nr).join(", ")})
                     {" "}gibt es keine passende Referenz mit Kostenangabe — sie fehlen im Total und müssen manuell geschätzt werden.
                   </span>
+                  <button type="button" className="shrink-0 text-xs font-semibold hover:underline"
+                    onClick={() => warnungIgnorieren("gesamt:unvollstaendig")}>Hinweis ausblenden</button>
                 </div>
+              )}
+              {positionenOhneAngabe.length > 0 && ignorierteWarnungen.has("gesamt:unvollstaendig") && (
+                <button type="button" onClick={() => warnungWiederherstellen("gesamt:unvollstaendig")}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-800">
+                  <RotateCcw className="size-3" /> Ausgeblendeten Hinweis wieder anzeigen
+                </button>
               )}
 
               {/* Kopf: Gesamt + Brutto/Netto-Umschalter + Datenbasis */}
@@ -301,8 +326,9 @@ export default function GrobkostenSchaetzung() {
                 <div className="card px-5 py-4">
                   <div className="text-xs font-medium text-slate-400">Datenbasis</div>
                   <div className="mt-1 text-lg font-semibold text-slate-700">
-                    Top {aktiv.referenzen_gefunden} <span className="text-sm font-normal text-slate-400">von {aktiv.referenzen_im_segment} passenden</span>
+                    {aktiv.referenzen_im_segment} <span className="text-sm font-normal text-slate-400">passende im Segment</span>
                   </div>
+                  <div className="text-[11px] text-slate-400">{aktiv.referenzen_gefunden} davon unten in der Übersicht</div>
                   {aktiv.korrekturfaktoren?.length > 0 && (
                     <div className="mt-0.5 text-[11px] text-amber-700">Korrektur: {aktiv.korrekturfaktoren.join(" · ")}</div>
                   )}
@@ -324,7 +350,13 @@ export default function GrobkostenSchaetzung() {
                     </thead>
                     <tbody>
                       {aktiv.gruppen.map((g) => (
-                        <GruppenBlock key={g.gruppe_nr} g={g} ziel={form} offen={offen} setOffen={setOffen} />
+                        <GruppenBlock key={g.gruppe_nr} g={g} ziel={form} projektId={id}
+                          variante={variante} offen={offen} setOffen={setOffen}
+                          manuelleBetraege={form.manuelle_betraege?.[variante] || {}}
+                          manuellenBetragSetzen={manuellenBetragSetzen}
+                          ignorierteWarnungen={ignorierteWarnungen}
+                          warnungIgnorieren={warnungIgnorieren}
+                          warnungWiederherstellen={warnungWiederherstellen} />
                       ))}
                       <tr className="border-t-2 border-slate-300 bg-slate-100 font-bold text-slate-900">
                         <td className="px-4 py-3" colSpan={3}>
@@ -344,8 +376,8 @@ export default function GrobkostenSchaetzung() {
               </div>
 
               {/* Verwendete Referenzen */}
-              <div className="card px-5 py-4">
-                <h3 className="mb-2 text-sm font-bold text-slate-800">Verwendete Referenzprojekte</h3>
+              {refsVerwendet.length > 0 && <div className="card px-5 py-4">
+                <h3 className="mb-2 text-sm font-bold text-slate-800">Ähnlichste Referenzprojekte (Übersicht)</h3>
                 <div className="divide-y divide-slate-50">
                   {refsVerwendet.map((r) => (
                     <div key={r.name} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 py-1.5 text-sm">
@@ -366,7 +398,7 @@ export default function GrobkostenSchaetzung() {
                         </span>
                       )}
                       {!r.abgabe_mischsystem && r.abgabe_abweichend && (
-                        <span className="inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700" title="Andere Wärmeabgabe als dein Projekt — zählt für die gemeinsamen Kosten mit, aber mit reduzierter Ähnlichkeit.">
+                        <span className="inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700" title="Andere Wärmeabgabe als dein Projekt. Für gemeinsame Positionen darf das Projekt zählen; dort wird die Abgabe im Positionsgewicht nicht berücksichtigt.">
                           <AlertTriangle className="size-3" /> andere Abgabe
                         </span>
                       )}
@@ -375,11 +407,11 @@ export default function GrobkostenSchaetzung() {
                   ))}
                 </div>
                 <p className="mt-2 text-xs leading-snug text-slate-400">
-                  Gewicht = Ähnlichkeit × Aktualität (nur milder Abzug ~1 %/Jahr, nie unter 90 % — die
-                  Teuerung korrigiert bereits der Baupreisindex). Die Wärmeabgabe zählt neu stark zur
-                  Ähnlichkeit: eine abweichende Abgabe senkt sie deutlich, ein Mischsystem etwas.
+                  Diese Liste dient der Orientierung. Für jede BKP-Position wird im Detail separat gewichtet:
+                  gemeinsame Positionen ohne Einfluss der Wärmeabgabe, Abgabepositionen nur aus fachlich
+                  passenden Projekten. Aktualität reduziert das Gewicht nur mild.
                 </p>
-              </div>
+              </div>}
             </>
           )}
         </div>
@@ -388,8 +420,13 @@ export default function GrobkostenSchaetzung() {
   );
 }
 
-function GruppenBlock({ g, ziel, offen, setOffen }) {
+function GruppenBlock({
+  g, ziel, projektId, variante, offen, setOffen, manuelleBetraege,
+  manuellenBetragSetzen, ignorierteWarnungen, warnungIgnorieren, warnungWiederherstellen,
+}) {
   const info = gruppeInfo(g.gruppe_nr);
+  const quercheckId = `gruppe:${g.gruppe_nr}:quercheck`;
+  const quercheckIgnoriert = ignorierteWarnungen.has(quercheckId);
   return (
     <>
       <tr className="border-t border-slate-200 bg-slate-50/60">
@@ -400,42 +437,61 @@ function GruppenBlock({ g, ziel, offen, setOffen }) {
         <td className="px-2 py-2 text-right font-bold tabular-nums text-slate-800">{chf(g.betrag)}</td>
         <td />
       </tr>
-      {g.quercheck_einheit?.warnung && (
+      {g.quercheck_einheit?.warnung && !quercheckIgnoriert && (
         <tr className="bg-amber-50/60">
           <td />
           <td colSpan={4} className="px-2 py-1.5 text-xs leading-snug text-amber-800">
-            <span className="inline-flex items-start gap-1.5">
+            <span className="flex items-start gap-1.5">
               <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-              <span>
+              <span className="flex-1">
                 CHF/m² und CHF/Einheit weichen stark voneinander ab — pro m² ergibt die Wärmeverteilung{" "}
                 <b>{chf(g.quercheck_einheit.betrag_flaeche)}</b>, hochgerechnet pro Wohnung dagegen{" "}
                 <b>{chf(g.quercheck_einheit.betrag_einheit)}</b>{" "}
                 ({num(g.quercheck_einheit.chf_pro_einheit)} CHF/Einheit). Zahl prüfen — evtl. ein Ausreisser.
               </span>
+              <button type="button" className="font-semibold hover:underline"
+                onClick={() => warnungIgnorieren(quercheckId)}>Ignorieren</button>
             </span>
           </td>
         </tr>
       )}
+      {g.quercheck_einheit?.warnung && quercheckIgnoriert && (
+        <tr className="bg-slate-50/60">
+          <td />
+          <td colSpan={4} className="px-2 py-1 text-xs text-slate-400">
+            CHF/Einheit-Warnung ignoriert.{" "}
+            <button type="button" className="font-medium hover:underline"
+              onClick={() => warnungWiederherstellen(quercheckId)}>Wieder anzeigen</button>
+          </td>
+        </tr>
+      )}
       {g.positionen.map((p) => {
-        const hasBetrag = p.betrag > 0;
+        const hasBetrag = p.betrag != null;
+        const hatBerechnung = p.berechneter_betrag != null;
         const keineAngaben = p.status_datenbasis === "Keine Angaben";
         const key = p.bkp_nr;
         const auf = offen === key;
+        const warnungId = `position:${key}:datenbasis`;
+        const warnungIgnoriert = ignorierteWarnungen.has(warnungId);
+        const hatWarnung = keineAngaben || p.mit_kostenangabe <= 3;
         return (
-          <>
-            <tr key={key} onClick={() => setOffen(auf ? null : key)}
+          <Fragment key={key}>
+            <tr onClick={() => setOffen(auf ? null : key)}
               className="cursor-pointer border-t border-slate-50 hover:bg-slate-50/70">
               <td className="py-1.5 pl-8 pr-2 tabular-nums text-slate-500">{p.bkp_nr}</td>
-              <td className={"px-2 py-1.5 " + (hasBetrag ? "text-slate-700" : "text-slate-400")}>{p.bezeichnung}</td>
+              <td className={"px-2 py-1.5 " + (hasBetrag ? "text-slate-700" : "text-slate-400")}>
+                {p.bezeichnung}
+                {p.quelle === "manuell" && <span className="ml-2 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">manuell</span>}
+              </td>
               <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">
-                {hasBetrag ? `${num(p.kennwert)} ${p.einheit}` : "–"}
+                {hatBerechnung ? `${num(p.kennwert)} ${p.einheit}` : "–"}
               </td>
               <td className={"px-2 py-1.5 text-right font-medium tabular-nums " + (hasBetrag ? "text-slate-900" : "text-amber-700")}>
                 {hasBetrag ? chf(p.betrag) : "Keine Angaben – manuell schätzen"}
               </td>
               <td className="px-2 py-1.5">
                 <span className="inline-flex items-center gap-1">
-                  {keineAngaben
+                  {hatWarnung && !warnungIgnoriert
                     ? <AlertTriangle className="size-3.5 text-amber-500" title="Keine Angaben" />
                     : <VertrauenPunkt stufe={p.vertrauen} />}
                   <ChevronRight className={`size-3.5 text-slate-300 transition ${auf ? "rotate-90" : ""}`} />
@@ -449,38 +505,95 @@ function GruppenBlock({ g, ziel, offen, setOffen }) {
                   {keineAngaben ? (
                     <div className="flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-amber-800">
                       <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-                      <span>
+                      <span className="flex-1">
                         Keine passende Referenz mit einer Kostenangabe gefunden. Von {p.grundsegment} grundsätzlich
                         passenden Projekten {p.passende_abgabe < p.grundsegment
                           ? <>hatten {p.passende_abgabe} die passende Wärmeabgabe, aber keines</>
                           : <>hat keines</>}
                         {" "}eine Kostenangabe für diese Position. Bitte manuell schätzen.
                       </span>
+                      {!warnungIgnoriert && <button type="button" className="shrink-0 font-semibold hover:underline"
+                        onClick={() => warnungIgnorieren(warnungId)}>Ignorieren</button>}
                     </div>
                   ) : (
                     <>
                       Ø Kennwert <b>{num(p.kennwert)} {p.einheit}</b> × {num(p.ziel_treiber)}{" "}
-                      {p.einheit.replace("CHF/", "")} = <b>{chf(p.betrag)}</b>.{" "}
+                      {p.einheit.replace("CHF/", "")} = <b>{chf(p.berechneter_betrag)}</b>.{" "}
                       Von {p.grundsegment} grundsätzlich passenden Projekten hatten {p.passende_abgabe} die passende
                       Wärmeabgabe, {p.mit_kostenangabe} davon eine Kostenangabe für diese Position
                       ({p.status_datenbasis}).
                       {p.bandbreite && <> Bandbreite {chf(p.bandbreite[0])} – {chf(p.bandbreite[1])}.</>}
-                      {p.mit_kostenangabe === 1 && (
+                      {p.mit_kostenangabe <= 3 && !warnungIgnoriert && (
                         <div className="mt-1.5 flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-amber-800">
                           <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-                          <span>
-                            Diese Position basiert auf einem Einzelfall. Von {p.grundsegment} grundsätzlich passenden
-                            Projekten hatten {p.passende_abgabe} die passende Wärmeabgabe und nur {p.mit_kostenangabe} Projekt
-                            enthält eine Kostenangabe. Der Kennwert ist statistisch nicht belastbar und muss fachlich geprüft werden.
+                          <span className="flex-1">
+                            Diese Position basiert nur auf {p.mit_kostenangabe} Kostenangabe{p.mit_kostenangabe === 1 ? "" : "n"}.
+                            Der Kennwert ist statistisch nicht belastbar und muss fachlich geprüft werden.
                           </span>
+                          <button type="button" className="shrink-0 font-semibold hover:underline"
+                            onClick={() => warnungIgnorieren(warnungId)}>Ignorieren</button>
                         </div>
                       )}
                     </>
                   )}
+                  {hatWarnung && warnungIgnoriert && (
+                    <div className="mt-1 text-slate-400">
+                      Warnung ignoriert. <button type="button" className="font-medium hover:underline"
+                        onClick={() => warnungWiederherstellen(warnungId)}>Wieder anzeigen</button>
+                    </div>
+                  )}
+
+                  <div className="mt-3 rounded-md border border-slate-200 bg-white p-3">
+                    <div className="flex flex-wrap items-end gap-2">
+                      <label className="min-w-[220px] flex-1">
+                        <span className="mb-1 block font-semibold text-slate-700">Manueller Endbetrag ({variante})</span>
+                        <input type="number" min="0" step="100" className="input" value={manuelleBetraege[key] ?? ""}
+                          placeholder={hatBerechnung ? String(Math.round(p.berechneter_betrag)) : "Betrag in CHF eingeben"}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => manuellenBetragSetzen(key, e.target.value)} />
+                      </label>
+                      {p.quelle === "manuell" && (
+                        <button type="button" className="btn-secondary" onClick={() => manuellenBetragSetzen(key, "")}>
+                          Berechnung verwenden
+                        </button>
+                      )}
+                    </div>
+                    <p className="mt-1 text-[11px] text-slate-400">
+                      Der manuelle Betrag ersetzt für diese Variante den Referenzwert im Gruppen- und Gesamttotal.
+                    </p>
+                  </div>
+
+                  <div className="mt-3 overflow-x-auto rounded-md border border-slate-200 bg-white">
+                    <div className="border-b border-slate-100 px-3 py-2 font-semibold text-slate-700">Herkunft und Projektvergleich – eingerechnete Projekte</div>
+                    <table className="w-full min-w-[680px] text-[11px]">
+                      <thead className="bg-slate-50 text-slate-500">
+                        <tr><th className="px-3 py-1.5 text-left">Projekt</th><th className="px-2 py-1.5 text-right">Kosten</th>
+                          <th className="px-2 py-1.5 text-right">Bezugsgrösse</th><th className="px-2 py-1.5 text-right">Kennwert</th>
+                          <th className="px-2 py-1.5 text-right">Gewicht</th><th className="px-3 py-1.5 text-left">Verwendung</th></tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50">
+                        {(p.herkunft || []).map((r, index) => (
+                          <tr key={`${r.id || r.name}-${index}`} className={r.verwendet ? "text-slate-700" : "text-slate-400"}>
+                            <td className="px-3 py-1.5">
+                              {r.id ? <Link to={`/auswertung/${r.id}`} state={{ zurueck: { to: `/projekte/${projektId}/kostenschaetzung`, label: "Grobkostenschätzung" } }}
+                                className="font-medium hover:text-brand-600 hover:underline">{ohnePrefix(r.name)}</Link> : ohnePrefix(r.name)}
+                              <span className="ml-1">({num(r.ebf_m2)} m² / {num(r.leistung_kw)} kW)</span>
+                            </td>
+                            <td className="px-2 py-1.5 text-right tabular-nums">{r.kosten != null ? chf(r.kosten) : "Keine Angabe"}</td>
+                            <td className="px-2 py-1.5 text-right tabular-nums">{r.treiber_wert != null ? num(r.treiber_wert) : "–"}</td>
+                            <td className="px-2 py-1.5 text-right tabular-nums">{r.kennwert != null ? `${num(r.kennwert)} ${p.einheit}` : "–"}</td>
+                            <td className="px-2 py-1.5 text-right tabular-nums">{num(r.gewicht * 100)} %</td>
+                            <td className="px-3 py-1.5">{r.verwendet ? "eingerechnet" : r.ausschlussgrund}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {(p.herkunft || []).length === 0 && <p className="px-3 py-2 text-slate-400">Keine Referenz mit verwendbarer Kostenangabe vorhanden.</p>}
+                  </div>
                 </td>
               </tr>
             )}
-          </>
+          </Fragment>
         );
       })}
     </>

@@ -5,7 +5,7 @@
 // Ergebnis bleiben pro Projekt gespeichert.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Calculator, ChevronRight, Database, RefreshCw } from "lucide-react";
+import { AlertTriangle, Calculator, ChevronRight, Database, RefreshCw } from "lucide-react";
 import {
   bauindexAutomatischAktualisieren, getBauindex, getProject,
   gkProjektGet, gkProjektSave,
@@ -333,21 +333,35 @@ export default function GrobkostenSchaetzung() {
                 <div className="divide-y divide-slate-50">
                   {refsVerwendet.map((r) => (
                     <div key={r.name} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 py-1.5 text-sm">
-                      <Link to={`/auswertung/${r.id}`} className="font-medium text-slate-800 hover:text-brand-600 hover:underline">
+                      <Link
+                        to={`/auswertung/${r.id}`}
+                        state={{ zurueck: { to: `/projekte/${id}/kostenschaetzung`, label: "Grobkostenschätzung" } }}
+                        className="font-medium text-slate-800 hover:text-brand-600 hover:underline"
+                      >
                         {ohnePrefix(r.name)}
                       </Link>
                       <span className="text-xs text-slate-400">
                         {r.datum_abrechnung?.slice(0, 4) || "ohne Datum"} · {r.nutzung} · {num(r.ebf_m2)} m² · {num(r.leistung_kw)} kW
                         {r.index_faktor != null ? ` · Index ×${num(r.index_faktor, 2)}` : ""}
                       </span>
+                      {r.abgabe_mischsystem && (
+                        <span className="inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700" title="Mischsystem — nur die Kosten deiner gewählten Wärmeabgabe wurden übernommen; der CHF/m² kann verzerrt sein, weil die Fläche geteilt ist.">
+                          <AlertTriangle className="size-3" /> Mischsystem
+                        </span>
+                      )}
+                      {!r.abgabe_mischsystem && r.abgabe_abweichend && (
+                        <span className="inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700" title="Andere Wärmeabgabe als dein Projekt — zählt für die gemeinsamen Kosten mit, aber mit reduzierter Ähnlichkeit.">
+                          <AlertTriangle className="size-3" /> andere Abgabe
+                        </span>
+                      )}
                       <span className="ml-auto text-xs font-semibold tabular-nums text-slate-600">Gewicht {num(r.rang * 100)} %</span>
                     </div>
                   ))}
                 </div>
                 <p className="mt-2 text-xs leading-snug text-slate-400">
                   Gewicht = Ähnlichkeit × Aktualität (nur milder Abzug ~1 %/Jahr, nie unter 90 % — die
-                  Teuerung korrigiert bereits der Baupreisindex). Eine abweichende Brauchwarmwasser-
-                  Schnittstelle senkt nur die Ähnlichkeit leicht, schliesst die Referenz aber nicht aus.
+                  Teuerung korrigiert bereits der Baupreisindex). Die Wärmeabgabe zählt neu stark zur
+                  Ähnlichkeit: eine abweichende Abgabe senkt sie deutlich, ein Mischsystem etwas.
                 </p>
               </div>
             </>
@@ -370,6 +384,22 @@ function GruppenBlock({ g, ziel, offen, setOffen }) {
         <td className="px-2 py-2 text-right font-bold tabular-nums text-slate-800">{chf(g.betrag)}</td>
         <td />
       </tr>
+      {g.quercheck_einheit?.warnung && (
+        <tr className="bg-amber-50/60">
+          <td />
+          <td colSpan={4} className="px-2 py-1.5 text-xs leading-snug text-amber-800">
+            <span className="inline-flex items-start gap-1.5">
+              <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+              <span>
+                CHF/m² und CHF/Einheit weichen stark voneinander ab — pro m² ergibt die Wärmeverteilung{" "}
+                <b>{chf(g.quercheck_einheit.betrag_flaeche)}</b>, hochgerechnet pro Wohnung dagegen{" "}
+                <b>{chf(g.quercheck_einheit.betrag_einheit)}</b>{" "}
+                ({num(g.quercheck_einheit.chf_pro_einheit)} CHF/Einheit). Zahl prüfen — evtl. ein Ausreisser.
+              </span>
+            </span>
+          </td>
+        </tr>
+      )}
       {g.positionen.map((p) => {
         const hasBetrag = p.betrag > 0;
         const key = p.bkp_nr;
@@ -401,8 +431,17 @@ function GruppenBlock({ g, ziel, offen, setOffen }) {
                 <td colSpan={4} className="px-2 py-2 text-xs leading-relaxed text-slate-600">
                   Ø Kennwert <b>{num(p.kennwert)} {p.einheit}</b> × {num(p.ziel_treiber)}{" "}
                   {p.einheit.replace("CHF/", "")} = <b>{chf(p.betrag)}</b>.{" "}
-                  In {p.abdeckung} von {p.n_referenzen} passenden Referenzen enthalten.
+                  In {p.abdeckung} von {p.segment_groesse ?? p.n_referenzen} passenden Referenzen enthalten.
                   {p.bandbreite && <> Bandbreite {chf(p.bandbreite[0])} – {chf(p.bandbreite[1])}.</>}
+                  {p.abdeckung <= 1 && (
+                    <div className="mt-1.5 flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-amber-800">
+                      <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                      <span>
+                        Nur {p.abdeckung} von {p.segment_groesse ?? p.n_referenzen} passenden Referenzen hatte diese
+                        Position — der Kennwert ist ein <b>Einzelfall</b>, keine breite Statistik. Mit Vorsicht verwenden.
+                      </span>
+                    </div>
+                  )}
                 </td>
               </tr>
             )}
@@ -414,6 +453,11 @@ function GruppenBlock({ g, ziel, offen, setOffen }) {
 }
 
 function VertrauenPunkt({ stufe }) {
-  const farbe = { hoch: "bg-green-500", mittel: "bg-amber-500", niedrig: "bg-red-400" }[stufe] || "bg-slate-300";
+  // Bei niedrigem Vertrauen ein Warndreieck statt nur Punkt — deutlich sichtbarer
+  // (Dominic 2026-07-19), weil ein Einzelfall-Kennwert leicht übersehen wird.
+  if (stufe === "niedrig") {
+    return <AlertTriangle className="inline size-3.5 text-red-500" title="Vertrauen niedrig — dünne Datenbasis" />;
+  }
+  const farbe = { hoch: "bg-green-500", mittel: "bg-amber-500" }[stufe] || "bg-slate-300";
   return <span className={`inline-block size-2 rounded-full ${farbe}`} title={`Vertrauen ${stufe}`} />;
 }

@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Plus, ChartColumnBig, Download, Sparkles, Trash2, Upload } from "lucide-react";
+import { Plus, ChartColumnBig, CheckSquare, Download, Sparkles, Trash2, Upload, X } from "lucide-react";
 import {
   deleteRefsBulk, exportRefsCsv, getRefProjekte, gkBeispieldatenLaden,
   gkBeispieldatenLoeschen, importRefsCsv,
 } from "../../api/hcApi";
 import PageHeader from "../../components/ui/PageHeader";
 import GewerkLeiste from "../../components/ui/GewerkLeiste";
+import { GEBAEUDETYPEN, PROJEKTARTEN, WAERMEABGABE, WAERMEERZEUGER } from "../../data/kv";
 
 const chf = (n) => (n ? Math.round(n).toLocaleString("de-CH") + " CHF" : "—");
 
@@ -29,6 +30,34 @@ export default function AuswertungList() {
   const [importing, setImporting] = useState(false);
   const [beschaeftigt, setBeschaeftigt] = useState(false);
   const [auswahl, setAuswahl] = useState(new Set());
+  // Filter (rein client-seitig — die Liste ist schon geladen). Erzeuger/Abgabe
+  // nach «enthält»-Regel: ein Projekt zählt, wenn es MINDESTENS eine der
+  // gewählten Arten hat (gemischte Projekte tauchen also mit auf).
+  const [fErzeuger, setFErzeuger] = useState(new Set());
+  const [fAbgabe, setFAbgabe] = useState(new Set());
+  const [fNutzung, setFNutzung] = useState("");
+  const [fProjektart, setFProjektart] = useState("");
+
+  const toggleFilter = (setter) => (wert) => setter((s) => {
+    const neu = new Set(s);
+    neu.has(wert) ? neu.delete(wert) : neu.add(wert);
+    return neu;
+  });
+  const filterAktiv = fErzeuger.size || fAbgabe.size || fNutzung || fProjektart;
+  const filterReset = () => { setFErzeuger(new Set()); setFAbgabe(new Set()); setFNutzung(""); setFProjektart(""); };
+
+  const gefiltert = useMemo(() => refs.filter((r) => {
+    const erz = new Set(r.waermeerzeuger || []);
+    const abg = new Set(r.waermeabgabe || []);
+    if (fErzeuger.size && ![...fErzeuger].some((x) => erz.has(x))) return false;
+    if (fAbgabe.size && ![...fAbgabe].some((x) => abg.has(x))) return false;
+    if (fNutzung && r.gebaeudetyp !== fNutzung) return false;
+    if (fProjektart && r.projektart !== fProjektart) return false;
+    return true;
+  }), [refs, fErzeuger, fAbgabe, fNutzung, fProjektart]);
+
+  const alleGefiltertGewaehlt = gefiltert.length > 0 && gefiltert.every((r) => auswahl.has(r.id));
+  const alleAuswaehlen = () => setAuswahl(alleGefiltertGewaehlt ? new Set() : new Set(gefiltert.map((r) => r.id)));
 
   const load = () =>
     getRefProjekte()
@@ -119,6 +148,42 @@ export default function AuswertungList() {
 
       <GewerkLeiste aktiv="heizung" className="mb-6" />
 
+      {refs.length > 0 && (
+        <div className="card mb-6 space-y-3 p-4">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="mr-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Wärmeerzeuger</span>
+            {WAERMEERZEUGER.map((e) => (
+              <ChipToggle key={e} label={e} aktiv={fErzeuger.has(e)} onClick={() => toggleFilter(setFErzeuger)(e)} />
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="mr-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Wärmeabgabe</span>
+            {WAERMEABGABE.map((a) => (
+              <ChipToggle key={a} label={a} aktiv={fAbgabe.has(a)} onClick={() => toggleFilter(setFAbgabe)(a)} />
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            <select className="input h-9 w-auto py-1 text-sm" value={fNutzung} onChange={(e) => setFNutzung(e.target.value)}>
+              <option value="">Nutzung: alle</option>
+              {GEBAEUDETYPEN.map((g) => <option key={g} value={g}>{g}</option>)}
+            </select>
+            <select className="input h-9 w-auto py-1 text-sm" value={fProjektart} onChange={(e) => setFProjektart(e.target.value)}>
+              <option value="">Projektart: alle</option>
+              {PROJEKTARTEN.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+            <span className="text-sm text-slate-500">{gefiltert.length} von {refs.length}</span>
+            <div className="ml-auto flex items-center gap-2">
+              <button onClick={alleAuswaehlen} disabled={gefiltert.length === 0} className="btn-ghost text-sm text-slate-600 disabled:opacity-40">
+                <CheckSquare className="size-4" /> {alleGefiltertGewaehlt ? "Auswahl aufheben" : "Alle auswählen"}
+              </button>
+              {filterAktiv ? (
+                <button onClick={filterReset} className="btn-ghost text-sm text-slate-500"><X className="size-4" /> Filter zurücksetzen</button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )}
+
       {importMsg && <div className="mb-4 rounded-lg border border-brand-200 bg-brand-50 p-3 text-sm text-brand-800">{importMsg}</div>}
       {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
@@ -134,9 +199,14 @@ export default function AuswertungList() {
           </p>
           <Link to="/auswertung/neu" className="btn-primary mt-2"><Plus className="size-4" /> Erstes Referenzprojekt</Link>
         </div>
+      ) : gefiltert.length === 0 ? (
+        <div className="card flex flex-col items-center gap-2 border-dashed p-12 text-center">
+          <p className="font-medium text-slate-700">Keine Referenzprojekte passen zum Filter</p>
+          <button onClick={filterReset} className="btn-secondary mt-1"><X className="size-4" /> Filter zurücksetzen</button>
+        </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
-          {refs.map((r) => (
+          {gefiltert.map((r) => (
             <div key={r.id} onClick={() => nav(`/auswertung/${r.id}`)}
               className={"card group relative cursor-pointer p-5 text-left transition hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md " + (auswahl.has(r.id) ? "border-brand-300 bg-brand-50/30" : "")}>
               <input
@@ -167,5 +237,18 @@ export default function AuswertungList() {
         </div>
       )}
     </div>
+  );
+}
+
+function ChipToggle({ label, aktiv, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={"rounded-full border px-2.5 py-0.5 text-xs font-medium transition " +
+        (aktiv ? "border-brand-300 bg-brand-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:border-brand-200 hover:bg-brand-50")}
+    >
+      {label}
+    </button>
   );
 }

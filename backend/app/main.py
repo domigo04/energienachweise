@@ -134,6 +134,27 @@ def _ensure_columns():
         conn.commit()
 
 
+def _ensure_indexes():
+    """Fehlende Indizes auf BESTEHENDEN Tabellen nachziehen. create_all() legt
+    Indizes nur beim ERSTEN Anlegen einer Tabelle an — wird ein index=True erst
+    später im Modell ergänzt (z.B. hc_projects.erstellt_von), bleibt die schon
+    existierende Prod-Tabelle ohne diesen Index, und Filter darauf machen einen
+    Full-Scan. CREATE INDEX IF NOT EXISTS ist auf SQLite wie Postgres idempotent
+    und nicht-destruktiv (legt nur an, verändert keine Daten).
+
+    Wichtig für die Ladezeit: die Projektliste filtert pro Nicht-Admin auf
+    erstellt_von, jede Heizgruppen-Abfrage auf project_id/tenant_id."""
+    idx = [
+        ("ix_hc_projects_erstellt_von", "hc_projects", "erstellt_von"),
+        ("ix_hc_heating_groups_project_id", "hc_heating_groups", "project_id"),
+        ("ix_hc_heating_groups_tenant_id", "hc_heating_groups", "tenant_id"),
+    ]
+    with engine.connect() as conn:
+        for name, table, col in idx:
+            conn.execute(text(f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({col})"))
+        conn.commit()
+
+
 def _seed_group_templates(db):
     if db.query(HcGroupTemplate).count() > 0:
         return
@@ -221,6 +242,12 @@ def init_db_and_seed():
         _ensure_columns()
     except Exception:
         print("Column migration error:")
+        traceback.print_exc()
+
+    try:
+        _ensure_indexes()
+    except Exception:
+        print("Index migration error:")
         traceback.print_exc()
 
     db = SessionLocal()

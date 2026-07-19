@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Download, Trash2 } from "lucide-react";
 import { createRef, deleteRef, exportRefCsv, getRef, getRefKatalog, updateRef } from "../../api/hcApi";
 import CheckboxGruppe from "../../components/kv/CheckboxGruppe";
@@ -43,6 +43,11 @@ const chf = (n) => Math.round(n || 0).toLocaleString("de-CH");
 export default function AuswertungForm() {
   const { id } = useParams();
   const nav = useNavigate();
+  const location = useLocation();
+  // Herkunft: kam man aus der Grobkostenschätzung eines Projekts (Klick auf eine
+  // verwendete Referenz), führt der Zurück-Button dorthin zurück statt in die
+  // Auswertungs-Liste (Dominic 2026-07-19).
+  const zurueck = location.state?.zurueck || { to: "/auswertung", label: "Auswertung" };
   const isEdit = Boolean(id);
   const [form, setForm] = useState(LEER);
   const [betraege, setBetraege] = useState({}); // { bkp_nr: "12345" }
@@ -155,7 +160,7 @@ export default function AuswertungForm() {
   return (
     <div className="mx-auto max-w-[1600px] px-4 py-8 lg:px-8">
       <PageHeader
-        back={{ to: "/auswertung", label: "Auswertung" }}
+        back={zurueck}
         title={isEdit ? (form.name || "Referenzprojekt bearbeiten") : "Neues Referenzprojekt"}
         subtitle="Ein abgeschlossenes Projekt mit seinen echten BKP-Kosten erfassen — das ist die Wissensbasis für die Grobkostenschätzung."
       />

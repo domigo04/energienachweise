@@ -134,17 +134,56 @@ def einheiten_naehe(a, b) -> float:
     return min(a, b) / max(a, b)
 
 
+def _ziel_abgabe_klassen(ziel: dict) -> set:
+    """Abgabe-Klassen des Zielprojekts — entweder direkt gesetzt oder aus der
+    Wärmeabgabe-Mehrfachauswahl abgeleitet."""
+    kl = ziel.get("abgabe_klassen")
+    if kl is not None:
+        return set(kl)
+    return set(abgabe_klassen_von(ziel.get("waermeabgabe")))
+
+
+def abgabe_naehe(ref_klassen, ziel_klassen) -> float:
+    """Wärmeabgabe-Ähnlichkeit — Dominic 2026-07-19: neu ein STARKER eigener
+    Score-Faktor (nicht mehr nur Positions-Steuerung). Ein sonst identisches
+    Projekt mit ANDERER Abgabe soll sichtbar weniger ähnlich sein, nicht nur
+    ein paar Prozent. Und ein Mischsystem (Referenz hat die Ziel-Abgabe PLUS
+    weitere) ist verzerrt (Fläche geteilt → CHF/m² zu tief) → Malus.
+
+      gleich (exakt dieselbe(n) Abgabe(n))      → 1.0
+      Referenz ist Obermenge (Mischsystem)       → 0.6   (hat Ziel-Abgabe + mehr)
+      teilweise Überschneidung                   → 0.45
+      komplett andere Abgabe                     → 0.25
+      Referenz ohne Angabe                       → 0.5   (neutral-tief)
+    """
+    ref = set(ref_klassen or [])
+    ziel = set(ziel_klassen or [])
+    if not ziel:
+        return 1.0            # Ziel ohne Abgabe (Pflichtfeld, sollte nicht vorkommen) → neutral
+    if not ref:
+        return 0.5
+    if ref == ziel:
+        return 1.0
+    if ziel <= ref:
+        return 0.6           # Mischsystem: Referenz hat die Ziel-Abgabe UND weitere
+    if ref & ziel:
+        return 0.45
+    return 0.25
+
+
 def aehnlichkeits_score(kandidat: dict, ziel: dict) -> float:
     """Gewichtete Summe (0..1) der WEICHEN Ähnlichkeits-Merkmale (Summe = 1.0).
-    Spec Dominic 2026-07-19: Nutzung ist neu HART (raus aus dem Score), die
-    Wärmeabgabe steuert nur die Kosten-Positionen (auch raus). Übrig als weiche
-    Merkmale: EBF, kW, Zertifizierung, Anzahl Einheiten, BWW-Schnittstelle."""
+    Nutzung/WP-Art/Projektart/Erdsonden sind HART (raus aus dem Score). Die
+    Wärmeabgabe steuert weiterhin die Kosten-Positionen UND ist seit 2026-07-19
+    zusätzlich ein starker Score-Faktor (0.20) — sonst wirkte ein Projekt mit
+    anderem Abgabesystem fast gleich ähnlich (verwirrend, Dominic)."""
     return (
-        0.30 * groessennaehe(kandidat.get("ebf_m2"), ziel.get("ebf_m2"))
-        + 0.26 * groessennaehe(kandidat.get("leistung_kw"), ziel.get("leistung_kw"))
-        + 0.16 * zertifizierungs_naehe(kandidat.get("zertifizierung"), ziel.get("zertifizierung"))
-        + 0.16 * einheiten_naehe(kandidat.get("anzahl_ne"), ziel.get("anzahl_ne"))
-        + 0.12 * bww_naehe(kandidat.get("bww_bei_heizung"), ziel.get("bww_bei_heizung"))
+        0.25 * groessennaehe(kandidat.get("ebf_m2"), ziel.get("ebf_m2"))
+        + 0.22 * groessennaehe(kandidat.get("leistung_kw"), ziel.get("leistung_kw"))
+        + 0.20 * abgabe_naehe(kandidat.get("abgabe_klassen"), _ziel_abgabe_klassen(ziel))
+        + 0.13 * zertifizierungs_naehe(kandidat.get("zertifizierung"), ziel.get("zertifizierung"))
+        + 0.12 * einheiten_naehe(kandidat.get("anzahl_ne"), ziel.get("anzahl_ne"))
+        + 0.08 * bww_naehe(kandidat.get("bww_bei_heizung"), ziel.get("bww_bei_heizung"))
     )
 
 
@@ -153,6 +192,7 @@ def finde_referenzen(kandidaten: list, ziel: dict, top_n: Optional[int] = 5, heu
     liefert das ganze Segment (alle Hard-Filter-Treffer). Referenz ohne
     Abrechnungsdatum (Altbestand) wird zeitlich neutral gewichtet (1.0) statt
     abzustürzen."""
+    ziel_klassen = _ziel_abgabe_klassen(ziel)
     gefiltert = [k for k in kandidaten if hard_filter(k, ziel)]
     angereichert = []
     for k in gefiltert:
@@ -160,7 +200,16 @@ def finde_referenzen(kandidaten: list, ziel: dict, top_n: Optional[int] = 5, heu
         datum = k.get("datum_abrechnung")
         gewicht = zeitgewicht(alter_in_jahren(datum, heute)) if datum else 1.0
         rang = score * gewicht
-        angereichert.append({**k, "score": round(score, 4), "zeitgewicht": round(gewicht, 4), "rang": round(rang, 4)})
+        ref_klassen = set(k.get("abgabe_klassen") or [])
+        # Flags für die UI-Hinweise an der Referenz (Dominic 2026-07-19):
+        abgabe_gleich = ref_klassen == ziel_klassen
+        abgabe_mischsystem = bool(ziel_klassen) and ziel_klassen <= ref_klassen and ref_klassen != ziel_klassen
+        abgabe_abweichend = bool(ziel_klassen) and not (ziel_klassen <= ref_klassen)
+        angereichert.append({
+            **k, "score": round(score, 4), "zeitgewicht": round(gewicht, 4), "rang": round(rang, 4),
+            "abgabe_gleich": abgabe_gleich, "abgabe_mischsystem": abgabe_mischsystem,
+            "abgabe_abweichend": abgabe_abweichend,
+        })
     angereichert.sort(key=lambda r: r["rang"], reverse=True)
     return angereichert[:top_n] if top_n else angereichert
 
@@ -273,6 +322,7 @@ def schaetze_position(pos: dict, segment: list, ziel: dict) -> dict:
         "bkp_nr": bkp_nr, "bezeichnung": pos["bezeichnung"], "gruppe_nr": pos["gruppe_nr"],
         "einheit": _TREIBER_EINHEIT[treiber], "kennwert": 0.0, "betrag": 0.0,
         "abdeckung": abdeckung, "n_referenzen": len(kennwerte),
+        "segment_groesse": len(segment),  # Gesamtzahl passender Referenzen (Nenner für «X von Y»)
         "vertrauen": _vertrauen_aus_abdeckung(abdeckung), "ziel_treiber": ziel_treiber,
         "bandbreite": None,
     }
@@ -289,6 +339,51 @@ def schaetze_position(pos: dict, segment: list, ziel: dict) -> dict:
         "bandbreite": (min(lo, betrag), max(hi, betrag)),
     })
     return basis
+
+
+def quercheck_chf_pro_einheit(positionen_der_gruppe: list, segment: list, ziel: dict,
+                              faktor: float = 1.0, schwelle: float = 0.35) -> Optional[dict]:
+    """Gegencheck der Wärmeverteilung: ergibt die CHF/m²-Schätzung auch pro
+    Wohnung (CHF/Einheit) Sinn? (Dominic 2026-07-19). Bei MFH ist die Anzahl
+    Wohnungen ein zweiter, unabhängiger Massstab. Weicht die einheiten-basierte
+    Summe stark (> Schwelle) von der flächen-basierten ab, stimmt vermutlich
+    etwas nicht (Ausreisser in einer Richtung) → Hinweis. Rein informativ, ändert
+    die Schätzung NICHT.
+
+    faktor: derselbe Korrekturfaktor-Multiplikator wie auf der m²-Schätzung, damit
+    beide Wege vergleichbar sind (kürzt sich in der relativen Abweichung eh weg)."""
+    ziel_ne = ziel.get("anzahl_ne")
+    if not ziel_ne or ziel_ne <= 0:
+        return None  # ohne Anzahl Einheiten kein Quercheck
+    betrag_flaeche = sum(p["betrag"] for p in positionen_der_gruppe)
+    if betrag_flaeche <= 0:
+        return None
+    nrs = [p["bkp_nr"] for p in positionen_der_gruppe]
+    kennwerte, gewichte = [], []
+    for r in segment:
+        ne = r.get("anzahl_ne")
+        if not ne or ne <= 0:
+            continue
+        summe = sum((r.get("positionen") or {}).get(nr, 0.0) or 0.0 for nr in nrs)
+        if summe <= 0:
+            continue
+        kennwerte.append(summe / ne)
+        gewichte.append(r.get("rang", 1.0) or 0.0)
+    sw = sum(gewichte)
+    if not kennwerte or sw <= 0:
+        return None
+    chf_pro_einheit = sum(k * g for k, g in zip(kennwerte, gewichte)) / sw
+    betrag_einheit = chf_pro_einheit * ziel_ne * faktor
+    abweichung = (betrag_einheit - betrag_flaeche) / betrag_flaeche
+    return {
+        "chf_pro_einheit": round(chf_pro_einheit, 2),
+        "betrag_einheit": round(betrag_einheit, 2),
+        "betrag_flaeche": round(betrag_flaeche, 2),
+        "abweichung": round(abweichung, 4),
+        "warnung": abs(abweichung) > schwelle,
+        "schwelle": schwelle,
+        "n_referenzen": len(kennwerte),
+    }
 
 
 # ── Orchestrierung ───────────────────────────────────────────────────────────
@@ -333,6 +428,12 @@ def berechne_grobkostenschaetzung(ziel: dict, referenzen_roh: list, faktoren: li
 
     gruppen = [gruppen_map[nr] for nr in BKP_GRUPPEN_ALLE if nr in gruppen_map]
     gesamt_betrag = sum(g["betrag"] for g in gruppen)
+
+    # CHF/Einheit-Gegencheck auf der Wärmeverteilung (243) — Ausreisser-Erkennung
+    # (Dominic 2026-07-19). Rein informativ, ändert die Schätzung nicht.
+    for g in gruppen:
+        if g["gruppe_nr"] == "243":
+            g["quercheck_einheit"] = quercheck_chf_pro_einheit(g["positionen"], segment, ziel, faktor)
 
     return {
         "gesamt_betrag": gesamt_betrag,

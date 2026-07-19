@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.calculations.grobkostenschaetzung import (
+    abgabe_naehe,
     abgabetyp_naehe,
     aehnlichkeits_score,
     alter_in_jahren,
@@ -18,6 +19,7 @@ from app.calculations.grobkostenschaetzung import (
     hard_filter,
     nutzungsnaehe,
     perzentil,
+    quercheck_chf_pro_einheit,
     schaetze_position,
     skaliere_auf_baupreisindex,
     wende_korrekturfaktoren_an,
@@ -197,8 +199,9 @@ def test_finde_referenzen_hard_filter_und_zeitgewicht_ranking():
     assert [r["name"] for r in ergebnis] == ["A_perfekt_neu", "B_perfekt_alt", "E_kleiner_neu"]
     assert ergebnis[0]["rang"] == pytest.approx(1.0)              # perfekt + neu
     assert ergebnis[1]["rang"] == pytest.approx(0.94, abs=0.001)  # perfekt, 6 J. alt → nur 6 % Abzug
-    # E: 0.30×0.5 (ebf) + 0.26×0.5 (kW) + 0.16 (zert) + 0.16 (NE) + 0.12 (bww) = 0.72, aktuell → ×1.0
-    assert ergebnis[2]["rang"] == pytest.approx(0.72, abs=0.001)
+    # E: 0.25×0.5 (ebf) + 0.22×0.5 (kW) + 0.20×1.0 (Abgabe neutral, Ziel ohne Angabe)
+    #    + 0.13 (zert) + 0.12 (NE) + 0.08 (bww) = 0.765, aktuell → ×1.0
+    assert ergebnis[2]["rang"] == pytest.approx(0.765, abs=0.001)
 
 
 def test_finde_referenzen_ohne_datum_neutral_gewichtet():
@@ -401,3 +404,93 @@ def test_adapter_wp_typ_und_abgabe_ableitung():
     assert _hat_erdsonden(["Luft/Wasser-WP"]) is False
     assert _abgabe_dominant_von(["FBH", "Heizkörper"]) == "gemischt"
     assert _abgabe_dominant_von(["TABS"]) == "FBH"
+
+
+# ── Wärmeabgabe als Score-Faktor (Dominic 2026-07-19) ───────────────────────
+
+def test_abgabe_naehe_stufen():
+    assert abgabe_naehe({"koerper"}, {"koerper"}) == 1.0                # gleich
+    assert abgabe_naehe({"koerper", "flaeche"}, {"koerper"}) == 0.6     # Mischsystem (Obermenge)
+    assert abgabe_naehe({"flaeche"}, {"koerper"}) == 0.25              # komplett andere Abgabe
+    assert abgabe_naehe({"koerper", "flaeche"}, {"koerper", "luft"}) == 0.45  # teilweise Überschneidung
+    assert abgabe_naehe(set(), {"koerper"}) == 0.5                     # Referenz ohne Angabe
+    assert abgabe_naehe({"koerper"}, set()) == 1.0                     # Ziel ohne Angabe → neutral
+
+
+def test_abgabe_senkt_aehnlichkeit_bei_anderer_abgabe():
+    """Zwei sonst IDENTISCHE Referenzen, nur die Wärmeabgabe unterscheidet sich —
+    die mit anderer Abgabe muss klar (>= 10 Punkte) tiefer scoren, nicht nur
+    minimal (Dominics 90-%-vs-80-%-Problem)."""
+    ziel = {"ebf_m2": 1700, "leistung_kw": 60, "waermeabgabe": ["Heizkörper"]}
+    gleich = {"ebf_m2": 1700, "leistung_kw": 60, "abgabe_klassen": {"koerper"}}
+    anders = {"ebf_m2": 1700, "leistung_kw": 60, "abgabe_klassen": {"flaeche"}}
+    s_gleich = aehnlichkeits_score(gleich, ziel)
+    s_anders = aehnlichkeits_score(anders, ziel)
+    assert s_gleich == pytest.approx(1.0, abs=0.01)
+    assert s_gleich - s_anders >= 0.10   # spürbarer Abstand, nicht nur ein paar Prozent
+
+
+def test_finde_referenzen_setzt_abgabe_flags():
+    """UI-Flags: gleiche Abgabe, Mischsystem (Obermenge), abweichende Abgabe."""
+    ziel = {"nutzung": "MFH", "projektart": "Neubau", "wp_typ": "sole", "hat_erdsonden": True,
+            "ebf_m2": 1700, "leistung_kw": 60, "waermeabgabe": ["Heizkörper"]}
+    base = {"nutzung": "MFH", "projektart": "Neubau", "wp_typ": "sole", "hat_erdsonden": True,
+            "ebf_m2": 1700, "leistung_kw": 60}
+    kandidaten = [
+        {**base, "name": "gleich", "abgabe_klassen": {"koerper"}},
+        {**base, "name": "misch", "abgabe_klassen": {"koerper", "flaeche"}},
+        {**base, "name": "anders", "abgabe_klassen": {"flaeche"}},
+    ]
+    res = {r["name"]: r for r in finde_referenzen(kandidaten, ziel, top_n=None)}
+    assert res["gleich"]["abgabe_gleich"] and not res["gleich"]["abgabe_mischsystem"]
+    assert res["misch"]["abgabe_mischsystem"] and not res["misch"]["abgabe_abweichend"]
+    assert res["anders"]["abgabe_abweichend"] and not res["anders"]["abgabe_gleich"]
+
+
+def test_schaetze_position_liefert_segment_groesse():
+    """Nenner für den «X von Y»-Hinweis: Y = Anzahl passender Referenzen im Segment."""
+    segment = [{"ebf_m2": 1000, "rang": 1.0, "positionen": ({"243.1": 50000} if i == 0 else {})}
+               for i in range(15)]
+    e = schaetze_position(_pos(), segment, {"ebf_m2": 1000})
+    assert e["abdeckung"] == 1
+    assert e["segment_groesse"] == 15   # 1 von 15 → Einzelfall-Hinweis in der UI
+
+
+# ── CHF/Einheit-Gegencheck der Wärmeverteilung (Dominic 2026-07-19) ──────────
+
+def test_quercheck_ohne_einheiten_ist_none():
+    assert quercheck_chf_pro_einheit([{"bkp_nr": "243.1", "betrag": 10000}], [], {"anzahl_ne": None}) is None
+
+
+def test_quercheck_warnt_bei_starker_abweichung():
+    """CHF/m² schätzt ~10'000 (243.1 auf 1000 m²), aber pro Einheit ergäben die
+    Referenzen ein viel höheres Total → Ausreisser, Warnung an."""
+    positionen = [{"bkp_nr": "243.1", "betrag": 10000.0}]
+    segment = [
+        {"anzahl_ne": 2, "rang": 1.0, "positionen": {"243.1": 40000.0}},  # 20'000 CHF/Einheit
+        {"anzahl_ne": 3, "rang": 1.0, "positionen": {"243.1": 60000.0}},  # 20'000 CHF/Einheit
+    ]
+    q = quercheck_chf_pro_einheit(positionen, segment, {"anzahl_ne": 10})
+    assert q is not None
+    assert q["betrag_einheit"] == pytest.approx(200000)   # 20'000 × 10
+    assert q["warnung"] is True                            # 200k vs 10k → riesige Abweichung
+
+
+def test_quercheck_ok_wenn_wege_uebereinstimmen():
+    positionen = [{"bkp_nr": "243.1", "betrag": 100000.0}]
+    segment = [{"anzahl_ne": 10, "rang": 1.0, "positionen": {"243.1": 100000.0}}]  # 10'000 CHF/Einheit
+    q = quercheck_chf_pro_einheit(positionen, segment, {"anzahl_ne": 10})
+    assert q["betrag_einheit"] == pytest.approx(100000)
+    assert q["warnung"] is False
+
+
+def test_berechne_haengt_quercheck_an_243():
+    refs = [
+        _ref("A", 1000, 40, {"243.1": 50000, "242.3": 90000}, anzahl_ne=8),
+        _ref("B", 500, 20, {"243.1": 26000, "242.3": 48000}, datum=date(2024, 6, 1), anzahl_ne=4),
+    ]
+    ziel = {**_ZIEL, "anzahl_ne": 6}
+    r = berechne_grobkostenschaetzung(ziel, refs, faktoren=[], heute=date(2026, 7, 14))
+    g243 = next(g for g in r["gruppen"] if g["gruppe_nr"] == "243")
+    assert "quercheck_einheit" in g243
+    assert g243["quercheck_einheit"] is not None

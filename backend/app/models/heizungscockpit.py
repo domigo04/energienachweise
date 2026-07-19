@@ -111,8 +111,8 @@ class HcHeatingGroup(Base):
     __tablename__ = "hc_heating_groups"
 
     id = Column(Integer, primary_key=True, index=True)
-    tenant_id = Column(Integer, default=1)
-    project_id = Column(Integer, ForeignKey("hc_projects.id"))
+    tenant_id = Column(Integer, default=1, index=True)
+    project_id = Column(Integer, ForeignKey("hc_projects.id"), index=True)
     template_id = Column(Integer, ForeignKey("hc_group_templates.id"), nullable=True)
     name = Column(String, nullable=False)
     typ = Column(SAEnum(HcGruppeTyp), nullable=False)

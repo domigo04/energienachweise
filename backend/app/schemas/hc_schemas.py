@@ -108,13 +108,17 @@ class HeatingGroupOut(BaseModel):
 
 
 class ProjectOut(BaseModel):
+    # Leichte Projekt-Metadaten für die Liste (GET /projects). Bewusst OHNE
+    # base_data — sonst löst Pydantic beim Serialisieren pro Projekt einen
+    # eigenen Lazy-Load von base_data aus (N+1: 1 + N Abfragen). Die Liste
+    # zeigt nur Name/Ort/Kunde/Status/Datum, base_data braucht sie nie.
+    # Die Detailsicht (ProjectDetailOut) hängt base_data wieder an.
     id: int
     name: str
     standort: Optional[str]
     kunde: Optional[str]
     beschreibung: Optional[str]
     status: ProjectStatus
-    base_data: Optional[ProjectBaseDataOut]
     created_at: datetime
     updated_at: datetime
 
@@ -122,6 +126,7 @@ class ProjectOut(BaseModel):
 
 
 class ProjectDetailOut(ProjectOut):
+    base_data: Optional[ProjectBaseDataOut] = None
     heating_groups: List[HeatingGroupOut] = []
     summe_leistung_kw: float = 0.0
     summe_volumenstrom_m3h: float = 0.0

@@ -185,7 +185,41 @@ pro Projekt gespeichert (`Kostenschaetzung`-Tabelle, gleiche Mechanik wie frühe
     Hard-Filter lockern? (2) `anzahl_ne` wird erfasst, fliesst aber nirgends ein — 5. Score-Dimension
     oder nur dokumentarisch?
 
-## Nächste Schritte (Roadmap — Stand 2026-07-19, «◀ HIER» = aktueller Fokus)
+## Nächste Schritte (Roadmap — Stand 2026-07-20, «◀ HIER» = aktueller Fokus)
+
+**✅ Erledigt — Ladezeit Projektliste (2026-07-20, Tests grün, noch NICHT committet):**
+Nachgewiesenes N+1: `GET /api/v1/projects` lud pro Projekt `base_data` einzeln nach (1 + N Abfragen;
+14 Projekte → 15 SELECTs, auf Railway je ein Roundtrip). Fix: `base_data` aus `ProjectOut` (Liste) in
+`ProjectDetailOut` (Einzelprojekt) verschoben → Liste **1 statt 15 Abfragen**, Payload 5063 → 2747 B,
+konstant statt linear. Zusätzlich `_ensure_indexes()` in `main.py` (CREATE INDEX IF NOT EXISTS, nicht-
+destruktiv) für die in der Prod-Postgres fehlenden Indizes `hc_projects.erstellt_von`,
+`hc_heating_groups.project_id`/`tenant_id`. Test: `tests/test_projects_performance.py` (friert das N+1
+ein). Schema-`graph_json` wird weiterhin nur im Editor geladen (geprüft, war schon ok). Physik/Hydraulik
+unberührt.
+
+**✅ Erledigt — Grobkostenschätzung Fach-Anpassungen F1–F4 + Auswertungs-Filter G1–G2 (2026-07-20,
+136/136 Tests grün, noch NICHT committet):**
+- **F1 Zurück-Navigation:** Klick auf eine verwendete Referenz gibt die Herkunft mit (`state.zurueck`);
+  der Zurück-Button der Auswertung führt zurück zur Grobkostenschätzung des Projekts statt in die
+  Auswertungs-Liste (`GrobkostenSchaetzung.jsx` Link + `AuswertungForm.jsx` `useLocation`).
+- **F3 Wärmeabgabe als starker Score-Faktor:** neue `abgabe_naehe` (gleich 1.0 / Mischsystem-Obermenge
+  0.6 / teilweise 0.45 / andere 0.25 / Referenz ohne Angabe 0.5). Neue Gewichte: EBF 0.25 · kW 0.22 ·
+  **Abgabe 0.20** · Zert 0.13 · Einheiten 0.12 · BWW 0.08. Eine abweichende Abgabe senkt die Ähnlichkeit
+  jetzt spürbar (≥ 10 Punkte statt ~1), nicht nur indirekt.
+- **F3/F4 Hinweise:** Referenzliste zeigt Badge «Mischsystem» bzw. «andere Abgabe»
+  (`abgabe_mischsystem`/`abgabe_abweichend` aus `finde_referenzen`); Mischsystem (FBH + Heizkörper) ist
+  über `abgabe_naehe` schon tiefer gewichtet, weil die Fläche geteilt ist.
+- **F2 Kleine Datenbasis:** Position trägt `segment_groesse`; aufgeklappte Zeile warnt bei `abdeckung ≤ 1`
+  («Nur X von Y … Einzelfall»), Vertrauen-Badge bei «niedrig» neu als Warndreieck statt Punkt.
+- **F5 CHF/Einheit-Gegencheck:** `quercheck_chf_pro_einheit` rechnet die Wärmeverteilung (243) auch pro
+  Wohnung; weicht sie > 35 % vom CHF/m²-Weg ab → Warnzeile in der 243-Gruppe. Rein informativ, ändert die
+  Schätzung nicht.
+- **G1 Filter Auswertung:** Chips für Wärmeerzeuger/-abgabe («enthält»-Regel), Dropdowns Nutzung/
+  Projektart, rein client-seitig (`AuswertungList.jsx`).
+- **G2 «Alle auswählen»:** wählt alle aktuell gefilterten Karten für das Sammel-Löschen.
+- Tests: `test_grobkostenschaetzung.py` erweitert (abgabe_naehe, Abgabe-Score, Flags, segment_groesse,
+  Quercheck). **OFFEN (Vorschläge, Dominic entscheidet):** G3 Chatbot (Aufwand siehe unten),
+  Schema-Plugin-Wechsel (siehe eigener Abschnitt).
 
 **✅ Erledigt — UX-/Bedienbarkeits-Runde (2026-07-19, von Dominic committet):**
 Einheitlicher Seitenkopf mit **Zurück-Buttons** (`components/ui/PageHeader.jsx`), **Gewerk-Leiste**
@@ -250,7 +284,8 @@ Reihenfolge/Gewichtung, nie Ausschluss.
 *Danach noch:* Referenz-`qualitaet` (gesichert/Devis/Schätzung) in die Gewichtung; PDF-Export der
 Grobkostenschätzung (alter Endpunkt in `hc_export.py` verwaist).
 
-*F) NEU — weitere Fach-Anpassungen Grobkostenschätzung (Dominic 2026-07-19, NOCH NICHT umgesetzt):*
+*F) Fach-Anpassungen Grobkostenschätzung (Dominic 2026-07-19) — ✅ F1–F5 UMGESETZT 2026-07-20 (siehe
+Umsetzungs-Block oben). Details/Begründung der einzelnen Punkte hier belassen:*
 
 1. **Zurück-Navigation bei Referenz-Klick.** Klickt man in der Grobkostenschätzung auf ein verwendetes
    Referenzprojekt, landet man in der Auswertung — der Zurück-Button dort führt zur Auswertungs-Liste,
@@ -305,7 +340,8 @@ Grobkostenschätzung (alter Endpunkt in `hc_export.py` verwaist).
 gleiche Code-Stelle: Score + Referenzliste), dann 2 (Hinweistext), dann 5 (eigener Rechenweg, am meisten
 Aufwand) — aber Dominic entscheidet die Reihenfolge.
 
-*G) NEU — Auswertungsseite: mehr Funktionen (Dominic 2026-07-19, NOCH NICHT umgesetzt):*
+*G) Auswertungsseite: mehr Funktionen (Dominic 2026-07-19) — ✅ G1 (Filter) + G2 («Alle auswählen»)
+UMGESETZT 2026-07-20; G3 (Chatbot) offen, Aufwandsschätzung unten:*
 
 1. **Filter nach Projekt-Merkmalen.** Auf `AuswertungList.jsx` Filterleiste ergänzen: Wärmeerzeuger-
    Häkchen (Mehrfachauswahl, "enthält" statt "exakt" — Filter "Erdsonden-WP" zeigt auch gemischte

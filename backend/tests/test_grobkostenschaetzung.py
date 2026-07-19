@@ -12,6 +12,7 @@ from app.calculations.grobkostenschaetzung import (
     alter_in_jahren,
     berechne_grobkostenschaetzung,
     bww_naehe,
+    einheiten_naehe,
     finde_referenzen,
     groessennaehe,
     hard_filter,
@@ -21,15 +22,19 @@ from app.calculations.grobkostenschaetzung import (
     skaliere_auf_baupreisindex,
     wende_korrekturfaktoren_an,
     zeitgewicht,
+    zertifizierungs_naehe,
 )
+from app.data.bkp_positionen import abgabe_klassen_von, filter_positionen
 
 
 # ── Zeitgewicht ──────────────────────────────────────────────────────────────
 
-def test_zeitgewicht_halbwertszeit_3_jahre():
+def test_zeitgewicht_milde_reduktion():
+    """Aktualität nur noch minimal (Dominic 2026-07-19): 1 %/Jahr, nie unter 90 %."""
     assert zeitgewicht(0.0) == pytest.approx(1.0)
-    assert zeitgewicht(3.0) == pytest.approx(0.5)
-    assert zeitgewicht(6.0) == pytest.approx(0.25)
+    assert zeitgewicht(4.0) == pytest.approx(0.96)   # 4 Jahre → nur 4 % Abzug
+    assert zeitgewicht(5.0) == pytest.approx(0.95)
+    assert zeitgewicht(20.0) == pytest.approx(0.90)  # Floor: nie unter 90 %
 
 
 def test_zeitgewicht_negatives_alter_wie_null():
@@ -69,12 +74,97 @@ def test_bww_naehe_weiches_kriterium():
     assert bww_naehe(None, None) == 1.0
 
 
+def test_zertifizierungs_naehe():
+    assert zertifizierungs_naehe("Minergie", "Minergie") == 1.0
+    assert zertifizierungs_naehe("Minergie", "Minergie-P") == 0.3
+    assert zertifizierungs_naehe(None, None) == 1.0   # beide unbekannt = neutral
+    assert zertifizierungs_naehe("Minergie", None) == 0.5
+    assert zertifizierungs_naehe("", "") == 1.0
+
+
+def test_einheiten_naehe():
+    assert einheiten_naehe(8, 8) == 1.0
+    assert einheiten_naehe(8, 10) == pytest.approx(0.8)
+    assert einheiten_naehe(None, None) == 1.0         # beide unbekannt = neutral
+    assert einheiten_naehe(8, None) == 0.5
+
+
+def test_anzahl_ne_beeinflusst_score():
+    """Dominics Frage: Anzahl Einheiten muss nun wirken (war vorher tot)."""
+    kandidat = {"ebf_m2": 1000, "leistung_kw": 20, "nutzung": "MFH", "abgabe_dominant": "FBH", "anzahl_ne": 8}
+    ziel_gleich = {**kandidat}
+    ziel_anders = {**kandidat, "anzahl_ne": 40}
+    assert aehnlichkeits_score(kandidat, ziel_gleich) > aehnlichkeits_score(kandidat, ziel_anders)
+
+
+# ── Wärmeabgabe filtert die Positionen (Dominics Luftheizapparate-Fehler) ─────
+
+def test_abgabe_klassen_von():
+    assert abgabe_klassen_von(["FBH"]) == {"flaeche"}
+    assert abgabe_klassen_von(["Heizkörper", "Konvektoren"]) == {"koerper"}
+    assert abgabe_klassen_von(["FBH", "Lufterhitzer"]) == {"flaeche", "luft"}
+    assert abgabe_klassen_von([]) == set()
+    assert abgabe_klassen_von(None) == set()
+
+
+def test_filter_positionen_waermeabgabe_blendet_fremde_aus():
+    """FBH-Projekt darf keine Heizkörper- (243.2*) oder Luftheizapparate-Position
+    (243.4a) enthalten — genau Dominics gemeldeter Fehler."""
+    fbh = {p["bkp_nr"] for p in filter_positionen("sole_wasser", "MFH", {"flaeche"})}
+    assert "243.3a" in fbh          # Bodenheizung: passt
+    assert "243.4a" not in fbh      # Luftheizapparate: raus
+    assert "243.2a" not in fbh      # Heizkörper: raus
+    assert "243.1" in fbh           # Rohrleitungen: gelten immer
+    # Luft-Projekt umgekehrt
+    luft = {p["bkp_nr"] for p in filter_positionen("sole_wasser", "MFH", {"luft"})}
+    assert "243.4a" in luft
+    assert "243.3a" not in luft
+    # unbekannte Abgabe (leer) → nicht filtern, alle Verteil-Positionen da
+    alle = {p["bkp_nr"] for p in filter_positionen("sole_wasser", "MFH", set())}
+    assert {"243.2a", "243.3a", "243.4a"} <= alle
+
+
+def test_berechne_fbh_projekt_ohne_luftheizapparate():
+    """End-to-end: ein reines FBH-Zielprojekt zeigt keine Luftheizapparate (243.4a),
+    auch wenn eine gemischte Referenz solche Kosten hatte — nur die FBH-Kosten kommen."""
+    ziel = {"ebf_m2": 1000, "leistung_kw": 20, "nutzung": "MFH", "projektart": "Neubau",
+            "wp_typ": "sole", "hat_erdsonden": True, "waermeabgabe": ["FBH"], "abgabe_dominant": "FBH"}
+    referenz = {"name": "R", "ebf_m2": 1000, "leistung_kw": 20, "nutzung": "MFH", "projektart": "Neubau",
+                "wp_typ": "sole", "hat_erdsonden": True, "abgabe_klassen": {"flaeche", "luft"},
+                "datum_abrechnung": date(2025, 1, 1),
+                "positionen": {"243.4a": 50000, "243.3a": 40000}}
+    res = berechne_grobkostenschaetzung(ziel, [referenz], [], heute=date(2026, 1, 1))
+    alle = {p["bkp_nr"]: p for g in res["gruppen"] for p in g["positionen"]}
+    assert "243.4a" not in alle              # Luftheizapparate gar nicht erst dabei
+    assert alle["243.3a"]["betrag"] == pytest.approx(40000)  # nur die FBH-Kosten der Referenz
+
+
+def test_position_nur_referenzen_mit_gewaehlter_abgabe():
+    """Dominics Kernregel (essenziell): für ein FBH-Ziel liefert eine reine
+    Heizkörper-Referenz KEINE Fussbodenheizungs-Kosten — sie zieht 243.3a nicht
+    auf einen Mischwert runter."""
+    ziel = {"ebf_m2": 1000, "leistung_kw": 20, "nutzung": "MFH", "projektart": "Neubau",
+            "wp_typ": "sole", "hat_erdsonden": True, "waermeabgabe": ["FBH"]}
+    fbh_ref = {"name": "FBH", "ebf_m2": 1000, "leistung_kw": 20, "nutzung": "MFH", "projektart": "Neubau",
+               "wp_typ": "sole", "hat_erdsonden": True, "abgabe_klassen": {"flaeche"},
+               "datum_abrechnung": date(2025, 1, 1), "positionen": {"243.3a": 40000}}
+    hk_ref = {"name": "HK", "ebf_m2": 1000, "leistung_kw": 20, "nutzung": "MFH", "projektart": "Neubau",
+              "wp_typ": "sole", "hat_erdsonden": True, "abgabe_klassen": {"koerper"},
+              "datum_abrechnung": date(2025, 1, 1), "positionen": {"243.2a": 30000}}
+    res = berechne_grobkostenschaetzung(ziel, [fbh_ref, hk_ref], [], heute=date(2026, 1, 1))
+    p = next(x for g in res["gruppen"] for x in g["positionen"] if x["bkp_nr"] == "243.3a")
+    assert p["betrag"] == pytest.approx(40000)  # nur FBH-Referenz, NICHT auf 20000 verwässert
+    assert p["n_referenzen"] == 1               # die HK-Referenz zählt bei 243.3a nicht mit
+
+
 def test_hard_filter():
-    ziel = {"wp_typ": "sole", "projektart": "Neubau", "hat_erdsonden": True}
-    assert hard_filter({"wp_typ": "sole", "projektart": "Neubau", "hat_erdsonden": True}, ziel) is True
-    assert hard_filter({"wp_typ": "luft", "projektart": "Neubau", "hat_erdsonden": True}, ziel) is False
-    assert hard_filter({"wp_typ": "sole", "projektart": "Sanierung", "hat_erdsonden": True}, ziel) is False
-    assert hard_filter({"wp_typ": "sole", "projektart": "Neubau", "hat_erdsonden": False}, ziel) is False
+    ziel = {"nutzung": "MFH", "wp_typ": "sole", "projektart": "Neubau", "hat_erdsonden": True}
+    passt = {"nutzung": "MFH", "wp_typ": "sole", "projektart": "Neubau", "hat_erdsonden": True}
+    assert hard_filter(passt, ziel) is True
+    assert hard_filter({**passt, "nutzung": "EFH"}, ziel) is False   # Nutzung EXAKT (Dominic 2026-07-19)
+    assert hard_filter({**passt, "wp_typ": "luft"}, ziel) is False
+    assert hard_filter({**passt, "projektart": "Sanierung"}, ziel) is False
+    assert hard_filter({**passt, "hat_erdsonden": False}, ziel) is False
 
 
 def test_aehnlichkeits_score_perfekter_treffer_ist_1():
@@ -83,8 +173,9 @@ def test_aehnlichkeits_score_perfekter_treffer_ist_1():
 
 
 def test_finde_referenzen_hard_filter_und_zeitgewicht_ranking():
-    """Von drei Hard-Filter-Treffern überholt eine mittelmässig ähnliche, aber
-    AKTUELLE Referenz eine perfekt passende, aber 6 Jahre alte."""
+    """Drei Hard-Filter-Treffer. Seit die Aktualität nur noch minimal zählt
+    (Dominic 2026-07-19: 1 %/Jahr), gewinnt die perfekt passende Referenz — auch
+    wenn sie 6 Jahre alt ist — vor der aktuellen, aber mittelmässig ähnlichen."""
     heute = date(2026, 1, 1)
     ziel = {"ebf_m2": 1000, "leistung_kw": 20, "nutzung": "MFH", "projektart": "Neubau",
             "wp_typ": "sole", "abgabe_dominant": "FBH", "hat_erdsonden": True}
@@ -98,16 +189,16 @@ def test_finde_referenzen_hard_filter_und_zeitgewicht_ranking():
         {"name": "C_falscher_wptyp", "ebf_m2": 1000, "leistung_kw": 20, "nutzung": "MFH",
          "projektart": "Neubau", "wp_typ": "luft", "abgabe_dominant": "FBH", "hat_erdsonden": True,
          "datum_abrechnung": heute},
-        {"name": "E_kleiner_neu", "ebf_m2": 500, "leistung_kw": 10, "nutzung": "Gewerbe",
+        {"name": "E_kleiner_neu", "ebf_m2": 500, "leistung_kw": 10, "nutzung": "MFH",
          "projektart": "Neubau", "wp_typ": "sole", "abgabe_dominant": "HK", "hat_erdsonden": True,
          "datum_abrechnung": heute},
     ]
     ergebnis = finde_referenzen(kandidaten, ziel, top_n=5, heute=heute)
-    assert [r["name"] for r in ergebnis] == ["A_perfekt_neu", "E_kleiner_neu", "B_perfekt_alt"]
-    assert ergebnis[0]["rang"] == pytest.approx(1.0)
-    # E: 0.30×0.5 + 0.25×0.5 + 0.20×0 + 0.15×0.2 + 0.10×1.0 = 0.405
-    assert ergebnis[1]["rang"] == pytest.approx(0.405, abs=0.001)
-    assert ergebnis[2]["rang"] == pytest.approx(0.25, abs=0.005)
+    assert [r["name"] for r in ergebnis] == ["A_perfekt_neu", "B_perfekt_alt", "E_kleiner_neu"]
+    assert ergebnis[0]["rang"] == pytest.approx(1.0)              # perfekt + neu
+    assert ergebnis[1]["rang"] == pytest.approx(0.94, abs=0.001)  # perfekt, 6 J. alt → nur 6 % Abzug
+    # E: 0.30×0.5 (ebf) + 0.26×0.5 (kW) + 0.16 (zert) + 0.16 (NE) + 0.12 (bww) = 0.72, aktuell → ×1.0
+    assert ergebnis[2]["rang"] == pytest.approx(0.72, abs=0.001)
 
 
 def test_finde_referenzen_ohne_datum_neutral_gewichtet():
@@ -280,7 +371,7 @@ def test_beispieldaten_generator_deterministisch_und_konsistent():
 
 def _mock_ref(zeilen, rabatt=0.0, skonto=0.0, **kw):
     base = dict(id=1, name="Ref", ebf_m2=1000.0, heizleistung_kw=40.0, gebaeudetyp="MFH",
-                projektart="Neubau", waermeerzeuger=["Erdsonden-WP"], waermeabgabe=["FBH"],
+                projektart="Neubau", zertifizierung=None, waermeerzeuger=["Erdsonden-WP"], waermeabgabe=["FBH"],
                 anzahl_einheiten=8, bww_bei_heizung=None, datum=date(2025, 1, 1),
                 laufmeter_rohre_heizung=None, bohrmeter=600.0, anzahl_heizkoerper=None)
     base.update(kw)

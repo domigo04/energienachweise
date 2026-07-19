@@ -185,31 +185,83 @@ pro Projekt gespeichert (`Kostenschaetzung`-Tabelle, gleiche Mechanik wie frühe
     Hard-Filter lockern? (2) `anzahl_ne` wird erfasst, fliesst aber nirgends ein — 5. Score-Dimension
     oder nur dokumentarisch?
 
-## Nächste Schritte
-**Hydraulik-Editor (Dominic-Feedback 2026-07-06, seither nicht angefasst):**
-1. **Leitungen entbuggen** — Ziel: immer so **wenig Bögen wie möglich**, nur senkrecht/waagrecht.
-   `FlowEdge.jsx` zickt gelegentlich beim Verschieben.
-2. **Leitung auf Leitung führen → automatisches T-Stück:** eine Leitung auf eine andere ziehen soll
-   sie verbinden und mittendrin ein T-Stück (Junction) erzeugen (Splice: Edge in zwei Segmente teilen).
-3. **Expansionsgefäss-Berechnung fertig wie Excel:** editierbare **Rohrinhalt-Tabelle** statt nur einem
-   Vsys-Feld, plus frei definierbare Zusatz-Bauteile. VL-Temperatur automatisch von der Verbrauchergruppe
-   mit der höchsten VL, Leistung automatisch aus dem Schema. IMI-Katalog (Statico) noch offen.
-4. **PDF:** Druckverlust übers Ventil umbenennen in **«Δp Ventil»**, `export/pdf.py`.
-5. **Anschluss-Marker per Gruppe anwählbar** («Anschluss für separate Gruppe» als Option in der
-   Verbrauchergruppe, funktioniert aktuell nur als Einzel-Bauteil aus der Palette).
-6. **Alle Bauteile um 90° drehbar** (Anschlüsse drehen mit).
-7. **Leitungs-Beschriftung neues Format:** zweizeilig — DN gross oben, m' in kg/h darunter.
+## Nächste Schritte (Roadmap — Stand 2026-07-19, «◀ HIER» = aktueller Fokus)
 
-**Grobkostenschätzung (BKP):**
-8. Dominics Fach-Review von R2 (Projekt öffnen → Grobkostenschätzung; Beispieldaten über die
-   Auswertung laden; sein 1100-m²-Szenario ergibt jetzt ~259'000 statt 744'000).
-9. Die zwei offenen Fachfragen aus Abschnitt 4 klären (Sanierung/Hard-Filter, `anzahl_ne`).
-10. PDF-Export der Grobkostenschätzung; Referenz-`qualitaet` in die Gewichtung aufnehmen;
-    verwaisten alten Kostenschätzungs-PDF-Endpunkt in `hc_export.py` entfernen.
+**✅ Erledigt — UX-/Bedienbarkeits-Runde (2026-07-19, von Dominic committet):**
+Einheitlicher Seitenkopf mit **Zurück-Buttons** (`components/ui/PageHeader.jsx`), **Gewerk-Leiste**
+(`components/ui/GewerkLeiste.jsx`: Heizung aktiv, Sanitär/Kälte/Lüftung «Bald») in Auswertung +
+Grobkostenschätzung, **Overlap-Bug** der «Zusammenstellung Heizung» behoben (eigene, klebende Spalte;
+sticky nur `lg:` und nur wenn allein in der Spalte — sonst überdeckt es beim Scrollen), **«i»-Erklärungen**
+ergänzt, die drei Rechner (Ventil/Druckverlust/RAVEL) + Heizgruppen von blauen Inline-Styles auf den
+**SIREGO-Look** umgestellt (`.card/.input/.btn-*`), Anrede durchgehend **«du»**, responsive für jede
+Bildschirmgrösse. **Berechnungen unangetastet.** Details/Standards: memory `feedback_ux_standards`.
+
+**◀ HIER — Ähnlichkeits-/Kosten-Spezifikation der Grobkostenschätzung (VERBINDLICH, Dominic 2026-07-19).**
+Leitsatz: «es muss stimmen» — ein Planer muss die Zahl vor dem Bauherrn verteidigen können. So läuft die
+Schätzung; **FIX (hart)** = Kriterium muss exakt passen, sonst fällt die Referenz raus. **WEICH** = nur
+Reihenfolge/Gewichtung, nie Ausschluss.
+
+*A) HARTE Kriterien (müssen EXAKT gleich sein — Dominic 2026-07-19 bestätigt):*
+- **Nutzung / Gebäudekategorie EXAKT** (MFH nur MFH, EFH nur EFH, Büro nur Büro …). NEU hart — war bisher
+  weich (MFH↔EFH ist NICHT mehr erlaubt).
+- **Wärmeerzeugung** = Wärmepumpen-Art (Erdsonden-/Luft-/Wasser-WP) + Erdsonden ja/nein. Erdsonden-WP-Ziel
+  → NUR Erdsonden-WP-Referenzen (bereits hart via `hard_filter`).
+- **Projektart** (Neubau/Sanierung/…) bleibt hart.
+
+*B) WÄRMEABGABE — KEIN harter Filter, sondern steuert die Kosten-Positionen (Kernforderung, «essenziell»):*
+- **Wärmeabgabe ist PFLICHT-Eingabe** für eine Schätzung (Dominic 2026-07-19) — ohne sie ist nicht
+  klar, welche Kosten gelten. Formular: `gueltig` erst, wenn mindestens eine Abgabe gewählt ist.
+- Referenzen mit anderer/breiterer Abgabe dürfen mitzählen (z.B. eine Referenz mit FBH UND Heizkörpern).
+- Übernommen werden aber NUR die BKP-Positionen der vom Ziel **angewählten** Abgabe — nichts anderes:
+  FBH→243.3a, TABS/Wandheizung→243.3a, Deckenstrahlplatten→243.3b, Heizkörper/Konvektoren→243.2*,
+  Lufterhitzer→243.4*. Gemeinsame Positionen (243.1 Rohre, 243.5/6/7/8/9 Regelung/Messung/Schaltschrank/
+  Montage) gelten immer.
+- Und je Abgabe-Position zählen NUR Referenzen, die genau diese Abgabe wirklich hatten (NICHT als 0
+  mitteln). → «FBH-Ziel bekommt nur die Fussbodenheizungs-Preise von Projekten, die FBH haben — nie die
+  Heizkörper-Kosten einer gemischten Referenz. Nur was ich angewählt habe, nicht mehr und nicht weniger.»
+
+*C) WEICHE Kriterien (Reihenfolge/Gewichtung):* EBF-Nähe, kW-Nähe, Zertifizierung, Anzahl Einheiten,
+   BWW-Schnittstelle — alles × Zeitgewicht (Halbwertszeit 3 Jahre). Top 5 werden gezeigt, das ganze
+   harte Segment fliesst in Kennwert + Bandbreite.
+
+*D) Fachentscheide:*
+1. ✅ Nutzung hart = EXAKT (Dominic 2026-07-19).
+2. ✅ Projektart bleibt harter Filter (Dominic 2026-07-19).
+3. ⏳ OFFEN — Anzahl Einheiten: zusätzlich zum Ähnlichkeits-Faktor ein CHF/Einheit-Wert bei der
+   Wärmeverteilung, gemittelt/quergecheckt mit CHF/m² EBF (v.a. Wohnbau) — genaue Verrechnung noch
+   mit Dominic festzulegen (eigener Schritt).
+
+*E) Umsetzungsstand (2026-07-19 — UMGESETZT gemäss A–C, 125/125 Tests grün, noch NICHT committet):*
+- **Nutzung jetzt HART** (`hard_filter` um `nutzung`-Exaktvergleich erweitert; `nutzungsnaehe` +
+  `abgabetyp_naehe` aus dem Score raus). Weiche Gewichte neu: EBF 0.30 / kW 0.26 / Zertifizierung 0.16 /
+  Anzahl Einheiten 0.16 / BWW 0.12 (Summe 1.0).
+- **Wärmeabgabe filtert die Positionen** (`bkp_positionen.py`: `abgabe`-Tag an 243.2*/3*/4*,
+  `abgabe_klassen_von`, `filter_positionen(..., abgabe_klassen)`), UND **je Abgabe-Position werden nur
+  Referenzen mit genau dieser Abgabe gemittelt** (`schaetze_position` überspringt Referenzen ohne die
+  Klasse; Referenz-Dict trägt `abgabe_klassen`). Kernregel als Test abgesichert
+  (`test_position_nur_referenzen_mit_gewaehlter_abgabe`, `test_berechne_fbh_projekt_ohne_luftheizapparate`).
+- **Zertifizierung**: `SchaetzungIn`-Feld + Adapter + `zertifizierungs_naehe` + Formular-Auswahl.
+- **Wärmeabgabe = Pflichtfeld** im Formular (`gueltig` verlangt ≥1 Abgabe); «keine passenden Referenzen»-
+  Hinweis nennt jetzt auch die Nutzung.
+- Folge des strengeren Filters: findet nur noch Referenzen mit EXAKT gleicher Nutzung/Projektart/WP-Art —
+  Beispieldaten/echte Referenzen mit passender Kombination nötig, sonst «keine passenden».
+- OFFEN (Punkt D.3): CHF/Einheit-Quercheck der Wärmeverteilung — eigener Schritt, noch nicht gebaut.
+
+*Danach noch:* Referenz-`qualitaet` (gesichert/Devis/Schätzung) in die Gewichtung; PDF-Export der
+Grobkostenschätzung (alter Endpunkt in `hc_export.py` verwaist).
+
+**DANN — zurück ins Schema-Tool (Hydraulik-Editor, Feedback 2026-07-06, seither nicht angefasst):**
+6. **Leitungen entbuggen** — immer so wenig Bögen wie möglich, nur senkrecht/waagrecht; `FlowEdge.jsx`.
+7. **Leitung auf Leitung → automatisches T-Stück** (Splice: Edge in zwei Segmente teilen).
+8. **Expansionsgefäss wie Excel** — editierbare Rohrinhalt-Tabelle statt nur Vsys, Zusatz-Bauteile,
+   VL-Temperatur automatisch von der Gruppe mit höchster VL, Leistung aus dem Schema. IMI-Katalog offen.
+9. **PDF:** «Druckverlust übers Ventil» → **«Δp Ventil»** (`export/pdf.py`).
+10. **Anschluss-Marker per Gruppe anwählbar** (Option in der Verbrauchergruppe).
+11. **Alle Bauteile um 90° drehbar** (Anschlüsse drehen mit).
+12. **Leitungs-Beschriftung zweizeilig** — DN gross oben, m' in kg/h darunter.
 
 **Sonst:**
-11. Produktions-Login nach dem nächsten Deploy verifizieren (Postgres-Fix, siehe Abschnitt 4 — noch
-    nicht gepusht, wartet auf Dominics OK).
+13. Produktions-Login nach dem nächsten Deploy verifizieren (Postgres-Fix, wartet auf Dominics OK).
 
 ## Geparkt / später
 - **Schema ↔ Heizgruppen-DB verknüpfen** (Kernversprechen F2: Änderung fliesst automatisch), manueller

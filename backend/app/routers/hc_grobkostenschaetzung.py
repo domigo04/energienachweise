@@ -26,7 +26,7 @@ from app.auth import get_current_user
 from app.calculations.grobkostenschaetzung import BKP_GRUPPEN_ALLE, berechne_grobkostenschaetzung
 from app.calculations.kostenschaetzung import netto_aus_brutto
 from app.data.beispiel_referenzprojekte import BEISPIEL_PREFIX, BEISPIEL_PROJEKTE
-from app.data.bkp_positionen import BKP_POSITIONEN
+from app.data.bkp_positionen import BKP_POSITIONEN, abgabe_klassen_von
 from app.database import get_db
 from app.models.auth import User
 from app.models.grobkostenschaetzung import Korrekturfaktor
@@ -43,6 +43,7 @@ class SchaetzungIn(BaseModel):
     leistung_kw: float
     nutzung: str                       # wie Auswertung «Gebäudetyp» (MFH, EFH, Büro, …)
     projektart: str                    # wie Auswertung (Neubau, Sanierung, …)
+    zertifizierung: Optional[str] = None  # Minergie usw. — Ähnlichkeits-Faktor (kennt man beim Schätzen)
     anzahl_ne: int
     waermeerzeuger: List[str] = []      # Mehrfach-Auswahl → Wärmepumpen-Art + Erdsonden abgeleitet
     waermeabgabe: List[str] = []        # Mehrfach-Auswahl → dominanter Abgabetyp abgeleitet
@@ -118,8 +119,10 @@ def _ref_to_calc_dict(r: RefProjekt) -> dict:
         "id": r.id, "name": r.name,
         "ebf_m2": r.ebf_m2, "leistung_kw": r.heizleistung_kw,
         "nutzung": r.gebaeudetyp, "projektart": r.projektart,
+        "zertifizierung": r.zertifizierung,
         "wp_typ": _wp_typ_von(r.waermeerzeuger),
         "abgabe_dominant": _abgabe_dominant_von(r.waermeabgabe),
+        "abgabe_klassen": abgabe_klassen_von(r.waermeabgabe),  # welche Abgabe-Kosten die Referenz liefern darf
         "hat_erdsonden": _hat_erdsonden(r.waermeerzeuger),
         "anzahl_ne": r.anzahl_einheiten,
         "bww_bei_heizung": r.bww_bei_heizung,

@@ -18,8 +18,10 @@ BKP_GRUPPEN = {
 }
 
 
-def _p(nr, bezeichnung, wp_typen=None, kategorien=None):
-    return {"bkp_nr": nr, "bezeichnung": bezeichnung, "wp_typen": wp_typen, "kategorien": kategorien}
+def _p(nr, bezeichnung, wp_typen=None, kategorien=None, abgabe=None):
+    # abgabe (None|"koerper"|"flaeche"|"deckenstrahl"|"luft"): Verteil-Position gilt
+    # nur für die passende Wärmeabgabe. None = gilt immer (Rohre, Regelung, Montage …).
+    return {"bkp_nr": nr, "bezeichnung": bezeichnung, "wp_typen": wp_typen, "kategorien": kategorien, "abgabe": abgabe}
 
 
 SOLE = ["sole_wasser"]
@@ -43,15 +45,15 @@ BKP_POSITIONEN = [
     _p("242.5", "Wärmepumpe Wasser/Wasser", ["wasser_wasser"]),
     _p("242.6", "Expansion und Sicherheit", ALLE_WP),
     _p("242.7", "Montage / Transport Wärmeerzeugung", ALLE_WP),
-    # 243 — Wärmeverteilung
+    # 243 — Wärmeverteilung (243.2*/3*/4* hängen an der Wärmeabgabe, der Rest gilt immer)
     _p("243.1", "Rohrleitungen"),
-    _p("243.2a", "Heizkörper (Zwei-Rohr)"),
-    _p("243.2b", "Heizkörper (Stern-System)"),
-    _p("243.2c", "Badheizkörper"),
-    _p("243.3a", "Flächenheizung (Bodenheizung)"),
-    _p("243.3b", "Flächenheizung (Deckenstrahlplatten)"),
-    _p("243.4a", "Luftheizapparate"),
-    _p("243.4b", "Torluftschleier", None, ["Gewerbe", "Industrie"]),
+    _p("243.2a", "Heizkörper (Zwei-Rohr)", abgabe="koerper"),
+    _p("243.2b", "Heizkörper (Stern-System)", abgabe="koerper"),
+    _p("243.2c", "Badheizkörper", abgabe="koerper"),
+    _p("243.3a", "Flächenheizung (Bodenheizung)", abgabe="flaeche"),
+    _p("243.3b", "Flächenheizung (Deckenstrahlplatten)", abgabe="deckenstrahl"),
+    _p("243.4a", "Luftheizapparate", abgabe="luft"),
+    _p("243.4b", "Torluftschleier", None, ["Gewerbe", "Industrie"], abgabe="luft"),
     _p("243.5", "Apparate / Armaturen PWW"),
     _p("243.6", "Regelung"),
     _p("243.7", "Wärmemessung"),
@@ -107,13 +109,32 @@ def treiber_fuer_bkp(bkp_nr: str) -> str:
 KOMPLEXITAETS_BKP = {"243.5", "243.6", "243.8", "249.8"}
 
 
-def filter_positionen(wp_typ: str = None, kategorie: str = None) -> list:
-    """Nur die relevanten Positionen für WP-Typ + Gebäudekategorie."""
+# Wärmeabgabe-Häkchen (roh) → Positions-Klasse. Ein reines FBH-Projekt darf keine
+# Heizkörper-/Luft-Positionen zeigen (Dominic 2026-07-19).
+_ABGABE_KLASSE = {
+    "FBH": "flaeche", "TABS": "flaeche", "Wandheizung": "flaeche",
+    "Deckenstrahlplatten": "deckenstrahl",
+    "Heizkörper": "koerper", "Konvektoren": "koerper",
+    "Lufterhitzer": "luft",
+}
+
+
+def abgabe_klassen_von(waermeabgabe) -> set:
+    """Aus den Wärmeabgabe-Häkchen die relevanten Positions-Klassen ableiten.
+    Leer/None = unbekannt → nicht filtern (alle Verteil-Positionen zeigen)."""
+    return {_ABGABE_KLASSE[a] for a in (waermeabgabe or []) if a in _ABGABE_KLASSE}
+
+
+def filter_positionen(wp_typ: str = None, kategorie: str = None, abgabe_klassen=None) -> list:
+    """Nur die relevanten Positionen für WP-Typ + Gebäudekategorie + Wärmeabgabe.
+    abgabe_klassen leer/None = Abgabe unbekannt → nicht danach filtern."""
     out = []
     for p in BKP_POSITIONEN:
         if wp_typ and p["wp_typen"] is not None and wp_typ not in p["wp_typen"]:
             continue
         if kategorie and p["kategorien"] is not None and kategorie not in p["kategorien"]:
+            continue
+        if abgabe_klassen and p.get("abgabe") is not None and p["abgabe"] not in abgabe_klassen:
             continue
         gruppe_nr = p["bkp_nr"].split(".")[0]
         out.append({
@@ -121,5 +142,6 @@ def filter_positionen(wp_typ: str = None, kategorie: str = None) -> list:
             "bezeichnung": p["bezeichnung"],
             "gruppe_nr": gruppe_nr,
             "gruppe": BKP_GRUPPEN.get(gruppe_nr, ""),
+            "abgabe": p.get("abgabe"),  # für die Positions-genaue Referenz-Auswahl
         })
     return out

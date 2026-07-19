@@ -14,11 +14,11 @@ import CheckboxGruppe from "../../components/kv/CheckboxGruppe";
 import InfoTip from "../../components/ui/InfoTip";
 import PageHeader from "../../components/ui/PageHeader";
 import GewerkLeiste from "../../components/ui/GewerkLeiste";
-import { WAERMEABGABE, WAERMEERZEUGER } from "../../data/kv";
+import { WAERMEABGABE, WAERMEERZEUGER, ZERTIFIZIERUNGEN } from "../../data/kv";
 import { chf, gruppeInfo, num, NUTZUNGEN, pct, PROJEKTARTEN } from "../../data/gk";
 
 const LEER = {
-  ebf_m2: "", leistung_kw: "", anzahl_ne: "", nutzung: "MFH", projektart: "Neubau",
+  ebf_m2: "", leistung_kw: "", anzahl_ne: "", nutzung: "MFH", projektart: "Neubau", zertifizierung: "",
   waermeerzeuger: ["Erdsonden-WP"], waermeabgabe: ["FBH"],
   bww_bei_heizung: false, baupreisindex_beruecksichtigen: false,
   weiterbetrieb_umbau: false, etappierung: false,
@@ -30,6 +30,7 @@ const ERKL = {
   vertrauen: "Wie viele der passenden Referenzprojekte diese Position überhaupt hatten. Viele → verlässlich (hoch), wenige → vorsichtig sein.",
   baupreisindex: "Skaliert die Kosten jedes Referenzprojekts auf das heutige Preisniveau, bevor gerechnet wird (heutiger Index ÷ Index zum Zeitpunkt des Referenzprojekts). Ohne hinterlegte Indexwerte hat das Häkchen keine Wirkung.",
   bww: "Ist das Brauchwarmwasser Teil der Heizungs-Kosten (Schnittstelle bei der Heizung) oder läuft es beim Sanitär? Weiches Kriterium: Referenzen mit anderer Schnittstelle bleiben brauchbar, zählen nur etwas weniger.",
+  zertifizierung: "Gebäude-Standard (Minergie usw.). Referenzen mit gleicher Zertifizierung zählen bei der Ähnlichkeit mehr — höhere Standards treiben die Kosten. Weiches Kriterium, kein Ausschluss.",
   bruttoNetto: "Brutto = Summe der Leistungsverzeichnis-Positionen der Referenzen. Netto = nach deren Rabatt/Skonto — der real bezahlte Betrag.",
 };
 
@@ -86,8 +87,11 @@ export default function GrobkostenSchaetzung() {
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
+  // Wärmeabgabe ist Pflicht (Dominic 2026-07-19): sie bestimmt, welche Kosten
+  // übernommen werden — ohne sie ist keine sinnvolle Schätzung möglich.
   const gueltig = zahl(form.ebf_m2) > 0 && zahl(form.leistung_kw) > 0
-    && zahl(form.anzahl_ne) > 0 && (form.waermeerzeuger?.length > 0);
+    && zahl(form.anzahl_ne) > 0 && (form.waermeerzeuger?.length > 0)
+    && (form.waermeabgabe?.length > 0);
 
   const rechnen = useCallback(async (f) => {
     setLaden(true);
@@ -167,13 +171,22 @@ export default function GrobkostenSchaetzung() {
             <Feld label="Projektart">
               <Select value={form.projektart} onChange={(v) => set("projektart", v)} optionen={PROJEKTARTEN} />
             </Feld>
+            <Feld label={<span className="inline-flex items-center gap-1">Zertifizierung <InfoTip text={ERKL.zertifizierung} /></span>}>
+              <select className="input" value={form.zertifizierung} onChange={(e) => set("zertifizierung", e.target.value)}>
+                <option value="">—</option>
+                {ZERTIFIZIERUNGEN.map((z) => <option key={z} value={z}>{z}</option>)}
+              </select>
+            </Feld>
           </div>
 
           <div className="mt-3">
             <CheckboxGruppe label="Wärmeerzeuger" options={WAERMEERZEUGER} value={form.waermeerzeuger} onChange={(v) => set("waermeerzeuger", v)} />
           </div>
           <div className="mt-3">
-            <CheckboxGruppe label="Wärmeabgabe" options={WAERMEABGABE} value={form.waermeabgabe} onChange={(v) => set("waermeabgabe", v)} />
+            <CheckboxGruppe label="Wärmeabgabe *" options={WAERMEABGABE} value={form.waermeabgabe} onChange={(v) => set("waermeabgabe", v)} />
+            <p className="mt-1 text-xs text-slate-400">
+              Pflicht — es werden nur die Kosten der hier gewählten Abgabesysteme übernommen.
+            </p>
           </div>
 
           <div className="mt-4 space-y-2 border-t border-slate-100 pt-4">
@@ -243,8 +256,9 @@ export default function GrobkostenSchaetzung() {
             <div className="card border-amber-200 bg-amber-50/50 px-5 py-5">
               <h3 className="text-sm font-bold text-slate-800">Keine passenden Referenzprojekte gefunden</h3>
               <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
-                Damit eine Referenz zählt, müssen Wärmepumpen-Art, Projektart und Erdsonden ja/nein
-                übereinstimmen. In der Auswertung gibt es dafür noch kein passendes Referenzprojekt mit BKP-Kosten.
+                Damit eine Referenz zählt, müssen <b>Nutzung</b> (z.B. MFH), <b>Wärmepumpen-Art</b>,
+                <b> Projektart</b> und <b>Erdsonden ja/nein</b> exakt übereinstimmen. In der Auswertung gibt
+                es dafür noch kein passendes Referenzprojekt mit BKP-Kosten — erfasse eines oder lade die Beispieldaten.
               </p>
               <Link to="/auswertung" className="btn-secondary mt-3"><Database className="size-4" /> Zur Auswertung</Link>
             </div>
@@ -331,7 +345,8 @@ export default function GrobkostenSchaetzung() {
                   ))}
                 </div>
                 <p className="mt-2 text-xs leading-snug text-slate-400">
-                  Gewicht = Ähnlichkeit × Aktualität (Halbwertszeit 3 Jahre). Eine abweichende Brauchwarmwasser-
+                  Gewicht = Ähnlichkeit × Aktualität (nur milder Abzug ~1 %/Jahr, nie unter 90 % — die
+                  Teuerung korrigiert bereits der Baupreisindex). Eine abweichende Brauchwarmwasser-
                   Schnittstelle senkt nur die Ähnlichkeit leicht, schliesst die Referenz aber nicht aus.
                 </p>
               </div>

@@ -23,7 +23,7 @@ from datetime import date
 from typing import Optional
 
 from app.calculations.kostenschaetzung import index_faktor  # Baupreisindex — gleiche Logik wie im alten System
-from app.data.bkp_positionen import BKP_GRUPPEN, filter_positionen, treiber_fuer_bkp
+from app.data.bkp_positionen import BKP_GRUPPEN, abgabe_klassen_von, filter_positionen, treiber_fuer_bkp
 
 WOHNNUTZUNGEN = {"MFH", "EFH"}
 BKP_GRUPPEN_ALLE = ["241", "242", "243", "247", "248", "249"]
@@ -41,13 +41,15 @@ _WP_KATALOG = {"sole": "sole_wasser", "luft": "luft_wasser", "wasser": "wasser_w
 
 # ── Zeitgewicht ──────────────────────────────────────────────────────────────
 
-def zeitgewicht(alter_jahre: float, halbwertszeit_jahre: float = 3.0) -> float:
-    """Exponentieller Zerfall: neuere Referenzen zählen mehr. Bei
-    Halbwertszeit 3.0 Jahre: 3 Jahre alt → 0.5, heute (0 Jahre) → 1.0."""
+def zeitgewicht(alter_jahre: float, reduktion_pro_jahr: float = 0.01, minimum: float = 0.90) -> float:
+    """SEHR milde Aktualitäts-Reduktion (Dominic 2026-07-19): neuere Referenzen
+    zählen nur MINIMAL mehr — die Preis-Teuerung korrigiert bereits der
+    Baupreisindex, darum darf das Alter nicht ein zweites Mal stark bestrafen.
+    1 % Abzug pro Jahr, nie unter 90 %. Beispiel: 4 Jahre alt → 0.96, heute → 1.0.
+    (Früher exponentiell mit Halbwertszeit 3 J. — viel zu streng: 4 Jahre → nur 0.40.)"""
     if alter_jahre < 0:
         alter_jahre = 0.0
-    lam = math.log(2) / halbwertszeit_jahre
-    return math.exp(-lam * alter_jahre)
+    return max(minimum, 1.0 - reduktion_pro_jahr * alter_jahre)
 
 
 def alter_in_jahren(datum_abrechnung: date, heute: Optional[date] = None) -> float:
@@ -58,10 +60,13 @@ def alter_in_jahren(datum_abrechnung: date, heute: Optional[date] = None) -> flo
 # ── Ähnlichkeitssuche ───────────────────────────────────────────────────────
 
 def hard_filter(kandidat: dict, ziel: dict) -> bool:
-    """Muss identisch sein, sonst scheidet die Referenz aus: Wärmepumpen-Art,
-    Projektart, Erdsonden ja/nein."""
+    """Muss EXAKT identisch sein, sonst scheidet die Referenz aus (Dominic
+    2026-07-19): Nutzung/Gebäudekategorie, Wärmepumpen-Art, Projektart,
+    Erdsonden ja/nein. Die Wärmeabgabe ist bewusst NICHT hier — sie steuert
+    nur, welche Kosten-Positionen übernommen werden (siehe schaetze_position)."""
     return (
-        kandidat.get("wp_typ") == ziel.get("wp_typ")
+        kandidat.get("nutzung") == ziel.get("nutzung")
+        and kandidat.get("wp_typ") == ziel.get("wp_typ")
         and kandidat.get("projektart") == ziel.get("projektart")
         and bool(kandidat.get("hat_erdsonden")) == bool(ziel.get("hat_erdsonden"))
     )
@@ -106,14 +111,40 @@ def bww_naehe(a, b) -> float:
     return 1.0 if bool(a) == bool(b) else 0.0
 
 
+def zertifizierungs_naehe(a, b) -> float:
+    """Gebäudestandard (Minergie, Minergie-P …). Gleiche Zertifizierung 1.0,
+    beide unbekannt neutral 1.0, eine unbekannt 0.5, sonst 0.3 — ein höherer
+    Standard treibt die Kosten, darum zählen Referenzen mit gleichem Standard
+    mehr. Weich, kein Hard-Filter."""
+    if not a and not b:
+        return 1.0
+    if not a or not b:
+        return 0.5
+    return 1.0 if a == b else 0.3
+
+
+def einheiten_naehe(a, b) -> float:
+    """Anzahl Nutzeinheiten. Beide unbekannt → neutral 1.0, eine unbekannt → 0.5,
+    sonst Verhältnis min/max (8 vs. 10 → 0.8). Neutral bei Unbekannt, damit ein
+    fehlender Wert die Ähnlichkeit nicht künstlich drückt (wie bei BWW)."""
+    if not a and not b:
+        return 1.0
+    if not a or not b:
+        return 0.5
+    return min(a, b) / max(a, b)
+
+
 def aehnlichkeits_score(kandidat: dict, ziel: dict) -> float:
-    """Gewichtete Summe (0..1) der weichen Ähnlichkeits-Merkmale."""
+    """Gewichtete Summe (0..1) der WEICHEN Ähnlichkeits-Merkmale (Summe = 1.0).
+    Spec Dominic 2026-07-19: Nutzung ist neu HART (raus aus dem Score), die
+    Wärmeabgabe steuert nur die Kosten-Positionen (auch raus). Übrig als weiche
+    Merkmale: EBF, kW, Zertifizierung, Anzahl Einheiten, BWW-Schnittstelle."""
     return (
         0.30 * groessennaehe(kandidat.get("ebf_m2"), ziel.get("ebf_m2"))
-        + 0.25 * groessennaehe(kandidat.get("leistung_kw"), ziel.get("leistung_kw"))
-        + 0.20 * nutzungsnaehe(kandidat.get("nutzung"), ziel.get("nutzung"))
-        + 0.15 * abgabetyp_naehe(kandidat.get("abgabe_dominant"), ziel.get("abgabe_dominant"))
-        + 0.10 * bww_naehe(kandidat.get("bww_bei_heizung"), ziel.get("bww_bei_heizung"))
+        + 0.26 * groessennaehe(kandidat.get("leistung_kw"), ziel.get("leistung_kw"))
+        + 0.16 * zertifizierungs_naehe(kandidat.get("zertifizierung"), ziel.get("zertifizierung"))
+        + 0.16 * einheiten_naehe(kandidat.get("anzahl_ne"), ziel.get("anzahl_ne"))
+        + 0.12 * bww_naehe(kandidat.get("bww_bei_heizung"), ziel.get("bww_bei_heizung"))
     )
 
 
@@ -211,9 +242,15 @@ def _effektiver_treiber(bkp_nr: str, ziel: dict) -> str:
 
 def schaetze_position(pos: dict, segment: list, ziel: dict) -> dict:
     """Eine BKP-Einzelposition schätzen: gewichteter Kennwert (Betrag ÷
-    Bezugsgrösse) über ALLE Segment-Referenzen — Referenz ohne diese Position
-    zählt mit 0 — × Bezugsgrösse des Zielprojekts."""
+    Bezugsgrösse) über die passenden Segment-Referenzen — Referenz ohne diese
+    Position zählt mit 0 — × Bezugsgrösse des Zielprojekts.
+
+    Wärmeabgabe-Position (243.2*/3*/4*, `pos["abgabe"]` gesetzt): es zählen NUR
+    Referenzen, die genau diese Abgabe hatten (Dominic 2026-07-19). Eine reine
+    Heizkörper-Referenz verwässert so den Fussbodenheizungs-Kennwert NICHT auf 0.
+    Gemeinsame Positionen (`abgabe` None) mitteln wie bisher über das ganze Segment."""
     bkp_nr = pos["bkp_nr"]
+    pos_abgabe = pos.get("abgabe")  # None|"flaeche"|"koerper"|"deckenstrahl"|"luft"
     treiber = _effektiver_treiber(bkp_nr, ziel)
     feld = _TREIBER_ZIEL_FELD[treiber]
     ziel_treiber = ziel.get(feld)
@@ -221,6 +258,8 @@ def schaetze_position(pos: dict, segment: list, ziel: dict) -> dict:
     kennwerte, gewichte = [], []
     abdeckung = 0  # Referenzen, die diese Position tatsächlich hatten (>0)
     for r in segment:
+        if pos_abgabe is not None and pos_abgabe not in (r.get("abgabe_klassen") or set()):
+            continue  # Abgabe-Position: nur Referenzen mit genau dieser Wärmeabgabe
         drv = r.get(feld)
         if not drv or drv <= 0:
             continue  # Referenz ohne diese Bezugsgrösse — nicht normierbar
@@ -272,7 +311,12 @@ def berechne_grobkostenschaetzung(ziel: dict, referenzen_roh: list, faktoren: li
     korr = wende_korrekturfaktoren_an(1.0, ziel, faktoren)
     faktor = korr["betrag"]  # gemeinsamer Multiplikator für alle Positionen
 
-    positionen = filter_positionen(_WP_KATALOG.get(ziel.get("wp_typ")), ziel.get("nutzung"))
+    # Wärmeabgabe filtert die Verteil-Positionen: ein reines FBH-Projekt bekommt
+    # keine Heizkörper-/Luftheizapparate-Positionen mehr (Dominic 2026-07-19).
+    positionen = filter_positionen(
+        _WP_KATALOG.get(ziel.get("wp_typ")), ziel.get("nutzung"),
+        abgabe_klassen_von(ziel.get("waermeabgabe")),
+    )
 
     gruppen_map = {}
     for pos in positionen:

@@ -2,9 +2,9 @@
 vollständig von Dominic geliefert — inkl. Tank/Gas/Öl, die früher weggelassen
 waren; sein schriftliches Leistungsverzeichnis ist massgebend).
 
-- wp_typen None  → Position gilt für alle Wärmepumpen-Typen (und für Gas/Öl/Tank,
-  die keinem WP-Typ zugeordnet sind — sie erscheinen im Norm-LV, bleiben bei
-  Wärmepumpen-Projekten mangels Referenzdaten aber bei 0).
+- wp_typen None  → keine Einschränkung auf einen Wärmepumpen-Typ.
+- erzeuger gesetzt → Position erscheint nur, wenn mindestens einer dieser
+  bestehenden Wärmeerzeuger im Zielprojekt ausgewählt ist.
 - kategorien None → Position gilt für alle Gebäudekategorien.
 """
 
@@ -18,10 +18,13 @@ BKP_GRUPPEN = {
 }
 
 
-def _p(nr, bezeichnung, wp_typen=None, kategorien=None, abgabe=None):
+def _p(nr, bezeichnung, wp_typen=None, kategorien=None, abgabe=None, erzeuger=None):
     # abgabe (None|"koerper"|"flaeche"|"deckenstrahl"|"luft"): Verteil-Position gilt
     # nur für die passende Wärmeabgabe. None = gilt immer (Rohre, Regelung, Montage …).
-    return {"bkp_nr": nr, "bezeichnung": bezeichnung, "wp_typen": wp_typen, "kategorien": kategorien, "abgabe": abgabe}
+    return {
+        "bkp_nr": nr, "bezeichnung": bezeichnung, "wp_typen": wp_typen,
+        "kategorien": kategorien, "abgabe": abgabe, "erzeuger": erzeuger,
+    }
 
 
 SOLE = ["sole_wasser"]
@@ -29,17 +32,17 @@ ALLE_WP = ["sole_wasser", "luft_wasser", "wasser_wasser"]
 
 BKP_POSITIONEN = [
     # 241 — Energielagerung
-    _p("241.1a", "Tank aus Kunststoff"),
-    _p("241.1b", "Tank aus Stahl"),
-    _p("241.2", "Montage / Transport"),
+    _p("241.1a", "Tank aus Kunststoff", erzeuger=["Öl"]),
+    _p("241.1b", "Tank aus Stahl", erzeuger=["Öl"]),
+    _p("241.2", "Montage / Transport", erzeuger=["Öl"]),
     _p("241.10", "Expansion und Sicherheit Primärkreis WP / Erdsondensammler", SOLE),
     _p("241.11", "Rohrleitungen Primärkreis WP / Erdsondensammler", SOLE),
     _p("241.12", "Apparate / Armaturen Primärkreis WP / Erdsondensammler", SOLE),
     _p("241.13", "Montage / Transport Primärkreis WP / Erdsondensammler", SOLE),
     _p("241.14", "Erdsonden und Zubehör", SOLE),
     # 242 — Wärmeerzeugung
-    _p("242.1", "Gasheizkessel"),
-    _p("242.2", "Ölheizkessel"),
+    _p("242.1", "Gasheizkessel", erzeuger=["Gas"]),
+    _p("242.2", "Ölheizkessel", erzeuger=["Öl"]),
     _p("242.3", "Wärmepumpe Sole/Wasser", ["sole_wasser"]),
     _p("242.4", "Wärmepumpe Luft/Wasser", ["luft_wasser"]),
     _p("242.5", "Wärmepumpe Wasser/Wasser", ["wasser_wasser"]),
@@ -125,13 +128,31 @@ def abgabe_klassen_von(waermeabgabe) -> set:
     return {_ABGABE_KLASSE[a] for a in (waermeabgabe or []) if a in _ABGABE_KLASSE}
 
 
-def filter_positionen(wp_typ: str = None, kategorie: str = None, abgabe_klassen=None) -> list:
+_WP_ERZEUGER_ZU_KATALOG = {
+    "Erdsonden-WP": "sole_wasser",
+    "Luft/Wasser-WP": "luft_wasser",
+    "Wasser/Wasser-WP": "wasser_wasser",
+}
+
+
+def filter_positionen(wp_typ: str = None, kategorie: str = None, abgabe_klassen=None,
+                      waermeerzeuger=None) -> list:
     """Nur die relevanten Positionen für WP-Typ + Gebäudekategorie + Wärmeabgabe.
     abgabe_klassen leer/None = Abgabe unbekannt → nicht danach filtern."""
     out = []
+    erzeuger_auswahl = set(waermeerzeuger or []) if waermeerzeuger is not None else None
+    wp_katalog_auswahl = {
+        _WP_ERZEUGER_ZU_KATALOG[e] for e in (erzeuger_auswahl or set())
+        if e in _WP_ERZEUGER_ZU_KATALOG
+    }
     for p in BKP_POSITIONEN:
-        if wp_typ and p["wp_typen"] is not None and wp_typ not in p["wp_typen"]:
-            continue
+        if erzeuger_auswahl is not None:
+            if p.get("erzeuger") and not (set(p["erzeuger"]) & erzeuger_auswahl):
+                continue
+            if p["wp_typen"] is not None and not (set(p["wp_typen"]) & wp_katalog_auswahl):
+                continue
+        elif wp_typ and p["wp_typen"] is not None and wp_typ not in p["wp_typen"]:
+            continue  # Rückwärtskompatibilität für bestehende Katalog-Aufrufe
         if kategorie and p["kategorien"] is not None and kategorie not in p["kategorien"]:
             continue
         if abgabe_klassen and p.get("abgabe") is not None and p["abgabe"] not in abgabe_klassen:

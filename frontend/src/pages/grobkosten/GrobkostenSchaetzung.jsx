@@ -5,17 +5,20 @@
 // Ergebnis bleiben pro Projekt gespeichert.
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { AlertTriangle, Calculator, ChevronRight, Database, RefreshCw, RotateCcw } from "lucide-react";
+import {
+  AlertTriangle, Calculator, Check, ChevronRight, Database,
+  FileSpreadsheet, FileText, Pencil, RefreshCw, RotateCcw, X,
+} from "lucide-react";
 import {
   bauindexAutomatischAktualisieren, getBauindex, getProject,
-  gkProjektGet, gkProjektSave,
+  gkProjektExportExcel, gkProjektExportPdf, gkProjektGet, gkProjektSave,
 } from "../../api/hcApi";
 import CheckboxGruppe from "../../components/kv/CheckboxGruppe";
 import InfoTip from "../../components/ui/InfoTip";
 import PageHeader from "../../components/ui/PageHeader";
 import GewerkLeiste from "../../components/ui/GewerkLeiste";
 import { WAERMEABGABE, WAERMEERZEUGER, ZERTIFIZIERUNGEN } from "../../data/kv";
-import { chf, gruppeInfo, num, NUTZUNGEN, pct, PROJEKTARTEN } from "../../data/gk";
+import { chf, gruppeInfo, num, NUTZUNGEN, PROJEKTARTEN } from "../../data/gk";
 
 const LEER = {
   ebf_m2: "", leistung_kw: "", anzahl_ne: "", nutzung: "MFH", projektart: "Neubau", zertifizierung: "",
@@ -61,7 +64,10 @@ export default function GrobkostenSchaetzung() {
   const [laden, setLaden] = useState(false);
   const [fehler, setFehler] = useState("");
   const [offen, setOffen] = useState(null);
+  const [betragBearbeiten, setBetragBearbeiten] = useState(null);
+  const [exportLaedt, setExportLaedt] = useState("");
   const timer = useRef(null);
+  const autoRechnenUeberspringen = useRef(false);
 
   const ladeIndexStand = useCallback(
     () => getBauindex().then((e) => setIndexStand(e[0]?.periode || null)).catch(() => {}), []);
@@ -114,6 +120,10 @@ export default function GrobkostenSchaetzung() {
 
   useEffect(() => {
     if (!result || !gueltig) return;
+    if (autoRechnenUeberspringen.current) {
+      autoRechnenUeberspringen.current = false;
+      return;
+    }
     clearTimeout(timer.current);
     timer.current = setTimeout(() => rechnen(form), 600);
     return () => clearTimeout(timer.current);
@@ -145,14 +155,41 @@ export default function GrobkostenSchaetzung() {
     ...f,
     ignorierte_warnungen: (f.ignorierte_warnungen || []).filter((x) => x !== warnungId),
   }));
-  const manuellenBetragSetzen = (bkpNr, wert) => setForm((f) => {
-    const alle = { ...(f.manuelle_betraege || {}) };
+  const manuellenBetragSetzen = (bkpNr, wert) => {
+    const alle = { ...(form.manuelle_betraege || {}) };
     const aktuell = { ...(alle[variante] || {}) };
     if (wert === "") delete aktuell[bkpNr];
     else aktuell[bkpNr] = wert;
     alle[variante] = aktuell;
-    return { ...f, manuelle_betraege: alle };
-  });
+    const neu = { ...form, manuelle_betraege: alle };
+    clearTimeout(timer.current);
+    autoRechnenUeberspringen.current = true;
+    setForm(neu);
+    rechnen(neu);
+  };
+
+  const exportieren = async (format) => {
+    setExportLaedt(format);
+    setFehler("");
+    try {
+      const blob = format === "pdf"
+        ? await gkProjektExportPdf(id, variante)
+        : await gkProjektExportExcel(id, variante);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const projektName = (projekt?.name || "Projekt").replace(/[^A-Za-z0-9_-]+/g, "_");
+      a.download = `${projektName}_Grobkostenschaetzung_${variante}.${format === "pdf" ? "pdf" : "xlsx"}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setFehler(err?.response?.data?.detail || `${format.toUpperCase()}-Export fehlgeschlagen.`);
+    } finally {
+      setExportLaedt("");
+    }
+  };
 
   return (
     <div className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8">
@@ -273,7 +310,7 @@ export default function GrobkostenSchaetzung() {
           )}
 
           {aktiv && aktiv.referenzen_gefunden === 0 && (
-            <div className="card border-amber-200 bg-amber-50/50 px-5 py-5">
+            <div className="card border-red-200 bg-red-50/60 px-5 py-5">
               <h3 className="text-sm font-bold text-slate-800">Keine passenden Referenzprojekte gefunden</h3>
               <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
                 Damit eine Referenz zählt, müssen <b>Nutzung</b> (z.B. MFH), <b>Wärmepumpen-Art</b>,
@@ -286,9 +323,20 @@ export default function GrobkostenSchaetzung() {
 
           {aktiv && (
             <>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-xs text-slate-500">Exportiert wird die aktuell gewählte {variante}-Variante inklusive manueller Beträge.</p>
+                <div className="flex gap-2">
+                  <button type="button" className="btn-secondary" disabled={!!exportLaedt || laden} onClick={() => exportieren("pdf")}>
+                    <FileText className="size-4" /> {exportLaedt === "pdf" ? "PDF wird erstellt…" : "PDF"}
+                  </button>
+                  <button type="button" className="btn-secondary" disabled={!!exportLaedt || laden} onClick={() => exportieren("excel")}>
+                    <FileSpreadsheet className="size-4" /> {exportLaedt === "excel" ? "Excel wird erstellt…" : "Excel"}
+                  </button>
+                </div>
+              </div>
               {positionenOhneAngabe.length > 0 && !ignorierteWarnungen.has("gesamt:unvollstaendig") && (
-                <div className="card flex items-start gap-2 border-amber-200 bg-amber-50/60 px-4 py-3 text-sm text-amber-800">
-                  <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                <div className="card flex items-start gap-2 border-red-200 bg-red-50/60 px-4 py-3 text-sm text-red-800">
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0 text-red-600" />
                   <span className="flex-1">
                     <b>Schätzung unvollständig:</b> für {positionenOhneAngabe.length} Position{positionenOhneAngabe.length > 1 ? "en" : ""} ({positionenOhneAngabe.map((p) => p.bkp_nr).join(", ")})
                     {" "}gibt es keine passende Referenz mit Kostenangabe — sie fehlen im Total und müssen manuell geschätzt werden.
@@ -350,8 +398,9 @@ export default function GrobkostenSchaetzung() {
                     </thead>
                     <tbody>
                       {aktiv.gruppen.map((g) => (
-                        <GruppenBlock key={g.gruppe_nr} g={g} ziel={form} projektId={id}
+                        <GruppenBlock key={g.gruppe_nr} g={g} projektId={id}
                           variante={variante} offen={offen} setOffen={setOffen}
+                          betragBearbeiten={betragBearbeiten} setBetragBearbeiten={setBetragBearbeiten}
                           manuelleBetraege={form.manuelle_betraege?.[variante] || {}}
                           manuellenBetragSetzen={manuellenBetragSetzen}
                           ignorierteWarnungen={ignorierteWarnungen}
@@ -421,7 +470,8 @@ export default function GrobkostenSchaetzung() {
 }
 
 function GruppenBlock({
-  g, ziel, projektId, variante, offen, setOffen, manuelleBetraege,
+  g, projektId, variante, offen, setOffen, manuelleBetraege,
+  betragBearbeiten, setBetragBearbeiten,
   manuellenBetragSetzen, ignorierteWarnungen, warnungIgnorieren, warnungWiederherstellen,
 }) {
   const info = gruppeInfo(g.gruppe_nr);
@@ -486,13 +536,24 @@ function GruppenBlock({
               <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">
                 {hatBerechnung ? `${num(p.kennwert)} ${p.einheit}` : "–"}
               </td>
-              <td className={"px-2 py-1.5 text-right font-medium tabular-nums " + (hasBetrag ? "text-slate-900" : "text-amber-700")}>
-                {hasBetrag ? chf(p.betrag) : "Keine Angaben – manuell schätzen"}
+              <td className={"px-2 py-1.5 text-right font-medium tabular-nums " + (hasBetrag ? "text-slate-900" : "text-red-700")}>
+                <span className="inline-flex items-center justify-end gap-1.5">
+                  <span>{hasBetrag ? chf(p.betrag) : "Keine Angaben"}</span>
+                  <button type="button" title="Betrag bearbeiten"
+                    className="rounded p-1 text-slate-400 hover:bg-blue-50 hover:text-blue-700"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setOffen(key);
+                      setBetragBearbeiten(key);
+                    }}>
+                    <Pencil className="size-3.5" />
+                  </button>
+                </span>
               </td>
               <td className="px-2 py-1.5">
                 <span className="inline-flex items-center gap-1">
                   {hatWarnung && !warnungIgnoriert
-                    ? <AlertTriangle className="size-3.5 text-amber-500" title="Keine Angaben" />
+                    ? <AlertTriangle className={`size-3.5 ${keineAngaben ? "text-red-500" : "text-amber-500"}`} title={p.status_datenbasis} />
                     : <VertrauenPunkt stufe={p.vertrauen} />}
                   <ChevronRight className={`size-3.5 text-slate-300 transition ${auf ? "rotate-90" : ""}`} />
                 </span>
@@ -503,8 +564,10 @@ function GruppenBlock({
                 <td />
                 <td colSpan={4} className="px-2 py-2 text-xs leading-relaxed text-slate-600">
                   {keineAngaben ? (
-                    <div className="flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-amber-800">
-                      <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                    <div className={`flex items-start gap-1.5 rounded-md border px-2 py-1.5 ${warnungIgnoriert
+                      ? "border-slate-200 bg-slate-50 text-slate-500"
+                      : "border-red-200 bg-red-50 text-red-800"}`}>
+                      {!warnungIgnoriert && <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />}
                       <span className="flex-1">
                         Keine passende Referenz mit einer Kostenangabe gefunden. Von {p.grundsegment} grundsätzlich
                         passenden Projekten {p.passende_abgabe < p.grundsegment
@@ -543,25 +606,20 @@ function GruppenBlock({
                     </div>
                   )}
 
-                  <div className="mt-3 rounded-md border border-slate-200 bg-white p-3">
-                    <div className="flex flex-wrap items-end gap-2">
-                      <label className="min-w-[220px] flex-1">
-                        <span className="mb-1 block font-semibold text-slate-700">Manueller Endbetrag ({variante})</span>
-                        <input type="number" min="0" step="100" className="input" value={manuelleBetraege[key] ?? ""}
-                          placeholder={hatBerechnung ? String(Math.round(p.berechneter_betrag)) : "Betrag in CHF eingeben"}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={(e) => manuellenBetragSetzen(key, e.target.value)} />
-                      </label>
-                      {p.quelle === "manuell" && (
-                        <button type="button" className="btn-secondary" onClick={() => manuellenBetragSetzen(key, "")}>
-                          Berechnung verwenden
-                        </button>
-                      )}
-                    </div>
-                    <p className="mt-1 text-[11px] text-slate-400">
-                      Der manuelle Betrag ersetzt für diese Variante den Referenzwert im Gruppen- und Gesamttotal.
-                    </p>
-                  </div>
+                  <ManuellerBetragEditor
+                    key={`${key}-${manuelleBetraege[key] ?? "leer"}`}
+                    p={p} variante={variante} wert={manuelleBetraege[key]}
+                    autoFocus={betragBearbeiten === key}
+                    onSpeichern={(wert) => {
+                      manuellenBetragSetzen(key, wert);
+                      setBetragBearbeiten(null);
+                    }}
+                    onBerechnung={() => {
+                      manuellenBetragSetzen(key, "");
+                      setBetragBearbeiten(null);
+                    }}
+                    onAbbrechen={() => setBetragBearbeiten(null)}
+                  />
 
                   <div className="mt-3 overflow-x-auto rounded-md border border-slate-200 bg-white">
                     <div className="border-b border-slate-100 px-3 py-2 font-semibold text-slate-700">Herkunft und Projektvergleich – eingerechnete Projekte</div>
@@ -600,11 +658,53 @@ function GruppenBlock({
   );
 }
 
+function ManuellerBetragEditor({ p, variante, wert, autoFocus, onSpeichern, onBerechnung, onAbbrechen }) {
+  const [eingabe, setEingabe] = useState(wert ?? "");
+  const inputRef = useRef(null);
+  useEffect(() => { if (autoFocus) inputRef.current?.focus(); }, [autoFocus]);
+  const zahlWert = eingabe === "" ? null : Number(eingabe);
+  const gueltig = zahlWert != null && Number.isFinite(zahlWert) && zahlWert >= 0;
+  return (
+    <form className={`mt-3 rounded-md border p-3 ${autoFocus ? "border-blue-300 bg-blue-50/40" : "border-slate-200 bg-white"}`}
+      onSubmit={(e) => { e.preventDefault(); if (gueltig) onSpeichern(zahlWert); }}>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-1">
+        <div>
+          <div className="font-semibold text-slate-700">Betrag festlegen ({variante})</div>
+          <div className="text-[11px] text-slate-400">
+            {p.berechneter_betrag != null
+              ? <>Berechneter Vorschlag: <b>{chf(p.berechneter_betrag)}</b></>
+              : "Kein berechneter Vorschlag vorhanden."}
+          </div>
+        </div>
+        {p.quelle === "manuell" && <span className="rounded bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-700">Manueller Wert aktiv</span>}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-[220px] flex-1">
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 font-semibold text-slate-400">CHF</span>
+          <input ref={inputRef} type="number" min="0" step="100" className="input pl-12 text-right font-semibold tabular-nums"
+            value={eingabe} placeholder="Betrag eingeben"
+            onChange={(e) => setEingabe(e.target.value)} />
+        </div>
+        <button type="submit" className="btn-primary" disabled={!gueltig}>
+          <Check className="size-4" /> Übernehmen
+        </button>
+        {p.quelle === "manuell" && (
+          <button type="button" className="btn-secondary" onClick={onBerechnung}>
+            <RotateCcw className="size-4" /> {p.berechneter_betrag != null ? "Vorschlag verwenden" : "Manuellen Wert entfernen"}
+          </button>
+        )}
+        {autoFocus && <button type="button" className="rounded p-2 text-slate-400 hover:bg-slate-100" title="Abbrechen" onClick={onAbbrechen}><X className="size-4" /></button>}
+      </div>
+      <p className="mt-1.5 text-[11px] text-slate-400">Erst mit «Übernehmen» wird der Wert gespeichert und in das Total aufgenommen.</p>
+    </form>
+  );
+}
+
 function VertrauenPunkt({ stufe }) {
   // Bei niedrigem Vertrauen ein Warndreieck statt nur Punkt — deutlich sichtbarer
   // (Dominic 2026-07-19), weil ein Einzelfall-Kennwert leicht übersehen wird.
   if (stufe === "niedrig") {
-    return <AlertTriangle className="inline size-3.5 text-red-500" title="Vertrauen niedrig — dünne Datenbasis" />;
+    return <AlertTriangle className="inline size-3.5 text-amber-500" title="Vertrauen niedrig — dünne Datenbasis" />;
   }
   const farbe = { hoch: "bg-green-500", mittel: "bg-amber-500" }[stufe] || "bg-slate-300";
   return <span className={`inline-block size-2 rounded-full ${farbe}`} title={`Vertrauen ${stufe}`} />;

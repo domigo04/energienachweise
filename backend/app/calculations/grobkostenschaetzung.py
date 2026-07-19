@@ -463,6 +463,7 @@ def berechne_grobkostenschaetzung(ziel: dict, referenzen_roh: list, faktoren: li
     positionen = filter_positionen(
         _WP_KATALOG.get(ziel.get("wp_typ")), ziel.get("nutzung"),
         abgabe_klassen_von(ziel.get("waermeabgabe")),
+        ziel.get("waermeerzeuger"),
     )
 
     gruppen_map = {}

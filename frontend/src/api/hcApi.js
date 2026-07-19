@@ -92,6 +92,10 @@ export const importRefsCsv = (file) => {
 export const gkSchaetzen = (data) => api.post(`${BASE}/grobkostenschaetzung/schaetzen`, data).then(r => r.data);
 export const gkProjektGet = (projectId) => api.get(`${BASE}/grobkostenschaetzung/projekt/${projectId}`).then(r => r.data);
 export const gkProjektSave = (projectId, data) => api.put(`${BASE}/grobkostenschaetzung/projekt/${projectId}`, data).then(r => r.data);
+export const gkProjektExportPdf = (projectId, variante) =>
+  api.get(`${BASE}/grobkostenschaetzung/projekt/${projectId}/export.pdf`, { params: { variante }, responseType: "blob" }).then(r => r.data);
+export const gkProjektExportExcel = (projectId, variante) =>
+  api.get(`${BASE}/grobkostenschaetzung/projekt/${projectId}/export.xlsx`, { params: { variante }, responseType: "blob" }).then(r => r.data);
 export const gkFaktoren = () => api.get(`${BASE}/grobkostenschaetzung/korrekturfaktoren`).then(r => r.data);
 export const gkPatchFaktor = (id, data) => api.patch(`${BASE}/grobkostenschaetzung/korrekturfaktoren/${id}`, data).then(r => r.data);
 export const gkBeispieldatenLaden = () => api.post(`${BASE}/grobkostenschaetzung/beispieldaten`).then(r => r.data);

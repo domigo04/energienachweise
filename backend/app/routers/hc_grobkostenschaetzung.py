@@ -15,10 +15,12 @@ bereits auf Positions-Ebene erfasst (RefKostenzeile.bkp_nr = z.B. «243.1»), de
 Adapter reicht sie brutto und netto durch.
 """
 import json
+import re
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.encoders import jsonable_encoder
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -28,6 +30,10 @@ from app.calculations.kostenschaetzung import netto_aus_brutto
 from app.data.beispiel_referenzprojekte import BEISPIEL_PREFIX, BEISPIEL_PROJEKTE
 from app.data.bkp_positionen import BKP_POSITIONEN, abgabe_klassen_von
 from app.database import get_db
+from app.export.grobkostenschaetzung import (
+    erzeuge_grobkostenschaetzung_excel,
+    erzeuge_grobkostenschaetzung_pdf,
+)
 from app.models.auth import User
 from app.models.grobkostenschaetzung import Korrekturfaktor
 from app.models.heizungscockpit import HcProject
@@ -215,6 +221,56 @@ def compute_and_save(project_id: int, body: SchaetzungIn, user: User = Depends(g
     ks.result_json = json.dumps(result)
     db.commit()
     return {"inputs": inputs, "result": result}
+
+
+def _export_daten(project_id: int, variante: str, user: User, db: Session) -> tuple:
+    if variante not in {"brutto", "netto"}:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Variante muss brutto oder netto sein")
+    project = db.query(HcProject).filter(
+        HcProject.id == project_id, HcProject.tenant_id == user.tenant_id
+    ).first()
+    if not project:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Projekt nicht gefunden")
+    ks = db.query(Kostenschaetzung).filter(
+        Kostenschaetzung.project_id == project_id,
+        Kostenschaetzung.tenant_id == user.tenant_id,
+    ).first()
+    if not ks:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Noch keine Grobkostenschätzung gespeichert")
+    inputs = json.loads(ks.inputs_json or "{}")
+    result_alle = json.loads(ks.result_json or "{}")
+    result = result_alle.get(variante)
+    if not result:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Die Schätzung muss zuerst neu berechnet werden")
+    return project.name or "Projekt", inputs, result
+
+
+def _export_dateiname(projekt_name: str, variante: str, endung: str) -> str:
+    sicher = re.sub(r"[^A-Za-z0-9_-]+", "_", projekt_name).strip("_") or "Projekt"
+    return f"{sicher}_Grobkostenschaetzung_{variante}.{endung}"
+
+
+@router.get("/projekt/{project_id}/export.pdf")
+def export_pdf(project_id: int, variante: str = "netto",
+               user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    projekt_name, inputs, result = _export_daten(project_id, variante, user, db)
+    pdf = erzeuge_grobkostenschaetzung_pdf(projekt_name, inputs, result, variante)
+    return Response(
+        content=pdf, media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{_export_dateiname(projekt_name, variante, "pdf")}"'},
+    )
+
+
+@router.get("/projekt/{project_id}/export.xlsx")
+def export_excel(project_id: int, variante: str = "netto",
+                 user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    projekt_name, inputs, result = _export_daten(project_id, variante, user, db)
+    xlsx = erzeuge_grobkostenschaetzung_excel(projekt_name, inputs, result, variante)
+    return Response(
+        content=xlsx,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{_export_dateiname(projekt_name, variante, "xlsx")}"'},
+    )
 
 
 # ── Korrekturfaktoren (firmenweit) ──────────────────────────────────────────

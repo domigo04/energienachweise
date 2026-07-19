@@ -124,6 +124,47 @@ def test_filter_positionen_waermeabgabe_blendet_fremde_aus():
     assert {"243.2a", "243.3a", "243.4a"} <= alle
 
 
+def test_filter_positionen_blendet_oel_und_gas_bei_waermepumpe_aus():
+    positionen = {
+        p["bkp_nr"] for p in filter_positionen(
+            "sole_wasser", "MFH", {"flaeche"}, ["Erdsonden-WP"]
+        )
+    }
+    assert "242.3" in positionen
+    assert "241.14" in positionen
+    assert "241.1a" not in positionen
+    assert "241.1b" not in positionen
+    assert "241.2" not in positionen
+    assert "242.1" not in positionen
+    assert "242.2" not in positionen
+
+
+def test_filter_positionen_zeigt_nur_gewaehlten_fossilen_erzeuger():
+    gas = {p["bkp_nr"] for p in filter_positionen(None, "MFH", {"koerper"}, ["Gas"])}
+    assert "242.1" in gas
+    assert "242.2" not in gas
+    assert "241.1a" not in gas
+    assert "242.3" not in gas
+
+    oel = {p["bkp_nr"] for p in filter_positionen(None, "MFH", {"koerper"}, ["Öl"])}
+    assert {"241.1a", "241.1b", "241.2", "242.2"} <= oel
+    assert "242.1" not in oel
+    assert "242.3" not in oel
+
+
+def test_wp_schaetzung_enthaelt_keine_warnungen_fuer_oel_oder_gas_positionen():
+    ziel = {
+        "ebf_m2": 1000, "leistung_kw": 30, "anzahl_ne": 8, "nutzung": "MFH",
+        "projektart": "Neubau", "wp_typ": "sole", "hat_erdsonden": True,
+        "waermeerzeuger": ["Erdsonden-WP"], "waermeabgabe": ["FBH"],
+    }
+    result = berechne_grobkostenschaetzung(ziel, [], faktoren=[])
+    alle_bkp = {p["bkp_nr"] for g in result["gruppen"] for p in g["positionen"]}
+    irrelevante = {"241.1a", "241.1b", "241.2", "242.1", "242.2"}
+    assert not (alle_bkp & irrelevante)
+    assert not (set(result["fehlende_positionen"]) & irrelevante)
+
+
 def test_berechne_fbh_projekt_ohne_luftheizapparate():
     """End-to-end: ein reines FBH-Zielprojekt zeigt keine Luftheizapparate (243.4a),
     auch wenn eine gemischte Referenz solche Kosten hatte — nur die FBH-Kosten kommen."""

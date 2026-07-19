@@ -187,6 +187,27 @@ pro Projekt gespeichert (`Kostenschaetzung`-Tabelle, gleiche Mechanik wie frühe
 
 ## Nächste Schritte (Roadmap — Stand 2026-07-20, «◀ HIER» = aktueller Fokus)
 
+**✅ Erledigt — Transparenz Datengrundlage je BKP-Position (2026-07-20, 142/142 Tests grün, noch NICHT
+committet):** Chatbot (G3) zurückgestellt, Schema-Plugin-Wechsel bewusst vertagt (beides auf Dominics
+Wunsch). Keine neuen Eingabefelder, keine geänderte Auswahl — reine Transparenz.
+- **Neue Zähler je Position** (`schaetze_position`): `grundsegment` (Hard-Filter-Treffer),
+  `passende_abgabe` (davon mit passender Wärmeabgabe für GENAU diese Position), `mit_kostenangabe`
+  (davon mit echtem Betrag) — ersetzt/ergänzt das bisherige `abdeckung`/`n_referenzen`.
+- **`status_datenbasis`** (`_status_datenbasis`): 0 → «Keine Angaben» · 1 → «Einzelfall – nicht
+  belastbar» · 2–3 → «Sehr geringe Datengrundlage» · 4–7 → «Begrenzte Datengrundlage» · ab 8 → «Gute
+  Datengrundlage».
+- **UI** (`GrobkostenSchaetzung.jsx`): jede Position ist jetzt aufklappbar (auch ohne Betrag). Betrag 0 →
+  «Keine Angaben – manuell schätzen» statt stummem «–», mit Warndreieck statt Vertrauens-Punkt.
+  Einzelfall (`mit_kostenangabe === 1`) zeigt den geforderten Wortlaut («Diese Position basiert auf einem
+  Einzelfall. Von X grundsätzlich passenden Projekten hatten Y die passende Wärmeabgabe und nur 1 Projekt
+  enthält eine Kostenangabe …»). Gesamtschätzung zeigt oben eine Sammel-Warnung + «(unvollständig)» am
+  Total, wenn mindestens eine Position ganz ohne Kostenangabe blieb.
+- Tests: Wärmeerzeugung unabhängig von Wärmeabgabe, FBH ohne HK-Kosten, HK ohne FBH-Kosten (Spiegeltest),
+  Einzelfall-Hinweis, «Keine Angaben»-Hinweis, Zähler-Korrektheit — alle in `test_grobkostenschaetzung.py`.
+- **Nicht live im Browser verifiziert** — Login bräuchte ein Passwort-Feld, das ich grundsätzlich nicht
+  selbst ausfülle (Sicherheitsregel). Abgesichert über Frontend-Build (sauber) + 142/142 Backend-Tests.
+  **Bitte von Dominic im Browser gegentesten**, v.a. eine Position mit genau 1 Referenz und eine ganz ohne.
+
 **✅ Erledigt — Ladezeit Projektliste (2026-07-20, Tests grün, noch NICHT committet):**
 Nachgewiesenes N+1: `GET /api/v1/projects` lud pro Projekt `base_data` einzeln nach (1 + N Abfragen;
 14 Projekte → 15 SELECTs, auf Railway je ein Roundtrip). Fix: `base_data` aus `ProjectOut` (Liste) in

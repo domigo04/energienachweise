@@ -278,6 +278,20 @@ def _vertrauen_aus_abdeckung(abdeckung: int) -> str:
     return "keine Daten"
 
 
+def _status_datenbasis(abdeckung: int) -> str:
+    """Transparenz der Datengrundlage — wie zuverlässig ist diese Position?
+    (Dominic 2026-07-20)."""
+    if abdeckung == 0:
+        return "Keine Angaben"
+    if abdeckung == 1:
+        return "Einzelfall – nicht belastbar"
+    if abdeckung <= 3:
+        return "Sehr geringe Datengrundlage"
+    if abdeckung <= 7:
+        return "Begrenzte Datengrundlage"
+    return "Gute Datengrundlage"
+
+
 def _effektiver_treiber(bkp_nr: str, ziel: dict) -> str:
     """Bezugsgrösse einer Position — oder Rückfall, wenn das Zielprojekt sie
     nicht kennt (z.B. Bohrmeter nicht angegeben)."""
@@ -306,9 +320,12 @@ def schaetze_position(pos: dict, segment: list, ziel: dict) -> dict:
 
     kennwerte, gewichte = [], []
     abdeckung = 0  # Referenzen, die diese Position tatsächlich hatten (>0)
+    grundsegment = len(segment)
+    passende_abgabe = 0  # Referenzen mit passender Abgabe (für diese Position)
     for r in segment:
         if pos_abgabe is not None and pos_abgabe not in (r.get("abgabe_klassen") or set()):
             continue  # Abgabe-Position: nur Referenzen mit genau dieser Wärmeabgabe
+        passende_abgabe += 1
         drv = r.get(feld)
         if not drv or drv <= 0:
             continue  # Referenz ohne diese Bezugsgrösse — nicht normierbar
@@ -323,6 +340,11 @@ def schaetze_position(pos: dict, segment: list, ziel: dict) -> dict:
         "einheit": _TREIBER_EINHEIT[treiber], "kennwert": 0.0, "betrag": 0.0,
         "abdeckung": abdeckung, "n_referenzen": len(kennwerte),
         "segment_groesse": len(segment),  # Gesamtzahl passender Referenzen (Nenner für «X von Y»)
+        # Transparenz: wie zuverlässig ist diese Position? (Dominic 2026-07-20)
+        "grundsegment": grundsegment,
+        "passende_abgabe": passende_abgabe,
+        "mit_kostenangabe": abdeckung,
+        "status_datenbasis": _status_datenbasis(abdeckung),
         "vertrauen": _vertrauen_aus_abdeckung(abdeckung), "ziel_treiber": ziel_treiber,
         "bandbreite": None,
     }

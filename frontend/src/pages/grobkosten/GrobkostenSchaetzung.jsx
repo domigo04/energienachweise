@@ -133,6 +133,9 @@ export default function GrobkostenSchaetzung() {
 
   const aktiv = result?.[variante];
   const refsVerwendet = aktiv?.referenzen_verwendet || [];
+  // Gesamtschätzung ist unvollständig, wenn mindestens eine Position komplett
+  // ohne Kostenangabe blieb — die Summe unterschätzt dann real (Dominic 2026-07-20).
+  const positionenOhneAngabe = aktiv?.gruppen.flatMap((g) => g.positionen).filter((p) => p.status_datenbasis === "Keine Angaben") || [];
 
   return (
     <div className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8">
@@ -266,6 +269,16 @@ export default function GrobkostenSchaetzung() {
 
           {aktiv && aktiv.referenzen_gefunden > 0 && (
             <>
+              {positionenOhneAngabe.length > 0 && (
+                <div className="card flex items-start gap-2 border-amber-200 bg-amber-50/60 px-4 py-3 text-sm text-amber-800">
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                  <span>
+                    <b>Schätzung unvollständig:</b> für {positionenOhneAngabe.length} Position{positionenOhneAngabe.length > 1 ? "en" : ""} ({positionenOhneAngabe.map((p) => p.bkp_nr).join(", ")})
+                    {" "}gibt es keine passende Referenz mit Kostenangabe — sie fehlen im Total und müssen manuell geschätzt werden.
+                  </span>
+                </div>
+              )}
+
               {/* Kopf: Gesamt + Brutto/Netto-Umschalter + Datenbasis */}
               <div className="grid gap-4 sm:grid-cols-3">
                 <div className="card px-5 py-4">
@@ -314,7 +327,10 @@ export default function GrobkostenSchaetzung() {
                         <GruppenBlock key={g.gruppe_nr} g={g} ziel={form} offen={offen} setOffen={setOffen} />
                       ))}
                       <tr className="border-t-2 border-slate-300 bg-slate-100 font-bold text-slate-900">
-                        <td className="px-4 py-3" colSpan={3}>Total BKP 24 Heizungsanlage</td>
+                        <td className="px-4 py-3" colSpan={3}>
+                          Total BKP 24 Heizungsanlage
+                          {positionenOhneAngabe.length > 0 && <span className="ml-2 text-xs font-normal text-amber-700">(unvollständig)</span>}
+                        </td>
                         <td className="px-2 py-3 text-right tabular-nums">{chf(aktiv.gesamt_betrag)}</td>
                         <td />
                       </tr>
@@ -402,45 +418,64 @@ function GruppenBlock({ g, ziel, offen, setOffen }) {
       )}
       {g.positionen.map((p) => {
         const hasBetrag = p.betrag > 0;
+        const keineAngaben = p.status_datenbasis === "Keine Angaben";
         const key = p.bkp_nr;
         const auf = offen === key;
         return (
           <>
-            <tr key={key} onClick={() => hasBetrag && setOffen(auf ? null : key)}
-              className={"border-t border-slate-50 " + (hasBetrag ? "cursor-pointer hover:bg-slate-50/70" : "")}>
+            <tr key={key} onClick={() => setOffen(auf ? null : key)}
+              className="cursor-pointer border-t border-slate-50 hover:bg-slate-50/70">
               <td className="py-1.5 pl-8 pr-2 tabular-nums text-slate-500">{p.bkp_nr}</td>
-              <td className={"px-2 py-1.5 " + (hasBetrag ? "text-slate-700" : "text-slate-300")}>{p.bezeichnung}</td>
+              <td className={"px-2 py-1.5 " + (hasBetrag ? "text-slate-700" : "text-slate-400")}>{p.bezeichnung}</td>
               <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">
                 {hasBetrag ? `${num(p.kennwert)} ${p.einheit}` : "–"}
               </td>
-              <td className={"px-2 py-1.5 text-right font-medium tabular-nums " + (hasBetrag ? "text-slate-900" : "text-slate-300")}>
-                {hasBetrag ? chf(p.betrag) : "–"}
+              <td className={"px-2 py-1.5 text-right font-medium tabular-nums " + (hasBetrag ? "text-slate-900" : "text-amber-700")}>
+                {hasBetrag ? chf(p.betrag) : "Keine Angaben – manuell schätzen"}
               </td>
               <td className="px-2 py-1.5">
-                {hasBetrag && (
-                  <span className="inline-flex items-center gap-1">
-                    <VertrauenPunkt stufe={p.vertrauen} />
-                    <ChevronRight className={`size-3.5 text-slate-300 transition ${auf ? "rotate-90" : ""}`} />
-                  </span>
-                )}
+                <span className="inline-flex items-center gap-1">
+                  {keineAngaben
+                    ? <AlertTriangle className="size-3.5 text-amber-500" title="Keine Angaben" />
+                    : <VertrauenPunkt stufe={p.vertrauen} />}
+                  <ChevronRight className={`size-3.5 text-slate-300 transition ${auf ? "rotate-90" : ""}`} />
+                </span>
               </td>
             </tr>
             {auf && (
               <tr className="bg-slate-50/50">
                 <td />
                 <td colSpan={4} className="px-2 py-2 text-xs leading-relaxed text-slate-600">
-                  Ø Kennwert <b>{num(p.kennwert)} {p.einheit}</b> × {num(p.ziel_treiber)}{" "}
-                  {p.einheit.replace("CHF/", "")} = <b>{chf(p.betrag)}</b>.{" "}
-                  In {p.abdeckung} von {p.segment_groesse ?? p.n_referenzen} passenden Referenzen enthalten.
-                  {p.bandbreite && <> Bandbreite {chf(p.bandbreite[0])} – {chf(p.bandbreite[1])}.</>}
-                  {p.abdeckung <= 1 && (
-                    <div className="mt-1.5 flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-amber-800">
+                  {keineAngaben ? (
+                    <div className="flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-amber-800">
                       <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
                       <span>
-                        Nur {p.abdeckung} von {p.segment_groesse ?? p.n_referenzen} passenden Referenzen hatte diese
-                        Position — der Kennwert ist ein <b>Einzelfall</b>, keine breite Statistik. Mit Vorsicht verwenden.
+                        Keine passende Referenz mit einer Kostenangabe gefunden. Von {p.grundsegment} grundsätzlich
+                        passenden Projekten {p.passende_abgabe < p.grundsegment
+                          ? <>hatten {p.passende_abgabe} die passende Wärmeabgabe, aber keines</>
+                          : <>hat keines</>}
+                        {" "}eine Kostenangabe für diese Position. Bitte manuell schätzen.
                       </span>
                     </div>
+                  ) : (
+                    <>
+                      Ø Kennwert <b>{num(p.kennwert)} {p.einheit}</b> × {num(p.ziel_treiber)}{" "}
+                      {p.einheit.replace("CHF/", "")} = <b>{chf(p.betrag)}</b>.{" "}
+                      Von {p.grundsegment} grundsätzlich passenden Projekten hatten {p.passende_abgabe} die passende
+                      Wärmeabgabe, {p.mit_kostenangabe} davon eine Kostenangabe für diese Position
+                      ({p.status_datenbasis}).
+                      {p.bandbreite && <> Bandbreite {chf(p.bandbreite[0])} – {chf(p.bandbreite[1])}.</>}
+                      {p.mit_kostenangabe === 1 && (
+                        <div className="mt-1.5 flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-amber-800">
+                          <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                          <span>
+                            Diese Position basiert auf einem Einzelfall. Von {p.grundsegment} grundsätzlich passenden
+                            Projekten hatten {p.passende_abgabe} die passende Wärmeabgabe und nur {p.mit_kostenangabe} Projekt
+                            enthält eine Kostenangabe. Der Kennwert ist statistisch nicht belastbar und muss fachlich geprüft werden.
+                          </span>
+                        </div>
+                      )}
+                    </>
                   )}
                 </td>
               </tr>

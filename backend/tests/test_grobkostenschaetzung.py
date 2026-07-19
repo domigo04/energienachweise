@@ -159,6 +159,41 @@ def test_position_nur_referenzen_mit_gewaehlter_abgabe():
     assert p["n_referenzen"] == 1               # die HK-Referenz zählt bei 243.3a nicht mit
 
 
+def test_heizkoerper_ziel_verwendet_keine_fbh_kosten():
+    """Spiegeltest zu test_position_nur_referenzen_mit_gewaehlter_abgabe: für
+    ein Heizkörper-Ziel liefert eine reine FBH-Referenz KEINE Heizkörper-Kosten."""
+    ziel = {"ebf_m2": 1000, "leistung_kw": 20, "nutzung": "MFH", "projektart": "Neubau",
+            "wp_typ": "sole", "hat_erdsonden": True, "waermeabgabe": ["Heizkörper"]}
+    fbh_ref = {"name": "FBH", "ebf_m2": 1000, "leistung_kw": 20, "nutzung": "MFH", "projektart": "Neubau",
+               "wp_typ": "sole", "hat_erdsonden": True, "abgabe_klassen": {"flaeche"},
+               "datum_abrechnung": date(2025, 1, 1), "positionen": {"243.3a": 40000}}
+    hk_ref = {"name": "HK", "ebf_m2": 1000, "leistung_kw": 20, "nutzung": "MFH", "projektart": "Neubau",
+              "wp_typ": "sole", "hat_erdsonden": True, "abgabe_klassen": {"koerper"},
+              "datum_abrechnung": date(2025, 1, 1), "positionen": {"243.2a": 30000}}
+    res = berechne_grobkostenschaetzung(ziel, [fbh_ref, hk_ref], [], heute=date(2026, 1, 1))
+    alle = {p["bkp_nr"]: p for g in res["gruppen"] for p in g["positionen"]}
+    assert "243.3a" not in alle                          # FBH-Position kommt für ein HK-Ziel gar nicht vor
+    assert alle["243.2a"]["betrag"] == pytest.approx(30000)  # nur die HK-Referenz, NICHT verwässert
+    assert alle["243.2a"]["n_referenzen"] == 1
+
+
+def test_waermeerzeugung_unabhaengig_von_waermeabgabe():
+    """Wärmeerzeugung (242er-Gruppe, keine abgabe-Markierung) verwendet ALLE
+    passenden Referenzen — unabhängig davon, welche Wärmeabgabe sie haben."""
+    ziel = {"ebf_m2": 1000, "leistung_kw": 20, "nutzung": "MFH", "projektart": "Neubau",
+            "wp_typ": "sole", "hat_erdsonden": True, "waermeabgabe": ["Heizkörper"]}
+    fbh_ref = {"name": "FBH", "ebf_m2": 1000, "leistung_kw": 20, "nutzung": "MFH", "projektart": "Neubau",
+               "wp_typ": "sole", "hat_erdsonden": True, "abgabe_klassen": {"flaeche"},
+               "datum_abrechnung": date(2025, 1, 1), "positionen": {"242.3": 60000}}
+    hk_ref = {"name": "HK", "ebf_m2": 1000, "leistung_kw": 20, "nutzung": "MFH", "projektart": "Neubau",
+              "wp_typ": "sole", "hat_erdsonden": True, "abgabe_klassen": {"koerper"},
+              "datum_abrechnung": date(2025, 1, 1), "positionen": {"242.3": 40000}}
+    res = berechne_grobkostenschaetzung(ziel, [fbh_ref, hk_ref], [], heute=date(2026, 1, 1))
+    p = next(x for g in res["gruppen"] for x in g["positionen"] if x["bkp_nr"] == "242.3")
+    assert p["n_referenzen"] == 2      # beide zählen, trotz unterschiedlicher Wärmeabgabe
+    assert p["grundsegment"] == p["passende_abgabe"] == 2  # keine Abgabe-Filterung bei 242er
+
+
 def test_hard_filter():
     ziel = {"nutzung": "MFH", "wp_typ": "sole", "projektart": "Neubau", "hat_erdsonden": True}
     passt = {"nutzung": "MFH", "wp_typ": "sole", "projektart": "Neubau", "hat_erdsonden": True}
@@ -482,6 +517,71 @@ def test_quercheck_ok_wenn_wege_uebereinstimmen():
     q = quercheck_chf_pro_einheit(positionen, segment, {"anzahl_ne": 10})
     assert q["betrag_einheit"] == pytest.approx(100000)
     assert q["warnung"] is False
+
+
+def test_status_datenbasis_stufen():
+    from app.calculations.grobkostenschaetzung import _status_datenbasis
+    assert _status_datenbasis(0) == "Keine Angaben"
+    assert _status_datenbasis(1) == "Einzelfall – nicht belastbar"
+    assert _status_datenbasis(2) == "Sehr geringe Datengrundlage"
+    assert _status_datenbasis(3) == "Sehr geringe Datengrundlage"
+    assert _status_datenbasis(4) == "Begrenzte Datengrundlage"
+    assert _status_datenbasis(7) == "Begrenzte Datengrundlage"
+    assert _status_datenbasis(8) == "Gute Datengrundlage"
+    assert _status_datenbasis(20) == "Gute Datengrundlage"
+
+
+def test_schaetze_position_zaehlt_grundsegment_passende_abgabe_kosten():
+    """Transparenz: Position zählt (1) Grundsegment (alle Hard-Filter-Treffer),
+    (2) passende Abgabe (nur die mit der richtigen Wärmeabgabe, falls Position
+    abgabe-tagged ist), (3) mit Kostenangabe (= abdeckung)."""
+    # Gemeinsame Position (keine Abgabe): alle Referenzen zählen
+    segment = [
+        {"ebf_m2": 1000, "leistung_kw": 30, "rang": 1.0, "abgabe_klassen": {"koerper"}, "positionen": {"242.3": 100000}},
+        {"ebf_m2": 1000, "leistung_kw": 30, "rang": 1.0, "abgabe_klassen": {"flaeche"}, "positionen": {"242.3": 50000}},
+        {"ebf_m2": 1000, "leistung_kw": 30, "rang": 1.0, "abgabe_klassen": {"koerper"}, "positionen": {}},  # kein Betrag
+    ]
+    e = schaetze_position(_pos("242.3", "Wärmeerzeugung"), segment, {"ebf_m2": 1000, "leistung_kw": 25})
+    assert e["grundsegment"] == 3  # alle im Segment
+    assert e["passende_abgabe"] == 3  # keine Abgabe-Filter, also alle
+    assert e["mit_kostenangabe"] == 2  # 2 haben die Position
+    assert e["status_datenbasis"] == "Sehr geringe Datengrundlage"
+
+    # Abgabe-Position (243.2 Heizkörper): nur Referenzen mit Heizkörper
+    segment_abgabe = [
+        {"ebf_m2": 1000, "rang": 1.0, "abgabe_klassen": {"koerper"}, "positionen": {"243.2a": 40000}},
+        {"ebf_m2": 1000, "rang": 1.0, "abgabe_klassen": {"flaeche"}, "positionen": {}},  # hat FBH, nicht HK
+        {"ebf_m2": 1000, "rang": 1.0, "abgabe_klassen": {"koerper"}, "positionen": {"243.2a": 35000}},
+    ]
+    pos_hk = {"bkp_nr": "243.2a", "bezeichnung": "Heizkörper", "gruppe_nr": "243", "abgabe": "koerper"}
+    e_hk = schaetze_position(pos_hk, segment_abgabe, {"ebf_m2": 1000})
+    assert e_hk["grundsegment"] == 3  # alle Referenzen
+    assert e_hk["passende_abgabe"] == 2  # nur die mit Heizkörper
+    assert e_hk["mit_kostenangabe"] == 2  # beide mit HK haben einen Betrag
+    assert e_hk["status_datenbasis"] == "Sehr geringe Datengrundlage"
+
+
+def test_einzelfall_bei_einer_kostenangabe():
+    """Eine Kostenangabe → «Einzelfall – nicht belastbar»."""
+    segment = [
+        {"ebf_m2": 1000, "rang": 1.0, "positionen": {"243.1": 50000}},
+        {"ebf_m2": 1000, "rang": 1.0, "positionen": {}},
+        {"ebf_m2": 1000, "rang": 1.0, "positionen": {}},
+    ]
+    e = schaetze_position(_pos(), segment, {"ebf_m2": 1000})
+    assert e["mit_kostenangabe"] == 1
+    assert e["status_datenbasis"] == "Einzelfall – nicht belastbar"
+
+
+def test_keine_angaben_bei_null_kostenangaben():
+    """Keine Kostenangabe → «Keine Angaben»."""
+    segment = [
+        {"ebf_m2": 1000, "rang": 1.0, "positionen": {}},
+        {"ebf_m2": 1000, "rang": 1.0, "positionen": {}},
+    ]
+    e = schaetze_position(_pos(), segment, {"ebf_m2": 1000})
+    assert e["mit_kostenangabe"] == 0
+    assert e["status_datenbasis"] == "Keine Angaben"
 
 
 def test_berechne_haengt_quercheck_an_243():

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
-import { Share2, Calculator, Layers, ArrowRight, MapPin, User, Pencil, Archive } from "lucide-react";
+import { Share2, Calculator, Layers, ArrowRight, ArrowLeft, MapPin, User, Pencil, Archive } from "lucide-react";
 import { getProject, updateProject } from "../../api/hcApi";
 import { GEBAEUDEKATEGORIEN } from "../../data/sia";
 
@@ -66,12 +66,10 @@ export default function ProjectDashboard() {
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8 lg:px-8">
-      {/* Breadcrumb */}
-      <div className="mb-6 flex items-center gap-2 text-sm text-slate-500">
-        <Link to="/projekte" className="hover:text-brand-600">Projekte</Link>
-        <span>/</span>
-        <span className="text-slate-800">{project.name}</span>
-      </div>
+      {/* Zurück zur Projektübersicht */}
+      <Link to="/projekte" className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 transition hover:text-brand-600">
+        <ArrowLeft className="size-4" /> Projekte
+      </Link>
 
       {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 

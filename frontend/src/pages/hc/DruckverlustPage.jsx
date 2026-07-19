@@ -1,6 +1,7 @@
 import React, { useState } from "react";
-import { Link } from "react-router-dom";
+import { Plus, X } from "lucide-react";
 import { api } from "../../api";
+import PageHeader from "../../components/ui/PageHeader";
 
 const DEFAULT_KREISE = [
   {
@@ -44,20 +45,12 @@ const DEFAULT_KREISE = [
   },
 ];
 
-const inputStyle = {
-  padding: "6px 8px", border: "1px solid #d1d5db", borderRadius: 4,
-  fontSize: 13, width: "100%", boxSizing: "border-box",
-};
-
-const numInput = (val, onChange, placeholder = "0") => (
-  <input
-    type="number" step="0.1" min="0"
-    style={inputStyle}
-    value={val}
-    onChange={e => onChange(e.target.value)}
-    placeholder={placeholder}
-  />
-);
+function NumInput({ value, onChange, placeholder = "0" }) {
+  return (
+    <input type="number" step="0.1" min="0" className="input px-2.5 py-1.5"
+      value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
+  );
+}
 
 export default function DruckverlustPage() {
   const [kreise, setKreise] = useState(DEFAULT_KREISE);
@@ -67,31 +60,26 @@ export default function DruckverlustPage() {
   const [activeTab, setActiveTab] = useState(0);
 
   const updateKreis = (ki, field, val) => {
-    setKreise(prev => prev.map((k, i) => i === ki ? { ...k, [field]: val } : k));
+    setKreise((prev) => prev.map((k, i) => (i === ki ? { ...k, [field]: val } : k)));
   };
 
   const updateApparat = (ki, ai, field, val) => {
-    setKreise(prev => prev.map((k, i) => {
+    setKreise((prev) => prev.map((k, i) => {
       if (i !== ki) return k;
-      return {
-        ...k,
-        apparate: k.apparate.map((a, j) => j === ai ? { ...a, [field]: val } : a),
-      };
+      return { ...k, apparate: k.apparate.map((a, j) => (j === ai ? { ...a, [field]: val } : a)) };
     }));
   };
 
   const addApparat = (ki) => {
-    setKreise(prev => prev.map((k, i) => i === ki
+    setKreise((prev) => prev.map((k, i) => (i === ki
       ? { ...k, apparate: [...k.apparate, { name: "Neu", anzahl: 1, dp_kpa: 0 }] }
-      : k
-    ));
+      : k)));
   };
 
   const removeApparat = (ki, ai) => {
-    setKreise(prev => prev.map((k, i) => i === ki
+    setKreise((prev) => prev.map((k, i) => (i === ki
       ? { ...k, apparate: k.apparate.filter((_, j) => j !== ai) }
-      : k
-    ));
+      : k)));
   };
 
   const berechne = async () => {
@@ -99,13 +87,13 @@ export default function DruckverlustPage() {
     setError("");
     try {
       const body = {
-        kreise: kreise.map(k => ({
+        kreise: kreise.map((k) => ({
           name: k.name,
           rohrlange_m: parseFloat(k.rohrlange_m) || 0,
           druckgefaelle_pam: parseFloat(k.druckgefaelle_pam) || 70,
           apparate: k.apparate
-            .filter(a => parseFloat(a.anzahl) > 0 || parseFloat(a.dp_kpa) > 0)
-            .map(a => ({ name: a.name, anzahl: parseFloat(a.anzahl) || 0, dp_kpa: parseFloat(a.dp_kpa) || 0 })),
+            .filter((a) => parseFloat(a.anzahl) > 0 || parseFloat(a.dp_kpa) > 0)
+            .map((a) => ({ name: a.name, anzahl: parseFloat(a.anzahl) || 0, dp_kpa: parseFloat(a.dp_kpa) || 0 })),
         })),
       };
       const r = await api.post("/api/v1/druckverlust/berechnen", body);
@@ -121,175 +109,150 @@ export default function DruckverlustPage() {
   const res = results?.[activeTab];
 
   return (
-    <div style={{ maxWidth: 800, margin: "0 auto", padding: "24px 16px", fontFamily: "sans-serif" }}>
-      <div style={{ marginBottom: 16, fontSize: 13, color: "#6b7280" }}>
-        <Link to="/projekte" style={{ color: "#2563eb" }}>Projekte</Link>
-        {" / "}Druckverlust approximativ
-      </div>
+    <div className="mx-auto max-w-4xl px-4 py-8 lg:px-8">
+      <PageHeader
+        back={{ to: "/start", label: "Start" }}
+        title="Druckverlust approximativ"
+        subtitle="Rohrsystem + Apparate je Pumpenkreis — nach deinem Excel-Blatt (M4)."
+      />
 
-      <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>Druckverlust approximativ (M4)</h1>
-      <p style={{ color: "#6b7280", fontSize: 13, marginBottom: 20 }}>
-        Rohrsystem + Apparate je Pumpenkreis — basierend auf deinem Excel
-      </p>
-
-      {/* Tabs */}
-      <div style={{ display: "flex", gap: 4, marginBottom: 20 }}>
-        {kreise.map((k, i) => (
-          <button
-            key={i}
-            onClick={() => setActiveTab(i)}
-            style={{
-              padding: "8px 16px", fontSize: 13, borderRadius: 6, cursor: "pointer",
-              background: activeTab === i ? "#1e40af" : "#f3f4f6",
-              color: activeTab === i ? "white" : "#374151",
-              border: "none", fontWeight: activeTab === i ? 600 : 400,
-            }}
-          >
-            {k.name}
-            {results?.[i] && (
-              <span style={{ marginLeft: 8, opacity: 0.8 }}>
-                {results[i].total_kpa} kPa
-              </span>
-            )}
+      {/* Tabs (Pumpenkreise) */}
+      <div className="mb-5 flex flex-wrap gap-1.5">
+        {kreise.map((kr, i) => (
+          <button key={i} onClick={() => setActiveTab(i)}
+            className={"rounded-lg px-4 py-2 text-sm font-semibold transition " +
+              (activeTab === i ? "bg-brand-600 text-white shadow-sm" : "border border-slate-200 text-slate-600 hover:bg-slate-50")}>
+            {kr.name}
+            {results?.[i] && <span className="ml-2 opacity-80">{results[i].total_kpa} kPa</span>}
           </button>
         ))}
       </div>
 
       {/* Aktiver Kreis */}
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden", marginBottom: 20 }}>
+      <div className="card mb-5 overflow-hidden">
         {/* Rohrsystem */}
-        <div style={{ background: "#f9fafb", padding: "14px 16px", borderBottom: "1px solid #e5e7eb" }}>
-          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12 }}>Rohrsystem</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div className="border-b border-slate-100 bg-slate-50 p-5">
+          <div className="mb-3 font-semibold text-slate-800">Rohrsystem</div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <label style={{ display: "block", fontSize: 12, color: "#6b7280", marginBottom: 4 }}>Länge VL+RL [m]</label>
-              {numInput(k.rohrlange_m, v => updateKreis(activeTab, "rohrlange_m", v), "0")}
+              <label className="label">Länge VL+RL [m]</label>
+              <NumInput value={k.rohrlange_m} onChange={(v) => updateKreis(activeTab, "rohrlange_m", v)} />
             </div>
             <div>
-              <label style={{ display: "block", fontSize: 12, color: "#6b7280", marginBottom: 4 }}>Dimensioniert auf [Pa/m]</label>
-              {numInput(k.druckgefaelle_pam, v => updateKreis(activeTab, "druckgefaelle_pam", v), "70")}
-              <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>Typisch: 70–100 Pa/m</div>
+              <label className="label">Dimensioniert auf [Pa/m]</label>
+              <NumInput value={k.druckgefaelle_pam} onChange={(v) => updateKreis(activeTab, "druckgefaelle_pam", v)} placeholder="70" />
+              <p className="mt-1 text-xs text-slate-400">Typisch: 70–100 Pa/m</p>
             </div>
           </div>
-          {/* Zwischenergebnis Rohr */}
           {k.rohrlange_m > 0 && k.druckgefaelle_pam > 0 && (
-            <div style={{ marginTop: 8, fontSize: 12, color: "#2563eb" }}>
+            <div className="mt-2 text-xs font-medium text-brand-600">
               → Rohrsystem: {((parseFloat(k.rohrlange_m) || 0) * (parseFloat(k.druckgefaelle_pam) || 0) / 1000).toFixed(2)} kPa
             </div>
           )}
         </div>
 
         {/* Apparate */}
-        <div style={{ padding: "14px 16px" }}>
-          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12 }}>Apparate</div>
-          <table style={{ width: "100%", fontSize: 13, borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ background: "#f9fafb" }}>
-                <th style={th}>Bezeichnung</th>
-                <th style={{ ...th, width: 80 }}>Stk.</th>
-                <th style={{ ...th, width: 110 }}>kPa / Stk.</th>
-                <th style={{ ...th, width: 90 }}>Total kPa</th>
-                <th style={{ ...th, width: 40 }}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {k.apparate.map((a, ai) => {
-                const tot = (parseFloat(a.anzahl) || 0) * (parseFloat(a.dp_kpa) || 0);
-                return (
-                  <tr key={ai} style={{ borderBottom: "1px solid #f3f4f6" }}>
-                    <td style={td}>
-                      <input
-                        style={{ ...inputStyle, minWidth: 120 }}
-                        value={a.name}
-                        onChange={e => updateApparat(activeTab, ai, "name", e.target.value)}
-                      />
-                    </td>
-                    <td style={td}>{numInput(a.anzahl, v => updateApparat(activeTab, ai, "anzahl", v), "0")}</td>
-                    <td style={td}>{numInput(a.dp_kpa, v => updateApparat(activeTab, ai, "dp_kpa", v), "0")}</td>
-                    <td style={{ ...td, fontWeight: tot > 0 ? 600 : 400, color: tot > 0 ? "#1e40af" : "#9ca3af", textAlign: "right" }}>
-                      {tot > 0 ? tot.toFixed(2) : "—"}
-                    </td>
-                    <td style={td}>
-                      <button onClick={() => removeApparat(activeTab, ai)}
-                        style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 16, lineHeight: 1 }}>
-                        ×
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          <button onClick={() => addApparat(activeTab)}
-            style={{ marginTop: 10, fontSize: 12, color: "#2563eb", background: "none", border: "none", cursor: "pointer", padding: 0 }}>
-            + Apparat hinzufügen
+        <div className="p-5">
+          <div className="mb-3 font-semibold text-slate-800">Apparate</div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-slate-50 text-left text-xs font-semibold text-slate-500">
+                  <th className="px-3 py-2">Bezeichnung</th>
+                  <th className="px-3 py-2" style={{ width: 80 }}>Stk.</th>
+                  <th className="px-3 py-2" style={{ width: 110 }}>kPa / Stk.</th>
+                  <th className="px-3 py-2 text-right" style={{ width: 90 }}>Total kPa</th>
+                  <th className="px-3 py-2" style={{ width: 40 }}></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {k.apparate.map((a, ai) => {
+                  const tot = (parseFloat(a.anzahl) || 0) * (parseFloat(a.dp_kpa) || 0);
+                  return (
+                    <tr key={ai}>
+                      <td className="px-3 py-1.5">
+                        <input className="input px-2.5 py-1.5" style={{ minWidth: 120 }} value={a.name}
+                          onChange={(e) => updateApparat(activeTab, ai, "name", e.target.value)} />
+                      </td>
+                      <td className="px-3 py-1.5"><NumInput value={a.anzahl} onChange={(v) => updateApparat(activeTab, ai, "anzahl", v)} /></td>
+                      <td className="px-3 py-1.5"><NumInput value={a.dp_kpa} onChange={(v) => updateApparat(activeTab, ai, "dp_kpa", v)} /></td>
+                      <td className={"px-3 py-1.5 text-right font-mono tabular-nums " + (tot > 0 ? "font-semibold text-slate-900" : "text-slate-300")}>
+                        {tot > 0 ? tot.toFixed(2) : "—"}
+                      </td>
+                      <td className="px-3 py-1.5 text-center">
+                        <button onClick={() => removeApparat(activeTab, ai)} className="text-slate-300 transition hover:text-red-500" title="Entfernen">
+                          <X className="size-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <button onClick={() => addApparat(activeTab)} className="btn-ghost mt-3 px-0 text-brand-600 hover:bg-transparent hover:text-brand-700">
+            <Plus className="size-4" /> Apparat hinzufügen
           </button>
         </div>
       </div>
 
       {/* Berechnen */}
-      <button
-        onClick={berechne}
-        disabled={loading}
-        style={{
-          background: "#1e40af", color: "white", border: "none", borderRadius: 8,
-          padding: "12px 28px", fontSize: 15, fontWeight: 600, cursor: "pointer",
-          opacity: loading ? 0.6 : 1, marginBottom: 20,
-        }}
-      >
+      <button onClick={berechne} disabled={loading} className="btn-primary">
         {loading ? "Berechne…" : "Alle Kreise berechnen"}
       </button>
 
-      {error && <div style={{ color: "#ef4444", marginBottom: 12 }}>{error}</div>}
+      {error && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
       {/* Resultate */}
       {results && (
-        <div>
-          <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>Resultate</h2>
-          <table style={{ width: "100%", fontSize: 13, borderCollapse: "collapse", marginBottom: 16 }}>
-            <thead>
-              <tr style={{ background: "#1e40af", color: "white" }}>
-                <th style={{ ...th, color: "white" }}>Pumpenkreis</th>
-                <th style={{ ...th, color: "white", textAlign: "right" }}>Rohrsystem [kPa]</th>
-                <th style={{ ...th, color: "white", textAlign: "right" }}>Apparate [kPa]</th>
-                <th style={{ ...th, color: "white", textAlign: "right" }}>Total [kPa]</th>
-                <th style={{ ...th, color: "white", textAlign: "right" }}>Total [mWS]</th>
-              </tr>
-            </thead>
-            <tbody>
-              {results.map((r, i) => (
-                <tr key={i} style={{ background: i % 2 === 0 ? "white" : "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
-                  <td style={td}><strong>{r.kreis_name}</strong></td>
-                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{r.dp_rohr_kpa}</td>
-                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{r.dp_apparate_kpa}</td>
-                  <td style={{ ...td, textAlign: "right", fontWeight: 700, fontFamily: "monospace", color: "#1e40af" }}>{r.total_kpa}</td>
-                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{r.total_mws}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="mt-6">
+          <h2 className="mb-3 font-semibold text-slate-800">Resultate</h2>
+          <div className="card mb-4 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-slate-50 text-left text-xs font-semibold text-slate-500">
+                    <th className="px-4 py-2">Pumpenkreis</th>
+                    <th className="px-4 py-2 text-right">Rohrsystem [kPa]</th>
+                    <th className="px-4 py-2 text-right">Apparate [kPa]</th>
+                    <th className="px-4 py-2 text-right">Total [kPa]</th>
+                    <th className="px-4 py-2 text-right">Total [mWS]</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {results.map((r, i) => (
+                    <tr key={i} className="hover:bg-slate-50/60">
+                      <td className="px-4 py-2 font-medium text-slate-800">{r.kreis_name}</td>
+                      <td className="px-4 py-2 text-right font-mono tabular-nums text-slate-600">{r.dp_rohr_kpa}</td>
+                      <td className="px-4 py-2 text-right font-mono tabular-nums text-slate-600">{r.dp_apparate_kpa}</td>
+                      <td className="px-4 py-2 text-right font-mono font-bold tabular-nums text-brand-600">{r.total_kpa}</td>
+                      <td className="px-4 py-2 text-right font-mono tabular-nums text-slate-600">{r.total_mws}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
 
           {/* Detail aktiver Kreis */}
           {res && res.apparate_details?.length > 0 && (
-            <div style={{ background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8, padding: 16 }}>
-              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 10 }}>
-                Detail: {res.kreis_name}
-              </div>
-              <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+            <div className="card p-5">
+              <div className="mb-3 text-sm font-semibold text-slate-700">Detail: {res.kreis_name}</div>
+              <table className="w-full text-sm">
                 <tbody>
-                  <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
-                    <td style={{ padding: "5px 8px", color: "#6b7280" }}>Rohrsystem ({kreise[activeTab].rohrlange_m} m × {kreise[activeTab].druckgefaelle_pam} Pa/m)</td>
-                    <td style={{ padding: "5px 8px", textAlign: "right", fontFamily: "monospace" }}>{res.dp_rohr_kpa} kPa</td>
+                  <tr className="border-b border-slate-100">
+                    <td className="py-1.5 text-slate-500">Rohrsystem ({kreise[activeTab].rohrlange_m} m × {kreise[activeTab].druckgefaelle_pam} Pa/m)</td>
+                    <td className="py-1.5 text-right font-mono tabular-nums text-slate-700">{res.dp_rohr_kpa} kPa</td>
                   </tr>
-                  {res.apparate_details.filter(a => a.total_kpa > 0).map((a, i) => (
-                    <tr key={i} style={{ borderBottom: "1px solid #f3f4f6" }}>
-                      <td style={{ padding: "5px 8px", color: "#374151" }}>{a.name} ({a.anzahl} × {a.dp_kpa_pro_stk} kPa)</td>
-                      <td style={{ padding: "5px 8px", textAlign: "right", fontFamily: "monospace" }}>{a.total_kpa} kPa</td>
+                  {res.apparate_details.filter((a) => a.total_kpa > 0).map((a, i) => (
+                    <tr key={i} className="border-b border-slate-50">
+                      <td className="py-1.5 text-slate-600">{a.name} ({a.anzahl} × {a.dp_kpa_pro_stk} kPa)</td>
+                      <td className="py-1.5 text-right font-mono tabular-nums text-slate-700">{a.total_kpa} kPa</td>
                     </tr>
                   ))}
-                  <tr style={{ background: "#dbeafe", fontWeight: 700 }}>
-                    <td style={{ padding: "8px 8px" }}>Total Druckverlust</td>
-                    <td style={{ padding: "8px 8px", textAlign: "right", fontFamily: "monospace" }}>{res.total_kpa} kPa = {res.total_mws} mWS</td>
+                  <tr className="bg-brand-50/50 font-bold">
+                    <td className="py-2 text-slate-800">Total Druckverlust</td>
+                    <td className="py-2 text-right font-mono tabular-nums text-brand-700">{res.total_kpa} kPa = {res.total_mws} mWS</td>
                   </tr>
                 </tbody>
               </table>
@@ -300,6 +263,3 @@ export default function DruckverlustPage() {
     </div>
   );
 }
-
-const th = { padding: "8px 10px", textAlign: "left", fontSize: 12, fontWeight: 600, color: "#374151" };
-const td = { padding: "6px 8px", verticalAlign: "middle" };

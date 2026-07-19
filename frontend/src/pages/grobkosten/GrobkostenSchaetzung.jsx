@@ -12,6 +12,8 @@ import {
 } from "../../api/hcApi";
 import CheckboxGruppe from "../../components/kv/CheckboxGruppe";
 import InfoTip from "../../components/ui/InfoTip";
+import PageHeader from "../../components/ui/PageHeader";
+import GewerkLeiste from "../../components/ui/GewerkLeiste";
 import { WAERMEABGABE, WAERMEERZEUGER } from "../../data/kv";
 import { chf, gruppeInfo, num, NUTZUNGEN, pct, PROJEKTARTEN } from "../../data/gk";
 
@@ -129,20 +131,25 @@ export default function GrobkostenSchaetzung() {
   const refsVerwendet = aktiv?.referenzen_verwendet || [];
 
   return (
-    <div className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6">
-      <Link to={`/projekte/${id}`} className="mb-2 inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800">
-        ← {projekt?.name || "Projekt"}
-      </Link>
-      <h1 className="text-xl font-bold text-slate-900">Grobkostenschätzung</h1>
-      <p className="mb-5 mt-1 text-sm text-slate-500">
-        Schätzung je BKP-Position aus den Referenzprojekten der{" "}
-        <Link to="/auswertung" className="text-brand-600 hover:underline">Auswertung</Link> —
-        aufgebaut wie ein Norm-Leistungsverzeichnis. Eingaben und Ergebnis bleiben im Projekt gespeichert.
-      </p>
+    <div className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8">
+      <PageHeader
+        back={{ to: `/projekte/${id}`, label: projekt?.name || "Projekt" }}
+        title="Grobkostenschätzung"
+        subtitle={
+          <>
+            Schätzung je BKP-Position aus den Referenzprojekten der{" "}
+            <Link to="/auswertung" className="text-brand-600 hover:underline">Auswertung</Link> —
+            aufgebaut wie ein Norm-Leistungsverzeichnis. Eingaben und Ergebnis bleiben im Projekt gespeichert.
+          </>
+        }
+      />
+
+      <GewerkLeiste aktiv="heizung" className="mb-6" />
 
       <div className="grid items-start gap-6 lg:grid-cols-[380px_minmax(0,1fr)]">
-        {/* ── Eingabe ── */}
-        <div className="card sticky top-4 p-5">
+        {/* ── Eingabe ── (klebt nur auf dem Desktop, wo sie alleine in ihrer Spalte
+            steht — auf dem Handy normal im Fluss, sonst würde sie das Ergebnis überdecken) */}
+        <div className="card lg:sticky lg:top-4 p-5">
           <h2 className="mb-4 text-sm font-bold text-slate-800">Eckdaten</h2>
           <div className="grid grid-cols-2 gap-3">
             <Feld label="EBF [m²]">
@@ -204,7 +211,7 @@ export default function GrobkostenSchaetzung() {
             </summary>
             <p className="mt-2 text-xs leading-snug text-slate-400">
               Falls schon bekannt (z.B. Bohrmeter aus der Sondendimensionierung), rechnen die
-              zugehörigen Positionen direkt mit Ihrer Zahl.
+              zugehörigen Positionen direkt mit deiner Zahl.
             </p>
             <div className="mt-3 grid grid-cols-3 gap-3">
               <Feld label="Bohrmeter"><input className="input" type="number" min="0" value={form.bohrmeter} onChange={(e) => set("bohrmeter", e.target.value)} /></Feld>

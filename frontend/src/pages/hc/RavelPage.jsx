@@ -1,6 +1,7 @@
 import React, { useState } from "react";
-import { Link } from "react-router-dom";
+import { Plus, X } from "lucide-react";
 import { api } from "../../api";
+import PageHeader from "../../components/ui/PageHeader";
 
 const ENERGIETRAEGER_STEIGERUNG = {
   "Öl": 2.5, "Gas": 2.5, "Wärmepumpe (Strom)": 1.5,
@@ -13,15 +14,14 @@ const VARIANTE_DEFAULT = {
   energie_pa: "", energie_steigerung_pct: 2.5,
 };
 
-const FARBEN = ["#2563eb", "#16a34a", "#dc2626", "#d97706", "#7c3aed", "#0891b2"];
+// Varianten-Farben aus der Diagramm-Palette (index.css) — gut unterscheidbar,
+// markenkonform.
+const FARBEN = ["#dc2626", "#0d9488", "#0284c7", "#d97706", "#4f46e5", "#64748b"];
+// Kostenarten im Balken: Kapital / Betrieb / Energie
+const SEG = { kapital: "#0284c7", betrieb: "#0d9488", energie: "#d97706" };
 
-const fmt = (n, dec = 0) => n != null ? Number(n).toLocaleString("de-CH", { minimumFractionDigits: dec, maximumFractionDigits: dec }) : "—";
-const chf = (n) => n != null ? `CHF ${fmt(n)}` : "—";
-
-const inputSt = {
-  padding: "6px 8px", border: "1px solid #d1d5db", borderRadius: 4,
-  fontSize: 13, width: "100%", boxSizing: "border-box",
-};
+const fmt = (n, dec = 0) => (n != null ? Number(n).toLocaleString("de-CH", { minimumFractionDigits: dec, maximumFractionDigits: dec }) : "—");
+const chf = (n) => (n != null ? `CHF ${fmt(n)}` : "—");
 
 export default function RavelPage() {
   const [varianten, setVarianten] = useState([
@@ -33,16 +33,16 @@ export default function RavelPage() {
   const [error, setError] = useState("");
 
   const setV = (i, field, val) => {
-    setVarianten(prev => prev.map((v, j) => j === i ? { ...v, [field]: val } : v));
+    setVarianten((prev) => prev.map((v, j) => (j === i ? { ...v, [field]: val } : v)));
   };
 
   const addVariante = () => {
     if (varianten.length >= 6) return;
-    setVarianten(prev => [...prev, { ...VARIANTE_DEFAULT, name: `Variante ${prev.length + 1}` }]);
+    setVarianten((prev) => [...prev, { ...VARIANTE_DEFAULT, name: `Variante ${prev.length + 1}` }]);
   };
 
   const removeVariante = (i) => {
-    setVarianten(prev => prev.filter((_, j) => j !== i));
+    setVarianten((prev) => prev.filter((_, j) => j !== i));
     setResults(null);
   };
 
@@ -51,7 +51,7 @@ export default function RavelPage() {
     setError("");
     try {
       const body = {
-        varianten: varianten.map(v => ({
+        varianten: varianten.map((v) => ({
           name: v.name || "Ohne Name",
           investition: parseFloat(v.investition) || 0,
           nutzungsdauer: parseInt(v.nutzungsdauer) || 20,
@@ -71,43 +71,30 @@ export default function RavelPage() {
     }
   };
 
-  // Farbe für Rang
-  const rangColor = (rang) => {
-    if (rang === 1) return "#16a34a";
-    if (rang === 2) return "#2563eb";
-    return "#6b7280";
-  };
+  const rangColor = (rang) => (rang === 1 ? "text-green-600" : "text-slate-600");
 
   return (
-    <div style={{ maxWidth: 1000, margin: "0 auto", padding: "24px 16px", fontFamily: "sans-serif" }}>
-      <div style={{ marginBottom: 16, fontSize: 13, color: "#6b7280" }}>
-        <Link to="/projekte" style={{ color: "#2563eb" }}>Projekte</Link>
-        {" / "}RAVEL-Wirtschaftlichkeit
-      </div>
+    <div className="mx-auto max-w-5xl px-4 py-8 lg:px-8">
+      <PageHeader
+        back={{ to: "/start", label: "Start" }}
+        title="RAVEL-Wirtschaftlichkeitsvergleich"
+        subtitle="Dynamische Annuitätenmethode nach RAVEL-Leitfaden — bis 6 Varianten parallel (M10)."
+      />
 
-      <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>RAVEL-Wirtschaftlichkeitsvergleich (M10)</h1>
-      <p style={{ color: "#6b7280", fontSize: 13, marginBottom: 20 }}>
-        Dynamische Annuitätenmethode nach RAVEL-Leitfaden — bis 6 Varianten parallel
-      </p>
-
-      {/* Varianten Eingabe */}
-      <div style={{ overflowX: "auto", marginBottom: 16 }}>
-        <table style={{ borderCollapse: "collapse", minWidth: 700, fontSize: 13 }}>
+      {/* Varianten-Eingabe */}
+      <div className="card mb-4 overflow-x-auto">
+        <table className="w-full border-collapse text-sm" style={{ minWidth: 700 }}>
           <thead>
-            <tr style={{ background: "#f9fafb" }}>
-              <th style={{ ...th, width: 180 }}>Feld</th>
+            <tr className="bg-slate-50">
+              <th className="px-3 py-2.5 text-left text-xs font-semibold text-slate-500" style={{ width: 180 }}>Feld</th>
               {varianten.map((v, i) => (
-                <th key={i} style={{ ...th, width: 160, textAlign: "center" }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <input
-                      style={{ ...inputSt, fontWeight: 600, color: FARBEN[i], border: "none", background: "transparent", padding: "2px 0" }}
-                      value={v.name}
-                      onChange={e => setV(i, "name", e.target.value)}
-                    />
+                <th key={i} className="px-3 py-2.5" style={{ width: 160 }}>
+                  <div className="flex items-center justify-between gap-1">
+                    <input className="w-full border-none bg-transparent p-0 text-sm font-semibold outline-none" style={{ color: FARBEN[i] }}
+                      value={v.name} onChange={(e) => setV(i, "name", e.target.value)} />
                     {varianten.length > 1 && (
-                      <button onClick={() => removeVariante(i)}
-                        style={{ background: "none", border: "none", color: "#9ca3af", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px" }}>
-                        ×
+                      <button onClick={() => removeVariante(i)} className="text-slate-300 transition hover:text-red-500" title="Variante entfernen">
+                        <X className="size-4" />
                       </button>
                     )}
                   </div>
@@ -127,24 +114,20 @@ export default function RavelPage() {
 
             <SectionRow label="Energiekosten" span={varianten.length} />
             <InputRow label="Energiekosten/Jahr [CHF]" field="energie_pa" varianten={varianten} setV={setV} step={50} placeholder="z.B. 2400" />
-            <tr style={{ borderBottom: "1px solid #f3f4f6" }}>
-              <td style={tdSt}>
+            <tr className="border-b border-slate-100">
+              <td className="px-3 py-2 align-top text-slate-600">
                 Preissteigerung Energie [%]
-                <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>Öl/Gas ~2.5%, WP ~1.5%, Holz ~2.0%</div>
+                <div className="mt-0.5 text-xs text-slate-400">Öl/Gas ~2.5 %, WP ~1.5 %, Holz ~2.0 %</div>
               </td>
               {varianten.map((v, i) => (
-                <td key={i} style={{ ...tdSt, textAlign: "center" }}>
-                  <input
-                    type="number" step={0.1}
-                    style={inputSt}
-                    value={v.energie_steigerung_pct}
-                    onChange={e => setV(i, "energie_steigerung_pct", e.target.value)}
-                  />
-                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4, justifyContent: "center" }}>
-                    {Object.entries(ENERGIETRAEGER_STEIGERUNG).slice(0, 3).map(([k, val]) => (
-                      <button key={k} onClick={() => setV(i, "energie_steigerung_pct", val)}
-                        style={{ fontSize: 10, padding: "2px 4px", background: "#f3f4f6", border: "1px solid #e5e7eb", borderRadius: 3, cursor: "pointer" }}>
-                        {k.split(" ")[0]}: {val}%
+                <td key={i} className="px-3 py-2 text-center">
+                  <input type="number" step={0.1} className="input px-2.5 py-1.5" value={v.energie_steigerung_pct}
+                    onChange={(e) => setV(i, "energie_steigerung_pct", e.target.value)} />
+                  <div className="mt-1.5 flex flex-wrap justify-center gap-1">
+                    {Object.entries(ENERGIETRAEGER_STEIGERUNG).slice(0, 3).map(([kk, val]) => (
+                      <button key={kk} onClick={() => setV(i, "energie_steigerung_pct", val)}
+                        className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] text-slate-500 transition hover:bg-slate-100">
+                        {kk.split(" ")[0]}: {val}%
                       </button>
                     ))}
                   </div>
@@ -155,93 +138,59 @@ export default function RavelPage() {
         </table>
       </div>
 
-      {/* Buttons */}
-      <div style={{ display: "flex", gap: 12, marginBottom: 24, alignItems: "center" }}>
-        <button onClick={berechne} disabled={loading}
-          style={{ background: "#1e40af", color: "white", border: "none", borderRadius: 8, padding: "11px 28px", fontSize: 15, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.6 : 1 }}>
+      {/* Knöpfe */}
+      <div className="mb-6 flex flex-wrap items-center gap-3">
+        <button onClick={berechne} disabled={loading} className="btn-primary">
           {loading ? "Berechne…" : "Vergleich berechnen"}
         </button>
         {varianten.length < 6 && (
-          <button onClick={addVariante}
-            style={{ background: "#f3f4f6", color: "#374151", border: "1px solid #d1d5db", borderRadius: 8, padding: "11px 20px", fontSize: 14, cursor: "pointer" }}>
-            + Variante hinzufügen
-          </button>
+          <button onClick={addVariante} className="btn-secondary"><Plus className="size-4" /> Variante hinzufügen</button>
         )}
-        <span style={{ fontSize: 12, color: "#9ca3af" }}>{varianten.length}/6 Varianten</span>
+        <span className="text-xs text-slate-400">{varianten.length}/6 Varianten</span>
       </div>
 
-      {error && <div style={{ color: "#ef4444", marginBottom: 12 }}>{error}</div>}
+      {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
       {/* Resultate */}
       {results && (
         <div>
           {/* Günstigste Variante */}
-          <div style={{ background: "#dcfce7", border: "1px solid #86efac", borderRadius: 8, padding: "12px 16px", marginBottom: 20, display: "flex", alignItems: "center", gap: 12 }}>
-            <span style={{ fontSize: 24 }}>🏆</span>
+          <div className="mb-5 flex items-center gap-3 rounded-xl border border-green-200 bg-green-50 px-4 py-3">
+            <span className="text-2xl">🏆</span>
             <div>
-              <div style={{ fontWeight: 700, color: "#15803d" }}>{results.guenstigste}</div>
-              <div style={{ fontSize: 12, color: "#166534" }}>Günstigste Variante nach mittleren Jahreskosten</div>
+              <div className="font-bold text-green-700">{results.guenstigste}</div>
+              <div className="text-xs text-green-600">Günstigste Variante nach mittleren Jahreskosten</div>
             </div>
           </div>
 
           {/* Vergleichstabelle */}
-          <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 10 }}>Mittlere Jahreskosten (MJK)</h2>
-          <div style={{ overflowX: "auto", marginBottom: 20 }}>
-            <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 13 }}>
+          <h2 className="mb-3 font-semibold text-slate-800">Mittlere Jahreskosten (MJK)</h2>
+          <div className="card mb-6 overflow-x-auto">
+            <table className="w-full border-collapse text-sm">
               <thead>
-                <tr style={{ background: "#1e3a8a", color: "white" }}>
-                  <th style={{ ...th, color: "white" }}>Kostenart</th>
+                <tr className="bg-slate-50 text-xs font-semibold text-slate-500">
+                  <th className="px-4 py-2.5 text-left">Kostenart</th>
                   {results.varianten.map((v, i) => (
-                    <th key={i} style={{ ...th, color: "white", textAlign: "right" }}>
-                      <div>{v.name}</div>
-                      <div style={{ fontSize: 12, fontWeight: 400, opacity: 0.8 }}>Rang {v.rang}</div>
+                    <th key={i} className="px-4 py-2.5 text-right">
+                      <div className="text-slate-700">{v.name}</div>
+                      <div className="font-normal text-slate-400">Rang {v.rang}</div>
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                <tr style={{ borderBottom: "1px solid #e5e7eb", background: "#f9fafb" }}>
-                  <td style={tdSt}>Investition</td>
+                <MjkRow label="Investition" val={(v) => chf(v.investition)} vs={results.varianten} />
+                <MjkRow label="Nutzungsdauer / Zinssatz" val={(v) => `${v.nutzungsdauer} J. / ${v.zinssatz_pct}%`} vs={results.varianten} muted />
+                <MjkRow label="Annuitätsfaktor a" val={(v) => v.annuitaetsfaktor} vs={results.varianten} muted />
+                <MjkRow label="Kapitalkosten (K = Invest × a)" val={(v) => chf(v.kapitalkosten)} vs={results.varianten} />
+                <MjkRow label="Mittl. Betriebskosten" val={(v) => chf(v.betrieb_mittel)} vs={results.varianten} />
+                <MjkRow label="Mittl. Energiekosten" val={(v) => chf(v.energie_mittel)} vs={results.varianten} />
+                <tr className="border-t-2 border-brand-200 bg-brand-50/50 font-bold">
+                  <td className="px-4 py-3 text-slate-800">Mittlere Jahreskosten (MJK)</td>
                   {results.varianten.map((v, i) => (
-                    <td key={i} style={{ ...tdSt, textAlign: "right", fontFamily: "monospace" }}>{chf(v.investition)}</td>
-                  ))}
-                </tr>
-                <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
-                  <td style={tdSt}>Nutzungsdauer / Zinssatz</td>
-                  {results.varianten.map((v, i) => (
-                    <td key={i} style={{ ...tdSt, textAlign: "right", color: "#6b7280" }}>{v.nutzungsdauer} J. / {v.zinssatz_pct}%</td>
-                  ))}
-                </tr>
-                <tr style={{ borderBottom: "1px solid #e5e7eb", background: "#f9fafb" }}>
-                  <td style={tdSt}>Annuitätsfaktor a</td>
-                  {results.varianten.map((v, i) => (
-                    <td key={i} style={{ ...tdSt, textAlign: "right", fontFamily: "monospace", color: "#6b7280" }}>{v.annuitaetsfaktor}</td>
-                  ))}
-                </tr>
-                <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
-                  <td style={tdSt}>Kapitalkosten (K = Invest × a)</td>
-                  {results.varianten.map((v, i) => (
-                    <td key={i} style={{ ...tdSt, textAlign: "right", fontFamily: "monospace" }}>{chf(v.kapitalkosten)}</td>
-                  ))}
-                </tr>
-                <tr style={{ borderBottom: "1px solid #e5e7eb", background: "#f9fafb" }}>
-                  <td style={tdSt}>Mittl. Betriebskosten</td>
-                  {results.varianten.map((v, i) => (
-                    <td key={i} style={{ ...tdSt, textAlign: "right", fontFamily: "monospace" }}>{chf(v.betrieb_mittel)}</td>
-                  ))}
-                </tr>
-                <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
-                  <td style={tdSt}>Mittl. Energiekosten</td>
-                  {results.varianten.map((v, i) => (
-                    <td key={i} style={{ ...tdSt, textAlign: "right", fontFamily: "monospace" }}>{chf(v.energie_mittel)}</td>
-                  ))}
-                </tr>
-                <tr style={{ background: "#dbeafe", fontWeight: 700, borderTop: "2px solid #2563eb" }}>
-                  <td style={{ ...tdSt, fontSize: 14 }}>Mittlere Jahreskosten (MJK)</td>
-                  {results.varianten.map((v, i) => (
-                    <td key={i} style={{ ...tdSt, textAlign: "right", fontFamily: "monospace", fontSize: 15, color: rangColor(v.rang) }}>
+                    <td key={i} className={"px-4 py-3 text-right font-mono tabular-nums " + rangColor(v.rang)}>
                       {chf(v.mjk)}
-                      <div style={{ fontSize: 11, fontWeight: 400, color: rangColor(v.rang) }}>Rang {v.rang}</div>
+                      <div className={"text-xs font-normal " + rangColor(v.rang)}>Rang {v.rang}</div>
                     </td>
                   ))}
                 </tr>
@@ -250,51 +199,46 @@ export default function RavelPage() {
           </div>
 
           {/* Balkendiagramm */}
-          <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>Kostenstruktur im Vergleich</h2>
-          <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: 8, padding: 16 }}>
+          <h2 className="mb-3 font-semibold text-slate-800">Kostenstruktur im Vergleich</h2>
+          <div className="card p-5">
             {results.varianten.map((v, i) => {
-              const max = Math.max(...results.varianten.map(x => x.mjk));
-              const barWidth = max > 0 ? (v.mjk / max) * 100 : 0;
-              const kWidth = max > 0 ? (v.kapitalkosten / max) * 100 : 0;
-              const bWidth = max > 0 ? (v.betrieb_mittel / max) * 100 : 0;
-              const eWidth = max > 0 ? (v.energie_mittel / max) * 100 : 0;
+              const max = Math.max(...results.varianten.map((x) => x.mjk));
+              const w = (val) => (max > 0 ? (val / max) * 100 : 0);
               return (
-                <div key={i} style={{ marginBottom: 16 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, fontSize: 13 }}>
-                    <span style={{ fontWeight: 600 }}>{v.rang}. {v.name}</span>
-                    <span style={{ fontFamily: "monospace", fontWeight: 600 }}>{chf(v.mjk)} / Jahr</span>
+                <div key={i} className="mb-4 last:mb-0">
+                  <div className="mb-1 flex justify-between text-sm">
+                    <span className="font-semibold text-slate-700">{v.rang}. {v.name}</span>
+                    <span className="font-mono font-semibold text-slate-800">{chf(v.mjk)} / Jahr</span>
                   </div>
-                  <div style={{ height: 24, background: "#f3f4f6", borderRadius: 4, overflow: "hidden", display: "flex" }}>
-                    <div style={{ width: `${kWidth}%`, background: "#2563eb", transition: "width 0.5s" }} title={`Kapital: ${chf(v.kapitalkosten)}`} />
-                    <div style={{ width: `${bWidth}%`, background: "#16a34a", transition: "width 0.5s" }} title={`Betrieb: ${chf(v.betrieb_mittel)}`} />
-                    <div style={{ width: `${eWidth}%`, background: "#f59e0b", transition: "width 0.5s" }} title={`Energie: ${chf(v.energie_mittel)}`} />
+                  <div className="flex h-6 overflow-hidden rounded-lg bg-slate-100">
+                    <div className="transition-all" style={{ width: `${w(v.kapitalkosten)}%`, background: SEG.kapital }} title={`Kapital: ${chf(v.kapitalkosten)}`} />
+                    <div className="transition-all" style={{ width: `${w(v.betrieb_mittel)}%`, background: SEG.betrieb }} title={`Betrieb: ${chf(v.betrieb_mittel)}`} />
+                    <div className="transition-all" style={{ width: `${w(v.energie_mittel)}%`, background: SEG.energie }} title={`Energie: ${chf(v.energie_mittel)}`} />
                   </div>
                 </div>
               );
             })}
-            <div style={{ display: "flex", gap: 16, fontSize: 11, color: "#6b7280", marginTop: 8 }}>
-              <span><span style={{ display: "inline-block", width: 12, height: 12, background: "#2563eb", borderRadius: 2, marginRight: 4 }} />Kapital</span>
-              <span><span style={{ display: "inline-block", width: 12, height: 12, background: "#16a34a", borderRadius: 2, marginRight: 4 }} />Betrieb</span>
-              <span><span style={{ display: "inline-block", width: 12, height: 12, background: "#f59e0b", borderRadius: 2, marginRight: 4 }} />Energie</span>
+            <div className="mt-3 flex gap-4 text-xs text-slate-500">
+              <span className="inline-flex items-center gap-1.5"><span className="size-3 rounded-sm" style={{ background: SEG.kapital }} />Kapital</span>
+              <span className="inline-flex items-center gap-1.5"><span className="size-3 rounded-sm" style={{ background: SEG.betrieb }} />Betrieb</span>
+              <span className="inline-flex items-center gap-1.5"><span className="size-3 rounded-sm" style={{ background: SEG.energie }} />Energie</span>
             </div>
           </div>
 
           {/* Warnungen */}
-          {results.varianten.some(v => v.warnings?.length > 0) && (
-            <div style={{ marginTop: 16 }}>
-              {results.varianten.filter(v => v.warnings?.length > 0).map((v, i) => (
+          {results.varianten.some((v) => v.warnings?.length > 0) && (
+            <div className="mt-4 space-y-2">
+              {results.varianten.filter((v) => v.warnings?.length > 0).map((v, i) =>
                 v.warnings.map((w, j) => (
-                  <div key={`${i}-${j}`} style={{ background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 6, padding: "8px 12px", fontSize: 12, color: "#92400e", marginBottom: 6 }}>
-                    ⚠️ {v.name}: {w}
-                  </div>
+                  <div key={`${i}-${j}`} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">⚠️ {v.name}: {w}</div>
                 ))
-              ))}
+              )}
             </div>
           )}
 
-          {/* Formel-Erklärung */}
-          <div style={{ marginTop: 20, background: "#f9fafb", borderRadius: 8, padding: 16, fontSize: 12, color: "#6b7280" }}>
-            <strong>Methodik:</strong> Dynamische Annuitätenmethode nach RAVEL-Leitfaden (BfK, 1994)<br />
+          {/* Methodik */}
+          <div className="mt-5 rounded-lg bg-slate-50 p-4 text-xs leading-relaxed text-slate-500">
+            <strong className="text-slate-600">Methodik:</strong> Dynamische Annuitätenmethode nach RAVEL-Leitfaden (BfK, 1994)<br />
             a = i·(1+i)^n / ((1+i)^n − 1) | m = a·[1−(1+r)^−n] / r wobei r = (i−e)/(1+e)<br />
             MJK = K_Kapital + B_mittel + E_mittel
           </div>
@@ -306,32 +250,33 @@ export default function RavelPage() {
 
 function SectionRow({ label, span }) {
   return (
-    <tr style={{ background: "#f3f4f6" }}>
-      <td colSpan={span + 1} style={{ padding: "8px 10px", fontSize: 12, fontWeight: 600, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-        {label}
-      </td>
+    <tr className="bg-slate-100/70">
+      <td colSpan={span + 1} className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">{label}</td>
     </tr>
   );
 }
 
 function InputRow({ label, field, varianten, setV, step = 1, placeholder = "" }) {
   return (
-    <tr style={{ borderBottom: "1px solid #f3f4f6" }}>
-      <td style={tdSt}>{label}</td>
+    <tr className="border-b border-slate-100">
+      <td className="px-3 py-2 text-slate-600">{label}</td>
       {varianten.map((v, i) => (
-        <td key={i} style={{ ...tdSt, textAlign: "center" }}>
-          <input
-            type="number" step={step}
-            style={inputSt}
-            value={v[field]}
-            onChange={e => setV(i, field, e.target.value)}
-            placeholder={placeholder}
-          />
+        <td key={i} className="px-3 py-2 text-center">
+          <input type="number" step={step} className="input px-2.5 py-1.5" value={v[field]}
+            onChange={(e) => setV(i, field, e.target.value)} placeholder={placeholder} />
         </td>
       ))}
     </tr>
   );
 }
 
-const th = { padding: "10px 12px", textAlign: "left", fontSize: 12, fontWeight: 600 };
-const tdSt = { padding: "8px 10px", verticalAlign: "middle", borderBottom: "1px solid #f3f4f6", fontSize: 13 };
+function MjkRow({ label, val, vs, muted }) {
+  return (
+    <tr className="border-b border-slate-100">
+      <td className="px-4 py-2 text-slate-600">{label}</td>
+      {vs.map((v, i) => (
+        <td key={i} className={"px-4 py-2 text-right font-mono tabular-nums " + (muted ? "text-slate-400" : "text-slate-700")}>{val(v)}</td>
+      ))}
+    </tr>
+  );
+}

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { getRefAnalyse } from "../../api/hcApi";
 import BoxPlot from "../../components/charts/BoxPlot";
+import PageHeader from "../../components/ui/PageHeader";
 
 const fmt = (n) => Number(n).toLocaleString("de-CH", { maximumFractionDigits: n < 100 ? 1 : 0 });
 
@@ -15,18 +15,11 @@ export default function AuswertungAnalyse() {
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8 lg:px-8">
-      <div className="mb-6 flex items-center gap-2 text-sm text-slate-500">
-        <Link to="/auswertung" className="hover:text-brand-600">Auswertung</Link>
-        <span>/</span>
-        <span className="text-slate-800">Analyse</span>
-      </div>
-
-      <header className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-900">Kennwert-Streuung</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Kennwerte je BKP-Position über alle Referenzprojekte {data ? `(${data.anzahl})` : ""}. Box = P25–P75, Strich = Median, Punkt = Mittel.
-        </p>
-      </header>
+      <PageHeader
+        back={{ to: "/auswertung", label: "Auswertung" }}
+        title="Kennwert-Streuung"
+        subtitle={`Kennwerte je BKP-Position über alle Referenzprojekte${data ? ` (${data.anzahl})` : ""}. Box = P25–P75, Strich = Median, Punkt = Mittel.`}
+      />
 
       {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 

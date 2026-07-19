@@ -1,10 +1,22 @@
 import React, { useState } from "react";
-import { Link } from "react-router-dom";
 import { api } from "../../api";
+import PageHeader from "../../components/ui/PageHeader";
+import InfoTip from "../../components/ui/InfoTip";
 
 const KVS_REIHE = [0.1, 0.16, 0.25, 0.4, 0.63, 1.0, 1.6, 2.5, 4.0, 6.3, 10.0, 16.0, 25.0, 40.0, 63.0];
 
-const fmtNum = (n, dec = 3) => n != null ? Number(n).toFixed(dec) : "—";
+const fmtNum = (n, dec = 3) => (n != null ? Number(n).toFixed(dec) : "—");
+
+// Ideal-Fenster der Ventilautorität: 30–80 %. Farben bleiben bewusst semantisch
+// (rot = schlecht, grün = gut), nicht Marken-Rot.
+const pvText = (pv) => (pv < 30 ? "text-red-600" : pv > 80 ? "text-amber-600" : "text-green-600");
+const pvBar = (pv) => (pv < 30 ? "bg-red-500" : pv > 80 ? "bg-amber-500" : "bg-green-500");
+
+const ERKL = {
+  volumenstrom: "Der Wasser-Volumenstrom durch das Ventil im Auslegungsfall (aus der Heizgruppe).",
+  dpvar: "Der veränderliche Druckverlust im Kreis ohne das Ventil selbst — die «Anlage», gegen die das Ventil arbeitet.",
+  autoritaet: "Wie stark das Ventil den Durchfluss wirklich steuert. Unter 30 % regelt es schlecht, über 80 % ist es überdimensioniert. Ideal: 30–80 %.",
+};
 
 export default function VentilPage() {
   const [form, setForm] = useState({ volumenstrom_m3h: "", dp_var_kpa: "", kvs_gewaehlt: "" });
@@ -42,129 +54,92 @@ export default function VentilPage() {
     }
   };
 
-  const pvColor = (pv) => {
-    if (pv < 30) return "#ef4444";
-    if (pv > 80) return "#f59e0b";
-    return "#16a34a";
-  };
-
   return (
-    <div style={{ maxWidth: 700, margin: "0 auto", padding: "24px 16px", fontFamily: "sans-serif" }}>
-      <div style={{ marginBottom: 16, fontSize: 13, color: "#6b7280" }}>
-        <Link to="/projekte" style={{ color: "#2563eb" }}>Projekte</Link>
-        {" / "}Ventilauslegung
-      </div>
-
-      <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>Ventilauslegung (M3)</h1>
-      <p style={{ color: "#6b7280", fontSize: 13, marginBottom: 24 }}>
-        kvs-Berechnung mit Ventilautorität nach deinem Excel
-      </p>
+    <div className="mx-auto max-w-3xl px-4 py-8 lg:px-8">
+      <PageHeader
+        back={{ to: "/start", label: "Start" }}
+        title="Ventilauslegung"
+        subtitle="kvs-Wert und Ventilautorität eines Regelventils — nach deinem Excel-Blatt (M3)."
+      />
 
       {/* Eingaben */}
-      <div style={{ background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8, padding: 20, marginBottom: 20 }}>
-        <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 16 }}>Eingaben</h2>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+      <div className="card p-6">
+        <h2 className="mb-4 font-semibold text-slate-800">Eingaben</h2>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <label style={{ display: "block", fontSize: 12, color: "#374151", marginBottom: 4 }}>
-              Volumenstrom V' [m³/h] *
-            </label>
-            <input
-              type="number" step="0.01" min="0"
-              style={inputStyle}
-              value={form.volumenstrom_m3h}
-              onChange={e => set("volumenstrom_m3h", e.target.value)}
-              placeholder="z.B. 0.49"
-            />
+            <label className="label flex items-center gap-1">Volumenstrom V' [m³/h] * <InfoTip text={ERKL.volumenstrom} /></label>
+            <input type="number" step="0.01" min="0" className="input" value={form.volumenstrom_m3h}
+              onChange={(e) => set("volumenstrom_m3h", e.target.value)} placeholder="z.B. 0.49" />
           </div>
           <div>
-            <label style={{ display: "block", fontSize: 12, color: "#374151", marginBottom: 4 }}>
-              Δpvar (variable Anlage) [kPa] *
-            </label>
-            <input
-              type="number" step="0.5" min="0"
-              style={inputStyle}
-              value={form.dp_var_kpa}
-              onChange={e => set("dp_var_kpa", e.target.value)}
-              placeholder="z.B. 26"
-            />
-            <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 3 }}>100 kPa = 1 bar</div>
+            <label className="label flex items-center gap-1">Δpvar (variable Anlage) [kPa] * <InfoTip text={ERKL.dpvar} /></label>
+            <input type="number" step="0.5" min="0" className="input" value={form.dp_var_kpa}
+              onChange={(e) => set("dp_var_kpa", e.target.value)} placeholder="z.B. 26" />
+            <p className="mt-1 text-xs text-slate-400">100 kPa = 1 bar</p>
           </div>
         </div>
 
         {result && (
-          <div style={{ marginTop: 16 }}>
-            <label style={{ display: "block", fontSize: 12, color: "#374151", marginBottom: 4 }}>
-              KVS wählen (Vorschlag: {result.kvs_vorschlag})
-            </label>
-            <select
-              style={inputStyle}
-              value={form.kvs_gewaehlt || result.kvs_vorschlag}
-              onChange={e => set("kvs_gewaehlt", e.target.value)}
-            >
-              {KVS_REIHE.map(k => (
-                <option key={k} value={k}>
-                  KVS {k}{k === result.kvs_vorschlag ? " ← Vorschlag" : ""}
-                </option>
+          <div className="mt-4">
+            <label className="label">KVS wählen (Vorschlag: {result.kvs_vorschlag})</label>
+            <select className="input" value={form.kvs_gewaehlt || result.kvs_vorschlag}
+              onChange={(e) => set("kvs_gewaehlt", e.target.value)}>
+              {KVS_REIHE.map((k) => (
+                <option key={k} value={k}>KVS {k}{k === result.kvs_vorschlag ? " ← Vorschlag" : ""}</option>
               ))}
             </select>
           </div>
         )}
       </div>
 
-      {error && <div style={{ color: "#ef4444", marginBottom: 12, fontSize: 13 }}>{error}</div>}
+      {error && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
       {/* Resultate */}
       {result && !result.fehler && (
-        <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden" }}>
-          <div style={{ background: "#1e40af", color: "white", padding: "12px 20px", fontSize: 14, fontWeight: 600 }}>
-            Resultate
-          </div>
-
-          {/* Ventilautorität gross */}
-          <div style={{ padding: "20px", background: "white" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 24, marginBottom: 20 }}>
-              <div style={{ textAlign: "center" }}>
-                <div style={{ fontSize: 42, fontWeight: 700, color: pvColor(result.ventilautoritaet_pct) }}>
-                  {fmtNum(result.ventilautoritaet_pct, 1)}%
-                </div>
-                <div style={{ fontSize: 12, color: "#6b7280" }}>Ventilautorität Pv</div>
-                <div style={{ fontSize: 11, color: "#9ca3af" }}>Ideal: 30–80%</div>
+        <div className="card mt-6 overflow-hidden">
+          <div className="border-b border-slate-200 bg-slate-50 px-6 py-3 text-sm font-semibold text-slate-700">Resultate</div>
+          <div className="p-6">
+            {/* Ventilautorität gross + Balken */}
+            <div className="mb-6 flex flex-col items-center gap-6 sm:flex-row">
+              <div className="text-center">
+                <div className={"text-5xl font-bold " + pvText(result.ventilautoritaet_pct)}>{fmtNum(result.ventilautoritaet_pct, 1)}%</div>
+                <div className="mt-1 flex items-center justify-center gap-1 text-xs text-slate-500">Ventilautorität Pv <InfoTip text={ERKL.autoritaet} /></div>
+                <div className="text-xs text-slate-400">Ideal: 30–80 %</div>
               </div>
-              {/* Balken */}
-              <div style={{ flex: 1 }}>
-                <div style={{ background: "#f3f4f6", borderRadius: 4, height: 20, position: "relative", overflow: "hidden" }}>
-                  <div style={{
-                    width: `${Math.min(result.ventilautoritaet_pct, 100)}%`,
-                    background: pvColor(result.ventilautoritaet_pct),
-                    height: "100%",
-                    transition: "width 0.3s"
-                  }} />
-                  {/* Markierungen bei 30% und 80% */}
-                  <div style={{ position: "absolute", top: 0, left: "30%", height: "100%", borderLeft: "2px dashed #9ca3af" }} />
-                  <div style={{ position: "absolute", top: 0, left: "80%", height: "100%", borderLeft: "2px dashed #9ca3af" }} />
+              <div className="w-full flex-1">
+                <div className="relative h-5 overflow-hidden rounded-full bg-slate-100">
+                  <div className={"h-full transition-all " + pvBar(result.ventilautoritaet_pct)}
+                    style={{ width: `${Math.min(result.ventilautoritaet_pct, 100)}%` }} />
+                  <div className="absolute top-0 h-full border-l-2 border-dashed border-slate-400" style={{ left: "30%" }} />
+                  <div className="absolute top-0 h-full border-l-2 border-dashed border-slate-400" style={{ left: "80%" }} />
                 </div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#9ca3af", marginTop: 2 }}>
-                  <span>0%</span><span>30%</span><span style={{ marginLeft: "calc(50% - 16px)" }}>80%</span><span>100%</span>
+                <div className="relative mt-1 h-4 text-[10px] text-slate-400">
+                  <span className="absolute left-0">0 %</span>
+                  <span className="absolute -translate-x-1/2" style={{ left: "30%" }}>30 %</span>
+                  <span className="absolute -translate-x-1/2" style={{ left: "80%" }}>80 %</span>
+                  <span className="absolute right-0">100 %</span>
                 </div>
               </div>
             </div>
 
             {/* Zahlentabelle */}
-            <table style={{ width: "100%", fontSize: 13, borderCollapse: "collapse" }}>
-              <tbody>
-                <Row label="Theoretischer KVS" value={`${fmtNum(result.kvs_theor, 4)} m³/h·bar^½`} />
-                <Row label="Gewählter KVS (nächste Norm-Grösse)" value={<strong>{result.kvs_eff}</strong>} />
-                <Row label="Δpvar [kPa]" value={fmtNum(result.dp_var_kpa, 1)} />
-                <Row label="Δpvar [bar]" value={fmtNum(result.dp_var_bar, 5)} />
-                <Row label="Δpv,eff (Druckverlust Ventil) [kPa]" value={fmtNum(result.dp_v_eff_kpa, 2)} highlight />
-                <Row label="Δpv,eff [bar]" value={fmtNum(result.dp_v_eff_bar, 6)} />
-                <Row label="Ventilautorität Pv" value={<span style={{ color: pvColor(result.ventilautoritaet_pct), fontWeight: 600 }}>{fmtNum(result.ventilautoritaet_pct, 2)}%</span>} highlight />
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <tbody>
+                  <Row label="Theoretischer KVS" value={`${fmtNum(result.kvs_theor, 4)} m³/h·bar^½`} />
+                  <Row label="Gewählter KVS (nächste Norm-Grösse)" value={<strong>{result.kvs_eff}</strong>} />
+                  <Row label="Δpvar [kPa]" value={fmtNum(result.dp_var_kpa, 1)} />
+                  <Row label="Δpvar [bar]" value={fmtNum(result.dp_var_bar, 5)} />
+                  <Row label="Δpv,eff (Druckverlust Ventil) [kPa]" value={fmtNum(result.dp_v_eff_kpa, 2)} highlight />
+                  <Row label="Δpv,eff [bar]" value={fmtNum(result.dp_v_eff_bar, 6)} />
+                  <Row label="Ventilautorität Pv" value={<span className={"font-semibold " + pvText(result.ventilautoritaet_pct)}>{fmtNum(result.ventilautoritaet_pct, 2)}%</span>} highlight />
+                </tbody>
+              </table>
+            </div>
 
             {/* Formeln */}
-            <div style={{ marginTop: 16, background: "#f9fafb", borderRadius: 6, padding: 12, fontSize: 11, color: "#6b7280" }}>
-              <strong>Formeln:</strong><br />
+            <div className="mt-4 rounded-lg bg-slate-50 p-3 text-xs leading-relaxed text-slate-500">
+              <strong className="text-slate-600">Formeln:</strong><br />
               kvs_theor = V' / √Δpvar [bar] = {fmtNum(result.volumenstrom_m3h, 3)} / √{fmtNum(result.dp_var_bar, 4)} = <strong>{fmtNum(result.kvs_theor, 4)}</strong><br />
               Δpv,eff [bar] = (V' / kvs_eff)² = ({fmtNum(result.volumenstrom_m3h, 3)} / {result.kvs_eff})² = <strong>{fmtNum(result.dp_v_eff_bar, 6)}</strong><br />
               Pv = Δpv,eff / (Δpv,eff + Δpvar) = {fmtNum(result.dp_v_eff_bar, 6)} / ({fmtNum(result.dp_v_eff_bar, 6)} + {fmtNum(result.dp_var_bar, 5)}) = <strong>{fmtNum(result.ventilautoritaet_pct, 2)}%</strong>
@@ -172,11 +147,9 @@ export default function VentilPage() {
 
             {/* Warnungen */}
             {result.warnings?.length > 0 && (
-              <div style={{ marginTop: 12 }}>
+              <div className="mt-4 space-y-2">
                 {result.warnings.map((w, i) => (
-                  <div key={i} style={{ background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 6, padding: "8px 12px", fontSize: 12, color: "#92400e", marginBottom: 6 }}>
-                    ⚠️ {w}
-                  </div>
+                  <div key={i} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">⚠️ {w}</div>
                 ))}
               </div>
             )}
@@ -185,22 +158,17 @@ export default function VentilPage() {
       )}
 
       {result?.fehler && (
-        <div style={{ color: "#ef4444", padding: 12, background: "#fef2f2", borderRadius: 6 }}>{result.fehler}</div>
+        <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{result.fehler}</div>
       )}
     </div>
   );
 }
 
-const inputStyle = {
-  width: "100%", padding: "8px 10px", border: "1px solid #d1d5db",
-  borderRadius: 6, fontSize: 14, boxSizing: "border-box",
-};
-
 function Row({ label, value, highlight }) {
   return (
-    <tr style={{ background: highlight ? "#f0f9ff" : "white", borderBottom: "1px solid #f3f4f6" }}>
-      <td style={{ padding: "8px 12px", color: "#374151", width: "55%" }}>{label}</td>
-      <td style={{ padding: "8px 12px", fontWeight: highlight ? 600 : 400, fontFamily: "monospace" }}>{value}</td>
+    <tr className={"border-b border-slate-100 " + (highlight ? "bg-brand-50/40" : "")}>
+      <td className="py-2 pr-3 text-slate-600" style={{ width: "55%" }}>{label}</td>
+      <td className={"py-2 font-mono tabular-nums " + (highlight ? "font-semibold text-slate-900" : "text-slate-700")}>{value}</td>
     </tr>
   );
 }

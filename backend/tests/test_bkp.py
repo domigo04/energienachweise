@@ -24,11 +24,12 @@ def test_gewicht_6_jahre():
 
 
 def test_katalog_vollstaendig():
-    # 5 (241) + 5 (242) + 13 (243) + 2 (247) + 3 (248) + 8 (249) = 36 Positionen
-    assert len(BKP_POSITIONEN) == 36
+    # Vollständiges Norm-LV (Dominic 2026-07-14): 8 (241 inkl. Tank/Montage) +
+    # 7 (242 inkl. Gas/Öl) + 13 (243) + 2 (247) + 3 (248) + 8 (249) = 41 Positionen
+    assert len(BKP_POSITIONEN) == 41
     nummern = {p["bkp_nr"] for p in BKP_POSITIONEN}
-    # Kein Öl / Gas / Tank — Stichprobe der Pflicht-Positionen
-    for nr in ("241.10", "241.14", "242.3", "242.7", "243.1", "243.9", "247.5", "248.3", "249.8"):
+    for nr in ("241.1a", "241.10", "241.14", "242.1", "242.3", "242.7",
+               "243.1", "243.9", "247.5", "248.3", "249.8"):
         assert nr in nummern
 
 

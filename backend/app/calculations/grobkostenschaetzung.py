@@ -1,41 +1,45 @@
-"""Grobkostenschätzung (BKP) — Berechnungskern. Eigenständiges Modul, siehe
-models/grobkostenschaetzung.py und CLAUDE.md, Abschnitt "Grobkostenschätzung
-(BKP)" für die Einordnung neben der bestehenden Auswertung/Kostenschätzung.
+"""Grobkostenschätzung (BKP) — Berechnungskern.
 
-Reine Funktionen (Dicts/Listen rein, Dicts/Zahlen raus) — keine DB-Abhängigkeit,
-damit jede Formel isoliert mit pytest getestet werden kann (CLAUDE.md-Regel).
-Alle 7 Bausteine:
-1. Zeitgewicht          — Halbwertszeit 3 Jahre
-2. Ähnlichkeitssuche    — Hard-Filter + Score + Zeitgewicht → Rang (Top 3–5)
-3. Hochrechnung Weg A   — Kennwert (CHF/kW, CHF/m² EBF, %-Anteil bei BKP 249)
-4. Faktor-Brücke Weg B  — gelernte Mengen-Faktoren (nur mit Stufe-2-Daten)
-5. Kreuzcheck           — Abweichung Weg A/B → Vertrauen
-6. Potenzfunktion       — K = a×X^b, nur wenn n≥8 im Segment und R²>0.7
-7. Korrekturfaktoren    — Sanierung/Weiterbetrieb/Etappierung, aus DB-Tabelle
+Reine Funktionen (Dicts/Listen rein, Dicts/Zahlen raus, kein DB-Zugriff), damit
+jede Formel isoliert mit pytest testbar ist. Die Schätzung läuft im Projekt und
+rechnet auf den Referenzprojekten der Auswertung; der Router übersetzt die
+Auswertungs-Daten (siehe hc_grobkostenschaetzung.py::_ref_to_calc_dict).
+
+Ausgabe auf Ebene der BKP-EINZELPOSITIONEN (Norm-Leistungsverzeichnis, Dominic
+2026-07-14) statt Gruppen-Summen. Kernidee gegen die frühere Überschätzung:
+**eine Position, die in einer Referenz fehlt, zählt als 0 Franken** — sie kostete
+in jenem Projekt real nichts, ist nicht «unbekannt». Dadurch bekommen selten
+vorkommende Positionen einen tiefen Mittelwert statt hochgerechnet zu werden, und
+die Summe aller Positionen bleibt in der Grössenordnung der Referenz-Totale.
+
+Ablauf:
+1. Ähnlichkeitssuche (Hard-Filter + Score + Zeitgewicht) — unverändert.
+2. Je Position: gewichteter Kennwert (Betrag ÷ Bezugsgrösse) über ALLE
+   Segment-Referenzen, fehlende Position = 0 → × Bezugsgrösse des Zielprojekts.
+3. Korrekturfaktoren (Sanierung/Weiterbetrieb/Etappierung) und Baupreisindex.
 """
 import math
 from datetime import date
 from typing import Optional
 
-import numpy as np
+from app.calculations.kostenschaetzung import index_faktor  # Baupreisindex — gleiche Logik wie im alten System
+from app.data.bkp_positionen import BKP_GRUPPEN, filter_positionen, treiber_fuer_bkp
 
-KATEGORIE_ORDER = ["EFH", "MFH_2_5", "MFH_6_10", "MFH_11plus", "Gewerbe", "Industrie"]
+WOHNNUTZUNGEN = {"MFH", "EFH"}
+BKP_GRUPPEN_ALLE = ["241", "242", "243", "247", "248", "249"]
 
-# Treiber je BKP-Gruppe für Weg A (Kennwert-Hochrechnung). BKP 249 hat keinen
-# Treiber — läuft als %-Anteil vom Zwischentotal (siehe weg_a_bkp_249).
-_TREIBER_FELD = {"241": "leistung_kw", "242": "leistung_kw", "243": "ebf_m2", "247": "ebf_m2", "248": "ebf_m2"}
-_TREIBER_EINHEIT = {"241": "CHF/kW", "242": "CHF/kW", "243": "CHF/m² EBF", "247": "CHF/m² EBF", "248": "CHF/m² EBF"}
-
-# Faktor-Brücke (Weg B): welche Stufe-2-Menge, geteilt durch welche
-# Schlüsselgrösse, gehört zu welcher BKP-Gruppe.
-_FAKTOR_DEF = {
-    "rohr_faktor": {"menge_feld": "rohrmeter", "schluessel_feld": "ebf_m2", "bkp": "243", "einheit": "CHF/m"},
-    "hk_faktor": {"menge_feld": "hk_anzahl", "schluessel_feld": "ebf_m2", "bkp": "243", "einheit": "CHF/Stk"},
-    "bohr_faktor": {"menge_feld": "bohrmeter", "schluessel_feld": "leistung_kw", "bkp": "241", "einheit": "CHF/m"},
-}
+# Die Bezugsgrösse einer Position (aus treiber_fuer_bkp) → Feld im Zielprojekt/
+# in der Referenz, plus Anzeige-Einheit des Kennwerts.
+_TREIBER_ZIEL_FELD = {"bohrmeter": "bohrmeter", "kw": "leistung_kw", "einheiten": "hk_anzahl", "ebf": "ebf_m2"}
+_TREIBER_EINHEIT = {"bohrmeter": "CHF/m", "kw": "CHF/kW", "einheiten": "CHF/Stk", "ebf": "CHF/m² EBF"}
+# Rückfall, wenn das Zielprojekt die eigentliche Bezugsgrösse nicht kennt
+# (z.B. Bohrmeter/Heizkörper nicht angegeben) — kW und EBF sind Pflichteingaben.
+_TREIBER_FALLBACK = {"bohrmeter": "kw", "einheiten": "ebf"}
+# Wärmepumpen-Art im Rechenkern ("sole"/"luft"/"wasser") → Schlüssel im Katalog.
+_WP_KATALOG = {"sole": "sole_wasser", "luft": "luft_wasser", "wasser": "wasser_wasser"}
 
 
-# ── 1) Zeitgewicht ───────────────────────────────────────────────────────────
+# ── Zeitgewicht ──────────────────────────────────────────────────────────────
 
 def zeitgewicht(alter_jahre: float, halbwertszeit_jahre: float = 3.0) -> float:
     """Exponentieller Zerfall: neuere Referenzen zählen mehr. Bei
@@ -51,10 +55,11 @@ def alter_in_jahren(datum_abrechnung: date, heute: Optional[date] = None) -> flo
     return (heute - datum_abrechnung).days / 365.25
 
 
-# ── 2) Ähnlichkeitssuche (3 Ebenen) ─────────────────────────────────────────
+# ── Ähnlichkeitssuche ───────────────────────────────────────────────────────
 
 def hard_filter(kandidat: dict, ziel: dict) -> bool:
-    """Ebene 1 — muss identisch sein, sonst scheidet die Referenz aus."""
+    """Muss identisch sein, sonst scheidet die Referenz aus: Wärmepumpen-Art,
+    Projektart, Erdsonden ja/nein."""
     return (
         kandidat.get("wp_typ") == ziel.get("wp_typ")
         and kandidat.get("projektart") == ziel.get("projektart")
@@ -70,16 +75,14 @@ def groessennaehe(a: Optional[float], b: Optional[float]) -> float:
     return min(a, b) / max(a, b)
 
 
-def kategorienaehe(a: str, b: str) -> float:
-    """Gleiche Gebäudekategorie 1.0, Nachbarklasse (z.B. MFH_2_5↔MFH_6_10)
-    0.5, sonst 0.0."""
+def nutzungsnaehe(a: str, b: str) -> float:
+    """Gleiche Nutzung 1.0, beides Wohnen (MFH↔EFH) 0.5, sonst 0.0 —
+    ein Spital-Kennwert sagt über ein EFH praktisch nichts aus."""
     if a == b:
         return 1.0
-    try:
-        i, j = KATEGORIE_ORDER.index(a), KATEGORIE_ORDER.index(b)
-    except ValueError:
-        return 0.0
-    return 0.5 if abs(i - j) == 1 else 0.0
+    if a in WOHNNUTZUNGEN and b in WOHNNUTZUNGEN:
+        return 0.5
+    return 0.0
 
 
 def abgabetyp_naehe(a: str, b: str) -> float:
@@ -91,35 +94,48 @@ def abgabetyp_naehe(a: str, b: str) -> float:
     return 0.2
 
 
+def bww_naehe(a, b) -> float:
+    """Brauchwarmwasser-Schnittstelle (in den Heizungs-Kosten enthalten oder
+    beim Sanitär?). Bewusst WEICH, kein Hard-Filter: ein sonst sehr ähnliches
+    Projekt mit anderer Schnittstelle bleibt brauchbar, rutscht nur leicht nach
+    hinten. Unbekannt (None) ist neutral."""
+    if a is None and b is None:
+        return 1.0
+    if a is None or b is None:
+        return 0.5
+    return 1.0 if bool(a) == bool(b) else 0.0
+
+
 def aehnlichkeits_score(kandidat: dict, ziel: dict) -> float:
-    """Ebene 2 — gewichtete Summe (0..1)."""
+    """Gewichtete Summe (0..1) der weichen Ähnlichkeits-Merkmale."""
     return (
-        0.35 * groessennaehe(kandidat.get("ebf_m2"), ziel.get("ebf_m2"))
+        0.30 * groessennaehe(kandidat.get("ebf_m2"), ziel.get("ebf_m2"))
         + 0.25 * groessennaehe(kandidat.get("leistung_kw"), ziel.get("leistung_kw"))
-        + 0.20 * kategorienaehe(kandidat.get("gebaeudekategorie"), ziel.get("gebaeudekategorie"))
-        + 0.20 * abgabetyp_naehe(kandidat.get("abgabe_dominant"), ziel.get("abgabe_dominant"))
+        + 0.20 * nutzungsnaehe(kandidat.get("nutzung"), ziel.get("nutzung"))
+        + 0.15 * abgabetyp_naehe(kandidat.get("abgabe_dominant"), ziel.get("abgabe_dominant"))
+        + 0.10 * bww_naehe(kandidat.get("bww_bei_heizung"), ziel.get("bww_bei_heizung"))
     )
 
 
-def finde_referenzen(kandidaten: list, ziel: dict, top_n: int = 5, heute: Optional[date] = None) -> list:
-    """Ebene 1+2+3: Hard-Filter → Score → ×Zeitgewicht = Rang. Gibt die
-    Kandidaten (angereichert mit 'score'/'zeitgewicht'/'rang') absteigend
-    sortiert zurück — oben die Top n (3–5), wie im Auftrag verlangt."""
+def finde_referenzen(kandidaten: list, ziel: dict, top_n: Optional[int] = 5, heute: Optional[date] = None) -> list:
+    """Hard-Filter → Score → ×Zeitgewicht = Rang. Absteigend sortiert; top_n=None
+    liefert das ganze Segment (alle Hard-Filter-Treffer). Referenz ohne
+    Abrechnungsdatum (Altbestand) wird zeitlich neutral gewichtet (1.0) statt
+    abzustürzen."""
     gefiltert = [k for k in kandidaten if hard_filter(k, ziel)]
     angereichert = []
     for k in gefiltert:
         score = aehnlichkeits_score(k, ziel)
-        gewicht = zeitgewicht(alter_in_jahren(k["datum_abrechnung"], heute))
+        datum = k.get("datum_abrechnung")
+        gewicht = zeitgewicht(alter_in_jahren(datum, heute)) if datum else 1.0
         rang = score * gewicht
         angereichert.append({**k, "score": round(score, 4), "zeitgewicht": round(gewicht, 4), "rang": round(rang, 4)})
     angereichert.sort(key=lambda r: r["rang"], reverse=True)
-    return angereichert[:top_n]
+    return angereichert[:top_n] if top_n else angereichert
 
-
-# ── Hilfsfunktion: Perzentil (für Bandbreite P25–P75) ───────────────────────
 
 def perzentil(werte: list, q: float) -> float:
-    """Linear interpoliertes Perzentil."""
+    """Linear interpoliertes Perzentil (für die Bandbreite P25–P75)."""
     v = sorted(werte)
     if not v:
         return 0.0
@@ -129,174 +145,7 @@ def perzentil(werte: list, q: float) -> float:
     return v[lo] + rest * (v[lo + 1] - v[lo]) if lo + 1 < len(v) else v[lo]
 
 
-# ── 3) Hochrechnung Weg A — Kennwert ────────────────────────────────────────
-
-def kennwerte_je_referenz(referenzen: list, bkp_gruppe: str) -> list:
-    """Kennwert (Betrag/Treiber) je Referenz für eine BKP-Gruppe — nur
-    Referenzen mit Betrag>0 und gültigem Treiber zählen mit."""
-    feld = _TREIBER_FELD.get(bkp_gruppe)
-    out = []
-    for r in referenzen:
-        betrag = (r.get("bkp_betraege") or {}).get(bkp_gruppe)
-        treiber = r.get(feld) if feld else None
-        if betrag and betrag > 0 and treiber and treiber > 0:
-            jahr = r["datum_abrechnung"].year if hasattr(r.get("datum_abrechnung"), "year") else None
-            out.append({"kennwert": betrag / treiber, "gewicht": r.get("rang", 1.0), "name": r.get("name"), "jahr": jahr})
-    return out
-
-
-def weg_a_hochrechnung(referenzen: list, bkp_gruppe: str, ziel: dict) -> Optional[dict]:
-    """Weg A für 241/242/243/247/248: gewichteter Mittelwert des Kennwerts ×
-    Treibergrösse des Zielprojekts. BKP 249 läuft separat (weg_a_bkp_249)."""
-    if bkp_gruppe not in _TREIBER_FELD:
-        raise ValueError(f"BKP {bkp_gruppe} hat keinen Treiber — 249 läuft über weg_a_bkp_249()")
-    paare = kennwerte_je_referenz(referenzen, bkp_gruppe)
-    if not paare:
-        return None
-    treiber_wert = ziel.get(_TREIBER_FELD[bkp_gruppe])
-    if not treiber_wert or treiber_wert <= 0:
-        return None
-    sw = sum(p["gewicht"] for p in paare)
-    kennwert_mittel = sum(p["kennwert"] * p["gewicht"] for p in paare) / sw
-    werte = [p["kennwert"] for p in paare]
-    return {
-        "betrag": kennwert_mittel * treiber_wert,
-        "kennwert": kennwert_mittel,
-        "einheit": _TREIBER_EINHEIT[bkp_gruppe],
-        "n": len(paare),
-        "bandbreite": (perzentil(werte, 0.25) * treiber_wert, perzentil(werte, 0.75) * treiber_wert),
-        "referenzen": paare,
-    }
-
-
-def weg_a_bkp_249(referenzen: list, zwischentotal: float) -> Optional[dict]:
-    """BKP 249 (Diverses) als gewichteter %-Anteil vom Zwischentotal der
-    übrigen BKP-Gruppen (typisch 8–12%) — hat keinen eigenen Treiber."""
-    paare = []
-    for r in referenzen:
-        betraege = r.get("bkp_betraege") or {}
-        betrag_249 = betraege.get("249")
-        subtotal_andere = sum(v for k, v in betraege.items() if k != "249" and v)
-        if betrag_249 and betrag_249 > 0 and subtotal_andere > 0:
-            paare.append({"anteil": betrag_249 / subtotal_andere, "gewicht": r.get("rang", 1.0), "name": r.get("name")})
-    if not paare or zwischentotal <= 0:
-        return None
-    sw = sum(p["gewicht"] for p in paare)
-    anteil_mittel = sum(p["anteil"] * p["gewicht"] for p in paare) / sw
-    return {
-        "betrag": anteil_mittel * zwischentotal, "kennwert": anteil_mittel, "einheit": "% vom Zwischentotal",
-        "n": len(paare), "referenzen": paare,
-    }
-
-
-# ── 4) Faktor-Brücke Weg B — nur mit Stufe-2-Daten ─────────────────────────
-
-def lerne_faktor(referenzen: list, faktor_name: str) -> Optional[dict]:
-    """Lernt aus Referenzen (zeitgewichtet) den Mengen-Faktor (z.B. m Rohr
-    pro m² EBF) UND den Einheitspreis (CHF/m) für die zugehörige BKP-Gruppe."""
-    d = _FAKTOR_DEF[faktor_name]
-    menge_paare, preis_paare = [], []
-    for r in referenzen:
-        menge = r.get(d["menge_feld"])
-        schluessel = r.get(d["schluessel_feld"])
-        betrag = (r.get("bkp_betraege") or {}).get(d["bkp"])
-        gewicht = r.get("rang", 1.0)
-        if menge and menge > 0 and schluessel and schluessel > 0:
-            menge_paare.append((menge / schluessel, gewicht))
-        if betrag and betrag > 0 and menge and menge > 0:
-            preis_paare.append((betrag / menge, gewicht))
-    if not menge_paare or not preis_paare:
-        return None
-    faktor = sum(v * g for v, g in menge_paare) / sum(g for _, g in menge_paare)
-    einheitspreis = sum(v * g for v, g in preis_paare) / sum(g for _, g in preis_paare)
-    return {"faktor": faktor, "einheitspreis": einheitspreis, "bkp": d["bkp"], "einheit": d["einheit"], "n": len(menge_paare)}
-
-
-def weg_b_hochrechnung(referenzen: list, faktor_name: str, ziel: dict) -> Optional[dict]:
-    """Weg B: menge_geschätzt = gelernter Faktor × Schlüsselgrösse des
-    Zielprojekts, kosten = menge × gelernter Einheitspreis."""
-    d = _FAKTOR_DEF[faktor_name]
-    gelernt = lerne_faktor(referenzen, faktor_name)
-    if not gelernt:
-        return None
-    schluessel_ziel = ziel.get(d["schluessel_feld"])
-    if not schluessel_ziel or schluessel_ziel <= 0:
-        return None
-    menge_geschaetzt = gelernt["faktor"] * schluessel_ziel
-    betrag = menge_geschaetzt * gelernt["einheitspreis"]
-    return {
-        "betrag": betrag, "bkp": d["bkp"], "menge_geschaetzt": menge_geschaetzt,
-        "faktor": gelernt["faktor"], "einheitspreis": gelernt["einheitspreis"], "n": gelernt["n"],
-        "rechenweg": f"{faktor_name} {gelernt['faktor']:.2f} × {schluessel_ziel:g} = "
-                     f"{menge_geschaetzt:.0f} × {gelernt['einheitspreis']:.0f} {gelernt['einheit']} = {betrag:.0f} CHF",
-    }
-
-
-# ── 5) Kreuzcheck — Abweichung Weg A/B → Vertrauen ─────────────────────────
-
-def kreuzcheck(betrag_a: Optional[float], betrag_b: Optional[float], n_referenzen: int) -> dict:
-    """Beide Wege vorhanden → Abweichung entscheidet. Nur Weg A → Vertrauen
-    nach Anzahl Referenzen (n≥4 hoch, 2–3 mittel, <2 niedrig)."""
-    if betrag_a and betrag_b:
-        abweichung = abs(betrag_a - betrag_b) / betrag_a if betrag_a else 1.0
-        if abweichung < 0.15:
-            vertrauen = "hoch"
-        elif abweichung < 0.30:
-            vertrauen = "mittel"
-        else:
-            vertrauen = "niedrig"
-        hinweis = "Abweichung zwischen Kennwert- und Mengen-Weg gross — manuell prüfen" if vertrauen == "niedrig" else None
-        return {"vertrauen": vertrauen, "abweichung_prozent": round(abweichung * 100, 1), "hinweis": hinweis}
-
-    if n_referenzen >= 4:
-        vertrauen = "hoch"
-    elif n_referenzen >= 2:
-        vertrauen = "mittel"
-    else:
-        vertrauen = "niedrig"
-    return {"vertrauen": vertrauen, "abweichung_prozent": None, "hinweis": None}
-
-
-# ── 6) Potenzfunktion — K = a×X^b (nur bei n≥8, R²>0.7) ────────────────────
-
-def potenzfit(x_werte: list, y_werte: list, gewichte: list) -> Optional[dict]:
-    """Log-log lineare Regression: log(y) = log(a) + b×log(x), gewichtet mit
-    den Zeitgewichten (als Regressionsgewichte, per numpy.polyfit)."""
-    x = np.array(x_werte, dtype=float)
-    y = np.array(y_werte, dtype=float)
-    w = np.array(gewichte, dtype=float)
-    if len(x) < 2 or np.any(x <= 0) or np.any(y <= 0):
-        return None
-    log_x, log_y = np.log(x), np.log(y)
-    b, log_a = np.polyfit(log_x, log_y, 1, w=np.sqrt(w))
-    a = math.exp(log_a)
-    y_pred = a * x ** b
-    ss_res = np.sum(w * (y - y_pred) ** 2)
-    y_mittel = np.sum(w * y) / np.sum(w)
-    ss_tot = np.sum(w * (y - y_mittel) ** 2)
-    r2 = float(1 - ss_res / ss_tot) if ss_tot > 0 else 0.0
-    return {"a": float(a), "b": float(b), "r2": r2}
-
-
-def potenzfunktion_schaetzung(referenzen: list, bkp_gruppe: str, x_feld: str, ziel_x: float) -> Optional[dict]:
-    """Nur verwenden wenn n≥8 im Segment UND R²>0.7 — sonst None, Aufrufer
-    fällt auf Weg A zurück (siehe Auftrag Punkt 6)."""
-    punkte = []
-    for r in referenzen:
-        betrag = (r.get("bkp_betraege") or {}).get(bkp_gruppe)
-        x = r.get(x_feld)
-        if betrag and betrag > 0 and x and x > 0:
-            punkte.append((x, betrag, r.get("rang", 1.0)))
-    if len(punkte) < 8:
-        return None
-    fit = potenzfit([p[0] for p in punkte], [p[1] for p in punkte], [p[2] for p in punkte])
-    if not fit or fit["r2"] <= 0.7:
-        return None
-    betrag = fit["a"] * ziel_x ** fit["b"]
-    return {"betrag": betrag, "a": fit["a"], "b": fit["b"], "r2": fit["r2"], "n": len(punkte)}
-
-
-# ── 7) Korrekturfaktoren ────────────────────────────────────────────────────
+# ── Korrekturfaktoren ────────────────────────────────────────────────────────
 
 def wende_korrekturfaktoren_an(betrag: float, ziel: dict, faktoren: list) -> dict:
     """Multipliziert der Reihe nach alle zutreffenden, aktiven Korrekturfaktoren.
@@ -315,3 +164,138 @@ def wende_korrekturfaktoren_an(betrag: float, ziel: dict, faktoren: list) -> dic
             ergebnis *= f["faktor"]
             angewendet.append(f"{f['name']} ×{f['faktor']}")
     return {"betrag": ergebnis, "angewendet": angewendet}
+
+
+# ── Baupreisindex ────────────────────────────────────────────────────────────
+
+def skaliere_auf_baupreisindex(referenzen: list, bauindex_eintraege: list, heute: Optional[date] = None) -> list:
+    """Skaliert die Positions-Beträge jeder Referenz aufs heutige Preisniveau
+    (Index heute ÷ Index zum Abrechnungsdatum) — VOR der Schätzung. Der Faktor
+    bleibt je Referenz als `index_faktor` sichtbar (Erklärung)."""
+    heute = heute or date.today()
+    out = []
+    for r in referenzen:
+        f = index_faktor(r.get("datum_abrechnung"), heute, bauindex_eintraege)
+        out.append({
+            **r,
+            "index_faktor": round(f, 4),
+            "positionen": {nr: v * f for nr, v in (r.get("positionen") or {}).items()},
+        })
+    return out
+
+
+# ── Schätzung je Einzelposition ──────────────────────────────────────────────
+
+def _vertrauen_aus_abdeckung(abdeckung: int) -> str:
+    """Wie viele der passenden Referenzen hatten diese Position überhaupt?
+    Je mehr, desto verlässlicher der Kennwert."""
+    if abdeckung >= 4:
+        return "hoch"
+    if abdeckung >= 2:
+        return "mittel"
+    if abdeckung == 1:
+        return "niedrig"
+    return "keine Daten"
+
+
+def _effektiver_treiber(bkp_nr: str, ziel: dict) -> str:
+    """Bezugsgrösse einer Position — oder Rückfall, wenn das Zielprojekt sie
+    nicht kennt (z.B. Bohrmeter nicht angegeben)."""
+    t = treiber_fuer_bkp(bkp_nr)
+    feld = _TREIBER_ZIEL_FELD[t]
+    wert = ziel.get(feld)
+    if wert and wert > 0:
+        return t
+    return _TREIBER_FALLBACK.get(t, t)
+
+
+def schaetze_position(pos: dict, segment: list, ziel: dict) -> dict:
+    """Eine BKP-Einzelposition schätzen: gewichteter Kennwert (Betrag ÷
+    Bezugsgrösse) über ALLE Segment-Referenzen — Referenz ohne diese Position
+    zählt mit 0 — × Bezugsgrösse des Zielprojekts."""
+    bkp_nr = pos["bkp_nr"]
+    treiber = _effektiver_treiber(bkp_nr, ziel)
+    feld = _TREIBER_ZIEL_FELD[treiber]
+    ziel_treiber = ziel.get(feld)
+
+    kennwerte, gewichte = [], []
+    abdeckung = 0  # Referenzen, die diese Position tatsächlich hatten (>0)
+    for r in segment:
+        drv = r.get(feld)
+        if not drv or drv <= 0:
+            continue  # Referenz ohne diese Bezugsgrösse — nicht normierbar
+        betrag = (r.get("positionen") or {}).get(bkp_nr) or 0.0
+        kennwerte.append(betrag / drv)
+        gewichte.append(r.get("rang", 1.0) or 0.0)
+        if betrag > 0:
+            abdeckung += 1
+
+    basis = {
+        "bkp_nr": bkp_nr, "bezeichnung": pos["bezeichnung"], "gruppe_nr": pos["gruppe_nr"],
+        "einheit": _TREIBER_EINHEIT[treiber], "kennwert": 0.0, "betrag": 0.0,
+        "abdeckung": abdeckung, "n_referenzen": len(kennwerte),
+        "vertrauen": _vertrauen_aus_abdeckung(abdeckung), "ziel_treiber": ziel_treiber,
+        "bandbreite": None,
+    }
+    sw = sum(gewichte)
+    if not kennwerte or sw <= 0 or not ziel_treiber or ziel_treiber <= 0:
+        return basis
+
+    kennwert = sum(k * g for k, g in zip(kennwerte, gewichte)) / sw
+    betrag = kennwert * ziel_treiber
+    lo = perzentil(kennwerte, 0.25) * ziel_treiber
+    hi = perzentil(kennwerte, 0.75) * ziel_treiber
+    basis.update({
+        "kennwert": kennwert, "betrag": betrag,
+        "bandbreite": (min(lo, betrag), max(hi, betrag)),
+    })
+    return basis
+
+
+# ── Orchestrierung ───────────────────────────────────────────────────────────
+
+def berechne_grobkostenschaetzung(ziel: dict, referenzen_roh: list, faktoren: list,
+                                  bauindex_eintraege: Optional[list] = None,
+                                  heute: Optional[date] = None) -> dict:
+    """Hauptfunktion: Zielprojekt-Eckdaten (`ziel`), alle Referenzprojekte
+    (`referenzen_roh`, je mit `positionen`={bkp_nr: betrag} und
+    `datum_abrechnung`) und die aktiven Korrekturfaktoren rein — Schätzung je
+    BKP-Einzelposition, gruppiert, mit Gesamttotal raus. Der Router ruft die
+    Funktion zweimal (Referenz-Brutto vs. -Netto) für den Brutto/Netto-Umschalter."""
+    baupreisindex_aktiv = bool(ziel.get("baupreisindex_beruecksichtigen")) and bool(bauindex_eintraege)
+    if baupreisindex_aktiv:
+        referenzen_roh = skaliere_auf_baupreisindex(referenzen_roh, bauindex_eintraege, heute)
+
+    segment = finde_referenzen(referenzen_roh, ziel, top_n=None, heute=heute)
+    top = segment[:5]
+
+    korr = wende_korrekturfaktoren_an(1.0, ziel, faktoren)
+    faktor = korr["betrag"]  # gemeinsamer Multiplikator für alle Positionen
+
+    positionen = filter_positionen(_WP_KATALOG.get(ziel.get("wp_typ")), ziel.get("nutzung"))
+
+    gruppen_map = {}
+    for pos in positionen:
+        e = schaetze_position(pos, segment, ziel)
+        if faktor != 1.0 and e["betrag"]:
+            e["betrag"] *= faktor
+            if e["bandbreite"]:
+                e["bandbreite"] = (e["bandbreite"][0] * faktor, e["bandbreite"][1] * faktor)
+        g = gruppen_map.setdefault(e["gruppe_nr"], {"gruppe_nr": e["gruppe_nr"],
+                                                    "name": BKP_GRUPPEN.get(e["gruppe_nr"], ""),
+                                                    "positionen": [], "betrag": 0.0})
+        g["positionen"].append(e)
+        g["betrag"] += e["betrag"]
+
+    gruppen = [gruppen_map[nr] for nr in BKP_GRUPPEN_ALLE if nr in gruppen_map]
+    gesamt_betrag = sum(g["betrag"] for g in gruppen)
+
+    return {
+        "gesamt_betrag": gesamt_betrag,
+        "gruppen": gruppen,
+        "korrekturfaktoren": korr["angewendet"],
+        "referenzen_gefunden": len(top),
+        "referenzen_im_segment": len(segment),
+        "baupreisindex_aktiv": baupreisindex_aktiv,
+        "referenzen_verwendet": top,
+    }

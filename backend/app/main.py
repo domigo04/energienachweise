@@ -44,8 +44,8 @@ from app.routers.hc_hydraulik import router as hc_hydraulik_router
 from app.routers.hc_bkp import router as hc_bkp_router
 from app.routers.hc_export import router as hc_export_router
 from app.routers.hc_auswertung import router as hc_auswertung_router
-from app.routers.hc_kostenschaetzung import router as hc_kostenschaetzung_router
 from app.routers.hc_bauindex import router as hc_bauindex_router
+from app.routers.hc_grobkostenschaetzung import router as hc_grobkostenschaetzung_router
 
 from app.auth import get_current_user
 
@@ -64,8 +64,8 @@ app.include_router(hc_schema_router, dependencies=_auth)
 app.include_router(hc_hydraulik_router, dependencies=_auth)
 app.include_router(hc_bkp_router, dependencies=_auth)
 app.include_router(hc_auswertung_router, dependencies=_auth)
-app.include_router(hc_kostenschaetzung_router, dependencies=_auth)
-app.include_router(hc_bauindex_router, dependencies=_auth)  # Schreib-Endpunkte schützen sich zusätzlich selbst (require_admin)
+app.include_router(hc_bauindex_router, dependencies=_auth)
+app.include_router(hc_grobkostenschaetzung_router, dependencies=_auth)
 
 # PDF-Export wird per window.open() geöffnet (kann kein Bearer-Token mitgeben) → offen.
 app.include_router(hc_export_router)
@@ -78,7 +78,7 @@ from app.models.heizungscockpit import (  # noqa: F401 — Tabellen vor create_a
 )
 from app.models.auth import Firma, User, Role  # noqa: F401
 from app.models.kv import RefProjekt, RefKostenzeile, RefProjektGewerk, Kostenschaetzung, BauindexEintrag  # noqa: F401
-from app.models.grobkostenschaetzung import ReferenzProjekt, BkpBetrag, Korrekturfaktor  # noqa: F401
+from app.models.grobkostenschaetzung import Korrekturfaktor  # noqa: F401
 from app.auth import hash_password
 
 
@@ -100,11 +100,20 @@ def _ensure_columns():
             ("flaeche_tabs_m2", "FLOAT"), ("flaeche_deckenstrahlplatten_m2", "FLOAT"),
             ("anzahl_heizkoerper", "INTEGER"), ("anzahl_waermemessungen", "INTEGER"),
             ("anzahl_schaltgeraetekombinationen", "INTEGER"), ("laufmeter_rohre_heizung", "FLOAT"),
+            ("bww_bei_heizung", "BOOLEAN"), ("weiterbetrieb_umbau", "BOOLEAN"), ("etappierung", "BOOLEAN"),
         ],
         "hc_firmen": [("abo_plan", "VARCHAR")],
         "ref_kostenzeilen": [("gewerk", "VARCHAR")],
     }
     is_sqlite = engine.url.get_backend_name().startswith("sqlite")
+    # Einmalige Dev-Migration (2026-07-14): die kurzlebige parallele
+    # Referenzprojekt-Datenbank der Grobkostenschätzung ist abgeschafft —
+    # die Schätzung liest jetzt direkt die Auswertung (ref_projekte). Die
+    # verwaisten Tabellen enthielten nur Demo-Daten und waren nie deployed.
+    with engine.connect() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS bkp_betraege"))
+        conn.execute(text("DROP TABLE IF EXISTS referenz_projekte"))
+        conn.commit()
     with engine.connect() as conn:
         for table, cols in to_add.items():
             if is_sqlite:

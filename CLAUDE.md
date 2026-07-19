@@ -39,7 +39,7 @@ und ist entsprechend nachzuführen, sobald das KV-Tool sich stabilisiert.
   SQLite und liess auf dem Server nach jedem Modell-Update Spalten fehlen, siehe Nächste Schritte).
   Neue Tabellen brauchen dort **keinen** Eintrag (die legt `create_all()` schon korrekt an) — nur neue
   **Spalten auf bestehenden** Tabellen.
-  Start: `bash start_backend.sh` (Port 8000). Tests: `cd backend && /Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12 -m pytest tests -q` (120 grün).
+  Start: `bash start_backend.sh` (Port 8000). Tests: `cd backend && /Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12 -m pytest tests -q` (124 grün).
   Auth: JWT (PyJWT + bcrypt/passlib), `tenant_id`-Multi-Tenancy (`models/auth.py`: `Firma`/`User`).
 - **Frontend:** React 18 + Vite + Tailwind v4 in `frontend/`; Schema-Editor `pages/hc/HydraulikEditor.jsx`
   (React Flow). Start: `cd frontend && npm run dev` (Port 5173). Login erforderlich (Registrierung →
@@ -93,75 +93,97 @@ niemand hat sie seither angefasst).
 - Projekte: echtes Hard-Delete zusätzlich zum Archivieren (`DELETE /api/v1/projects/{id}/endgueltig`,
   `.../archiviert/alle`) — vorher nur Archivieren möglich.
 
-### 3) KV-Tool — Auswertung & Kostenschätzung (bestehendes System, aktiv genutzt)
-Referenzprojekt-Datenbank (`models/kv.py`: `RefProjekt`/`RefKostenzeile`), Auswertung
-(`hc_auswertung.py`, CSV-Import/-Export inkl. aller BKP-Spalten) und Kostenschätzung
-(`calculations/kostenschaetzung.py`, `hc_kostenschaetzung.py`, `KostenschaetzungPage.jsx` —
-Frontend-Bezeichnung «Grobkostenschätzung», nicht zu verwechseln mit dem NEUEN Modul unter 4):
-- **Anlagenkonfiguration-Ähnlichkeit** (monovalent/bivalent/hybrid/kaskadiert/redundant,
-  Kompatibilitäts-Matrix) fliesst in die Referenz-Auswahl ein.
-- **Ähnlichkeit und Validierung getrennt ausgewiesen** (Dominics explizite Vorgabe: zwei unabhängige
-  Fragen). `aehnlichkeit_stufe(gewicht)` — wie gut passt die *beste* Referenz (hoch/mittel/tief),
-  unabhängig von der Menge. `confidence_from(neff, dispersion)` — wie viele *unabhängige* Referenzen
-  bestätigen das mit ähnlichen Zahlen (Validierung/Vertrauen). Zwei separate UI-Kacheln, nie geblendet.
-  Zeitgewichtung (`age_weight`, Halbwertszeit-Idee) und Baupreis-Index-Korrektur (`index_faktor`) fliessen
-  in die Ähnlichkeits-Gewichtung ein.
-- **Baupreisindex-Automatik** (`hc_bauindex.py`, Admin-UI `BaupreisindexAdmin.jsx`): holt Werte live von
-  opendata.swiss (CKAN `package_search`, robust gegen Slug-Änderungen) + BFS-Excel-Parsing (`openpyxl`).
-  Manueller Fallback-Link zur offiziellen BFS-Seite falls die Automatik doch mal versagt.
-- Dynamische, datengetriebene Erklärungssätze pro Referenz (vergleicht Eingabe vs. beste Referenz auf
-  konkreten Feldern) + grössere, interaktive Diagramme mit Hover-Tooltips (`charts/BoxPlot.jsx`,
-  `BarPlot.jsx`, eigene `position:fixed`-Tooltips statt nativem `<title>`).
+### 3) KV-Tool — Auswertung (die EINE Wissensbasis) + Baupreisindex
+Referenzprojekt-Datenbank (`models/kv.py`: `RefProjekt`/`RefKostenzeile`), gepflegt über die
+**Auswertung** (`hc_auswertung.py`, `AuswertungList/Form/Analyse.jsx`): CRUD, CSV-Import/-Export
+(inkl. aller BKP-Spalten + `bww_bei_heizung`), Analyse-Kennwerte, **Mehrfach-Auswahl mit
+Sammel-Löschen** (`POST /auswertung/loeschen`, Checkboxen auf den Karten, R2 2026-07-14).
+Neu (R2): Feld **`bww_bei_heizung`** (Brauchwarmwasser-Schnittstelle bei Heizung statt Sanitär —
+weiches Ähnlichkeitskriterium der Grobkostenschätzung) + Beispieldaten-Knopf (~80 Demo-Projekte,
+Präfix «Beispiel — », per Knopf wieder entfernbar).
+- **Baupreisindex** (`hc_bauindex.py`, Seite `BaupreisindexAdmin.jsx`): holt Werte live von
+  opendata.swiss (CKAN `package_search`) + BFS-Excel-Parsing (`openpyxl`), manuelle Pflege als
+  Fallback. **Seit R2 für ALLE Nutzer** (tenant-scoped, kein Admin nötig — jede Firma pflegt ihre
+  eigenen Werte), Nav-Eintrag für alle sichtbar, zusätzlich Refresh direkt auf der Schätzungsseite.
+- **ABGELÖST (R2, 2026-07-14):** die alte positions-basierte Kostenschätzung
+  (`hc_kostenschaetzung.py` + `KostenschaetzungPage.jsx`, beide GELÖSCHT). Grund: sie summierte
+  Kennwerte über einzelne BKP-POSITIONEN verschiedener Referenzen auf — mit teilweise gefüllten
+  Referenzen ergab das absurde Summen (Dominics 744'000-CHF-Ausreisser bei einem 1100-m²-Projekt,
+  ähnlichste Referenz 159'000 brutto). `calculations/kostenschaetzung.py` bleibt (Helfer wie
+  `netto_aus_brutto`, `quantile`, `index_faktor` werden weiter verwendet); der alte
+  Kostenschätzungs-PDF-Endpunkt in `hc_export.py` ist verwaist (keine UI ruft ihn mehr) — beim
+  nächsten Aufräumen entfernen.
 
-### 4) Grobkostenschätzung (BKP) — NEUES Modul, LOOP K1 fertig (2026-07-13)
-Eigenständiges, präzise spezifiziertes System: aus 7 Eckdaten eines neuen Projekts eine **Schätzung pro
-BKP-GRUPPE** (241/242/243/247/248/249) — mit voller Nachvollziehbarkeit («ein Planer muss die Zahl vor
-dem Bauherrn verteidigen können», **das wichtigste Feature**). Bewusst in eigenen, neuen Dateien
-aufgebaut (keine Kollision mit 3) — offene Frage, ob/wie beide Systeme langfristig zusammengeführt werden,
-siehe unten.
-- **Datenmodell** (`models/grobkostenschaetzung.py`): `ReferenzProjekt` (Stufe 1 Pflicht: ebf_m2,
-  leistung_kw, gebaeudekategorie, projektart, wp_typ, abgabe_dominant, anzahl_ne, hat_erdsonden,
-  datum_abrechnung; Stufe 2 optional: rohrmeter, bohrmeter, hk_anzahl, verteiler_abgaenge,
-  fbh_flaeche_m2, anzahl_heizgruppen, etappierung, weiterbetrieb_umbau — verbessert Weg B, siehe unten),
-  `BkpBetrag` (eine BKP-GRUPPE + Betrag, viele je Referenzprojekt), `Korrekturfaktor`
-  (Sanierung ×1.20 / Weiterbetrieb ×1.10 / Etappierung ×1.08, editierbar, DB-geseedet).
-- **Berechnungskern** (`calculations/grobkostenschaetzung.py`, alle 7 Funktionsgruppen reine Funktionen,
-  Dicts rein/raus, kein DB-Zugriff — testbar ohne DB):
-  1. **Zeitgewicht** — exponentieller Zerfall, Halbwertszeit 3 Jahre (`zeitgewicht`).
-  2. **Ähnlichkeitssuche** — Hard-Filter (wp_typ/projektart/hat_erdsonden müssen exakt passen) → Score
-     (Grösse/Leistung log-nah, Kategorie-Nachbarschaft, Abgabetyp-Nähe) → ×Zeitgewicht = Rang, Top 3–5
-     (`finde_referenzen`).
-  3. **Hochrechnung Weg A** — gewichteter Kennwert (CHF/kW bzw. CHF/m² EBF) × Zielgrösse; BKP 249 separat
-     als %-Anteil vom Zwischentotal (`weg_a_hochrechnung`, `weg_a_bkp_249`).
-  4. **Faktor-Brücke Weg B** — nur mit Stufe-2-Daten: lernt Mengen-Faktor (z. B. m Rohr/m² EBF) UND
-     Einheitspreis aus Referenzen, wendet auf Zielprojekt an (`weg_b_hochrechnung`, `rohr_faktor`/
-     `hk_faktor`/`bohr_faktor`).
-  5. **Kreuzcheck** — Abweichung Weg A/B → Vertrauen hoch/mittel/niedrig; nur Weg A → Vertrauen nach
-     Anzahl Referenzen (`kreuzcheck`).
-  6. **Potenzfunktion** — K=a×X^b per log-log-Regression (numpy), nur verwendet wenn n≥8 im Segment
-     UND R²>0.7, sonst Rückfall auf Weg A (`potenzfunktion_schaetzung`).
-  7. **Korrekturfaktoren** — multipliziert alle zutreffenden aktiven Faktoren aus der DB-Tabelle
-     (`wende_korrekturfaktoren_an`).
-- **Tests** (`tests/test_grobkostenschaetzung.py`): 27 Tests, ein Test pro Formel mit konkreten Zahlen
-  (inkl. Score-Ranking über 6 Kandidaten, das zeigt wie eine ältere Referenz von einer aktuelleren
-  überholt wird; synthetischer Potenzfit mit bekanntem a/b). **120/120 Tests grün gesamt.**
-- **Postgres-Bug nebenbei gefixt** (`main.py::_ensure_columns`): lief vorher nur auf SQLite (früher
-  `return`), auf Postgres fehlten dadurch nach Modell-Updates Spalten still — vermutete Ursache des
-  Produktions-Login-Problems (Dominic 2026-07-13: Login auf energienachweise.com ging nicht, lokal
-  schon). Fix ist deploybereit, **auf dem Server noch nicht verifiziert** (kein lokaler Postgres-Zugriff)
-  — nach dem nächsten Deploy Login erneut testen.
-- **Noch offen (LOOP K2/K3, erst nach Dominics Review):**
-  - K2 — API-Endpunkt (`POST /api/v1/kostenschaetzung` o.ä., „7+3 Eingaben → Schätzung mit erklaerung“)
-    + das Erklärungs-Objekt, das die Kern-Funktionen zu einer Antwort pro BKP-Gruppe zusammensetzt.
-  - K3 — Frontend (Eingabeformular + Ergebnis-Darstellung, transparent nachvollziehbar).
-  - **Zwei offene Fragen an Dominic** (bewusst nicht selbst entschieden):
-    1. Soll dieses Modul das bestehende Kostenschätzung/Auswertung-System (Abschnitt 3) langfristig
-       **ersetzen** oder bleiben **beide parallel** bestehen (unterschiedlicher Detailgrad: BKP-Gruppen
-       hier vs. einzelne Kostenzeilen dort)?
-    2. `fbh_flaeche_m2`/`anzahl_heizgruppen` stehen in der neuen Spezifikation (Stufe 2, für Weg B), aber
-       Dominic hatte in einer früheren Session explizit gesagt, er wolle **keine** Bezugsgrössen wie
-       Anzahl Heizgruppen oder FBH-Fläche verwenden. Für K1 unverändert aus der Spezifikation übernommen
-       (nullable, nicht zwingend) — vor K2/K3 klären, ob das so gewollt ist.
+### 4) Grobkostenschätzung (BKP) — läuft IM Projekt, rechnet auf der Auswertung (R2, 2026-07-14)
+Aus 7 Eckdaten eine **Schätzung pro BKP-GRUPPE** (241/242/243/247/248/249) mit voller
+Nachvollziehbarkeit («ein Planer muss die Zahl vor dem Bauherrn verteidigen können», **das wichtigste
+Feature**). Nach drei Feedback-Runden (K1–K3 am 2026-07-13, R1 gleichentags, R2 am 2026-07-14) gilt:
+**EINE Wissensbasis** (die Auswertung, Abschnitt 3 — keine parallele Referenz-Datenbank mehr) und
+**geschätzt wird im Projekt** (Projekte → Projekt → Grobkostenschätzung), Eingaben + Ergebnis werden
+pro Projekt gespeichert (`Kostenschaetzung`-Tabelle, gleiche Mechanik wie früher).
+**BKP-Gruppen-Bedeutung in diesem Projekt** (aus `data/bkp_positionen.py`, nicht Standard-BKP raten!):
+241 Energielagerung (Erdsonden) · 242 Wärmeerzeugung · 243 Wärmeverteilung · 247 Spezialanlagen ·
+248 Dämmungen · 249 Diverses. Treiber: 241/242 → kW, 243/247/248 → m² EBF, 249 → %-Anteil.
+- **Berechnungskern** (`calculations/grobkostenschaetzung.py`, reine Funktionen, Dicts rein/raus,
+  kein DB-Zugriff — jede Formel pytest-getestet):
+  1. **Zeitgewicht** — exponentieller Zerfall, Halbwertszeit 3 Jahre; Referenz ohne Datum = neutral 1.0.
+  2. **Ähnlichkeitssuche** — Hard-Filter (wp_typ/projektart/hat_erdsonden exakt) → Score (0.30 EBF-Nähe,
+     0.25 kW-Nähe, 0.20 Nutzungsnähe [gleich 1.0 / MFH↔EFH 0.5 / sonst 0], 0.15 Abgabetyp-Nähe,
+     0.10 **BWW-Schnittstelle** [gleich 1.0 / anders 0.0 / unbekannt neutral — bewusst KEIN Hard-Filter,
+     Dominic 2026-07-14]) → ×Zeitgewicht = Rang, Top 5 rechnen, ganzes Segment für die Potenzfunktion.
+  3. **Weg A** — gewichteter Kennwert × Zielgrösse; BKP 249 als %-Anteil vom Zwischentotal.
+  4. **Weg B** — gelernte Mengen-Faktoren (rohr/hk/bohr) × Einheitspreis; eigene Mengen-EINGABEN des
+     Ziels übersteuern den Faktor (`menge_quelle: "eingabe"`).
+  5. **Kreuzcheck** — Abweichung Weg A/B → Vertrauen hoch/mittel/niedrig; sonst nach Referenz-Anzahl.
+  6. **Potenzfunktion** — K=a×X^b (numpy, log-log), nur bei n≥8 im Segment und R²>0.7; liefert `punkte`
+     und ehrliche `bandbreite` aus der Streuung um die Kurve. Bandbreiten umschliessen die Schätzung
+     IMMER (min/max-Klammer in `_schaetze_eine_gruppe` — die gewichtete Kopfzahl kann sonst knapp
+     ausserhalb der P25–P75 liegen).
+  7. **Korrekturfaktoren** — aktive Faktoren aus DB multipliziert (Sanierung ×1.20 / Weiterbetrieb ×1.10 /
+     Etappierung ×1.08, editierbar auf der Schätzungsseite; je Firma geseedet, `hc_auth.py` +
+     `main.py::_seed_korrekturfaktoren`). 249 kriegt keine eigenen (Doppelzählung).
+  8. **Baupreisindex** (`skaliere_auf_baupreisindex`) — skaliert Referenzkosten VOR allen Rechenwegen
+     auf heute (Index heute ÷ Index Abrechnungsdatum, `index_faktor` aus `calculations/kostenschaetzung.py`);
+     Faktor je Referenz bleibt in der Erklärung sichtbar.
+- **Adapter Auswertung → Kern** (`routers/hc_grobkostenschaetzung.py::_ref_to_calc_dict`):
+  Wärmeerzeuger-Häkchen → `wp_typ` (Erdsonden-WP→sole, Wasser/Wasser→wasser, Luft/Wasser→luft,
+  sonst None = fällt bei WP-Zielen raus) + `hat_erdsonden`; Wärmeabgabe-Häkchen → `abgabe_dominant`
+  (flächig [FBH/TABS/Wandheizung/Deckenstrahlplatten] / Körper [Heizkörper/Konvektoren] / beides =
+  gemischt / Lufterhitzer = Luft); Kostenzeilen (Gewerk Heizung) → BKP-GRUPPEN-Summen **netto**
+  (je Referenz eigener Rabatt/Skonto). Der 744k-Bug des alten Systems (Positions-Kennwerte
+  verschiedener Referenzen aufsummiert) ist damit konstruktiv unmöglich — Test
+  `test_adapter_ende_zu_ende_schaetzung_aus_auswertungsdaten` erzwingt, dass die Schätzung in der
+  Grössenordnung der Referenzen liegt.
+- **API** (`/api/v1/grobkostenschaetzung`): POST `/schaetzen` (zustandslos), GET/PUT `/projekt/{id}`
+  (rechnen + speichern; Alt-Format-Ergebnisse aus der Vor-R2-Zeit werden beim GET verworfen),
+  GET/PATCH `/korrekturfaktoren`, POST/DELETE `/beispieldaten` (schreibt ~80 Demo-Projekte in die
+  AUSWERTUNG, Beträge auf der ersten Katalogposition je Gruppe, idempotent, Präfix «Beispiel — »).
+  Achtung `jsonable_encoder` vor `json.dumps` (date-Objekte der Referenzen).
+- **Frontend**: `pages/grobkosten/GrobkostenSchaetzung.jsx` unter `/projekte/:id/kostenschaetzung`
+  (KEIN eigener Nav-Punkt mehr; `/grobkosten/*` leitet um). Formular: EBF, kW, Nutzung (kv.js-Liste),
+  Anzahl Einheiten, Projektart (kv.js-Liste, neu inkl. «Ersatz Wärmeerzeuger»), WP-Typ, Abgabe,
+  Erdsonden, **BWW bei Heizung**, Weiterbetrieb/Etappierung, **Baupreisindex-Häkchen mit
+  Stand-Anzeige + «jetzt aktualisieren (BFS)»**, bekannte Mengen, Korrekturfaktoren-Editor.
+  Ergebnis: 3 KPI-Kacheln, gestapelter BKP-Balken, BKP-Tabelle (Kennwert | Schätzung | tief–hoch |
+  Vertrauen, InfoTips) — Zeile anklicken zeigt den Rechenweg als kurze Sätze mit echten Zahlen;
+  Referenzliste mit Jahr/Nutzung/BWW/Index-Faktor/Gewicht und Link in die Auswertung.
+  `GkVisuals.jsx` nur noch VertrauenBadge + GruppenStapel (grosse Visuals auf Dominics Wunsch raus).
+- **Tests**: `tests/test_grobkostenschaetzung.py` (Kern + Adapter + Generator-Konsistenz + Bauindex-
+  Skalierung + BWW). **137/137 grün gesamt.** End-to-end verifiziert (Dominics Szenario 1100 m²/35 kW/
+  MFH/Neubau/Sole/420 Bohrmeter/Index: **CHF ~259'000** statt 744'000 — nach Bereinigung von 50
+  «KV Test»-Fake-CSV-Referenzen aus der Auswertung, die die Kennwerte verzerrten).
+- **Postgres-Bug gefixt** (`main.py::_ensure_columns`): lief vorher nur auf SQLite (früher `return`), auf
+  Postgres fehlten dadurch nach Modell-Updates Spalten still — vermutete Ursache des Produktions-Login-
+  Problems. **Noch nicht gepusht** — nach dem nächsten Deploy Login erneut testen.
+- **Noch offen:**
+  - PDF-Export der Grobkostenschätzung (der alte Kostenschätzungs-PDF-Endpunkt in `hc_export.py` passt
+    nicht mehr zum neuen Ergebnis-Format und ist verwaist).
+  - Referenz-`qualitaet` (gesichert/Devis/Schätzung) fliesst noch nicht in die Gewichtung der
+    Grobkostenschätzung ein (das alte System nutzte sie).
+  - **Fachfragen an Dominic:** (1) Sanierung-Korrekturfaktor greift nie zusätzlich zu passenden
+    Sanierungs-Referenzen (Hard-Filter) — nur relevant, wenn gar keine da sind: so lassen oder
+    Hard-Filter lockern? (2) `anzahl_ne` wird erfasst, fliesst aber nirgends ein — 5. Score-Dimension
+    oder nur dokumentarisch?
 
 ## Nächste Schritte
 **Hydraulik-Editor (Dominic-Feedback 2026-07-06, seither nicht angefasst):**
@@ -179,12 +201,15 @@ siehe unten.
 7. **Leitungs-Beschriftung neues Format:** zweizeilig — DN gross oben, m' in kg/h darunter.
 
 **Grobkostenschätzung (BKP):**
-8. LOOP K2 (API + Erklärungs-Objekt) — wartet auf Dominics Review von K1 (Testresultate wurden
-   gemeldet). Vorher die zwei offenen Fragen aus Abschnitt 4 klären.
-9. LOOP K3 (Frontend) — erst nach K2.
+8. Dominics Fach-Review von R2 (Projekt öffnen → Grobkostenschätzung; Beispieldaten über die
+   Auswertung laden; sein 1100-m²-Szenario ergibt jetzt ~259'000 statt 744'000).
+9. Die zwei offenen Fachfragen aus Abschnitt 4 klären (Sanierung/Hard-Filter, `anzahl_ne`).
+10. PDF-Export der Grobkostenschätzung; Referenz-`qualitaet` in die Gewichtung aufnehmen;
+    verwaisten alten Kostenschätzungs-PDF-Endpunkt in `hc_export.py` entfernen.
 
 **Sonst:**
-10. Produktions-Login nach dem nächsten Deploy verifizieren (Postgres-Fix, siehe Abschnitt 4).
+11. Produktions-Login nach dem nächsten Deploy verifizieren (Postgres-Fix, siehe Abschnitt 4 — noch
+    nicht gepusht, wartet auf Dominics OK).
 
 ## Geparkt / später
 - **Schema ↔ Heizgruppen-DB verknüpfen** (Kernversprechen F2: Änderung fliesst automatisch), manueller

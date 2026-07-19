@@ -10,7 +10,7 @@ die Ähnlichkeit zählt die Menge, nicht eine normalisierte Nebentabelle.
 """
 from datetime import datetime
 
-from sqlalchemy import Column, Date, DateTime, Float, ForeignKey, Integer, String, Text, JSON
+from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, String, Text, JSON
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -31,6 +31,14 @@ class RefProjekt(Base):
     anlagenkonfiguration = Column(String, nullable=True)  # monovalent/bivalent/hybrid/kaskadiert/redundant
     waermeerzeuger = Column(JSON, default=list)     # ["Erdsonden-WP", ...] (mehrere)
     waermeabgabe = Column(JSON, default=list)       # ["FBH", "Heizkörper", ...] (mehrere)
+    # Schnittstelle Brauchwarmwasser: True = BWW war Teil der Heizungs-Kosten
+    # (nicht Sanitär). Weiches Ähnlichkeits-Kriterium, bewusst KEIN Hard-Filter
+    # (Dominic 2026-07-14). None = nicht erfasst (Altbestand).
+    bww_bei_heizung = Column(Boolean, nullable=True)
+    # Ausführungs-Merkmale (dieselben, die im Zielprojekt die Korrekturfaktoren
+    # auslösen — so tragen auch Referenzen diese Info). None = nicht erfasst.
+    weiterbetrieb_umbau = Column(Boolean, nullable=True)
+    etappierung = Column(Boolean, nullable=True)
 
     # Bezugsgrössen (Treiber der Kennwerte)
     ebf_m2 = Column(Float, nullable=True)

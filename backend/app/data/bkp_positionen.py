@@ -1,12 +1,15 @@
-"""BKP-Positions-Katalog aus Dominics Norm-LV (Auftrag v3.0, Kap. 4.3).
+"""BKP-Positions-Katalog aus Dominics Norm-Leistungsverzeichnis (Stand 2026-07-14,
+vollständig von Dominic geliefert — inkl. Tank/Gas/Öl, die früher weggelassen
+waren; sein schriftliches Leistungsverzeichnis ist massgebend).
 
-Kein Öl, kein Gas, kein Tank.
-- wp_typen None  → Position gilt für alle WP-Typen.
+- wp_typen None  → Position gilt für alle Wärmepumpen-Typen (und für Gas/Öl/Tank,
+  die keinem WP-Typ zugeordnet sind — sie erscheinen im Norm-LV, bleiben bei
+  Wärmepumpen-Projekten mangels Referenzdaten aber bei 0).
 - kategorien None → Position gilt für alle Gebäudekategorien.
 """
 
 BKP_GRUPPEN = {
-    "241": "Energielagerung (Erdsonden)",
+    "241": "Energielagerung",
     "242": "Wärmeerzeugung",
     "243": "Wärmeverteilung",
     "247": "Spezialanlagen",
@@ -23,13 +26,18 @@ SOLE = ["sole_wasser"]
 ALLE_WP = ["sole_wasser", "luft_wasser", "wasser_wasser"]
 
 BKP_POSITIONEN = [
-    # 241 — Energielagerung (nur Erdsonden / Sole-Wasser)
+    # 241 — Energielagerung
+    _p("241.1a", "Tank aus Kunststoff"),
+    _p("241.1b", "Tank aus Stahl"),
+    _p("241.2", "Montage / Transport"),
     _p("241.10", "Expansion und Sicherheit Primärkreis WP / Erdsondensammler", SOLE),
     _p("241.11", "Rohrleitungen Primärkreis WP / Erdsondensammler", SOLE),
     _p("241.12", "Apparate / Armaturen Primärkreis WP / Erdsondensammler", SOLE),
     _p("241.13", "Montage / Transport Primärkreis WP / Erdsondensammler", SOLE),
     _p("241.14", "Erdsonden und Zubehör", SOLE),
     # 242 — Wärmeerzeugung
+    _p("242.1", "Gasheizkessel"),
+    _p("242.2", "Ölheizkessel"),
     _p("242.3", "Wärmepumpe Sole/Wasser", ["sole_wasser"]),
     _p("242.4", "Wärmepumpe Luft/Wasser", ["luft_wasser"]),
     _p("242.5", "Wärmepumpe Wasser/Wasser", ["wasser_wasser"]),

@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.auth import create_access_token, get_current_user, hash_password, require_admin, verify_password
 from app.database import get_db
 from app.models.auth import Firma, Role, User
+from app.models.grobkostenschaetzung import Korrekturfaktor
 
 router = APIRouter(prefix="/api/v1/auth", tags=["Auth"])
 
@@ -74,11 +75,24 @@ class MePatch(BaseModel):
     neues_passwort: Optional[str] = None
 
 
+def _seed_korrekturfaktoren(db: Session, tenant_id: int):
+    """Jede Firma braucht ihre eigenen Korrekturfaktoren (Grobkostenschätzung,
+    CLAUDE.md Abschnitt 4) — der Start-Seed in main.py deckt nur tenant_id=1
+    (SIREGO) ab, ohne das hier blieben neue Firmen ohne Sanierung/Weiterbetrieb/
+    Etappierung-Werte."""
+    db.add_all([
+        Korrekturfaktor(tenant_id=tenant_id, name="Sanierung", faktor=1.20, aktiv=True),
+        Korrekturfaktor(tenant_id=tenant_id, name="Weiterbetrieb", faktor=1.10, aktiv=True),
+        Korrekturfaktor(tenant_id=tenant_id, name="Etappierung", faktor=1.08, aktiv=True),
+    ])
+
+
 def _firma_fuer_registrierung(body: RegisterIn, db: Session) -> Firma:
     if body.konto_typ == "einzelperson":
         firma = Firma(name=f"{(body.name or body.email).strip()} (Einzelperson)")
         db.add(firma)
         db.flush()
+        _seed_korrekturfaktoren(db, firma.id)
         return firma
 
     name_norm = (body.firmenname or "").strip()
@@ -89,6 +103,7 @@ def _firma_fuer_registrierung(body: RegisterIn, db: Session) -> Firma:
         firma = Firma(name=name_norm)
         db.add(firma)
         db.flush()
+        _seed_korrekturfaktoren(db, firma.id)
     return firma
 
 

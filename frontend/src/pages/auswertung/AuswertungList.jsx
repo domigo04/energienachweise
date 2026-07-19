@@ -1,7 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Plus, ChartColumnBig, MapPin, Download, Upload } from "lucide-react";
-import { getRefProjekte, exportRefsCsv, importRefsCsv } from "../../api/hcApi";
+import { Plus, ChartColumnBig, Download, Sparkles, Trash2, Upload } from "lucide-react";
+import {
+  deleteRefsBulk, exportRefsCsv, getRefProjekte, gkBeispieldatenLaden,
+  gkBeispieldatenLoeschen, importRefsCsv,
+} from "../../api/hcApi";
 
 const chf = (n) => (n ? Math.round(n).toLocaleString("de-CH") + " CHF" : "—");
 
@@ -22,11 +25,18 @@ export default function AuswertungList() {
   const [error, setError] = useState("");
   const [importMsg, setImportMsg] = useState("");
   const [importing, setImporting] = useState(false);
+  const [beschaeftigt, setBeschaeftigt] = useState(false);
+  const [auswahl, setAuswahl] = useState(new Set());
 
   const load = () =>
-    getRefProjekte().then(setRefs).catch(() => setError("Referenzprojekte konnten nicht geladen werden")).finally(() => setLoading(false));
+    getRefProjekte()
+      .then((r) => { setRefs(r); setAuswahl(new Set()); })
+      .catch(() => setError("Referenzprojekte konnten nicht geladen werden"))
+      .finally(() => setLoading(false));
 
   useEffect(() => { load(); }, []);
+
+  const hatBeispiele = useMemo(() => refs.some((r) => r.name.startsWith("Beispiel — ")), [refs]);
 
   const handleExport = async () => {
     try {
@@ -55,14 +65,49 @@ export default function AuswertungList() {
     }
   };
 
+  const beispiele = async (aktion) => {
+    setBeschaeftigt(true);
+    setImportMsg("");
+    try { await aktion(); await load(); } finally { setBeschaeftigt(false); }
+  };
+
+  const toggle = (id) => setAuswahl((s) => {
+    const neu = new Set(s);
+    neu.has(id) ? neu.delete(id) : neu.add(id);
+    return neu;
+  });
+
+  const auswahlLoeschen = async () => {
+    if (!window.confirm(`${auswahl.size} ausgewählte Referenzprojekte wirklich löschen?`)) return;
+    setBeschaeftigt(true);
+    try { await deleteRefsBulk([...auswahl]); await load(); } finally { setBeschaeftigt(false); }
+  };
+
   return (
     <div className="mx-auto max-w-5xl px-4 py-8 lg:px-8">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Auswertung</h1>
-          <p className="mt-1 text-sm text-slate-500">Referenzprojekte — die firmenweite Wissensdatenbank für Kennwerte.</p>
+          <p className="mt-1 text-sm text-slate-500">
+            Referenzprojekte — die firmenweite Wissensdatenbank. Auf ihr rechnet die
+            Grobkostenschätzung im Projekt.
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          {auswahl.size > 0 && (
+            <button onClick={auswahlLoeschen} disabled={beschaeftigt} className="btn-secondary border-brand-200 text-brand-700 hover:bg-brand-50">
+              <Trash2 className="size-4" /> {auswahl.size} ausgewählte löschen
+            </button>
+          )}
+          {!hatBeispiele ? (
+            <button onClick={() => beispiele(gkBeispieldatenLaden)} disabled={beschaeftigt} className="btn-secondary">
+              <Sparkles className="size-4" /> Beispieldaten laden
+            </button>
+          ) : (
+            <button onClick={() => beispiele(gkBeispieldatenLoeschen)} disabled={beschaeftigt} className="btn-ghost text-slate-500">
+              Beispieldaten entfernen
+            </button>
+          )}
           <button onClick={() => fileRef.current?.click()} disabled={importing} className="btn-secondary">
             <Upload className="size-4" /> {importing ? "Importiere…" : "CSV importieren"}
           </button>
@@ -82,15 +127,26 @@ export default function AuswertungList() {
         <div className="card flex flex-col items-center gap-2 border-dashed p-12 text-center">
           <div className="text-4xl">📊</div>
           <p className="font-medium text-slate-700">Noch keine Referenzprojekte</p>
-          <p className="max-w-md text-sm text-slate-400">Erfasse abgeschlossene Projekte mit ihren echten BKP-Kosten — oder importiere eine CSV. Je mehr Referenzen, desto verlässlicher die Grobkostenschätzung.</p>
+          <p className="max-w-md text-sm text-slate-400">
+            Erfasse abgeschlossene Projekte mit ihren echten BKP-Kosten, importiere eine CSV —
+            oder lade die Beispieldaten (~80 Demo-Projekte, jederzeit wieder entfernbar).
+          </p>
           <Link to="/auswertung/neu" className="btn-primary mt-2"><Plus className="size-4" /> Erstes Referenzprojekt</Link>
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           {refs.map((r) => (
-            <button key={r.id} onClick={() => nav(`/auswertung/${r.id}`)}
-              className="card group p-5 text-left transition hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md">
-              <div className="mb-2 flex items-start justify-between gap-3">
+            <div key={r.id} onClick={() => nav(`/auswertung/${r.id}`)}
+              className={"card group relative cursor-pointer p-5 text-left transition hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md " + (auswahl.has(r.id) ? "border-brand-300 bg-brand-50/30" : "")}>
+              <input
+                type="checkbox"
+                className="absolute right-4 top-4 size-4 accent-brand-600"
+                checked={auswahl.has(r.id)}
+                onClick={(e) => e.stopPropagation()}
+                onChange={() => toggle(r.id)}
+                title="Für Sammel-Löschen auswählen"
+              />
+              <div className="mb-2 flex items-start justify-between gap-3 pr-7">
                 <h3 className="truncate font-semibold text-slate-900 group-hover:text-brand-700">{r.name}</h3>
                 <span className="shrink-0 text-sm font-bold text-slate-900">{chf(r.summe_kosten)}</span>
               </div>
@@ -105,7 +161,7 @@ export default function AuswertungList() {
                 {r.heizleistung_kw ? <span>{r.heizleistung_kw} kW</span> : null}
                 {r.datum ? <span>{new Date(r.datum).toLocaleDateString("de-CH")}</span> : null}
               </div>
-            </button>
+            </div>
           ))}
         </div>
       )}

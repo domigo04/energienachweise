@@ -14,13 +14,13 @@ import ProjectList from "./pages/hc/ProjectList";
 import ProjectDashboard from "./pages/hc/ProjectDashboard";
 import HeizgruppenPage from "./pages/hc/HeizgruppenPage";
 import HydraulikEditor from "./pages/hc/HydraulikEditor";
-import KostenschaetzungPage from "./pages/hc/KostenschaetzungPage";
 import VentilPage from "./pages/hc/VentilPage";
 import DruckverlustPage from "./pages/hc/DruckverlustPage";
 import RavelPage from "./pages/hc/RavelPage";
 import AuswertungList from "./pages/auswertung/AuswertungList";
 import AuswertungForm from "./pages/auswertung/AuswertungForm";
 import AuswertungAnalyse from "./pages/auswertung/AuswertungAnalyse";
+import GrobkostenSchaetzung from "./pages/grobkosten/GrobkostenSchaetzung";
 import BenutzerFreischaltung from "./pages/admin/BenutzerFreischaltung";
 import BaupreisindexAdmin from "./pages/admin/BaupreisindexAdmin";
 
@@ -41,12 +41,15 @@ export default function App() {
             <Route path="/projekte" element={<ProjectList />} />
             <Route path="/projekte/:id" element={<ProjectDashboard />} />
             <Route path="/projekte/:id/heizgruppen" element={<HeizgruppenPage />} />
-            <Route path="/projekte/:id/kostenschaetzung" element={<KostenschaetzungPage />} />
+            <Route path="/projekte/:id/kostenschaetzung" element={<GrobkostenSchaetzung />} />
 
             <Route path="/auswertung" element={<AuswertungList />} />
             <Route path="/auswertung/neu" element={<AuswertungForm />} />
             <Route path="/auswertung/analyse" element={<AuswertungAnalyse />} />
             <Route path="/auswertung/:id" element={<AuswertungForm />} />
+
+            {/* Alte Grobkosten-Standalone-Routen → Schätzung läuft im Projekt */}
+            <Route path="/grobkosten/*" element={<Navigate to="/projekte" replace />} />
 
             <Route path="/rechner/ventil" element={<VentilPage />} />
             <Route path="/rechner/druckverlust" element={<DruckverlustPage />} />

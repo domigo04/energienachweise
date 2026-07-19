@@ -7,6 +7,9 @@ import logo from "../png/logo.png";
 // Persistente App-Shell für alle angemeldeten Seiten: linke Navigation +
 // (auf dem Handy) ein Kopf mit Schublade. Ersetzt den alten Marketing-Header.
 
+// Grobkostenschätzung ist bewusst KEIN eigener Nav-Punkt: geschätzt wird im
+// Projekt (Projekte → Projekt → Grobkostenschätzung), die Wissensbasis dafür
+// ist die Auswertung (Dominic 2026-07-14).
 const MAIN = [
   { to: "/start",      label: "Start",      icon: Home },
   { to: "/projekte",   label: "Projekte",   icon: FolderKanban },
@@ -63,13 +66,14 @@ function SidebarContent({ user, onLogout, onNavigate }) {
           ))}
         </div>
 
-        {user?.role === "admin" && (
-          <div className="pt-5">
-            <div className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Verwaltung</div>
+        <div className="pt-5">
+          <div className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Verwaltung</div>
+          {/* Baupreisindex für ALLE Nutzer: jede Firma pflegt ihre eigenen Indexwerte */}
+          <NavItem to="/admin/baupreisindex" label="Baupreisindex" icon={TrendingUp} onNavigate={onNavigate} />
+          {user?.role === "admin" && (
             <NavItem to="/admin/benutzer" label="Benutzer" icon={Users} onNavigate={onNavigate} />
-            <NavItem to="/admin/baupreisindex" label="Baupreisindex" icon={TrendingUp} onNavigate={onNavigate} />
-          </div>
-        )}
+          )}
+        </div>
       </nav>
 
       {/* Benutzer + Abmelden */}

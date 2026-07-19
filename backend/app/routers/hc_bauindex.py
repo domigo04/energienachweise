@@ -1,10 +1,14 @@
 """Baupreisindex-Verwaltung: manuelle Einträge (zuverlässiger Normalfall) +
 ein Best-Effort-Automatikabruf gegen die offizielle BFS-Quelle (opendata.swiss).
 
-- GET  /                       → alle Einträge (jeder angemeldete Nutzer)
-- POST /                       → manuellen Eintrag anlegen/überschreiben (Admin)
-- DELETE /{id}                 → Eintrag löschen (Admin)
-- POST /automatisch-aktualisieren → Abruf-Versuch auslösen (Admin)
+Alle Endpunkte für JEDEN angemeldeten Nutzer (Dominic 2026-07-14: jede
+Userkategorie muss den Index selbständig pflegen/aktualisieren können) —
+die Daten sind ohnehin je Firma getrennt (tenant_id).
+
+- GET  /                          → alle Einträge
+- POST /                          → manuellen Eintrag anlegen/überschreiben
+- DELETE /{id}                    → Eintrag löschen
+- POST /automatisch-aktualisieren → BFS-Abruf auslösen
 """
 from datetime import date
 
@@ -12,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user, require_admin
+from app.auth import get_current_user
 from app.data.bauindex_bfs import fetch_bfs_baupreisindex
 from app.database import get_db
 from app.models.auth import User
@@ -43,17 +47,17 @@ def list_eintraege(user: User = Depends(get_current_user), db: Session = Depends
 
 
 @router.post("", response_model=BauindexOut, status_code=201)
-def upsert_eintrag(body: BauindexIn, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+def upsert_eintrag(body: BauindexIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     eintrag = (
         db.query(BauindexEintrag)
-        .filter(BauindexEintrag.tenant_id == admin.tenant_id, BauindexEintrag.periode == body.periode)
+        .filter(BauindexEintrag.tenant_id == user.tenant_id, BauindexEintrag.periode == body.periode)
         .first()
     )
     if eintrag:
         eintrag.wert = body.wert
         eintrag.quelle = "manuell"
     else:
-        eintrag = BauindexEintrag(tenant_id=admin.tenant_id, periode=body.periode, wert=body.wert, quelle="manuell")
+        eintrag = BauindexEintrag(tenant_id=user.tenant_id, periode=body.periode, wert=body.wert, quelle="manuell")
         db.add(eintrag)
     db.commit()
     db.refresh(eintrag)
@@ -61,10 +65,10 @@ def upsert_eintrag(body: BauindexIn, admin: User = Depends(require_admin), db: S
 
 
 @router.delete("/{eintrag_id}", status_code=204)
-def delete_eintrag(eintrag_id: int, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+def delete_eintrag(eintrag_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     eintrag = (
         db.query(BauindexEintrag)
-        .filter(BauindexEintrag.id == eintrag_id, BauindexEintrag.tenant_id == admin.tenant_id)
+        .filter(BauindexEintrag.id == eintrag_id, BauindexEintrag.tenant_id == user.tenant_id)
         .first()
     )
     if not eintrag:
@@ -74,7 +78,7 @@ def delete_eintrag(eintrag_id: int, admin: User = Depends(require_admin), db: Se
 
 
 @router.post("/automatisch-aktualisieren")
-def automatisch_aktualisieren(admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+def automatisch_aktualisieren(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Abruf gegen die BFS-Quelle (opendata.swiss), live verifiziert. Schlägt er
     trotzdem fehl (Netzwerk/Format geändert), ändert sich an der Datenbank
     nichts — die manuelle Eingabe bleibt zusätzlich immer möglich."""
@@ -86,14 +90,14 @@ def automatisch_aktualisieren(admin: User = Depends(require_admin), db: Session 
     for e in ergebnis["eintraege"]:
         vorhanden = (
             db.query(BauindexEintrag)
-            .filter(BauindexEintrag.tenant_id == admin.tenant_id, BauindexEintrag.periode == e["periode"])
+            .filter(BauindexEintrag.tenant_id == user.tenant_id, BauindexEintrag.periode == e["periode"])
             .first()
         )
         if vorhanden:
             if vorhanden.quelle == "bfs-automatisch":
                 vorhanden.wert = e["wert"]
             continue  # manuelle Einträge nicht überschreiben
-        db.add(BauindexEintrag(tenant_id=admin.tenant_id, periode=e["periode"], wert=e["wert"], quelle="bfs-automatisch"))
+        db.add(BauindexEintrag(tenant_id=user.tenant_id, periode=e["periode"], wert=e["wert"], quelle="bfs-automatisch"))
         neu += 1
     db.commit()
     return {"erfolg": True, "meldung": ergebnis["meldung"], "neue_eintraege": neu}

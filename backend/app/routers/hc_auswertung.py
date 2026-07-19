@@ -57,6 +57,12 @@ class RefProjektIn(BaseModel):
     anzahl_waermemessungen: Optional[int] = None
     anzahl_schaltgeraetekombinationen: Optional[int] = None
     laufmeter_rohre_heizung: Optional[float] = None
+    # Schnittstelle Brauchwarmwasser: True = BWW in den Heizungs-Kosten
+    # enthalten (nicht Sanitär). Weiches Ähnlichkeits-Kriterium der
+    # Grobkostenschätzung, kein Hard-Filter. None = nicht erfasst.
+    bww_bei_heizung: Optional[bool] = None
+    weiterbetrieb_umbau: Optional[bool] = None
+    etappierung: Optional[bool] = None
     # Rabatt/Skonto Heizung (Gewerk "heizung" — Grundlage für Brutto→Netto)
     rabatt_pct: float = 0.0
     skonto_pct: float = 0.0
@@ -94,6 +100,8 @@ def _out(r: RefProjekt) -> dict:
     return {
         **_summary(r),
         "ausbauumfang": r.ausbauumfang, "zertifizierung": r.zertifizierung,
+        "bww_bei_heizung": r.bww_bei_heizung,
+        "weiterbetrieb_umbau": r.weiterbetrieb_umbau, "etappierung": r.etappierung,
         "bohrmeter": r.bohrmeter, "anzahl_einheiten": r.anzahl_einheiten, "qualitaet": r.qualitaet,
         "installierte_leistung_neu_kw": r.installierte_leistung_neu_kw,
         "flaeche_fbh_m2": r.flaeche_fbh_m2, "flaeche_tabs_m2": r.flaeche_tabs_m2,
@@ -129,6 +137,9 @@ def _apply(r: RefProjekt, body: RefProjektIn, user: User):
     r.anzahl_waermemessungen = body.anzahl_waermemessungen
     r.anzahl_schaltgeraetekombinationen = body.anzahl_schaltgeraetekombinationen
     r.laufmeter_rohre_heizung = body.laufmeter_rohre_heizung
+    r.bww_bei_heizung = body.bww_bei_heizung
+    r.weiterbetrieb_umbau = body.weiterbetrieb_umbau
+    r.etappierung = body.etappierung
     r.datum = body.datum
     r.qualitaet = body.qualitaet
     r.kostenzeilen = [
@@ -149,7 +160,8 @@ def _apply(r: RefProjekt, body: RefProjektIn, user: User):
 # wenn nicht erfasst. So bleibt Export→Import verlustfrei (Runde-Trip).
 _CSV_BASE_FIELDS = [
     "name", "projektart", "gebaeudetyp", "ausbauumfang", "zertifizierung", "anlagenkonfiguration",
-    "waermeerzeuger", "waermeabgabe", "ebf_m2", "bohrmeter", "heizleistung_kw",
+    "waermeerzeuger", "waermeabgabe", "bww_bei_heizung", "weiterbetrieb_umbau", "etappierung",
+    "ebf_m2", "bohrmeter", "heizleistung_kw",
     "anzahl_einheiten", "datum", "qualitaet", "rabatt_pct", "skonto_pct",
     "installierte_leistung_neu_kw", "flaeche_fbh_m2", "flaeche_tabs_m2", "flaeche_deckenstrahlplatten_m2",
     "anzahl_heizkoerper", "anzahl_waermemessungen", "anzahl_schaltgeraetekombinationen", "laufmeter_rohre_heizung",
@@ -175,6 +187,10 @@ def _ref_to_row(r) -> dict:
         "anlagenkonfiguration": r.anlagenkonfiguration or "",
         "waermeerzeuger": ";".join(r.waermeerzeuger or []),
         "waermeabgabe": ";".join(r.waermeabgabe or []),
+        # Bool als 1/0, leer = nicht erfasst (round-trip-sicher)
+        "bww_bei_heizung": "" if r.bww_bei_heizung is None else (1 if r.bww_bei_heizung else 0),
+        "weiterbetrieb_umbau": "" if r.weiterbetrieb_umbau is None else (1 if r.weiterbetrieb_umbau else 0),
+        "etappierung": "" if r.etappierung is None else (1 if r.etappierung else 0),
         "ebf_m2": _num_or_leer(r.ebf_m2),
         "bohrmeter": _num_or_leer(r.bohrmeter),
         "heizleistung_kw": _num_or_leer(r.heizleistung_kw),
@@ -239,6 +255,13 @@ def _pdate(v) -> Optional[date]:
         return date.fromisoformat(v)
     except ValueError:
         return None
+
+
+def _pbool(v) -> Optional[bool]:
+    v = (v or "").strip().lower()
+    if not v:
+        return None
+    return v in ("1", "true", "ja", "wahr", "x")
 
 
 @router.get("")
@@ -329,6 +352,9 @@ async def import_csv(file: UploadFile = File(...), user: User = Depends(get_curr
                 anzahl_waermemessungen=_pint(row.get("anzahl_waermemessungen")),
                 anzahl_schaltgeraetekombinationen=_pint(row.get("anzahl_schaltgeraetekombinationen")),
                 laufmeter_rohre_heizung=_num(row.get("laufmeter_rohre_heizung")),
+                bww_bei_heizung=_pbool(row.get("bww_bei_heizung")),
+                weiterbetrieb_umbau=_pbool(row.get("weiterbetrieb_umbau")),
+                etappierung=_pbool(row.get("etappierung")),
             )
             db.add(r)
             db.flush()
@@ -355,6 +381,25 @@ def create_ref(body: RefProjektIn, user: User = Depends(get_current_user), db: S
     db.commit()
     db.refresh(r)
     return _out(r)
+
+
+class BulkLoeschenIn(BaseModel):
+    ids: List[int]
+
+
+@router.post("/loeschen")
+def bulk_loeschen(body: BulkLoeschenIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Mehrere Referenzprojekte auf einmal löschen (Mehrfach-Auswahl in der
+    Liste) — nur eigene (tenant-geprüft), inkl. Kostenzeilen/Gewerken (Kaskade)."""
+    refs = (
+        db.query(RefProjekt)
+        .filter(RefProjekt.tenant_id == user.tenant_id, RefProjekt.id.in_(body.ids))
+        .all()
+    )
+    for r in refs:
+        db.delete(r)
+    db.commit()
+    return {"geloescht": len(refs)}
 
 
 @router.get("/{ref_id}")

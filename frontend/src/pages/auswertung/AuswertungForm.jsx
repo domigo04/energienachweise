@@ -11,7 +11,7 @@ import {
 
 const LEER = {
   name: "", projektart: "", gebaeudetyp: "", ausbauumfang: "", zertifizierung: "", anlagenkonfiguration: "",
-  waermeerzeuger: [], waermeabgabe: [], ebf_m2: "", bohrmeter: "", heizleistung_kw: "",
+  waermeerzeuger: [], waermeabgabe: [], bww_bei_heizung: false, ebf_m2: "", bohrmeter: "", heizleistung_kw: "",
   anzahl_einheiten: "", datum: "", qualitaet: 0.85,
   installierte_leistung_neu_kw: "", flaeche_fbh_m2: "", flaeche_tabs_m2: "", flaeche_deckenstrahlplatten_m2: "",
   anzahl_heizkoerper: "", anzahl_waermemessungen: "", anzahl_schaltgeraetekombinationen: "", laufmeter_rohre_heizung: "",
@@ -55,6 +55,7 @@ export default function AuswertungForm() {
             ausbauumfang: r.ausbauumfang || "", zertifizierung: r.zertifizierung || "",
             anlagenkonfiguration: r.anlagenkonfiguration || "",
             waermeerzeuger: r.waermeerzeuger || [], waermeabgabe: r.waermeabgabe || [],
+            bww_bei_heizung: !!r.bww_bei_heizung,
             ebf_m2: r.ebf_m2 ?? "", bohrmeter: r.bohrmeter ?? "", heizleistung_kw: r.heizleistung_kw ?? "",
             anzahl_einheiten: r.anzahl_einheiten ?? "", datum: r.datum || "", qualitaet: r.qualitaet ?? 0.85,
             installierte_leistung_neu_kw: r.installierte_leistung_neu_kw ?? "",
@@ -100,6 +101,7 @@ export default function AuswertungForm() {
       ausbauumfang: form.ausbauumfang || null, zertifizierung: form.zertifizierung || null,
       anlagenkonfiguration: form.anlagenkonfiguration || null,
       waermeerzeuger: form.waermeerzeuger, waermeabgabe: form.waermeabgabe,
+      bww_bei_heizung: !!form.bww_bei_heizung,
       ebf_m2: num(form.ebf_m2), bohrmeter: erdsonde ? num(form.bohrmeter) : null,
       heizleistung_kw: num(form.heizleistung_kw), anzahl_einheiten: num(form.anzahl_einheiten),
       installierte_leistung_neu_kw: num(form.installierte_leistung_neu_kw),
@@ -194,6 +196,11 @@ export default function AuswertungForm() {
                 </div>
                 <CheckboxGruppe label="Wärmeerzeuger (mehrere möglich)" options={WAERMEERZEUGER} value={form.waermeerzeuger} onChange={setWaermeerzeuger} />
                 <CheckboxGruppe label="Wärmeabgabe (mehrere möglich)" options={WAERMEABGABE} value={form.waermeabgabe} onChange={(v) => set("waermeabgabe", v)} />
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input type="checkbox" className="size-4 accent-brand-600" checked={!!form.bww_bei_heizung} onChange={(e) => set("bww_bei_heizung", e.target.checked)} />
+                  Brauchwarmwasser bei Heizung
+                  <span className="text-xs text-slate-400">(BWW-Kosten sind in den Heizungs-BKP enthalten, Schnittstelle nicht beim Sanitär)</span>
+                </label>
                 <AnlagenkonfigurationAuswahl value={form.anlagenkonfiguration} onChange={(v) => set("anlagenkonfiguration", v)} />
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div><label className="label">Datum (Devis / Ausführung)</label>

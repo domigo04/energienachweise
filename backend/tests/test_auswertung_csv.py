@@ -13,7 +13,9 @@ def _mock_ref(**kw):
     gewerke = kw.pop("gewerke", [])
     base = dict(
         name="Test", projektart=None, gebaeudetyp=None, ausbauumfang=None, zertifizierung=None,
-        anlagenkonfiguration=None, waermeerzeuger=[], waermeabgabe=[], ebf_m2=None, bohrmeter=None,
+        anlagenkonfiguration=None, waermeerzeuger=[], waermeabgabe=[], bww_bei_heizung=None,
+        weiterbetrieb_umbau=None, etappierung=None,
+        ebf_m2=None, bohrmeter=None,
         heizleistung_kw=None, anzahl_einheiten=None, datum=None, qualitaet=1.0,
         installierte_leistung_neu_kw=None, flaeche_fbh_m2=None, flaeche_tabs_m2=None,
         flaeche_deckenstrahlplatten_m2=None, anzahl_heizkoerper=None, anzahl_waermemessungen=None,

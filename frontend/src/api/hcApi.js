@@ -88,10 +88,17 @@ export const importRefsCsv = (file) => {
   return api.post(`${BASE}/auswertung/import`, fd, { headers: { "Content-Type": null } }).then(r => r.data);
 };
 
-// --- Kostenschätzung (je Projekt) ---
-export const ksBerechnen = (inputs) => api.post(`${BASE}/kostenschaetzung/berechnen`, inputs).then(r => r.data);
-export const ksGet = (projectId) => api.get(`${BASE}/kostenschaetzung/projekt/${projectId}`).then(r => r.data);
-export const ksSave = (projectId, inputs) => api.put(`${BASE}/kostenschaetzung/projekt/${projectId}`, inputs).then(r => r.data);
+// --- Grobkostenschätzung (BKP) — läuft IM Projekt, rechnet auf der Auswertung ---
+export const gkSchaetzen = (data) => api.post(`${BASE}/grobkostenschaetzung/schaetzen`, data).then(r => r.data);
+export const gkProjektGet = (projectId) => api.get(`${BASE}/grobkostenschaetzung/projekt/${projectId}`).then(r => r.data);
+export const gkProjektSave = (projectId, data) => api.put(`${BASE}/grobkostenschaetzung/projekt/${projectId}`, data).then(r => r.data);
+export const gkFaktoren = () => api.get(`${BASE}/grobkostenschaetzung/korrekturfaktoren`).then(r => r.data);
+export const gkPatchFaktor = (id, data) => api.patch(`${BASE}/grobkostenschaetzung/korrekturfaktoren/${id}`, data).then(r => r.data);
+export const gkBeispieldatenLaden = () => api.post(`${BASE}/grobkostenschaetzung/beispieldaten`).then(r => r.data);
+export const gkBeispieldatenLoeschen = () => api.delete(`${BASE}/grobkostenschaetzung/beispieldaten`).then(r => r.data);
+
+// --- Auswertung: Mehrfach-Löschen ---
+export const deleteRefsBulk = (ids) => api.post(`${BASE}/auswertung/loeschen`, { ids }).then(r => r.data);
 
 // --- Baupreisindex ---
 export const getBauindex = () => api.get(`${BASE}/bauindex`).then(r => r.data);

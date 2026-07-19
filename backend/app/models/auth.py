@@ -44,5 +44,9 @@ class User(Base):
     is_verified = Column(Boolean, default=False)  # Admin muss freischalten
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    # Fingerprint des zuletzt via ADMIN_INITIAL_PASSWORD gesetzten Passworts
+    # (nur beim Seed-Admin gesetzt) — verhindert, dass main.py::_seed_admin das
+    # Passwort bei JEDEM Serverstart zurücksetzt. Sicherheits-Review 2026-07-19.
+    admin_pw_seed_fingerprint = Column(String, nullable=True)
 
     firma = relationship("Firma", back_populates="users")

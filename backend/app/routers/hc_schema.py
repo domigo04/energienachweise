@@ -5,13 +5,13 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.auth import get_current_user
 from app.database import get_db
+from app.models.auth import User
 from app.models.heizungscockpit import HcProject, HcSchema
 from app.schemas.hc_schemas import SchemaCreate, SchemaUpdate, SchemaOut
 
 router = APIRouter(prefix="/api/v1", tags=["Heizungscockpit – Schema"])
-
-TENANT_ID = 1
 
 
 def _to_out(s: HcSchema) -> SchemaOut:
@@ -31,10 +31,10 @@ def _to_out(s: HcSchema) -> SchemaOut:
     )
 
 
-def _require_project(project_id: int, db: Session) -> HcProject:
+def _require_project(project_id: int, user: User, db: Session) -> HcProject:
     p = (
         db.query(HcProject)
-        .filter(HcProject.id == project_id, HcProject.tenant_id == TENANT_ID)
+        .filter(HcProject.id == project_id, HcProject.tenant_id == user.tenant_id)
         .first()
     )
     if not p:
@@ -42,10 +42,10 @@ def _require_project(project_id: int, db: Session) -> HcProject:
     return p
 
 
-def _require_schema(schema_id: int, db: Session) -> HcSchema:
+def _require_schema(schema_id: int, user: User, db: Session) -> HcSchema:
     s = (
         db.query(HcSchema)
-        .filter(HcSchema.id == schema_id, HcSchema.tenant_id == TENANT_ID)
+        .filter(HcSchema.id == schema_id, HcSchema.tenant_id == user.tenant_id)
         .first()
     )
     if not s:
@@ -54,11 +54,11 @@ def _require_schema(schema_id: int, db: Session) -> HcSchema:
 
 
 @router.get("/projects/{project_id}/schemas", response_model=List[SchemaOut])
-def list_schemas(project_id: int, db: Session = Depends(get_db)):
-    _require_project(project_id, db)
+def list_schemas(project_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    _require_project(project_id, user, db)
     rows = (
         db.query(HcSchema)
-        .filter(HcSchema.project_id == project_id, HcSchema.tenant_id == TENANT_ID)
+        .filter(HcSchema.project_id == project_id, HcSchema.tenant_id == user.tenant_id)
         .order_by(HcSchema.created_at)
         .all()
     )
@@ -66,10 +66,10 @@ def list_schemas(project_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/projects/{project_id}/schemas", response_model=SchemaOut, status_code=201)
-def create_schema(project_id: int, body: SchemaCreate, db: Session = Depends(get_db)):
-    _require_project(project_id, db)
+def create_schema(project_id: int, body: SchemaCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    _require_project(project_id, user, db)
     s = HcSchema(
-        tenant_id=TENANT_ID,
+        tenant_id=user.tenant_id,
         project_id=project_id,
         name=(body.name or "Schema"),
         graph_json=json.dumps(body.graph or {"nodes": [], "edges": []}),
@@ -81,13 +81,13 @@ def create_schema(project_id: int, body: SchemaCreate, db: Session = Depends(get
 
 
 @router.get("/schemas/{schema_id}", response_model=SchemaOut)
-def get_schema(schema_id: int, db: Session = Depends(get_db)):
-    return _to_out(_require_schema(schema_id, db))
+def get_schema(schema_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return _to_out(_require_schema(schema_id, user, db))
 
 
 @router.put("/schemas/{schema_id}", response_model=SchemaOut)
-def save_schema(schema_id: int, body: SchemaUpdate, db: Session = Depends(get_db)):
-    s = _require_schema(schema_id, db)
+def save_schema(schema_id: int, body: SchemaUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    s = _require_schema(schema_id, user, db)
     if body.name is not None:
         s.name = body.name
     if body.graph is not None:
@@ -99,7 +99,7 @@ def save_schema(schema_id: int, body: SchemaUpdate, db: Session = Depends(get_db
 
 
 @router.delete("/schemas/{schema_id}", status_code=204)
-def delete_schema(schema_id: int, db: Session = Depends(get_db)):
-    s = _require_schema(schema_id, db)
+def delete_schema(schema_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    s = _require_schema(schema_id, user, db)
     db.delete(s)
     db.commit()

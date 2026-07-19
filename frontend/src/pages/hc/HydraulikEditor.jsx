@@ -11,7 +11,7 @@ import { NODE_TYPES, NUMMERIERT, ROTATABLE } from '../../components/hc/nodes/Hyd
 import { EDGE_TYPES } from '../../components/hc/edges/FlowEdge';
 import { SCHALTUNGEN } from '../../components/hc/nodes/schaltungen';
 import { getProject, listSchemas, createSchema, saveSchema, hydraulikBerechnen } from '../../api/hcApi';
-import { API_BASE } from '../../api';
+import { api } from '../../api';
 
 // ── Konstanten ────────────────────────────────────────────────
 const KVS_REIHE = [0.1, 0.16, 0.25, 0.4, 0.63, 1.0, 1.6, 2.5, 4.0, 6.3, 10, 16, 25, 40, 63];
@@ -1149,6 +1149,25 @@ function EditorInner() {
     setSelected(null);
   };
 
+  // PDF-Endpunkt verlangt seit dem Sicherheits-Review 2026-07-19 ein
+  // Bearer-Token — window.open() sendet keine Header mit, darum authentifiziert
+  // als Blob laden (Token kommt automatisch vom Axios-Interceptor in api.js)
+  // und danach wie gewohnt in einem neuen Tab öffnen.
+  const downloadPdf = async (inhalt) => {
+    if (!schemaId) return;
+    try {
+      const res = await api.get(`/api/v1/schemas/${schemaId}/pdf`, {
+        params: { inhalt },
+        responseType: 'blob',
+      });
+      const url = URL.createObjectURL(res.data);
+      window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+    } catch {
+      alert('PDF konnte nicht geladen werden.');
+    }
+  };
+
   const onConnect = useCallback((params) => {
     snap();
     setEdges(eds => addEdge({ ...params, type:'flow', style:{ stroke:edgeColor, strokeWidth:2.5 } }, eds));
@@ -1262,7 +1281,7 @@ function EditorInner() {
         <span style={{ fontSize:11, color:'#94a3b8', marginLeft:6 }}>PDF:</span>
         {[['schema','Schema'],['berechnungen','Rechnung'],['beides','Beides']].map(([k,t])=>(
           <button key={k} disabled={!schemaId}
-            onClick={()=>window.open(`${API_BASE}/api/v1/schemas/${schemaId}/pdf?inhalt=${k}`,'_blank')}
+            onClick={()=>downloadPdf(k)}
             style={{ fontSize:11, padding:'3px 8px', borderRadius:4, border:'1px solid #bfdbfe', background:'#eff6ff', color:'#1d4ed8', cursor:'pointer', whiteSpace:'nowrap' }}>
             ⤓ {t}
           </button>

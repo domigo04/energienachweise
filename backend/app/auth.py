@@ -18,6 +18,13 @@ from app.database import get_db
 from app.models.auth import Role, User
 
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-me")
+if SECRET_KEY == "dev-secret-change-me":
+    # Sicherheits-Review 2026-07-19: ohne eigene SECRET_KEY sind alle Login-
+    # Tokens mit einem öffentlich bekannten Schlüssel signiert und fälschbar.
+    # Sichtbar im Log statt einer stillen Schwachstelle — kein harter Abbruch,
+    # damit ein Server ohne gesetzte Variable nicht überraschend down geht.
+    print("[WARNUNG] SECRET_KEY nicht gesetzt — unsicherer Code-Default aktiv. "
+          "Für Produktion zwingend eine eigene, geheime Umgebungsvariable setzen.")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "10080"))  # 7 Tage
 

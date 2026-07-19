@@ -250,7 +250,118 @@ Reihenfolge/Gewichtung, nie Ausschluss.
 *Danach noch:* Referenz-`qualitaet` (gesichert/Devis/Schätzung) in die Gewichtung; PDF-Export der
 Grobkostenschätzung (alter Endpunkt in `hc_export.py` verwaist).
 
-**DANN — zurück ins Schema-Tool (Hydraulik-Editor, Feedback 2026-07-06, seither nicht angefasst):**
+*F) NEU — weitere Fach-Anpassungen Grobkostenschätzung (Dominic 2026-07-19, NOCH NICHT umgesetzt):*
+
+1. **Zurück-Navigation bei Referenz-Klick.** Klickt man in der Grobkostenschätzung auf ein verwendetes
+   Referenzprojekt, landet man in der Auswertung — der Zurück-Button dort führt zur Auswertungs-Liste,
+   nicht zurück zur Grobkostenschätzung des Projekts. Fix: Link mit Herkunfts-Info (`state`/Query-Param)
+   oder Referenz in einem neuen Tab/Modal öffnen statt wegzunavigieren.
+
+2. **Warnhinweis bei kleiner Datenbasis pro Position.** Wenn für eine BKP-Position (z.B. 243.3a
+   Bodenheizung) nur 1 von 15 passenden Referenzen tatsächlich Daten liefert, ist der Kennwert nicht
+   aussagekräftig — das "Vertrauen niedrig"-Badge existiert zwar schon (`_vertrauen_aus_abdeckung`),
+   ist aber zu unauffällig. **[Vorschlag]** Bei `abdeckung <= 1` (oder generell "niedrig") einen expliziten
+   Text-Hinweis in der aufgeklappten Zeile ergänzen, z.B. *"Nur 1 von 15 passenden Referenzen hatte diese
+   Position — der Kennwert ist ein Einzelfall, keine breite Statistik. Mit Vorsicht verwenden."* Zusätzlich
+   das Badge visuell verstärken (z.B. Warndreieck statt nur Punkt) bei niedrigem Vertrauen.
+
+3. **Ähnlichkeit darf bei abweichender Wärmeabgabe nicht zu hoch wirken.** Beobachtung: eine Referenz mit
+   identischer Wärmeabgabe zeigt ~90 % Ähnlichkeit, eine sonst gleiche Referenz mit ANDERER Wärmeabgabe
+   (z.B. FBH statt Heizkörper) landet nur bei ~80 % — zu nah beieinander, obwohl die Wärmeabgabe seit
+   der letzten Anpassung (Abschnitt E) *kein* Score-Faktor mehr ist (sie steuert nur noch die Positionen).
+   Das täuscht Nähe vor, wo eigentlich ein wichtiges Merkmal abweicht. **[Vorschlag, 2 Teile]**
+   - Die Wärmeabgabe wieder als **eigenen, stark gewichteten** Score-Faktor aufnehmen (zusätzlich zur
+     Positions-Steuerung aus Abschnitt B) — z.B. 0.20–0.25 Gewicht, gleiche Abgabe voll, abweichende
+     Abgabe deutlich tiefer (nicht 0, da die Referenz ja trotzdem für die *anderen* Positionen brauchbar
+     bleibt).
+   - Zusätzlich in der UI ein **Hinweis-Icon direkt an der Referenz** in der Liste "Verwendete
+     Referenzprojekte", wenn `abgabe_klassen` der Referenz von der Ziel-Auswahl abweicht — z.B.
+     *"⚠ hat zusätzlich Heizkörper — nur die Fussbodenheizungs-Kosten wurden übernommen"*.
+   → Damit sinkt die Ähnlichkeit bei abweichender Abgabe spürbar UND man sieht auf einen Blick, warum.
+
+4. **Referenz mit "verdünnter" Fläche erkennen (mehrere Abgabesysteme auf gleicher EBF).** Fall: Ziel hat
+   nur Heizkörper, eine Referenz hat auf derselben Fläche sowohl Heizkörper ALS AUCH FBH — die Heizkörper-
+   Kosten dieser Referenz verteilen sich nur auf einen Teil der EBF, der CHF/m²-Kennwert (bezogen auf die
+   GANZE EBF) ist dadurch künstlich zu tief, wenn man ihn 1:1 aufs Ziel (100 % Heizkörper) anwendet.
+   **[Vorschlag]** Referenzen mit **mehreren** Wärmeabgabe-Klassen (`len(abgabe_klassen) > 1`) bei der
+   Ähnlichkeit generell tiefer gewichten (gehört zum Punkt 3 oben: "gemischte" Referenz ≠ "reine"
+   Referenz, auch wenn eine der Klassen zum Ziel passt) UND in der UI kennzeichnen: *"Mischsystem (FBH +
+   Heizkörper) — Kennwert evtl. verzerrt, da die Fläche geteilt ist"*. Sauberer wäre langfristig, in der
+   Auswertung die **Fläche je Abgabesystem** separat zu erfassen (`flaeche_fbh_m2` gibt es dort ja schon
+   für andere Zwecke) und den Kennwert direkt auf die passende Teilfläche statt auf die ganze EBF zu
+   beziehen — das ist aber ein grösserer Umbau, erstmal nur der Hinweis.
+
+5. **CHF/Einheit als Gegencheck zu CHF/m² (Ausreisser-Erkennung).** Für die Wärmeverteilung (243er-Gruppe)
+   zusätzlich zum CHF/m²-Kennwert einen CHF/Einheit-Kennwert rechnen (Einheit = Wohnungen bei MFH,
+   analog bei Büro etc. — keine Sonderlösung nötig, einfach `anzahl_ne` als zweiter Bezug). **[Vorschlag]**
+   Beide Kennwerte parallel rechnen und den geschätzten Betrag gegen beide Wege prüfen (ähnlich dem
+   alten "Weg A / Weg B"-Kreuzcheck aus Abschnitt 4, Kern-Punkt 5, der im aktuellen positionsbasierten
+   System noch nicht existiert): weicht der EBF-basierte Betrag stark vom Einheiten-basierten Betrag ab
+   (z.B. > 30–40 % in eine Richtung), Hinweis anzeigen: *"CHF/m² und CHF/Einheit weichen stark voneinander
+   ab — Zahl prüfen."* Verrechnungsdetail (welcher Weg zählt am Ende, wie stark die Abweichungs-Schwelle
+   ist) mit Dominic vor der Umsetzung festlegen.
+
+**Reihenfolge-Vorschlag für F:** zuerst 1 (kleiner Fix), dann 3+4 zusammen (gehören fachlich zusammen,
+gleiche Code-Stelle: Score + Referenzliste), dann 2 (Hinweistext), dann 5 (eigener Rechenweg, am meisten
+Aufwand) — aber Dominic entscheidet die Reihenfolge.
+
+*G) NEU — Auswertungsseite: mehr Funktionen (Dominic 2026-07-19, NOCH NICHT umgesetzt):*
+
+1. **Filter nach Projekt-Merkmalen.** Auf `AuswertungList.jsx` Filterleiste ergänzen: Wärmeerzeuger-
+   Häkchen (Mehrfachauswahl, "enthält" statt "exakt" — Filter "Erdsonden-WP" zeigt auch gemischte
+   Projekte, die zusätzlich noch anderes haben) und Wärmeabgabe-Häkchen nach gleichem Prinzip. Dazu
+   sinnvollerweise auch Nutzung/Projektart als Dropdown-Filter (bestehende Badges auf den Karten sind
+   schon die richtigen Kandidaten). Rein client-seitig filterbar (Referenzliste ist schon geladen),
+   kein Backend-Umbau nötig.
+2. **"Alle auswählen"-Knopf** neben den Filtern — markiert alle aktuell (nach Filter) sichtbaren
+   Karten für die bestehende Sammel-Löschen-Funktion, statt jede Karte einzeln anklicken zu müssen.
+3. **Chatbot auf den Auswertungsdaten ("Spielerei", Aufwand einschätzen).** Idee: ein Chat-Fenster, das
+   Fragen zu den Referenzprojekten beantwortet ("Welches Projekt hatte die höchsten Kosten pro m²?").
+   **[Einschätzung]** Aufwand hängt stark vom Anspruch ab:
+   - **Einfach (Tage):** Ein LLM-Aufruf, dem die aktuell geladenen Referenzprojekte (JSON) als Kontext
+     mitgegeben werden, plus ein simples Chat-UI. Reicht für Fragen über die sichtbaren ~50–200 Projekte.
+   - **Aufwendiger (Wochen):** Eine "Tool-Use"-Anbindung, bei der das LLM eigene Datenbank-Abfragen stellen
+     kann (z.B. Aggregationen über alle Projekte, nicht nur die geladene Seite) — nötig, falls die
+     Datenmenge wächst oder komplexere Auswertungen ("Trend über die letzten 3 Jahre") gefragt sind.
+   - Braucht ausserdem einen LLM-API-Zugang (Kosten pro Anfrage) und ist reine Zusatzfunktion, kein
+     Kernfeature — Empfehlung: zurückstellen, bis die Fach-Logik (Punkt F) und die Filter (oben) stehen.
+
+## Schema-Editor: Werkzeug-Wechsel prüfen (Dominic 2026-07-19, NOCH NICHT entschieden)
+
+**Problem, das Dominic beschreibt:** Die Berechnungs-Intelligenz des Schema-Editors ist gut (Graph aus
+Bauteilen + Leitungen, Hydraulik rechnet automatisch) — aber die **Darstellung** ist unbefriedigend:
+Leitungen (`FlowEdge.jsx`, aktuelles Werkzeug React Flow / `@xyflow/react`) lassen sich nicht frei wie
+in AutoCAD führen, für Speziallösungen (ungewöhnliche Linienführung, Detail-Anpassungen) gibt es kaum
+Freiheit. Das deckt sich mit den seit 2026-07-06 offenen Punkten 6+7 unten (Leitungen entbuggen,
+T-Stück-Splice) — beides Symptome derselben Grund-Einschränkung.
+
+**[Vorschlag] Drei Optionen, mit Aufwand/Nutzen-Einschätzung:**
+
+1. **React Flow behalten, nur die Leitungs-Darstellung aufwerten.** Eigenes Orthogonal-Routing bauen
+   (mehrere frei verschiebbare Eckpunkte pro Leitung statt automatischer Linienführung), dazu die
+   T-Stück-Splice-Logik (Punkt 7). Kleinster Aufwand, bleibt im bestehenden System, behebt aber nur
+   die Symptome — die grundsätzliche Freiheit bleibt beschränkt, weil React Flow für Knoten-Diagramme
+   gebaut ist, nicht für freies CAD-Zeichnen.
+2. **Wechsel auf eine Diagramm-Engine mit echtem Orthogonal-Routing** (z.B. die Technologie hinter
+   draw.io/mxGraph, oder eine vergleichbare Bibliothek). Solche Engines sind genau für "Linien frei
+   führen, aber sauber orthogonal, mit Verbindungspunkten" gebaut — näher an dem, was Dominic will,
+   als React Flow. Der bestehende Graph (Bauteile + Verbindungen), auf dem die Hydraulik-Berechnung
+   läuft, bliebe im Backend unverändert — nur die Zeichenfläche im Frontend würde ersetzt. Mittlerer
+   Aufwand (kompletter Editor-Neubau im Frontend), aber die Backend-Berechnung/Datenmodell bleibt stehen.
+3. **Freies Zeichnen auf einer Canvas-Bibliothek** (z.B. Konva.js/Fabric.js) mit selbstgebauter
+   "Intelligenz" obendrauf (Linien erkennen, Kreisläufe/Verbindungen ableiten). Maximale gestalterische
+   Freiheit (wirklich wie AutoCAD), aber die aktuell "geschenkte" Intelligenz von React Flow (Knoten +
+   Kanten sind bereits ein Graph) müsste grösstenteils neu gebaut werden — grösster Aufwand, höchstes
+   Risiko, aber auch höchste Freiheit.
+
+**Empfehlung Claude:** Option 2 zuerst genauer anschauen (z.B. mit einem kleinen Prototyp/Vergleich),
+bevor über 1 oder 3 entschieden wird — sie verspricht den besten Kompromiss aus "endlich frei zeichnen
+können" und "Graph-Intelligenz bleibt geschenkt". Das ist aber eine Grundsatzentscheidung, die die Punkte
+6+7 unten ersetzen würde (nicht zusätzlich dazu) — **Dominic entscheidet**, ob und wann dieser Wechsel
+angegangen wird, danach ggf. eigener Rechercheschritt (Bibliotheken vergleichen, Prototyp bauen).
+
+**DANN — zurück ins Schema-Tool (Hydraulik-Editor, Feedback 2026-07-06, seither nicht angefasst —
+ODER siehe Werkzeug-Wechsel oben, falls das den Vorrang bekommt):**
 6. **Leitungen entbuggen** — immer so wenig Bögen wie möglich, nur senkrecht/waagrecht; `FlowEdge.jsx`.
 7. **Leitung auf Leitung → automatisches T-Stück** (Splice: Edge in zwei Segmente teilen).
 8. **Expansionsgefäss wie Excel** — editierbare Rohrinhalt-Tabelle statt nur Vsys, Zusatz-Bauteile,
@@ -262,6 +373,71 @@ Grobkostenschätzung (alter Endpunkt in `hc_export.py` verwaist).
 
 **Sonst:**
 13. Produktions-Login nach dem nächsten Deploy verifizieren (Postgres-Fix, wartet auf Dominics OK).
+
+## Sicherheits-Review (extern, 2026-07-19)
+
+Externes Feedback. **Jeder Punkt im echten Code verifiziert, bevor er umgesetzt wird**
+(✅ behoben / 🔍 bestätigt, offen / ❌ nicht zutreffend). Umsetzungs-Log direkt bei den Punkten.
+
+1. **✅ teilweise behoben (2026-07-19) — Zugangsdaten/JWT-Schlüssel.**
+   - `_seed_admin` (`main.py`) setzt das Adminpasswort jetzt nur noch zurück, wenn sich
+     `ADMIN_INITIAL_PASSWORD` seit dem letzten Start WIRKLICH geändert hat (Fingerprint-Vergleich, neue
+     Spalte `hc_users.admin_pw_seed_fingerprint`). Lokal verifiziert: (a) normaler Neustart lässt ein
+     manuell übers Konto geändertes Passwort unangetastet, (b) eine bewusste Änderung der Env-Var setzt
+     das Passwort wie gewollt neu — beides mit echtem Login getestet (HTTP 200).
+   - `auth.py`/`main.py` geben jetzt beim Start eine sichtbare `[WARNUNG]` aus, wenn `SECRET_KEY` bzw.
+     `ADMIN_INITIAL_PASSWORD` nicht gesetzt sind und der unsichere Code-Default aktiv ist.
+   - **[Offene Handlung bei Dominic]** Das ist eine reine Code-Verbesserung — sie rotiert NICHT die
+     tatsächlichen Geheimnisse. `Sirego2004!` steht weiterhin als Code-Default im Repo (Git-Historie).
+     **Dominic muss auf dem Produktions-Server selbst** (Hosting-Dashboard/Env-Vars) `ADMIN_INITIAL_PASSWORD`
+     auf ein neues, nur ihm bekanntes Passwort setzen UND eine eigene, zufällige `SECRET_KEY` setzen (z.B.
+     `openssl rand -hex 32`) — dazu hat Claude keinen Zugriff, das kann nur er selbst im Hosting-Panel tun.
+     Nach dem Setzen: einmal neu deployen, dann im Log auf die `[WARNUNG]`-Zeilen prüfen (dürfen nicht
+     mehr erscheinen), danach das alte Passwort gilt als kompromittiert und muss ersetzt bleiben.
+2. **✅ behoben (2026-07-19) — Mandantentrennung.** Noch gravierender als beschrieben: `hc_schema.py`,
+   `hc_groups.py`, `hc_export.py` hatten GAR KEINE Authentifizierung (kein `Depends(get_current_user)`) —
+   nicht nur `TENANT_ID=1` fest codiert, die Endpunkte waren komplett ohne Login aufrufbar. Fix (Muster
+   aus `hc_projects.py` übernommen): alle Endpunkte verlangen jetzt `user: User = Depends(get_current_user)`,
+   sämtliche Datenbank-Filter nutzen `user.tenant_id` statt der Konstante. Lokal mit echten HTTP-Requests
+   bewiesen: `GET /projects/{id}/groups`, `GET /group-templates`, `GET /projects/{id}/schemas`,
+   `GET /schemas/{id}/pdf` liefern ohne Token **401**, mit gültigem Token **200** (curl-Tests, beide Fälle).
+   Backend-Testsuite weiterhin 125/125 grün (diese Router haben keine pytest-Abdeckung, da reine
+   Integrations-Endpunkte — Absicherung nur via echtem HTTP-Test verifiziert, nicht automatisiert).
+3. **✅ behoben (2026-07-19) — PDF-Export.** `HydraulikEditor.jsx`: `window.open()` durch eine
+   `downloadPdf()`-Funktion ersetzt, die den PDF-Endpunkt authentifiziert per Axios als Blob lädt (Token
+   kommt automatisch vom bestehenden Interceptor in `api.js`) und danach als Object-URL in einem neuen Tab
+   öffnet. Live im Browser getestet: eingeloggt → Klick auf «⤓ Schema» → `GET /schemas/{id}/pdf` liefert
+   HTTP 200 mit Token im Header (Netzwerk-Log geprüft), kein Klartext-Link mehr ohne Auth abrufbar.
+   **Nebenbefund:** Das Entfernen von `allow_origin_regex=".*"` (Punkt 4) blockiert jetzt zurecht Anfragen
+   von Origins, die nicht in `ALLOWED_ORIGINS` stehen — beim lokalen Testen mit einem Dev-Server auf einem
+   Nicht-Standard-Port (5182 statt dem dokumentierten 5173) schlug das CORS zuerst fehl. Kein Bug, sondern
+   der Fix wirkt wie gewollt; für produktive Zusatz-Domains muss `ALLOWED_ORIGINS` entsprechend gepflegt sein.
+4. **✅ behoben (2026-07-19) — CORS.** `allow_origin_regex=".*"` aus `main.py` entfernt — nur noch die
+   definierte `ALLOWED_ORIGINS`-Liste gilt. Lokal geprüft: Backend startet fehlerfrei, App funktioniert
+   weiter (`localhost:5173`/`5182` sind Teil der Default-Liste). **Nach dem nächsten Deploy prüfen**, ob
+   `ALLOWED_ORIGINS` auf dem Server die echte Produktions-Domain enthält.
+5. **🔍 bestätigt — Firmeneintritt über Namen.** `routers/hc_auth.py` nimmt `firmenname` frei entgegen und
+   lässt bei Namenstreffer automatisch beitreten, keine Einladung/kein Code nötig.
+   **[Rückfrage an Dominic nötig]** wie der Einladungs-/Code-Fluss fachlich aussehen soll, bevor das
+   umgebaut wird (Product-Entscheid, keine reine Code-Korrektur).
+
+**Datenbank:**
+🔍 bestätigt, sogar schlimmer als beschrieben — `backend/alembic/versions/` enthält NUR noch
+`__pycache__`-Reste (`.pyc`), die zugehörigen `.py`-Migrationsquellen existieren im Repo nicht (auch nicht
+in der Git-Historie) → Alembic ist im Projekt faktisch tot, die App migriert komplett über
+`main.py::_ensure_columns()` mit `ALTER TABLE`/`DROP TABLE IF EXISTS` bei jedem Start.
+`BauindexEintrag.periode` (`models/kv.py:130`) hat `unique=True` statt `UNIQUE(tenant_id, periode)` —
+bestätigt, zweite Firma kann denselben Periodenwert nicht anlegen.
+**[Rückfrage an Dominic nötig]** ein voller Alembic-Umbau (Migrationen aus dem Ist-Zustand neu aufbauen,
+Start-Verhalten umstellen, Backup-Strategie) ist ein grösserer, produktionsnaher Eingriff — nicht einfach
+nebenbei fixbar, eigener Schritt mit Dominic vor der Umsetzung planen.
+
+**Umsetzungsplan / Reihenfolge (mit Dominic abgesprochen, 2026-07-19):**
+- Zuerst die risikoarmen, klar umsetzbaren Code-Fixes: **4 (CORS)** → **1 (Secrets/Admin-Reset)** →
+  **2 (Mandantentrennung)** → **3 (PDF-Export)**.
+- **5 (Firmeneintritt)** und der **DB/Alembic-Umbau** brauchen zuerst einen Produkt-/Architektur-Entscheid
+  von Dominic — nicht blind umsetzen, zuerst Vorschlag + Rückfrage.
+- Status je Punkt wird hier direkt nachgetragen, sobald erledigt.
 
 ## Geparkt / später
 - **Schema ↔ Heizgruppen-DB verknüpfen** (Kernversprechen F2: Änderung fliesst automatisch), manueller

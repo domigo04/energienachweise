@@ -167,5 +167,13 @@ Dimensionierung), ohne dass eine lange Leitung quer durchs Schema gezeichnet wer
 - Eine optische Leitungskreuzung erzeugt **keine** hydraulische Verbindung. Erst das bewusste
   Ablegen eines Leitungsendes auf der Mitte einer Leitung teilt diese Leitung und erzeugt ein
   echtes T-Stück im Graphen.
-- `data.points` speichert CAD-Stützpunkte einer Leitung. Diese ändern nur die Leitungsführung,
-  nicht die hydraulische Verbindung. Der PDF-Export übernimmt dieselbe Polylinie.
+- Der produktive Editor verwendet dieselbe CAD-Zeichenlogik wie der React-Flow-Probeeditor:
+  Polylinie wählen, frei in der Fläche beginnen, Klick setzt einen Stützpunkt, Enter oder
+  Rechtsklick beendet die Leitung. Shift fängt auf 0°, 45° und 90°.
+- `data.cad_polyline=true` kennzeichnet eine bewusst gezeichnete Polylinie; `data.points`
+  speichert ihre inneren Stützpunkte. Beides ändert nur die Leitungsführung, nicht die
+  hydraulische Verbindung. Der PDF-Export übernimmt dieselbe Polylinie.
+- Freie Enden und T-Punkte werden intern als `junction` mit `data.cad_anchor=true` gespeichert.
+  Diese Nodes sind reine Topologie-Anker und weder im Editor noch im Export als Bauteile sichtbar.
+  Bearbeitet werden sie ausschliesslich über die Endgriffe der Leitung. Nur eine echte
+  T-Verbindung erhält einen kleinen Verbindungspunkt.

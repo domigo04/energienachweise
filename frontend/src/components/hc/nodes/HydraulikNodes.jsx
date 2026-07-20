@@ -140,7 +140,7 @@ export function SicherheitsventilNode({ data, selected: sel }) {
 }
 
 // ── Plattenwärmetauscher PWT (4 Tore an den Rauten-Ecken) ────
-export function PwtNode({ data, selected: sel }) {
+export function PwtNode({ selected: sel }) {
   return (
     <div style={wrap(sel)}>
       {/* Mitte der 4 Rauten-Seiten, oben/unten symmetrisch. Links = Primär
@@ -550,21 +550,22 @@ export function AnschlussNode({ data, selected: sel }) {
   );
 }
 
-// ── Fangpunkt / T-Stück — kleiner Punkt (rot am VL, blau am RL) ──────────────
-// Endpunkt freier Leitungen und T-Stelle, wenn zwei Leitungen sich berühren.
-export function JunctionNode({ data, selected: sel }) {
-  const farbe = data?.color || '#334155';
-  const hs = { width: 9, height: 9, background: 'transparent', border: 'none', minWidth: 0, minHeight: 0, zIndex: 5 };
+// ── Unsichtbarer Topologie-Anker ─────────────────────────────────────────────
+// Freie Polylinien und echte T-Verbindungen brauchen im gespeicherten Graphen
+// weiterhin einen Node. Im Editor ist dieser aber kein Bauteil: sichtbar und
+// bearbeitbar sind nur die Leitungsgriffe der CAD-Ebene.
+export function JunctionNode() {
+  const hs = {
+    left: 0, top: 0, width: 1, height: 1, minWidth: 0, minHeight: 0,
+    background: 'transparent', border: 'none', opacity: 0, pointerEvents: 'none',
+    transform: 'none',
+  };
   return (
-    <div style={{ width: 12, height: 12, position: 'relative', cursor: 'grab' }}>
-      <Handle type="source" position={Position.Left}   id="left"   style={{ ...hs, left: 1 }} />
-      <Handle type="source" position={Position.Right}  id="right"  style={{ ...hs, right: 1 }} />
-      <Handle type="source" position={Position.Top}    id="top"    style={{ ...hs, top: 1 }} />
-      <Handle type="source" position={Position.Bottom} id="bottom" style={{ ...hs, bottom: 1 }} />
-      <div style={{
-        width: 12, height: 12, borderRadius: '50%', background: farbe,
-        border: sel ? '2px solid #3b82f6' : '1.5px solid white', boxShadow: '0 0 0 1px #94a3b8',
-      }} />
+    <div style={{ width: 1, height: 1, position: 'relative', pointerEvents: 'none', opacity: 0 }}>
+      {['left', 'right', 'top', 'bottom', 'center-source'].map(id => (
+        <Handle key={id} className="hc-junction-handle" type="source" position={Position.Left} id={id} style={hs} />
+      ))}
+      <Handle className="hc-junction-handle" type="target" position={Position.Left} id="center-target" style={hs} />
     </div>
   );
 }
@@ -583,8 +584,10 @@ export function LabelNode({ data }) {
 
 // ── Bauteil-Nummern (Pflichtenheft §10: Nummerierung + Legende) ──────
 // Jedes nummerierbare Bauteil bekommt ein rotes Badge (data.nr) oben rechts.
+// eslint-disable-next-line react-refresh/only-export-components
 export const NUMMERIERT = ['gruppe', 'heizkreis', 'pump', 'valve2', 'valve3', 'checkvalve', 'shutoff', 'erzeuger', 'speicher', 'verteiler', 'waermezaehler', 'expansion', 'bww', 'stad', 'sicherheitsventil', 'pwt'];
 
+// eslint-disable-next-line no-unused-vars
 function mitNr(Comp) {
   function MitNr(props) {
     const nr = props.data?.nr;
@@ -637,6 +640,7 @@ export const ROTATABLE = new Set([
   'stad', 'temperatur', 'sicherheitsventil', 'pwt',
 ]);
 
+// eslint-disable-next-line no-unused-vars
 function mitRotation(Comp) {
   function MitRotation(props) {
     const rot = props.data?.rotation || 0;
@@ -650,6 +654,7 @@ function mitRotation(Comp) {
   return MitRotation;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const NODE_TYPES = Object.fromEntries(
   Object.entries(BASIS_TYPES).map(([k, C]) => {
     let W = ROTATABLE.has(k) ? mitRotation(C) : C;

@@ -33,14 +33,16 @@ export function FlowEdge({
   const waypoints = Array.isArray(data.points) ? data.points : [];
   const vertices = [{ x: sourceX, y: sourceY }, ...waypoints, { x: targetX, y: targetY }];
   const smooth = getSmoothStepPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, borderRadius: 8 });
-  const edgePath = waypoints.length ? polylinePath(vertices) : smooth[0];
-  const labelPoint = waypoints.length ? halfwayPoint(vertices) : { x: smooth[1], y: smooth[2] };
-  const dash = data._dashed || isRL ? '6 4' : undefined;
+  const isCadPolyline = data.cad_polyline || waypoints.length > 0;
+  const edgePath = isCadPolyline ? polylinePath(vertices) : smooth[0];
+  const labelPoint = isCadPolyline ? halfwayPoint(vertices) : { x: smooth[1], y: smooth[2] };
+  const dash = data._dashed || isRL ? '10 7' : undefined;
+  const color = style.stroke || '#334155';
 
   return (
     <>
       <BaseEdge id={id} path={edgePath}
-        style={{ ...style, strokeWidth: isVL ? 2 : 1.6, strokeDasharray: dash, fill: 'none' }} />
+        style={{ ...style, strokeWidth: 4.5, strokeDasharray: dash, strokeLinecap: 'round', strokeLinejoin: 'round', fill: 'none' }} />
 
       {selected && <path d={edgePath} fill="none" stroke="#0f172a" strokeWidth={9} opacity={0.11} pointerEvents="none" />}
 
@@ -53,11 +55,28 @@ export function FlowEdge({
           Beim Ziehen mit Shift übernimmt der Editor den 0°/45°/90°-Fang. */}
       {selected && waypoints.map((point, index) => (
         <circle key={`${id}-point-${index}`} cx={point.x} cy={point.y} r={6.5}
-          fill="white" stroke={style.stroke || '#334155'} strokeWidth={2.5}
+          fill="white" stroke={color} strokeWidth={2.5}
           style={{ pointerEvents: 'all', cursor: 'move' }}
           onPointerDown={(event) => { event.stopPropagation(); data._onPointPointerDown?.(event, id, index); }}
           onDoubleClick={(event) => { event.stopPropagation(); data._onRemovePoint?.(id, index); }} />
       ))}
+
+      {/* Wie im React-Flow-Probeeditor: freie/verbundene Enden werden direkt
+          an der Leitung gegriffen. Die internen Junction-Nodes bleiben unsichtbar. */}
+      {selected && [
+        ['source', sourceX, sourceY],
+        ['target', targetX, targetY],
+      ].map(([side, x, y]) => (
+        <circle key={`${id}-${side}`} cx={x} cy={y} r={8}
+          fill="white" stroke={color} strokeWidth={3.5}
+          style={{ pointerEvents: 'all', cursor: 'crosshair' }}
+          onPointerDown={(event) => { event.stopPropagation(); data._onEndpointPointerDown?.(event, id, side); }} />
+      ))}
+
+      {/* Nur echte T-Verbindungen erhalten einen kleinen Verbindungspunkt.
+          Freie Enden erzeugen keine dauerhaft sichtbaren Junction-Symbole. */}
+      {data._sourceJunctionDegree >= 3 && <circle cx={sourceX} cy={sourceY} r={4.5} fill={color} pointerEvents="none" />}
+      {data._targetJunctionDegree >= 3 && <circle cx={targetX} cy={targetY} r={4.5} fill={color} pointerEvents="none" />}
 
       {/* Leitungs-Label (DN + Massenstrom) — in der Streckenmitte */}
       {label && (

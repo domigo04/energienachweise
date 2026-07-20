@@ -75,6 +75,8 @@ def vt_stutzen_x(i: int) -> float:
 
 
 def node_groesse(node):
+    if node.get("type") == "junction" and (node.get("data") or {}).get("cad_anchor"):
+        return (1, 1)
     if node.get("type") == "verteiler":
         return (vt_breite(node), vt_hoehe(node))
     if node.get("type") == "gruppe":
@@ -102,6 +104,11 @@ def _handle_pos_base(node, handle: Optional[str]):
     y = (node.get("position") or {}).get("y", 0)
     w, h = node_groesse(node)
     t = node.get("type")
+
+    if t == "junction" and (node.get("data") or {}).get("cad_anchor"):
+        # CAD-Anker speichern bereits den exakten Leitungsfangpunkt. Sie sind
+        # keine sichtbaren Bauteile und besitzen keine geometrische Ausdehnung.
+        return (x, y)
 
     if t == "verteiler" and handle:
         vh = vt_hoehe(node)
@@ -440,6 +447,8 @@ def zeichne_standard(parts, node, results):
         parts.append(f'<polygon points="{x + 26},{y + 25} {x + 19},{y + 29} {x + 26},{y + 33}" fill="{RL_FARBE}"/>')
         return
     elif t == "junction":
+        if d.get("cad_anchor"):
+            return
         parts.append(f'<line x1="{x}" y1="{y + 30}" x2="{x + 46}" y2="{y + 30}" stroke="#1e293b" stroke-width="6" stroke-linecap="round"/>')
         parts.append(f'<line x1="{x + 23}" y1="{y + 30}" x2="{x + 23}" y2="{y + 4}" stroke="#1e293b" stroke-width="6" stroke-linecap="round"/>')
     elif t == "label":
@@ -463,12 +472,15 @@ def zeichne_edge(parts, edge, nodes_by_id, results):
     stroke = edge.get("stroke") or (edge.get("style") or {}).get("stroke") or "#1e293b"
     layer_id = str((edge.get("data") or {}).get("layer_id") or "")
     ist_rl = stroke == RL_FARBE or layer_id.endswith("_rl")
-    dash = ' stroke-dasharray="8,5"' if ist_rl else ""
-    # CAD-Leitung wie FlowEdge.jsx: dünn, rechte Winkel mit kleinen runden Bögen (r=8).
+    dash = ' stroke-dasharray="10,7"' if ist_rl else ""
+    # CAD-Leitung wie FlowEdge.jsx: echte Polylinie; klassische React-Flow-
+    # Kanten ohne cad_polyline behalten ihre automatische Winkelroute.
     dx, dy = x2 - x1, y2 - y1
     r = 8
-    stuetzpunkte = (edge.get("data") or {}).get("points") or []
-    if stuetzpunkte:
+    edge_data = edge.get("data") or {}
+    stuetzpunkte = edge_data.get("points") or []
+    ist_cad_polyline = bool(edge_data.get("cad_polyline")) or bool(stuetzpunkte)
+    if ist_cad_polyline:
         punkte = [(x1, y1)] + [(_f(p.get("x")), _f(p.get("y"))) for p in stuetzpunkte] + [(x2, y2)]
         pfad = "M " + " L ".join(f"{x} {y}" for x, y in punkte)
         # Label ungefähr in der geometrischen Mitte der Polylinie.
@@ -500,10 +512,10 @@ def zeichne_edge(parts, edge, nodes_by_id, results):
         s3 = 1 if x2 > mx else -1
         pfad = (f"M {x1} {y1} L {mx - s1 * rr} {y1} Q {mx} {y1} {mx} {y1 + s2 * rr} "
                 f"L {mx} {y2 - s2 * rr} Q {mx} {y2} {mx + s3 * rr} {y2} L {x2} {y2}")
-    if not stuetzpunkte:
+    if not ist_cad_polyline:
         lx, ly = (x1 + x2) / 2 + 6, (y1 + y2) / 2
-    sw = 1.6 if ist_rl else 2
-    parts.append(f'<path d="{pfad}" fill="none" stroke="{stroke}" stroke-width="{sw}"{dash}/>')
+    sw = 4.5
+    parts.append(f'<path d="{pfad}" fill="none" stroke="{stroke}" stroke-width="{sw}" stroke-linecap="round" stroke-linejoin="round"{dash}/>')
     fluss = (results.get("edge_flows") or {}).get(edge.get("id"))
     if fluss:
         # Neues Label-Format (Dominic 2026-07-06): DN gross oben, Massenstrom m' in

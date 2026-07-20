@@ -96,9 +96,28 @@ def test_svg_uebernimmt_cad_stuetzpunkte_und_medien_layer():
     svg = erzeuge_svg(nodes, edges, {})
     assert "L -300.0 200.0 L 200.0 200.0" in svg
     assert 'stroke="#0e7490"' in svg
-    assert 'stroke-dasharray="8,5"' in svg
+    assert 'stroke-dasharray="10,7"' in svg
     # Ein Stützpunkt ausserhalb der Bauteile muss den PDF/SVG-Ausschnitt erweitern.
     assert 'viewBox="-350.0' in svg
+
+
+def test_svg_cad_anker_sind_unsichtbar_und_polylinie_startet_exakt_am_punkt():
+    nodes = [
+        {"id": "frei_a", "type": "junction", "position": {"x": 40, "y": 60}, "data": {"cad_anchor": True}},
+        {"id": "frei_b", "type": "junction", "position": {"x": 240, "y": 160}, "data": {"cad_anchor": True}},
+    ]
+    edges = [{
+        "id": "cad", "source": "frei_a", "sourceHandle": "center-source",
+        "target": "frei_b", "targetHandle": "center-target",
+        "style": {"stroke": VL},
+        "data": {"layer_id": "heizung_vl", "cad_polyline": True, "points": []},
+    }]
+    svg = erzeuge_svg(nodes, edges, {})
+    assert handle_pos(nodes[0], "center-source") == (40, 60)
+    assert 'd="M 40 60 L 240 160"' in svg
+    # Alte Junction-Bauteile zeichneten ein schwarzes T-Symbol. CAD-Anker
+    # gehören nur zur Topologie und dürfen im Export nicht auftauchen.
+    assert 'stroke="#1e293b" stroke-width="6"' not in svg
 
 
 # ── Legende + Berechnungen ──────────────────────────────────────────────────

@@ -2,11 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import Konva from "konva";
 import { Circle, Group, Layer, Line, Rect, Shape, Stage, Text } from "react-konva";
-import { ArrowLeft, Boxes, Check, GitCompareArrows, Hand, MousePointer2, Redo2, RotateCcw, Trash2, Undo2, ZoomIn, ZoomOut } from "lucide-react";
+import { ArrowLeft, Boxes, Check, GitCompareArrows, Hand, MousePointer2, Redo2, RotateCcw, Trash2, Undo2, Waypoints, ZoomIn, ZoomOut } from "lucide-react";
 import { getProject } from "../../api/hcApi";
 
 const GRID = 20;
-const FRAME_MS = 1000 / 24;
 const COLORS = { vl: "#ef4444", rl: "#3b82f6", neutral: "#334155" };
 const snap = (value) => Math.round(value / GRID) * GRID;
 const uid = (prefix) => `${prefix}_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
@@ -71,10 +70,37 @@ function portPosition(nodes, endpoint) {
   return node && port ? { ...port, x: node.x + port.x, y: node.y + port.y } : null;
 }
 
+function endpointPosition(nodes, endpoint) {
+  if (endpoint?.nodeId) return portPosition(nodes, endpoint);
+  return Number.isFinite(endpoint?.x) && Number.isFinite(endpoint?.y)
+    ? { x: endpoint.x, y: endpoint.y, side: null, kind: endpoint.kind || "neutral" }
+    : null;
+}
+
+function nearestPort(nodes, point, radius = 28) {
+  let best = null;
+  for (const node of nodes) {
+    for (const port of NODE_SPECS[node.type].ports) {
+      const position = { x: node.x + port.x, y: node.y + port.y };
+      const distance = Math.hypot(position.x - point.x, position.y - point.y);
+      if (distance <= radius && (!best || distance < best.distance)) {
+        best = { distance, endpoint: { nodeId: node.id, portId: port.id }, port, position };
+      }
+    }
+  }
+  return best;
+}
+
 function routeForEdge(nodes, edge) {
-  const start = portPosition(nodes, edge.start);
-  const end = portPosition(nodes, edge.end);
+  const start = endpointPosition(nodes, edge.start);
+  const end = endpointPosition(nodes, edge.end);
   if (!start || !end) return null;
+  if (Array.isArray(edge.points)) {
+    return {
+      start, end, horizontal: null, handle: null,
+      points: [start.x, start.y, ...edge.points.flatMap((point) => [point.x, point.y]), end.x, end.y],
+    };
+  }
   const horizontal = ["left", "right"].includes(start.side);
   if (horizontal) {
     const midX = edge.mid?.x ?? (start.x + end.x) / 2;
@@ -82,6 +108,14 @@ function routeForEdge(nodes, edge) {
   }
   const midY = edge.mid?.y ?? (start.y + end.y) / 2;
   return { start, end, horizontal, handle: { x: (start.x + end.x) / 2, y: midY }, points: [start.x, start.y, start.x, midY, end.x, midY, end.x, end.y] };
+}
+
+function constrainedPoint(raw, anchor, orthogonal) {
+  const point = { x: snap(raw.x), y: snap(raw.y) };
+  if (!orthogonal || !anchor) return point;
+  return Math.abs(point.x - anchor.x) >= Math.abs(point.y - anchor.y)
+    ? { x: point.x, y: anchor.y }
+    : { x: anchor.x, y: point.y };
 }
 
 function Grid({ view, size }) {
@@ -210,6 +244,7 @@ export default function HydraulikCadLab() {
   const undoRef = useRef([]);
   const redoRef = useRef([]);
   const connectionStartRef = useRef(null);
+  const draftPointsRef = useRef([]);
   const nodeFrameRef = useRef(null);
   const pendingNodeMoveRef = useRef(null);
   const edgeFrameRef = useRef(null);
@@ -227,8 +262,12 @@ export default function HydraulikCadLab() {
   const [selected, setSelected] = useState(null);
   const [connectionStart, setConnectionStart] = useState(null);
   const [connectionPointer, setConnectionPointer] = useState(null);
+  const [draftPoints, setDraftPoints] = useState([]);
+  const [orthogonal, setOrthogonal] = useState(false);
+  const [lineKind, setLineKind] = useState("vl");
+  const [extension, setExtension] = useState(null);
   const [liveNodePositions, setLiveNodePositions] = useState({});
-  const [liveEdgeMids, setLiveEdgeMids] = useState({});
+  const [liveEdgeChanges, setLiveEdgeChanges] = useState({});
 
   useEffect(() => { getProject(projectId).then((project) => setProjectName(project.name)).catch(() => {}); }, [projectId]);
   // Während eines Drags niemals synchron serialisieren. Erst nach einer kurzen
@@ -243,9 +282,9 @@ export default function HydraulikCadLab() {
     return () => observer.disconnect();
   }, []);
   useEffect(() => () => {
-    if (nodeFrameRef.current) clearTimeout(nodeFrameRef.current);
-    if (edgeFrameRef.current) clearTimeout(edgeFrameRef.current);
-    if (pointerFrameRef.current) clearTimeout(pointerFrameRef.current);
+    if (nodeFrameRef.current) cancelAnimationFrame(nodeFrameRef.current);
+    if (edgeFrameRef.current) cancelAnimationFrame(edgeFrameRef.current);
+    if (pointerFrameRef.current) cancelAnimationFrame(pointerFrameRef.current);
   }, []);
 
   const checkpoint = useCallback(() => {
@@ -270,6 +309,10 @@ export default function HydraulikCadLab() {
       const tag = document.activeElement?.tagName;
       if (["INPUT", "TEXTAREA", "SELECT"].includes(tag)) return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") { event.preventDefault(); event.shiftKey ? redo() : undo(); }
+      if (event.key === "Backspace" && connectionStartRef.current) {
+        event.preventDefault();
+        const next = draftPointsRef.current.slice(0, -1); draftPointsRef.current = next; setDraftPoints(next); return;
+      }
       if ((event.key === "Delete" || event.key === "Backspace") && selected) {
         checkpoint();
         setGraph((current) => selected.kind === "node"
@@ -277,7 +320,7 @@ export default function HydraulikCadLab() {
           : { ...current, edges: current.edges.filter((e) => e.id !== selected.id) });
         setSelected(null);
       }
-      if (event.key === "Escape") { connectionStartRef.current = null; setConnectionStart(null); setConnectionPointer(null); }
+      if (event.key === "Escape") { connectionStartRef.current = null; draftPointsRef.current = []; setConnectionStart(null); setConnectionPointer(null); setDraftPoints([]); setExtension(null); }
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
@@ -294,41 +337,87 @@ export default function HydraulikCadLab() {
   };
   const renderNodes = useMemo(() => graph.nodes.map((node) => liveNodePositions[node.id]
     ? { ...node, ...liveNodePositions[node.id] } : node), [graph.nodes, liveNodePositions]);
-  const renderEdges = useMemo(() => graph.edges.map((edge) => liveEdgeMids[edge.id]
-    ? { ...edge, mid: liveEdgeMids[edge.id] } : edge), [graph.edges, liveEdgeMids]);
+  const renderEdges = useMemo(() => graph.edges.map((edge) => liveEdgeChanges[edge.id]
+    ? { ...edge, ...liveEdgeChanges[edge.id] } : edge), [graph.edges, liveEdgeChanges]);
 
   const moveNodeLive = (nodeId, x, y) => {
     pendingNodeMoveRef.current = { nodeId, x, y };
     if (nodeFrameRef.current) return;
-    nodeFrameRef.current = setTimeout(() => {
+    nodeFrameRef.current = requestAnimationFrame(() => {
       const pending = pendingNodeMoveRef.current;
       if (pending) setLiveNodePositions((current) => ({ ...current, [pending.nodeId]: { x: pending.x, y: pending.y } }));
       nodeFrameRef.current = null;
-    }, FRAME_MS);
+    });
   };
   const moveNodeEnd = (nodeId, x, y) => {
-    if (nodeFrameRef.current) clearTimeout(nodeFrameRef.current);
+    if (nodeFrameRef.current) cancelAnimationFrame(nodeFrameRef.current);
     nodeFrameRef.current = null; pendingNodeMoveRef.current = null;
     setLiveNodePositions((current) => { const next = { ...current }; delete next[nodeId]; return next; });
     setGraph((current) => ({ ...current, nodes: current.nodes.map((node) => node.id === nodeId ? { ...node, x, y } : node) }));
   };
 
   const cancelConnection = () => {
-    connectionStartRef.current = null; setConnectionStart(null); setConnectionPointer(null);
+    connectionStartRef.current = null; draftPointsRef.current = [];
+    setConnectionStart(null); setConnectionPointer(null); setDraftPoints([]); setExtension(null);
   };
   const startConnection = (nodeId, port) => {
     const endpoint = { nodeId, portId: port.id, kind: port.kind, side: port.side };
     connectionStartRef.current = endpoint; setConnectionStart(endpoint);
+    draftPointsRef.current = []; setDraftPoints([]); setExtension(null); setTool("line");
     const position = portPosition(renderNodes, endpoint);
     if (position) setConnectionPointer({ x: position.x, y: position.y });
+  };
+  const startFreeConnection = (raw) => {
+    const point = constrainedPoint(raw, null, false);
+    const endpoint = { ...point, kind: lineKind, side: null };
+    connectionStartRef.current = endpoint; draftPointsRef.current = [];
+    setConnectionStart(endpoint); setConnectionPointer(point); setDraftPoints([]); setExtension(null); setTool("line");
+  };
+  const commitConnection = (endEndpoint, endPort = null) => {
+    const start = connectionStartRef.current;
+    if (!start) return false;
+    const endPosition = endpointPosition(renderNodes, endEndpoint);
+    const last = draftPointsRef.current[draftPointsRef.current.length - 1] || endpointPosition(renderNodes, start);
+    let points = [...draftPointsRef.current];
+    if (orthogonal && endPosition && last && last.x !== endPosition.x && last.y !== endPosition.y) {
+      points.push(endPort && ["top", "bottom"].includes(endPort.side)
+        ? { x: endPosition.x, y: last.y }
+        : { x: last.x, y: endPosition.y });
+    }
+    const clean = points.filter((point, index) => {
+      const previous = index ? points[index - 1] : endpointPosition(renderNodes, start);
+      return !previous || point.x !== previous.x || point.y !== previous.y;
+    }).filter((point) => !endPosition || point.x !== endPosition.x || point.y !== endPosition.y);
+    const startPosition = endpointPosition(renderNodes, start);
+    if (!extension && startPosition && endPosition && clean.length === 0
+      && startPosition.x === endPosition.x && startPosition.y === endPosition.y) return false;
+    const storedStart = start.nodeId ? { nodeId: start.nodeId, portId: start.portId } : { x: start.x, y: start.y };
+    const storedEnd = endEndpoint.nodeId ? { nodeId: endEndpoint.nodeId, portId: endEndpoint.portId } : { x: endEndpoint.x, y: endEndpoint.y };
+    checkpoint();
+    setGraph((current) => {
+      if (!extension) return { ...current, edges: [...current.edges, {
+        id: uid("leitung"), start: storedStart, end: storedEnd,
+        kind: start.kind === "neutral" ? (endPort?.kind || lineKind) : (start.kind || lineKind), points: clean,
+      }] };
+      return { ...current, edges: current.edges.map((edge) => {
+        if (edge.id !== extension.edgeId) return edge;
+        const route = routeForEdge(current.nodes, edge);
+        const basePoints = Array.isArray(edge.points) ? edge.points : (route?.points || [])
+          .reduce((all, value, index, flat) => index % 2 ? [...all, { x: flat[index - 1], y: value }] : all, [])
+          .slice(1, -1);
+        const oldEndpoint = endpointPosition(current.nodes, extension.end === "start" ? edge.start : edge.end);
+        if (extension.end === "start") {
+          return { ...edge, start: storedEnd, points: [...clean].reverse().concat(oldEndpoint ? [oldEndpoint] : [], basePoints) };
+        }
+        return { ...edge, end: storedEnd, points: basePoints.concat(oldEndpoint ? [oldEndpoint] : [], clean) };
+      }) };
+    });
+    cancelConnection(); return true;
   };
   const finishConnection = (nodeId, port) => {
     const start = connectionStartRef.current;
     if (!start || (start.nodeId === nodeId && start.portId === port.id)) return false;
-    const endpoint = { nodeId, portId: port.id };
-    checkpoint();
-    setGraph((current) => ({ ...current, edges: [...current.edges, { id: uid("leitung"), start: { nodeId: start.nodeId, portId: start.portId }, end: endpoint, kind: start.kind === "neutral" ? port.kind : start.kind }] }));
-    cancelConnection(); return true;
+    return commitConnection({ nodeId, portId: port.id }, port);
   };
   const portDown = (nodeId, port) => {
     if (!connectionStartRef.current) startConnection(nodeId, port);
@@ -337,22 +426,86 @@ export default function HydraulikCadLab() {
   const portUp = (nodeId, port) => {
     finishConnection(nodeId, port); // Ziehen von Anschluss zu Anschluss
   };
+  const addDraftPoint = () => {
+    if (!connectionStartRef.current || !stageRef.current) return;
+    const pointer = stageRef.current.getPointerPosition();
+    if (!pointer) return;
+    const raw = { x: (pointer.x - view.x) / view.scale, y: (pointer.y - view.y) / view.scale };
+    const origin = endpointPosition(renderNodes, connectionStartRef.current);
+    const anchor = draftPointsRef.current[draftPointsRef.current.length - 1] || origin;
+    const point = constrainedPoint(raw, anchor, orthogonal);
+    if (!anchor || point.x !== anchor.x || point.y !== anchor.y) {
+      const next = [...draftPointsRef.current, point]; draftPointsRef.current = next; setDraftPoints(next);
+    }
+  };
+  const finishFreeConnection = () => {
+    if (!connectionStartRef.current || !stageRef.current) return;
+    const pointer = stageRef.current.getPointerPosition();
+    if (!pointer) return;
+    const raw = { x: (pointer.x - view.x) / view.scale, y: (pointer.y - view.y) / view.scale };
+    const anchor = draftPointsRef.current[draftPointsRef.current.length - 1] || endpointPosition(renderNodes, connectionStartRef.current);
+    const endpoint = constrainedPoint(raw, anchor, orthogonal);
+    commitConnection(endpoint);
+  };
+  const beginExtension = (edge, end) => {
+    const endpoint = endpointPosition(renderNodes, end === "start" ? edge.start : edge.end);
+    if (!endpoint) return;
+    const start = { x: endpoint.x, y: endpoint.y, kind: edge.kind, side: endpoint.side };
+    connectionStartRef.current = start; draftPointsRef.current = [];
+    setConnectionStart(start); setConnectionPointer(start); setDraftPoints([]); setExtension({ edgeId: edge.id, end }); setTool("line");
+  };
+  useEffect(() => {
+    const finishWithEnter = (event) => {
+      if (event.key === "Enter" && connectionStartRef.current) { event.preventDefault(); finishFreeConnection(); }
+    };
+    window.addEventListener("keydown", finishWithEnter);
+    return () => window.removeEventListener("keydown", finishWithEnter);
+  }, [finishFreeConnection]);
   const updateEdgeMidLive = (edge, route, position) => {
-    pendingEdgeMoveRef.current = { edgeId: edge.id, mid: route.horizontal ? { x: snap(position.x) } : { y: snap(position.y) } };
+    pendingEdgeMoveRef.current = { edgeId: edge.id, changes: { mid: route.horizontal ? { x: snap(position.x) } : { y: snap(position.y) } } };
     if (edgeFrameRef.current) return;
-    edgeFrameRef.current = setTimeout(() => {
+    edgeFrameRef.current = requestAnimationFrame(() => {
       const pending = pendingEdgeMoveRef.current;
-      if (pending) setLiveEdgeMids((current) => ({ ...current, [pending.edgeId]: pending.mid }));
+      if (pending) setLiveEdgeChanges((current) => ({ ...current, [pending.edgeId]: pending.changes }));
       edgeFrameRef.current = null;
-    }, FRAME_MS);
+    });
+  };
+  const updateEdgePointLive = (edge, index, position) => {
+    const points = (edge.points || []).map((point, pointIndex) => pointIndex === index
+      ? { x: snap(position.x), y: snap(position.y) } : point);
+    pendingEdgeMoveRef.current = { edgeId: edge.id, changes: { points } };
+    if (edgeFrameRef.current) return;
+    edgeFrameRef.current = requestAnimationFrame(() => {
+      const pending = pendingEdgeMoveRef.current;
+      if (pending) setLiveEdgeChanges((current) => ({ ...current, [pending.edgeId]: pending.changes }));
+      edgeFrameRef.current = null;
+    });
+  };
+  const updateEdgeEndpointLive = (edge, end, position) => {
+    pendingEdgeMoveRef.current = { edgeId: edge.id, changes: { [end]: { x: snap(position.x), y: snap(position.y) } } };
+    if (edgeFrameRef.current) return;
+    edgeFrameRef.current = requestAnimationFrame(() => {
+      const pending = pendingEdgeMoveRef.current;
+      if (pending) setLiveEdgeChanges((current) => ({ ...current, [pending.edgeId]: pending.changes }));
+      edgeFrameRef.current = null;
+    });
+  };
+  const updateEdgeEndpointEnd = (edgeId, end, position) => {
+    if (edgeFrameRef.current) cancelAnimationFrame(edgeFrameRef.current);
+    edgeFrameRef.current = null; pendingEdgeMoveRef.current = null;
+    const point = { x: snap(position.x), y: snap(position.y) };
+    const match = nearestPort(renderNodes, point);
+    const endpoint = match ? match.endpoint : point;
+    setGraph((current) => ({ ...current, edges: current.edges.map((edge) => edge.id === edgeId ? { ...edge, [end]: endpoint } : edge) }));
+    setLiveEdgeChanges((current) => { const next = { ...current }; delete next[edgeId]; return next; });
   };
   const updateEdgeMidEnd = (edgeId) => {
-    if (edgeFrameRef.current) clearTimeout(edgeFrameRef.current);
+    if (edgeFrameRef.current) cancelAnimationFrame(edgeFrameRef.current);
     edgeFrameRef.current = null;
-    const mid = pendingEdgeMoveRef.current?.edgeId === edgeId ? pendingEdgeMoveRef.current.mid : liveEdgeMids[edgeId];
+    const changes = pendingEdgeMoveRef.current?.edgeId === edgeId ? pendingEdgeMoveRef.current.changes : liveEdgeChanges[edgeId];
     pendingEdgeMoveRef.current = null;
-    if (mid) setGraph((current) => ({ ...current, edges: current.edges.map((edge) => edge.id === edgeId ? { ...edge, mid } : edge) }));
-    setLiveEdgeMids((current) => { const next = { ...current }; delete next[edgeId]; return next; });
+    if (changes) setGraph((current) => ({ ...current, edges: current.edges.map((edge) => edge.id === edgeId ? { ...edge, ...changes } : edge) }));
+    setLiveEdgeChanges((current) => { const next = { ...current }; delete next[edgeId]; return next; });
   };
   const updateSelectedLabel = (label) => setGraph((current) => ({ ...current, nodes: current.nodes.map((node) => selected?.kind === "node" && node.id === selected.id ? { ...node, label } : node) }));
   const selectedNode = selected?.kind === "node" ? graph.nodes.find((node) => node.id === selected.id) : null;
@@ -372,20 +525,28 @@ export default function HydraulikCadLab() {
     if (!pointer) return;
     pendingPointerRef.current = { x: (pointer.x - view.x) / view.scale, y: (pointer.y - view.y) / view.scale };
     if (pointerFrameRef.current) return;
-    pointerFrameRef.current = setTimeout(() => {
+    pointerFrameRef.current = requestAnimationFrame(() => {
       if (pendingPointerRef.current) setConnectionPointer(pendingPointerRef.current);
       pointerFrameRef.current = null;
-    }, FRAME_MS);
+    });
   };
-  const connectionOrigin = connectionStart ? portPosition(renderNodes, connectionStart) : null;
+  const connectionOrigin = connectionStart ? endpointPosition(renderNodes, connectionStart) : null;
   const previewPoints = connectionOrigin && connectionPointer ? (() => {
-    if (["left", "right"].includes(connectionOrigin.side)) {
-      const midX = (connectionOrigin.x + connectionPointer.x) / 2;
-      return [connectionOrigin.x, connectionOrigin.y, midX, connectionOrigin.y, midX, connectionPointer.y, connectionPointer.x, connectionPointer.y];
-    }
-    const midY = (connectionOrigin.y + connectionPointer.y) / 2;
-    return [connectionOrigin.x, connectionOrigin.y, connectionOrigin.x, midY, connectionPointer.x, midY, connectionPointer.x, connectionPointer.y];
+    const anchor = draftPoints[draftPoints.length - 1] || connectionOrigin;
+    const pointer = constrainedPoint(connectionPointer, anchor, orthogonal);
+    return [connectionOrigin.x, connectionOrigin.y, ...draftPoints.flatMap((point) => [point.x, point.y]), pointer.x, pointer.y];
   })() : null;
+  const canvasClick = (event) => {
+    if (event.target !== event.target.getStage()) return;
+    if (connectionStartRef.current) { addDraftPoint(); return; }
+    if (tool === "line" && stageRef.current) {
+      const pointer = stageRef.current.getPointerPosition();
+      if (pointer) startFreeConnection({ x: (pointer.x - view.x) / view.scale, y: (pointer.y - view.y) / view.scale });
+      return;
+    }
+    setSelected(null);
+  };
+  const selectedEdge = selected?.kind === "edge" ? graph.edges.find((edge) => edge.id === selected.id) : null;
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-slate-100 text-slate-800">
@@ -394,7 +555,7 @@ export default function HydraulikCadLab() {
         <span className="hidden text-slate-200 sm:inline">|</span>
         <div className="flex items-center gap-2 font-bold"><Boxes className="size-4 text-brand-600" /> CAD-Lab</div>
         <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold text-amber-800">Prototyp · separat gespeichert</span>
-        <span className="rounded-full bg-green-100 px-2.5 py-1 text-[11px] font-bold text-green-700">24 FPS Interaktion</span>
+        <span className="rounded-full bg-green-100 px-2.5 py-1 text-[11px] font-bold text-green-700">bis 60 FPS</span>
         <div className="ml-auto flex items-center gap-1">
           <button className="btn-ghost min-h-10" onClick={undo} title="Rückgängig"><Undo2 className="size-4" /></button>
           <button className="btn-ghost min-h-10" onClick={redo} title="Wiederholen"><Redo2 className="size-4" /></button>
@@ -405,9 +566,23 @@ export default function HydraulikCadLab() {
       <div className="flex min-h-0 flex-1">
         <aside className="z-10 w-48 shrink-0 overflow-y-auto border-r border-slate-200 bg-white p-3 shadow-sm sm:w-60">
           <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">Werkzeuge</div>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             <button className={`min-h-11 rounded-lg border px-2 text-xs font-bold ${tool === "select" ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200"}`} onClick={() => setTool("select")}><MousePointer2 className="mx-auto mb-1 size-4" />Auswahl</button>
             <button className={`min-h-11 rounded-lg border px-2 text-xs font-bold ${tool === "pan" ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200"}`} onClick={() => setTool("pan")}><Hand className="mx-auto mb-1 size-4" />Verschieben</button>
+            <button className={`min-h-11 rounded-lg border px-2 text-xs font-bold ${tool === "line" ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200"}`} onClick={() => setTool("line")}><Waypoints className="mx-auto mb-1 size-4" />Polylinie</button>
+          </div>
+          <button type="button" onClick={() => setOrthogonal((value) => !value)}
+            className={`mt-2 flex min-h-10 w-full items-center justify-between rounded-lg border px-3 text-xs font-bold ${orthogonal ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600"}`}>
+            Orthogonal-Modus <span>{orthogonal ? "Ein" : "Aus"}</span>
+          </button>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            {[['vl', 'Vorlauf', COLORS.vl], ['rl', 'Rücklauf', COLORS.rl]].map(([kind, label, color]) => (
+              <button key={kind} type="button" onClick={() => setLineKind(kind)}
+                className={`min-h-10 rounded-lg border text-xs font-bold ${lineKind === kind ? "text-white" : "bg-white text-slate-600"}`}
+                style={lineKind === kind ? { backgroundColor: color, borderColor: color } : { borderColor: '#e2e8f0' }}>
+                {label}
+              </button>
+            ))}
           </div>
           <div className="mb-2 mt-5 text-[10px] font-bold uppercase tracking-wider text-slate-400">Bauteile platzieren</div>
           <div className="space-y-2">
@@ -417,22 +592,26 @@ export default function HydraulikCadLab() {
             </button>)}
           </div>
           <div className="mt-5 rounded-xl bg-slate-50 p-3 text-[11px] leading-relaxed text-slate-500">
-            <b className="text-slate-700">Leitung zeichnen</b><br />Ersten Anschluss anklicken, danach den Zielanschluss. Den runden Griff auf der Leitung verschieben.
+            <b className="text-slate-700">Polylinie zeichnen</b><br />Frei oder am Anschluss beginnen. Klick setzt Eckpunkte. Doppelklick, Enter oder Rechtsklick beendet. Rücktaste entfernt den letzten Punkt.
           </div>
           {connectionStart && <button className="mt-3 w-full rounded-lg bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700" onClick={cancelConnection}>Verbindung abbrechen · Esc</button>}
         </aside>
 
-        <main ref={containerRef} className="relative min-w-0 flex-1 overflow-hidden bg-[#f8fafc]">
+        <main ref={containerRef} className={`relative min-w-0 flex-1 overflow-hidden bg-[#f8fafc] ${tool === "line" ? "cursor-crosshair" : ""}`}>
           <Stage ref={stageRef} width={size.width} height={size.height} x={view.x} y={view.y} scaleX={view.scale} scaleY={view.scale}
             draggable={tool === "pan"} onDragEnd={(event) => {
               if (event.target === event.target.getStage()) setView((current) => ({ ...current, x: event.target.x(), y: event.target.y() }));
             }}
             onWheel={onWheel} onMouseMove={trackConnectionPointer} onTouchMove={trackConnectionPointer}
-            onMouseDown={(event) => { if (event.target === event.target.getStage()) { setSelected(null); cancelConnection(); } }}
-            onTouchStart={(event) => { if (event.target === event.target.getStage()) setSelected(null); }}>
+            onMouseDown={(event) => { if (event.target === event.target.getStage() && !connectionStartRef.current) setSelected(null); }}
+            onClick={canvasClick} onTap={canvasClick}
+            onDblClick={(event) => { if (event.target === event.target.getStage() && connectionStartRef.current) finishFreeConnection(); }}
+            onContextMenu={(event) => { event.evt.preventDefault(); if (connectionStartRef.current) finishFreeConnection(); }}
+            onTouchStart={(event) => { if (event.target === event.target.getStage() && !connectionStartRef.current) setSelected(null); }}>
             <Layer listening={false}><Grid view={view} size={size} /></Layer>
             <Layer>
               {previewPoints && <Line points={previewPoints} stroke={COLORS[connectionStart.kind] || COLORS.neutral} strokeWidth={3} dash={[10, 6]} opacity={0.8} lineCap="round" lineJoin="round" listening={false} perfectDrawEnabled={false} />}
+              {connectionStart && draftPoints.map((point, index) => <Circle key={`draft-${index}`} x={point.x} y={point.y} radius={5} fill="white" stroke={COLORS[connectionStart.kind] || COLORS.neutral} strokeWidth={2} listening={false} />)}
               {renderEdges.map((edge) => {
                 const route = routeForEdge(renderNodes, edge);
                 if (!route) return null;
@@ -442,10 +621,23 @@ export default function HydraulikCadLab() {
                     perfectDrawEnabled={false}
                     onClick={(event) => { event.cancelBubble = true; setSelected({ kind: "edge", id: edge.id }); }}
                     onTap={(event) => { event.cancelBubble = true; setSelected({ kind: "edge", id: edge.id }); }} />
-                  {isSelected && <Circle x={route.handle.x} y={route.handle.y} radius={9} fill="white" stroke={COLORS[edge.kind]} strokeWidth={3} draggable
+                  {isSelected && route.handle && <Circle x={route.handle.x} y={route.handle.y} radius={9} fill="white" stroke={COLORS[edge.kind]} strokeWidth={3} draggable
                     dragBoundFunc={(position) => route.horizontal ? { x: snap(position.x), y: route.handle.y } : { x: route.handle.x, y: snap(position.y) }}
                     onDragStart={checkpoint} onDragMove={(event) => updateEdgeMidLive(edge, route, event.target.position())}
                     onDragEnd={() => updateEdgeMidEnd(edge.id)} />}
+                  {isSelected && edge.points?.map((point, index) => <Circle key={`${edge.id}-point-${index}`}
+                    x={point.x} y={point.y} radius={8} fill="white" stroke={COLORS[edge.kind]} strokeWidth={2.5} draggable
+                    dragBoundFunc={(position) => ({ x: snap(position.x), y: snap(position.y) })}
+                    onDragStart={checkpoint} onDragMove={(event) => updateEdgePointLive(edge, index, event.target.position())}
+                    onDragEnd={() => updateEdgeMidEnd(edge.id)} />)}
+                  {isSelected && !edge.start?.nodeId && <Circle x={route.start.x} y={route.start.y} radius={10} fill="white" stroke={COLORS[edge.kind]} strokeWidth={3} draggable
+                    onDragStart={checkpoint} onDragMove={(event) => updateEdgeEndpointLive(edge, "start", event.target.position())}
+                    onDragEnd={(event) => updateEdgeEndpointEnd(edge.id, "start", event.target.position())}
+                    onDblClick={() => beginExtension(edge, "start")} />}
+                  {isSelected && !edge.end?.nodeId && <Circle x={route.end.x} y={route.end.y} radius={10} fill="white" stroke={COLORS[edge.kind]} strokeWidth={3} draggable
+                    onDragStart={checkpoint} onDragMove={(event) => updateEdgeEndpointLive(edge, "end", event.target.position())}
+                    onDragEnd={(event) => updateEdgeEndpointEnd(edge.id, "end", event.target.position())}
+                    onDblClick={() => beginExtension(edge, "end")} />}
                 </Group>;
               })}
               {renderNodes.map((node) => <CadNode key={node.id} node={node} tool={tool} selected={selected?.kind === "node" && selected.id === node.id}
@@ -472,6 +664,13 @@ export default function HydraulikCadLab() {
               <input className="input" value={selectedNode.label} onChange={(event) => updateSelectedLabel(event.target.value)} />
               <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-500"><div>X <b>{selectedNode.x}</b></div><div>Y <b>{selectedNode.y}</b></div></div>
             </>}
+            {selectedEdge && <div className="mt-3 space-y-2">
+              <div className="text-xs leading-relaxed text-slate-500">Freie Enden kannst du direkt ziehen. In der Nähe eines Anschlusses rasten sie automatisch ein.</div>
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" className="btn-secondary min-h-10 justify-center text-xs" onClick={() => beginExtension(selectedEdge, "start")}>Anfang verlängern</button>
+                <button type="button" className="btn-secondary min-h-10 justify-center text-xs" onClick={() => beginExtension(selectedEdge, "end")}>Ende verlängern</button>
+              </div>
+            </div>}
             <button className="mt-4 flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-red-200 text-xs font-bold text-red-700 hover:bg-red-50"
               onClick={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete" }))}><Trash2 className="size-4" /> Entfernen</button>
           </div>}

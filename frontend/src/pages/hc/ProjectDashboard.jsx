@@ -156,6 +156,14 @@ export default function ProjectDashboard() {
 
       {/* Werkzeuge für dieses Projekt */}
       {!archiviert && (
+        <>
+        <div className="mb-3 flex flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center">
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-bold text-amber-900">Neuen CAD-Zeichenkern ausprobieren</div>
+            <div className="text-xs text-amber-800">Parallel zum bestehenden Editor – Verteiler, Hydraulikgruppen und Speicher vergleichen.</div>
+          </div>
+          <Link to={`/projekte/${id}/schema-cad`} className="btn-secondary min-h-11 shrink-0 justify-center border-amber-300 bg-white text-amber-900">CAD-Lab öffnen</Link>
+        </div>
         <div className="mb-6 grid gap-4 sm:grid-cols-3">
           {TOOLS.map(({ to, icon: Icon, title, text, primary }) => (
             <Link key={to} to={to}
@@ -172,6 +180,7 @@ export default function ProjectDashboard() {
             </Link>
           ))}
         </div>
+        </>
       )}
 
       {/* Grunddaten */}

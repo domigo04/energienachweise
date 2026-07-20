@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import "./index.css";
 
@@ -23,6 +24,10 @@ import AuswertungAnalyse from "./pages/auswertung/AuswertungAnalyse";
 import GrobkostenSchaetzung from "./pages/grobkosten/GrobkostenSchaetzung";
 import BenutzerFreischaltung from "./pages/admin/BenutzerFreischaltung";
 import BaupreisindexAdmin from "./pages/admin/BaupreisindexAdmin";
+
+// Der neue Canvas-Kern ist gross und wird nur geladen, wenn das CAD-Lab
+// tatsächlich geöffnet wird. Bestehende Projektseiten bleiben dadurch schnell.
+const HydraulikCadLab = lazy(() => import("./pages/hc/HydraulikCadLab"));
 
 export default function App() {
   return (
@@ -61,6 +66,7 @@ export default function App() {
 
           {/* Schema-Editor: Vollbild-Canvas, ausserhalb der gepolsterten Shell */}
           <Route path="/projekte/:id/schema" element={<ProtectedRoute><HydraulikEditor /></ProtectedRoute>} />
+          <Route path="/projekte/:id/schema-cad" element={<ProtectedRoute><Suspense fallback={<div className="flex h-screen items-center justify-center text-sm text-slate-500">CAD-Zeichenfläche wird geladen…</div>}><HydraulikCadLab /></Suspense></ProtectedRoute>} />
 
           {/* Alte Routen umleiten + Fallback */}
           <Route path="/heizungscockpit/*" element={<Navigate to="/start" replace />} />

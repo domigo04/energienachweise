@@ -1263,6 +1263,10 @@ function EditorInner() {
       {/* Topbar */}
       <div style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 14px', background:'white', borderBottom:'1px solid #e2e8f0', flexShrink:0, flexWrap:'wrap' }}>
         <Link to={`/projekte/${projectId}`} style={{ fontSize:12, color:'#2563eb', whiteSpace:'nowrap' }}>← {projectName || 'Projekt'}</Link>
+        <Link to={`/projekte/${projectId}/schema-cad`}
+          style={{ fontSize:11, fontWeight:700, padding:'4px 9px', borderRadius:6, border:'1px solid #f59e0b', background:'#fffbeb', color:'#92400e', whiteSpace:'nowrap' }}>
+          CAD-Lab vergleichen
+        </Link>
         <span style={{ color:'#e2e8f0' }}>|</span>
         <input value={schemaName} onChange={e=>setSchemaName(e.target.value)}
           style={{ fontSize:13, fontWeight:700, border:'1px solid #f1f5f9', borderRadius:4, padding:'2px 8px', color:'#1e293b', minWidth:160 }}/>

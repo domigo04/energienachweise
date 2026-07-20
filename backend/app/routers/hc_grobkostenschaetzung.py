@@ -16,6 +16,7 @@ Adapter reicht sie brutto und netto durch.
 """
 import json
 import re
+from datetime import datetime
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -38,7 +39,10 @@ from app.export.grobkostenschaetzung import (
 from app.models.auth import User
 from app.models.grobkostenschaetzung import Korrekturfaktor
 from app.models.heizungscockpit import HcProject
-from app.models.kv import BauindexEintrag, Kostenschaetzung, RefKostenzeile, RefProjekt, RefProjektGewerk
+from app.models.kv import (
+    BauindexEintrag, Kostenschaetzung, KostenschaetzungVersion,
+    RefKostenzeile, RefProjekt, RefProjektGewerk,
+)
 
 router = APIRouter(prefix="/api/v1/grobkostenschaetzung", tags=["Grobkostenschätzung (BKP)"])
 
@@ -65,12 +69,113 @@ class SchaetzungIn(BaseModel):
     # Redaktionelle Fertigstellung der Schätzung. Je Variante getrennt, damit
     # eine manuelle Nettozahl nicht versehentlich auch als Bruttozahl erscheint.
     manuelle_betraege: Dict[str, Dict[str, float]] = Field(default_factory=dict)
+    # Redaktionelle Dokumentation je Variante/BKP. Bearbeiter und Zeitpunkt
+    # werden serverseitig gesetzt und können vom Client nicht gefälscht werden.
+    manuelle_notizen: Dict[str, Dict[str, dict]] = Field(default_factory=dict)
     ignorierte_warnungen: List[str] = Field(default_factory=list)
 
 
 class KorrekturfaktorPatch(BaseModel):
     faktor: Optional[float] = None
     aktiv: Optional[bool] = None
+
+
+class SchaetzungStatusPatch(BaseModel):
+    status: str
+
+
+_GESPERRTE_STATUS = {"freigegeben", "exportiert"}
+
+
+def _status_fuer_resultat(result: dict) -> str:
+    return "unvollstaendig" if any(
+        (result.get(variante) or {}).get("ist_unvollstaendig") for variante in ("brutto", "netto")
+    ) else "entwurf"
+
+
+def _trenne_referenzdetails(result: dict) -> tuple[dict, dict]:
+    """Entfernt grosse Herkunftslisten aus dem Lade-JSON und speichert sie separat."""
+    details = {}
+    for variante in ("brutto", "netto"):
+        details[variante] = {}
+        for gruppe in (result.get(variante) or {}).get("gruppen") or []:
+            for position in gruppe.get("positionen") or []:
+                details[variante][position.get("bkp_nr")] = position.pop("herkunft", [])
+    return result, details
+
+
+def _lade_speicherinhalt(ks: Kostenschaetzung) -> tuple[dict, dict, dict]:
+    """Workflow und grosse Details liegen rückwärtskompatibel im bestehenden
+    inputs_json. Dadurch benötigt die bestehende Tabelle keine Schemaänderung."""
+    inputs = json.loads(ks.inputs_json or "{}")
+    workflow = inputs.pop("_workflow", {}) or {}
+    details = inputs.pop("_referenzdetails", {}) or {}
+    return inputs, workflow, details
+
+
+def _speichere_inputs(ks: Kostenschaetzung, inputs: dict, workflow: dict, details: dict) -> None:
+    ks.inputs_json = json.dumps({
+        **inputs, "_workflow": workflow, "_referenzdetails": details,
+    })
+
+
+def _referenzdetails(ks: Kostenschaetzung, result: Optional[dict] = None) -> dict:
+    _, _, details = _lade_speicherinhalt(ks)
+    if details:
+        return details
+    # Rückwärtskompatibilität für bereits gespeicherte Ergebnisse, bei denen
+    # die Herkunft noch direkt in jeder Position lag.
+    result = result or json.loads(ks.result_json or "{}")
+    details = {"brutto": {}, "netto": {}}
+    for variante in ("brutto", "netto"):
+        for gruppe in (result.get(variante) or {}).get("gruppen") or []:
+            for position in gruppe.get("positionen") or []:
+                details[variante][position.get("bkp_nr")] = position.get("herkunft") or []
+    return details
+
+
+def _ohne_referenzdetails(result: dict) -> dict:
+    for variante in ("brutto", "netto"):
+        for gruppe in (result.get(variante) or {}).get("gruppen") or []:
+            for position in gruppe.get("positionen") or []:
+                position.pop("herkunft", None)
+    return result
+
+
+def _mit_referenzdetails(result: dict, details: dict) -> dict:
+    for variante in ("brutto", "netto"):
+        for gruppe in (result.get(variante) or {}).get("gruppen") or []:
+            for position in gruppe.get("positionen") or []:
+                position["herkunft"] = (details.get(variante) or {}).get(position.get("bkp_nr"), [])
+    return result
+
+
+def _dokumentiere_manuelle_werte(inputs: dict, bisherige_inputs: dict, user: User) -> None:
+    betraege = inputs.get("manuelle_betraege") or {}
+    notizen = inputs.get("manuelle_notizen") or {}
+    alte_betraege = bisherige_inputs.get("manuelle_betraege") or {}
+    alte_notizen = bisherige_inputs.get("manuelle_notizen") or {}
+    dokumentiert = {}
+    for variante in ("brutto", "netto"):
+        dokumentiert[variante] = {}
+        for bkp_nr, betrag in (betraege.get(variante) or {}).items():
+            notiz = (notizen.get(variante) or {}).get(bkp_nr) or {}
+            fachangaben = {
+                "begruendung": (notiz.get("begruendung") or "").strip(),
+                "quelle": (notiz.get("quelle") or "").strip(),
+            }
+            alt = (alte_notizen.get(variante) or {}).get(bkp_nr) or {}
+            unveraendert = (
+                (alte_betraege.get(variante) or {}).get(bkp_nr) == betrag
+                and (alt.get("begruendung") or "") == fachangaben["begruendung"]
+                and (alt.get("quelle") or "") == fachangaben["quelle"]
+            )
+            dokumentiert[variante][bkp_nr] = {
+                **fachangaben,
+                "bearbeiter": alt.get("bearbeiter") if unveraendert else (user.name or user.email),
+                "geaendert_at": alt.get("geaendert_at") if unveraendert else datetime.utcnow().isoformat(),
+            }
+    inputs["manuelle_notizen"] = dokumentiert
 
 
 # ── Auswahl-Listen → abgeleitete Merkmale (Ziel wie Referenz beschrieben) ────
@@ -198,14 +303,19 @@ def get_saved(project_id: int, user: User = Depends(get_current_user), db: Sessi
         .first()
     )
     if not ks:
-        return {"inputs": None, "result": None}
-    inputs = json.loads(ks.inputs_json or "{}")
+        return {"inputs": None, "result": None, "status": "entwurf", "freigegeben_at": None, "version_nr": 0}
+    inputs, workflow, _ = _lade_speicherinhalt(ks)
     result = json.loads(ks.result_json or "{}")
     # Früher gespeicherte Schätzungen (anderes Format) nicht als neue anzeigen —
     # das neue Format hat den Brutto/Netto-Umschalter (Schlüssel "brutto").
     if "brutto" not in result:
-        return {"inputs": None, "result": None}
-    return {"inputs": inputs, "result": result}
+        return {"inputs": None, "result": None, "status": "entwurf", "freigegeben_at": None, "version_nr": 0}
+    return {
+        "inputs": inputs, "result": _ohne_referenzdetails(result),
+        "status": workflow.get("status") or _status_fuer_resultat(result),
+        "freigegeben_at": workflow.get("freigegeben_at"),
+        "version_nr": workflow.get("version_nr") or 0,
+    }
 
 
 @router.put("/projekt/{project_id}")
@@ -217,15 +327,111 @@ def compute_and_save(project_id: int, body: SchaetzungIn, user: User = Depends(g
     )
     if not project:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Projekt nicht gefunden")
+    ks = db.query(Kostenschaetzung).filter(
+        Kostenschaetzung.project_id == project_id,
+        Kostenschaetzung.tenant_id == user.tenant_id,
+    ).first()
+    bisherige_inputs, workflow, _ = _lade_speicherinhalt(ks) if ks else ({}, {}, {})
+    if ks and workflow.get("status") in _GESPERRTE_STATUS:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Die Kostenschätzung ist freigegeben. Vor einer Neuberechnung zuerst entsperren.",
+        )
     inputs, result = _berechne(body, user, db)
-    ks = db.query(Kostenschaetzung).filter(Kostenschaetzung.project_id == project_id).first()
+    _dokumentiere_manuelle_werte(inputs, bisherige_inputs, user)
+    result, details = _trenne_referenzdetails(result)
     if not ks:
         ks = Kostenschaetzung(tenant_id=user.tenant_id, project_id=project_id)
         db.add(ks)
-    ks.inputs_json = json.dumps(inputs)
     ks.result_json = json.dumps(result)
+    workflow = {
+        "status": _status_fuer_resultat(result), "freigegeben_at": None,
+        "freigegeben_von": None, "version_nr": workflow.get("version_nr") or 0,
+    }
+    _speichere_inputs(ks, inputs, workflow, details)
     db.commit()
-    return {"inputs": inputs, "result": result}
+    return {"inputs": inputs, "result": result, "status": workflow["status"], "freigegeben_at": None,
+            "version_nr": workflow["version_nr"]}
+
+
+@router.get("/projekt/{project_id}/position/{variante}/{bkp_nr}/herkunft")
+def get_position_herkunft(project_id: int, variante: str, bkp_nr: str,
+                          user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if variante not in {"brutto", "netto"}:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Variante muss brutto oder netto sein")
+    ks = db.query(Kostenschaetzung).filter(
+        Kostenschaetzung.project_id == project_id,
+        Kostenschaetzung.tenant_id == user.tenant_id,
+    ).first()
+    if not ks:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Noch keine Grobkostenschätzung gespeichert")
+    herkunft = (_referenzdetails(ks).get(variante) or {}).get(bkp_nr, [])
+    return {"bkp_nr": bkp_nr, "variante": variante, "herkunft": herkunft}
+
+
+@router.patch("/projekt/{project_id}/status")
+def update_schaetzung_status(project_id: int, body: SchaetzungStatusPatch,
+                             user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Prüft/freigibt den Snapshot oder gibt ihn wieder zur Bearbeitung frei."""
+    if body.status not in {"entwurf", "fachlich_geprueft", "freigegeben"}:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Ungültiger Statusübergang")
+    ks = db.query(Kostenschaetzung).filter(
+        Kostenschaetzung.project_id == project_id,
+        Kostenschaetzung.tenant_id == user.tenant_id,
+    ).first()
+    gespeichertes_resultat = json.loads(ks.result_json or "{}") if ks else {}
+    if not ks or not gespeichertes_resultat:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Zuerst eine Kostenschätzung berechnen und speichern")
+    ist_unvollstaendig = _status_fuer_resultat(gespeichertes_resultat) == "unvollstaendig"
+    if body.status in {"fachlich_geprueft", "freigegeben"} and ist_unvollstaendig:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Unvollständige Schätzungen können nicht geprüft oder freigegeben werden.",
+        )
+    inputs, workflow, details = _lade_speicherinhalt(ks)
+    if body.status == "freigegeben":
+        if workflow.get("status") != "fachlich_geprueft":
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Die Schätzung muss vor der Freigabe fachlich geprüft werden.",
+            )
+        freigabe_zeit = datetime.utcnow()
+        workflow.update({
+            "status": "freigegeben", "freigegeben_at": freigabe_zeit.isoformat(),
+            "freigegeben_von": user.id, "version_nr": (workflow.get("version_nr") or 0) + 1,
+        })
+        db.add(KostenschaetzungVersion(
+            tenant_id=user.tenant_id, project_id=project_id, version_nr=workflow["version_nr"],
+            inputs_json=json.dumps(inputs), result_json=ks.result_json,
+            details_json=json.dumps(details), freigegeben_at=freigabe_zeit,
+            freigegeben_von=user.id,
+        ))
+    elif body.status == "fachlich_geprueft":
+        workflow.update({"status": "fachlich_geprueft", "freigegeben_at": None, "freigegeben_von": None})
+    else:
+        workflow.update({
+            "status": "unvollstaendig" if ist_unvollstaendig else "entwurf",
+            "freigegeben_at": None, "freigegeben_von": None,
+        })
+    _speichere_inputs(ks, inputs, workflow, details)
+    db.commit()
+    return {
+        "status": workflow["status"], "freigegeben_at": workflow.get("freigegeben_at"),
+        "version_nr": workflow.get("version_nr") or 0,
+    }
+
+
+@router.get("/projekt/{project_id}/versionen")
+def list_schaetzung_versionen(project_id: int, user: User = Depends(get_current_user),
+                              db: Session = Depends(get_db)):
+    versionen = db.query(KostenschaetzungVersion).filter(
+        KostenschaetzungVersion.project_id == project_id,
+        KostenschaetzungVersion.tenant_id == user.tenant_id,
+    ).order_by(KostenschaetzungVersion.version_nr.desc()).all()
+    return [{
+        "version_nr": v.version_nr, "freigegeben_at": v.freigegeben_at.isoformat(),
+        "freigegeben_von": v.freigegeben_von,
+    } for v in versionen]
 
 
 def _export_daten(project_id: int, variante: str, user: User, db: Session) -> tuple:
@@ -242,12 +448,16 @@ def _export_daten(project_id: int, variante: str, user: User, db: Session) -> tu
     ).first()
     if not ks:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Noch keine Grobkostenschätzung gespeichert")
-    inputs = json.loads(ks.inputs_json or "{}")
+    inputs, workflow, _ = _lade_speicherinhalt(ks)
+    inputs["_schaetzung_status"] = workflow.get("status") or "entwurf"
+    inputs["_freigegeben_at"] = workflow.get("freigegeben_at")
+    inputs["_version_nr"] = workflow.get("version_nr") or 0
     result_alle = json.loads(ks.result_json or "{}")
+    result_alle = _mit_referenzdetails(result_alle, _referenzdetails(ks, result_alle))
     result = result_alle.get(variante)
     if not result:
         raise HTTPException(status.HTTP_409_CONFLICT, "Die Schätzung muss zuerst neu berechnet werden")
-    return project.name or "Projekt", inputs, result
+    return project.name or "Projekt", inputs, result, ks, workflow
 
 
 def _export_dateiname(projekt_name: str, variante: str, endung: str) -> str:
@@ -258,8 +468,13 @@ def _export_dateiname(projekt_name: str, variante: str, endung: str) -> str:
 @router.get("/projekt/{project_id}/export.pdf")
 def export_pdf(project_id: int, variante: str = "netto",
                user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    projekt_name, inputs, result = _export_daten(project_id, variante, user, db)
+    projekt_name, inputs, result, ks, workflow = _export_daten(project_id, variante, user, db)
     pdf = erzeuge_grobkostenschaetzung_pdf(projekt_name, inputs, result, variante)
+    if workflow.get("status") == "freigegeben":
+        gespeicherte_inputs, _, details = _lade_speicherinhalt(ks)
+        workflow["status"] = "exportiert"
+        _speichere_inputs(ks, gespeicherte_inputs, workflow, details)
+        db.commit()
     return Response(
         content=pdf, media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{_export_dateiname(projekt_name, variante, "pdf")}"'},
@@ -269,8 +484,13 @@ def export_pdf(project_id: int, variante: str = "netto",
 @router.get("/projekt/{project_id}/export.xlsx")
 def export_excel(project_id: int, variante: str = "netto",
                  user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    projekt_name, inputs, result = _export_daten(project_id, variante, user, db)
+    projekt_name, inputs, result, ks, workflow = _export_daten(project_id, variante, user, db)
     xlsx = erzeuge_grobkostenschaetzung_excel(projekt_name, inputs, result, variante)
+    if workflow.get("status") == "freigegeben":
+        gespeicherte_inputs, _, details = _lade_speicherinhalt(ks)
+        workflow["status"] = "exportiert"
+        _speichere_inputs(ks, gespeicherte_inputs, workflow, details)
+        db.commit()
     return Response(
         content=xlsx,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

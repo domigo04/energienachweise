@@ -7,11 +7,11 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   AlertTriangle, Calculator, Check, ChevronRight, Database,
-  FileSpreadsheet, FileText, ListChecks, Pencil, RefreshCw, RotateCcw, X,
+  FileSpreadsheet, FileText, ListChecks, LockKeyhole, Pencil, RefreshCw, RotateCcw, Unlock, X,
 } from "lucide-react";
 import {
   bauindexAutomatischAktualisieren, getBauindex, getProject,
-  gkProjektExportExcel, gkProjektExportPdf, gkProjektGet, gkProjektSave,
+  gkPositionHerkunft, gkProjektExportExcel, gkProjektExportPdf, gkProjektGet, gkProjektSave, gkProjektStatus,
 } from "../../api/hcApi";
 import CheckboxGruppe from "../../components/kv/CheckboxGruppe";
 import InfoTip from "../../components/ui/InfoTip";
@@ -26,7 +26,7 @@ const LEER = {
   bww_bei_heizung: false, baupreisindex_beruecksichtigen: false,
   weiterbetrieb_umbau: false, etappierung: false,
   rohrmeter: "", bohrmeter: "", hk_anzahl: "",
-  manuelle_betraege: {}, ignorierte_warnungen: [],
+  manuelle_betraege: {}, manuelle_notizen: {}, ignorierte_warnungen: [],
 };
 
 const ERKL = {
@@ -66,6 +66,11 @@ export default function GrobkostenSchaetzung() {
   const [offen, setOffen] = useState(null);
   const [betragBearbeiten, setBetragBearbeiten] = useState(null);
   const [exportLaedt, setExportLaedt] = useState("");
+  const [schaetzungStatus, setSchaetzungStatus] = useState("entwurf");
+  const [freigegebenAt, setFreigegebenAt] = useState(null);
+  const [statusLaedt, setStatusLaedt] = useState(false);
+  const [versionNr, setVersionNr] = useState(0);
+  const [aufgabenFilter, setAufgabenFilter] = useState("alle");
   const timer = useRef(null);
   const autoRechnenUeberspringen = useRef(false);
 
@@ -75,7 +80,10 @@ export default function GrobkostenSchaetzung() {
   useEffect(() => {
     getProject(id).then(setProjekt).catch(() => {});
     ladeIndexStand();
-    gkProjektGet(id).then(({ inputs, result: r }) => {
+    gkProjektGet(id).then(({ inputs, result: r, status: gespeicherterStatus, freigegeben_at: gespeichertAt, version_nr: gespeichertVersion }) => {
+      setSchaetzungStatus(gespeicherterStatus || "entwurf");
+      setFreigegebenAt(gespeichertAt || null);
+      setVersionNr(gespeichertVersion || 0);
       if (inputs) {
         setForm((f) => {
           const neu = { ...f, ...inputs };
@@ -93,6 +101,7 @@ export default function GrobkostenSchaetzung() {
   }, [id, ladeIndexStand]);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const istGesperrt = ["freigegeben", "exportiert"].includes(schaetzungStatus);
 
   // Wärmeabgabe ist Pflicht (Dominic 2026-07-19): sie bestimmt, welche Kosten
   // übernommen werden — ohne sie ist keine sinnvolle Schätzung möglich.
@@ -101,6 +110,7 @@ export default function GrobkostenSchaetzung() {
     && (form.waermeabgabe?.length > 0);
 
   const rechnen = useCallback(async (f) => {
+    if (["freigegeben", "exportiert"].includes(schaetzungStatus)) return;
     setLaden(true);
     setFehler("");
     try {
@@ -109,17 +119,24 @@ export default function GrobkostenSchaetzung() {
         ebf_m2: zahl(f.ebf_m2), leistung_kw: zahl(f.leistung_kw), anzahl_ne: zahl(f.anzahl_ne),
         rohrmeter: zahl(f.rohrmeter), bohrmeter: zahl(f.bohrmeter), hk_anzahl: zahl(f.hk_anzahl),
       };
-      const { result: r } = await gkProjektSave(id, payload);
+      const { inputs: gespeicherteInputs, result: r, status: neuerStatus, freigegeben_at: neuFreigegebenAt, version_nr: neueVersion } = await gkProjektSave(id, payload);
       setResult(r);
+      setSchaetzungStatus(neuerStatus || "entwurf");
+      setFreigegebenAt(neuFreigegebenAt || null);
+      setVersionNr(neueVersion || 0);
+      if (gespeicherteInputs?.manuelle_notizen) {
+        autoRechnenUeberspringen.current = true;
+        setForm((aktuell) => ({ ...aktuell, manuelle_notizen: gespeicherteInputs.manuelle_notizen }));
+      }
     } catch (err) {
       setFehler(err?.response?.data?.detail || "Die Schätzung konnte nicht berechnet werden.");
     } finally {
       setLaden(false);
     }
-  }, [id]);
+  }, [id, schaetzungStatus]);
 
   useEffect(() => {
-    if (!result || !gueltig) return;
+    if (!result || !gueltig || istGesperrt) return;
     if (autoRechnenUeberspringen.current) {
       autoRechnenUeberspringen.current = false;
       return;
@@ -129,6 +146,26 @@ export default function GrobkostenSchaetzung() {
     return () => clearTimeout(timer.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form]);
+
+  const statusAendern = async (neuerStatus) => {
+    const frage = neuerStatus === "freigegeben"
+      ? "Fachlich geprüfte Schätzung freigeben? Der aktuelle Stand wird als unveränderlicher Snapshot gespeichert."
+      : neuerStatus === "fachlich_geprueft"
+        ? "Bestätigst du, dass du Beträge, Datenbasis und Hinweise fachlich geprüft hast?"
+        : "Schätzung wieder zur Bearbeitung freigeben? Danach können neue Referenzen und Eingaben die Zahlen verändern.";
+    if (!window.confirm(frage)) return;
+    setStatusLaedt(true); setFehler("");
+    try {
+      const r = await gkProjektStatus(id, neuerStatus);
+      setSchaetzungStatus(r.status);
+      setFreigegebenAt(r.freigegeben_at || null);
+      setVersionNr(r.version_nr || versionNr);
+    } catch (err) {
+      setFehler(err?.response?.data?.detail || "Der Status konnte nicht geändert werden.");
+    } finally {
+      setStatusLaedt(false);
+    }
+  };
 
   const indexAktualisieren = async () => {
     setIndexLaedt(true); setIndexMeldung("");
@@ -157,27 +194,56 @@ export default function GrobkostenSchaetzung() {
   const offenePruefungen = [...positionenOhneAngabe, ...schwachePositionen].filter((p) =>
     !ignorierteWarnungen.has(`position:${p.bkp_nr}:datenbasis`)
   );
+  const ignoriertePositionen = allePositionen.filter((p) =>
+    ignorierteWarnungen.has(`position:${p.bkp_nr}:datenbasis`)
+  );
+  const positionPasstZumFilter = (p) => {
+    if (aufgabenFilter === "fehlen") return p.betrag == null;
+    if (aufgabenFilter === "einzelfaelle") return p.quelle !== "manuell" && p.betrag != null && p.mit_kostenangabe <= 3;
+    if (aufgabenFilter === "ignoriert") return ignorierteWarnungen.has(`position:${p.bkp_nr}:datenbasis`);
+    if (aufgabenFilter === "manuell") return p.quelle === "manuell";
+    return true;
+  };
+  const sichtbareGruppen = aktiv?.gruppen.map((g) => {
+    const positionen = g.positionen.filter(positionPasstZumFilter);
+    return {
+      ...g, positionen,
+      betrag: aufgabenFilter === "alle" ? g.betrag : positionen.reduce((summe, p) => summe + (p.betrag || 0), 0),
+    };
+  }).filter((g) => g.positionen.length > 0) || [];
   const naechstePruefungOeffnen = () => {
     const bkpNr = offenePruefungen[0]?.bkp_nr;
     if (!bkpNr) return;
     setOffen(bkpNr);
     setTimeout(() => document.getElementById(`bkp-${bkpNr}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
   };
-  const warnungIgnorieren = (warnungId) => setForm((f) => ({
-    ...f,
-    ignorierte_warnungen: [...new Set([...(f.ignorierte_warnungen || []), warnungId])],
-  }));
-  const warnungWiederherstellen = (warnungId) => setForm((f) => ({
-    ...f,
-    ignorierte_warnungen: (f.ignorierte_warnungen || []).filter((x) => x !== warnungId),
-  }));
-  const manuellenBetragSetzen = (bkpNr, wert) => {
+  const warnungIgnorieren = (warnungId) => {
+    if (istGesperrt) return;
+    setForm((f) => ({
+      ...f, ignorierte_warnungen: [...new Set([...(f.ignorierte_warnungen || []), warnungId])],
+    }));
+  };
+  const warnungWiederherstellen = (warnungId) => {
+    if (istGesperrt) return;
+    setForm((f) => ({
+      ...f, ignorierte_warnungen: (f.ignorierte_warnungen || []).filter((x) => x !== warnungId),
+    }));
+  };
+  const manuellenBetragSetzen = (bkpNr, wert, dokumentation = null) => {
+    if (istGesperrt) return;
     const alle = { ...(form.manuelle_betraege || {}) };
     const aktuell = { ...(alle[variante] || {}) };
     if (wert === "") delete aktuell[bkpNr];
     else aktuell[bkpNr] = wert;
     alle[variante] = aktuell;
-    const neu = { ...form, manuelle_betraege: alle };
+    const alleNotizen = { ...(form.manuelle_notizen || {}) };
+    const notizenVariante = { ...(alleNotizen[variante] || {}) };
+    if (wert === "") delete notizenVariante[bkpNr];
+    else if (dokumentation) notizenVariante[bkpNr] = {
+      ...(notizenVariante[bkpNr] || {}), ...dokumentation,
+    };
+    alleNotizen[variante] = notizenVariante;
+    const neu = { ...form, manuelle_betraege: alle, manuelle_notizen: alleNotizen };
     clearTimeout(timer.current);
     autoRechnenUeberspringen.current = true;
     setForm(neu);
@@ -200,6 +266,7 @@ export default function GrobkostenSchaetzung() {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
+      if (schaetzungStatus === "freigegeben") setSchaetzungStatus("exportiert");
     } catch (err) {
       setFehler(err?.response?.data?.detail || `${format.toUpperCase()}-Export fehlgeschlagen.`);
     } finally {
@@ -226,7 +293,7 @@ export default function GrobkostenSchaetzung() {
       <div className="grid items-start gap-6 lg:grid-cols-[380px_minmax(0,1fr)]">
         {/* ── Eingabe ── (klebt nur auf dem Desktop, wo sie alleine in ihrer Spalte
             steht — auf dem Handy normal im Fluss, sonst würde sie das Ergebnis überdecken) */}
-        <div className="card lg:sticky lg:top-4 p-5">
+        <fieldset disabled={istGesperrt} className={`card lg:sticky lg:top-4 p-5 ${istGesperrt ? "bg-slate-50/70" : ""}`}>
           <h2 className="mb-4 text-sm font-bold text-slate-800">Eckdaten</h2>
           <div className="grid grid-cols-2 gap-3">
             <Feld label="EBF [m²]">
@@ -311,7 +378,7 @@ export default function GrobkostenSchaetzung() {
             {laden ? "Berechnet…" : result ? "Neu berechnen" : "Schätzung berechnen"}
           </button>
           {fehler && <p className="mt-2 text-sm text-brand-700">{fehler}</p>}
-        </div>
+        </fieldset>
 
         {/* ── Ergebnis ── */}
         <div className="min-w-0 space-y-4">
@@ -358,6 +425,48 @@ export default function GrobkostenSchaetzung() {
 
           {aktiv && (
             <>
+              <div className={`card flex flex-wrap items-center gap-3 px-4 py-3 ${istGesperrt
+                ? "border-green-200 bg-green-50/60" : "border-blue-200 bg-blue-50/50"}`}>
+                <div className={`flex size-9 items-center justify-center rounded-full ${istGesperrt ? "bg-green-100 text-green-700" : "bg-blue-100 text-blue-700"}`}>
+                  {istGesperrt ? <LockKeyhole className="size-4" /> : <Unlock className="size-4" />}
+                </div>
+                <div className="mr-auto">
+                  <div className="text-sm font-bold text-slate-800">Status: {{
+                    entwurf: "Entwurf", unvollstaendig: "Unvollständig", fachlich_geprueft: "Fachlich geprüft",
+                    freigegeben: "Freigegeben", exportiert: "Exportiert",
+                  }[schaetzungStatus] || "Entwurf"}</div>
+                  <div className="text-xs text-slate-500">
+                    {istGesperrt
+                      ? `Freigegebener Snapshot Version ${versionNr || 1}${freigegebenAt ? ` vom ${new Date(freigegebenAt).toLocaleString("de-CH")}` : ""} – Zahlen ändern sich nicht.`
+                      : schaetzungStatus === "fachlich_geprueft"
+                        ? "Prüfung bestätigt. Bereit für die verbindliche Freigabe."
+                        : schaetzungStatus === "unvollstaendig"
+                          ? "Fehlende Positionen müssen vor Prüfung und Freigabe ergänzt werden."
+                          : "Änderungen werden automatisch neu berechnet und gespeichert."}
+                  </div>
+                </div>
+                {istGesperrt ? (
+                  <button type="button" className="btn-secondary" disabled={statusLaedt} onClick={() => statusAendern("entwurf")}>
+                    <Unlock className="size-4" /> Entsperren
+                  </button>
+                ) : schaetzungStatus === "fachlich_geprueft" ? (
+                  <button type="button" className="btn-primary" disabled={statusLaedt || aktiv.ist_unvollstaendig}
+                    onClick={() => statusAendern("freigegeben")}>
+                    <LockKeyhole className="size-4" /> Freigeben und Snapshot speichern
+                  </button>
+                ) : !aktiv.ist_unvollstaendig ? (
+                  <button type="button" className="btn-primary" disabled={statusLaedt}
+                    onClick={() => statusAendern("fachlich_geprueft")}>
+                    <Check className="size-4" /> Als fachlich geprüft markieren
+                  </button>
+                ) : null}
+                {schaetzungStatus === "fachlich_geprueft" && (
+                  <button type="button" className="btn-secondary" disabled={statusLaedt} onClick={() => statusAendern("entwurf")}>Prüfung zurücknehmen</button>
+                )}
+                {!istGesperrt && aktiv.ist_unvollstaendig && (
+                  <div className="w-full text-xs text-red-700">Fachliche Prüfung ist erst möglich, wenn alle fehlenden BKP-Positionen ergänzt sind.</div>
+                )}
+              </div>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="text-xs text-slate-500">Exportiert wird die aktuell gewählte {variante}-Variante inklusive manueller Beträge.</p>
                 <div className="flex gap-2">
@@ -427,10 +536,26 @@ export default function GrobkostenSchaetzung() {
                     <ListChecks className="size-4 text-slate-500" />
                     <span className="text-sm font-semibold text-slate-700">Prüfstand</span>
                   </div>
-                  <span className="rounded bg-green-50 px-2 py-1 text-xs font-medium text-green-700">{belastbarePositionen.length} belastbar</span>
-                  <span className="rounded bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700">{schwachePositionen.length} prüfen</span>
-                  <span className="rounded bg-red-50 px-2 py-1 text-xs font-medium text-red-700">{positionenOhneAngabe.length} fehlen</span>
-                  <span className="rounded bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700">{manuellePositionen.length} manuell</span>
+                  <button type="button" onClick={() => setAufgabenFilter("alle")}
+                    className={`rounded px-2 py-1 text-xs font-medium ${aufgabenFilter === "alle" ? "bg-slate-700 text-white" : "bg-green-50 text-green-700"}`}>
+                    {belastbarePositionen.length} belastbar
+                  </button>
+                  <button type="button" onClick={() => setAufgabenFilter("einzelfaelle")}
+                    className={`rounded px-2 py-1 text-xs font-medium ${aufgabenFilter === "einzelfaelle" ? "bg-amber-600 text-white" : "bg-amber-50 text-amber-700"}`}>
+                    {schwachePositionen.length} Einzelfälle
+                  </button>
+                  <button type="button" onClick={() => setAufgabenFilter("fehlen")}
+                    className={`rounded px-2 py-1 text-xs font-medium ${aufgabenFilter === "fehlen" ? "bg-red-600 text-white" : "bg-red-50 text-red-700"}`}>
+                    {positionenOhneAngabe.length} ohne Betrag
+                  </button>
+                  <button type="button" onClick={() => setAufgabenFilter("ignoriert")}
+                    className={`rounded px-2 py-1 text-xs font-medium ${aufgabenFilter === "ignoriert" ? "bg-slate-600 text-white" : "bg-slate-100 text-slate-600"}`}>
+                    {ignoriertePositionen.length} ignoriert
+                  </button>
+                  <button type="button" onClick={() => setAufgabenFilter("manuell")}
+                    className={`rounded px-2 py-1 text-xs font-medium ${aufgabenFilter === "manuell" ? "bg-blue-600 text-white" : "bg-blue-50 text-blue-700"}`}>
+                    {manuellePositionen.length} manuell
+                  </button>
                   {offenePruefungen.length > 0 ? (
                     <button type="button" className="btn-secondary ml-1" onClick={naechstePruefungOeffnen}>
                       Nächste offene Position
@@ -442,12 +567,12 @@ export default function GrobkostenSchaetzung() {
                   )}
                 </div>
                 <p className="mt-1.5 text-[11px] text-slate-400">
-                  „Prüfen“ bedeutet höchstens drei verwendbare Kostenangaben. Ignorierte Hinweise gelten als bearbeitet.
+                  Die Zähler sind anklickbare Filter. „Einzelfall“ bedeutet höchstens drei verwendbare Kostenangaben.
                 </p>
               </div>
 
               {/* Norm-Leistungsverzeichnis: Positionen je Gruppe + Zwischentotale */}
-              <div className="card overflow-hidden">
+              <fieldset disabled={istGesperrt} className="card overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
@@ -460,16 +585,20 @@ export default function GrobkostenSchaetzung() {
                       </tr>
                     </thead>
                     <tbody>
-                      {aktiv.gruppen.map((g) => (
-                        <GruppenBlock key={g.gruppe_nr} g={g} projektId={id}
+                      {sichtbareGruppen.map((g) => (
+                        <GruppenBlock key={`${variante}-${g.gruppe_nr}`} g={g} projektId={id}
                           variante={variante} offen={offen} setOffen={setOffen}
                           betragBearbeiten={betragBearbeiten} setBetragBearbeiten={setBetragBearbeiten}
                           manuelleBetraege={form.manuelle_betraege?.[variante] || {}}
+                          manuelleNotizen={form.manuelle_notizen?.[variante] || {}}
                           manuellenBetragSetzen={manuellenBetragSetzen}
                           ignorierteWarnungen={ignorierteWarnungen}
                           warnungIgnorieren={warnungIgnorieren}
                           warnungWiederherstellen={warnungWiederherstellen} />
                       ))}
+                      {sichtbareGruppen.length === 0 && (
+                        <tr><td colSpan={5} className="px-4 py-8 text-center text-sm text-slate-400">Keine Position entspricht diesem Filter.</td></tr>
+                      )}
                       <tr className="border-t-2 border-slate-300 bg-slate-100 font-bold text-slate-900">
                         <td className="px-4 py-3" colSpan={3}>
                           {positionenOhneAngabe.length > 0 ? "Teilbetrag BKP 24 – bekannte Positionen" : "Total BKP 24 Heizungsanlage"}
@@ -485,7 +614,7 @@ export default function GrobkostenSchaetzung() {
                   Position anklicken zeigt den Rechenweg. Positionen ohne Betrag kamen in den passenden
                   Referenzprojekten nicht vor.
                 </p>
-              </div>
+              </fieldset>
 
               {/* Verwendete Referenzen */}
               {refsVerwendet.length > 0 && <div className="card px-5 py-4">
@@ -524,6 +653,10 @@ export default function GrobkostenSchaetzung() {
                   passenden Projekten. Aktualität reduziert das Gewicht nur mild.
                 </p>
               </div>}
+              {refsVerwendet.length > 0 && (
+                <ReferenzVergleich projektId={id} variante={variante} ziel={form}
+                  referenzen={refsVerwendet} positionen={allePositionen} />
+              )}
             </>
           )}
         </div>
@@ -532,12 +665,97 @@ export default function GrobkostenSchaetzung() {
   );
 }
 
+function ReferenzVergleich({ projektId, variante, ziel, referenzen, positionen }) {
+  const [offen, setOffen] = useState(false);
+  const [bkpNr, setBkpNr] = useState(positionen[0]?.bkp_nr || "");
+  const [herkunft, setHerkunft] = useState([]);
+  const [laedt, setLaedt] = useState(false);
+  useEffect(() => {
+    if (!offen || !bkpNr) return;
+    setLaedt(true);
+    gkPositionHerkunft(projektId, variante, bkpNr)
+      .then((r) => setHerkunft(r.herkunft || []))
+      .catch(() => setHerkunft([]))
+      .finally(() => setLaedt(false));
+  }, [offen, bkpNr, projektId, variante]);
+  const ausgewaehlt = positionen.find((p) => p.bkp_nr === bkpNr);
+  const kostenNachId = new Map(herkunft.map((h) => [String(h.id), h.kosten]));
+  const refs = referenzen.slice(0, 3);
+  const abgabeText = (r) => {
+    const labels = { flaeche: "Flächenheizung", koerper: "Heizkörper", deckenstrahl: "Deckenstrahl", luft: "Luft" };
+    return (r.abgabe_klassen || []).map((x) => labels[x] || x).join(" + ") || "–";
+  };
+  const zeilen = [
+    ["EBF", `${num(ziel.ebf_m2)} m²`, (r) => `${num(r.ebf_m2)} m²`],
+    ["Leistung", `${num(ziel.leistung_kw)} kW`, (r) => `${num(r.leistung_kw)} kW`],
+    ["Einheiten", num(ziel.anzahl_ne), (r) => num(r.anzahl_ne)],
+    ["Wärmeerzeuger", (ziel.waermeerzeuger || []).join(" + ") || "–", (r) => (r.waermeerzeuger || []).join(" + ") || "–"],
+    ["Wärmeabgabe", (ziel.waermeabgabe || []).join(" + ") || "–", abgabeText],
+    [`BKP ${bkpNr}`, ausgewaehlt?.betrag != null ? chf(ausgewaehlt.betrag) : "Keine Angaben",
+      (r) => laedt ? "Lädt…" : (kostenNachId.has(String(r.id)) ? chf(kostenNachId.get(String(r.id))) : "Keine Angabe")],
+  ];
+  return (
+    <div className="card overflow-hidden">
+      <button type="button" className="flex w-full items-center justify-between px-5 py-3 text-left"
+        onClick={() => setOffen((v) => !v)}>
+        <span>
+          <span className="block text-sm font-bold text-slate-800">Referenzvergleich</span>
+          <span className="block text-xs text-slate-400">Zielprojekt und ähnlichste Projekte direkt gegenüberstellen</span>
+        </span>
+        <ChevronRight className={`size-4 text-slate-400 transition ${offen ? "rotate-90" : ""}`} />
+      </button>
+      {offen && (
+        <div className="border-t border-slate-100 px-5 py-4">
+          <label className="mb-3 block max-w-md">
+            <span className="label">BKP-Position vergleichen</span>
+            <select className="input" value={bkpNr} onChange={(e) => setBkpNr(e.target.value)}>
+              {positionen.map((p) => <option key={p.bkp_nr} value={p.bkp_nr}>{p.bkp_nr} – {p.bezeichnung}</option>)}
+            </select>
+          </label>
+          <div className="overflow-x-auto rounded border border-slate-200">
+            <table className="w-full min-w-[760px] text-xs">
+              <thead className="bg-slate-50 text-slate-500">
+                <tr><th className="px-3 py-2 text-left">Merkmal</th><th className="px-3 py-2 text-left">Zielprojekt</th>
+                  {refs.map((r) => <th key={r.id} className="px-3 py-2 text-left">{ohnePrefix(r.name)}</th>)}</tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {zeilen.map(([label, zielwert, refWert]) => (
+                  <tr key={label}><td className="px-3 py-2 font-semibold text-slate-600">{label}</td>
+                    <td className="px-3 py-2 text-slate-800">{zielwert}</td>
+                    {refs.map((r) => <td key={r.id} className="px-3 py-2 text-slate-600">{refWert(r)}</td>)}</tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-2 text-[11px] text-slate-400">„Keine Angabe“ bedeutet, dass das Referenzprojekt für diese BKP-Position keinen positiven Kostenbetrag besitzt.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function GruppenBlock({
-  g, projektId, variante, offen, setOffen, manuelleBetraege,
+  g, projektId, variante, offen, setOffen, manuelleBetraege, manuelleNotizen,
   betragBearbeiten, setBetragBearbeiten,
   manuellenBetragSetzen, ignorierteWarnungen, warnungIgnorieren, warnungWiederherstellen,
 }) {
   const info = gruppeInfo(g.gruppe_nr);
+  const [herkunftCache, setHerkunftCache] = useState({});
+  const [herkunftLaedt, setHerkunftLaedt] = useState(null);
+  useEffect(() => setHerkunftCache({}), [g]);
+  const positionOeffnen = async (bkpNr, istOffen) => {
+    setOffen(istOffen ? null : bkpNr);
+    if (istOffen || Object.prototype.hasOwnProperty.call(herkunftCache, bkpNr)) return;
+    setHerkunftLaedt(bkpNr);
+    try {
+      const r = await gkPositionHerkunft(projektId, variante, bkpNr);
+      setHerkunftCache((alt) => ({ ...alt, [bkpNr]: r.herkunft || [] }));
+    } catch {
+      setHerkunftCache((alt) => ({ ...alt, [bkpNr]: [] }));
+    } finally {
+      setHerkunftLaedt(null);
+    }
+  };
   const quercheckId = `gruppe:${g.gruppe_nr}:quercheck`;
   const quercheckIgnoriert = ignorierteWarnungen.has(quercheckId);
   return (
@@ -587,9 +805,10 @@ function GruppenBlock({
         const warnungId = `position:${key}:datenbasis`;
         const warnungIgnoriert = ignorierteWarnungen.has(warnungId);
         const hatWarnung = keineAngaben || p.mit_kostenangabe <= 3;
+        const herkunft = herkunftCache[key] ?? p.herkunft ?? [];
         return (
           <Fragment key={key}>
-            <tr id={`bkp-${key}`} onClick={() => setOffen(auf ? null : key)}
+            <tr id={`bkp-${key}`} onClick={() => positionOeffnen(key, auf)}
               className="cursor-pointer border-t border-slate-50 hover:bg-slate-50/70">
               <td className="py-1.5 pl-8 pr-2 tabular-nums text-slate-500">{p.bkp_nr}</td>
               <td className={"px-2 py-1.5 " + (hasBetrag ? "text-slate-700" : "text-slate-400")}>
@@ -606,7 +825,7 @@ function GruppenBlock({
                     className="rounded p-1 text-slate-400 hover:bg-blue-50 hover:text-blue-700"
                     onClick={(e) => {
                       e.stopPropagation();
-                      setOffen(key);
+                      positionOeffnen(key, false);
                       setBetragBearbeiten(key);
                     }}>
                     <Pencil className="size-3.5" />
@@ -672,9 +891,10 @@ function GruppenBlock({
                   <ManuellerBetragEditor
                     key={`${key}-${manuelleBetraege[key] ?? "leer"}`}
                     p={p} variante={variante} wert={manuelleBetraege[key]}
+                    notiz={manuelleNotizen[key]}
                     autoFocus={betragBearbeiten === key}
-                    onSpeichern={(wert) => {
-                      manuellenBetragSetzen(key, wert);
+                    onSpeichern={(wert, dokumentation) => {
+                      manuellenBetragSetzen(key, wert, dokumentation);
                       setBetragBearbeiten(null);
                     }}
                     onBerechnung={() => {
@@ -693,7 +913,7 @@ function GruppenBlock({
                           <th className="px-2 py-1.5 text-right">Gewicht</th><th className="px-3 py-1.5 text-left">Verwendung</th></tr>
                       </thead>
                       <tbody className="divide-y divide-slate-50">
-                        {(p.herkunft || []).map((r, index) => (
+                        {herkunft.map((r, index) => (
                           <tr key={`${r.id || r.name}-${index}`} className={r.verwendet ? "text-slate-700" : "text-slate-400"}>
                             <td className="px-3 py-1.5">
                               {r.id ? <Link to={`/auswertung/${r.id}`} state={{ zurueck: { to: `/projekte/${projektId}/kostenschaetzung`, label: "Grobkostenschätzung" } }}
@@ -712,7 +932,8 @@ function GruppenBlock({
                         ))}
                       </tbody>
                     </table>
-                    {(p.herkunft || []).length === 0 && <p className="px-3 py-2 text-slate-400">Keine Referenz mit verwendbarer Kostenangabe vorhanden.</p>}
+                    {herkunftLaedt === key && <p className="px-3 py-2 text-slate-400">Referenzdetails werden geladen…</p>}
+                    {herkunftLaedt !== key && herkunft.length === 0 && <p className="px-3 py-2 text-slate-400">Keine Referenz mit verwendbarer Kostenangabe vorhanden.</p>}
                   </div>
                 </td>
               </tr>
@@ -724,8 +945,10 @@ function GruppenBlock({
   );
 }
 
-function ManuellerBetragEditor({ p, variante, wert, autoFocus, onSpeichern, onBerechnung, onAbbrechen }) {
+function ManuellerBetragEditor({ p, variante, wert, notiz, autoFocus, onSpeichern, onBerechnung, onAbbrechen }) {
   const [eingabe, setEingabe] = useState(wert ?? "");
+  const [begruendung, setBegruendung] = useState(notiz?.begruendung || "");
+  const [quelle, setQuelle] = useState(notiz?.quelle || "");
   const inputRef = useRef(null);
   useEffect(() => { if (autoFocus) inputRef.current?.focus(); }, [autoFocus]);
   const normalisiert = String(eingabe).replace(/[’'\s]/g, "").replace(",", ".");
@@ -738,7 +961,10 @@ function ManuellerBetragEditor({ p, variante, wert, autoFocus, onSpeichern, onBe
   };
   return (
     <form className={`mt-3 rounded-md border p-3 ${autoFocus ? "border-blue-300 bg-blue-50/40" : "border-slate-200 bg-white"}`}
-      onSubmit={(e) => { e.preventDefault(); if (gueltig) onSpeichern(zahlWert); }}>
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (gueltig) onSpeichern(zahlWert, { begruendung: begruendung.trim(), quelle: quelle.trim() });
+      }}>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-1">
         <div>
           <div className="font-semibold text-slate-700">Betrag festlegen ({variante})</div>
@@ -763,6 +989,18 @@ function ManuellerBetragEditor({ p, variante, wert, autoFocus, onSpeichern, onBe
             onClick={() => vorschlagEinsetzen(1.2)}>+20 %</button>
         </div>
       )}
+      <div className="mb-2 grid gap-2 sm:grid-cols-2">
+        <label>
+          <span className="mb-1 block text-[11px] font-medium text-slate-500">Begründung (optional)</span>
+          <input className="input" value={begruendung} onChange={(e) => setBegruendung(e.target.value)}
+            placeholder="z.B. Richtofferte Unternehmer" />
+        </label>
+        <label>
+          <span className="mb-1 block text-[11px] font-medium text-slate-500">Quelle (optional)</span>
+          <input className="input" value={quelle} onChange={(e) => setQuelle(e.target.value)}
+            placeholder="z.B. Offerte vom 18.07.2026" />
+        </label>
+      </div>
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-[220px] flex-1">
           <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 font-semibold text-slate-400">CHF</span>
@@ -787,6 +1025,12 @@ function ManuellerBetragEditor({ p, variante, wert, autoFocus, onSpeichern, onBe
             ? `${chf(zahlWert)} wird mit «Übernehmen» gespeichert und in das Total aufgenommen.`
             : "Betrag eingeben und mit «Übernehmen» in das Total aufnehmen."}
       </p>
+      {notiz?.bearbeiter && (
+        <p className="mt-1 text-[11px] text-blue-700">
+          Zuletzt manuell durch <b>{notiz.bearbeiter}</b>
+          {notiz.geaendert_at ? ` am ${new Date(notiz.geaendert_at).toLocaleString("de-CH")}` : ""}.
+        </p>
+      )}
     </form>
   );
 }

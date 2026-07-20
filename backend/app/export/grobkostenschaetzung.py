@@ -64,6 +64,14 @@ def _alle_positionen(result):
     return [p for g in (result.get("gruppen") or []) for p in (g.get("positionen") or [])]
 
 
+def _workflow_status_label(status):
+    return {
+        "entwurf": "Entwurf", "unvollstaendig": "Unvollständig",
+        "fachlich_geprueft": "Fachlich geprüft", "freigegeben": "Freigegeben",
+        "exportiert": "Exportiert",
+    }.get(status, "Entwurf")
+
+
 def _pdf_styles():
     styles = getSampleStyleSheet()
     return {
@@ -107,6 +115,11 @@ def erzeuge_grobkostenschaetzung_pdf(projekt_name: str, inputs: dict, result: di
     story = [
         Paragraph("Grobkostenschätzung Heizung", styles["title"]),
         Paragraph(f"<b>{projekt_name}</b> &nbsp;&nbsp; Stand {date.today():%d.%m.%Y} &nbsp;&nbsp; Variante: {variante.title()}", styles["body"]),
+        Paragraph(
+            "Bearbeitungsstatus: " + _workflow_status_label(inputs.get("_schaetzung_status"))
+            + (f" · Version {inputs.get('_version_nr')}" if inputs.get("_version_nr") else ""),
+            styles["small"],
+        ),
         Spacer(1, 5 * mm),
     ]
 
@@ -190,6 +203,33 @@ def erzeuge_grobkostenschaetzung_pdf(projekt_name: str, inputs: dict, result: di
         ]))
         story += [Paragraph(f"BKP {gruppe.get('gruppe_nr')} - {gruppe.get('name') or ''}", styles["h1"]), table]
 
+    notizen = (inputs.get("manuelle_notizen") or {}).get(variante) or {}
+    manuelle_positionen = [p for p in _alle_positionen(result) if p.get("quelle") == "manuell"]
+    if manuelle_positionen:
+        story += [Paragraph("Dokumentation manueller Werte", styles["h1"])]
+        daten = [["BKP", "Betrag", "Begründung / Quelle", "Bearbeiter / Änderung"]]
+        for p in manuelle_positionen:
+            notiz = notizen.get(p.get("bkp_nr")) or {}
+            fachtext = " / ".join(x for x in (notiz.get("begruendung"), notiz.get("quelle")) if x) or "Keine Dokumentation"
+            audittext = " / ".join(x for x in (notiz.get("bearbeiter"), notiz.get("geaendert_at")) if x) or "-"
+            daten.append([
+                p.get("bkp_nr"), _chf(p.get("betrag")),
+                Paragraph(fachtext, styles["small"]), Paragraph(audittext, styles["small"]),
+            ])
+        table = Table(daten, colWidths=[18 * mm, 31 * mm, 65 * mm, 58 * mm], repeatRows=1)
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(f"#{BLAU}")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "GkSans-Bold"),
+            ("FONTNAME", (0, 1), (-1, -1), "GkSans"),
+            ("FONTSIZE", (0, 0), (-1, -1), 7),
+            ("LINEBELOW", (0, 1), (-1, -1), 0.25, colors.HexColor(f"#{LINIE}")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        story.append(table)
+
     herkunft = [(p, h) for p in _alle_positionen(result) for h in (p.get("herkunft") or [])]
     if herkunft:
         story += [PageBreak(), Paragraph("Herkunftsnachweis", styles["title"]),
@@ -255,6 +295,12 @@ def erzeuge_grobkostenschaetzung_excel(projekt_name: str, inputs: dict, result: 
     ws["E3"] = "Unvollständig" if result.get("ist_unvollstaendig") else "Vollständig"
     ws["E3"].fill = PatternFill("solid", fgColor=ROT_HELL if result.get("ist_unvollstaendig") else GRUEN_HELL)
     ws["E3"].font = Font(bold=True, color=ROT if result.get("ist_unvollstaendig") else GRUEN)
+    ws["G3"] = "Bearbeitung"
+    workflow_status = inputs.get("_schaetzung_status") or "entwurf"
+    ws["H3"] = _workflow_status_label(workflow_status)
+    ws["H3"].font = Font(bold=True, color=GRUEN if workflow_status in {"freigegeben", "exportiert"} else BLAU)
+    if inputs.get("_version_nr"):
+        ws["H3"] = f"{ws['H3'].value} · Version {inputs['_version_nr']}"
 
     grundlagen = [
         ("Nutzung", inputs.get("nutzung")), ("Projektart", inputs.get("projektart")),
@@ -370,6 +416,31 @@ def erzeuge_grobkostenschaetzung_excel(projekt_name: str, inputs: dict, result: 
     ref_ws.page_setup.fitToWidth = 1
     ref_ws.page_setup.fitToHeight = 0
     ref_ws.oddFooter.center.text = "Referenzdetails - Seite &P von &N"
+
+    man_ws = wb.create_sheet("Manuelle Werte")
+    man_ws.sheet_view.showGridLines = False
+    man_headers = ["BKP", "Position", "Betrag [CHF]", "Begründung", "Quelle", "Bearbeiter", "Änderungsdatum"]
+    for col, header in enumerate(man_headers, 1):
+        cell = man_ws.cell(1, col, header)
+        cell.fill = PatternFill("solid", fgColor=BLAU)
+        cell.font = Font(bold=True, color="FFFFFF")
+    notizen = (inputs.get("manuelle_notizen") or {}).get(variante) or {}
+    man_row = 2
+    for p in _alle_positionen(result):
+        if p.get("quelle") != "manuell":
+            continue
+        notiz = notizen.get(p.get("bkp_nr")) or {}
+        werte = [p.get("bkp_nr"), p.get("bezeichnung"), p.get("betrag"), notiz.get("begruendung"),
+                 notiz.get("quelle"), notiz.get("bearbeiter"), notiz.get("geaendert_at")]
+        for col, wert in enumerate(werte, 1):
+            man_ws.cell(man_row, col, wert)
+            man_ws.cell(man_row, col).border = Border(bottom=thin)
+        man_ws.cell(man_row, 3).number_format = '#,##0 "CHF"'
+        man_row += 1
+    man_ws.freeze_panes = "A2"
+    man_ws.auto_filter.ref = f"A1:G{max(1, man_row - 1)}"
+    for index, width in enumerate([12, 40, 18, 35, 35, 24, 24], 1):
+        man_ws.column_dimensions[get_column_letter(index)].width = width
 
     out = io.BytesIO()
     wb.save(out)

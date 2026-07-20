@@ -66,7 +66,7 @@ def test_pdf_export_ist_lesbar_und_enthaelt_kerndaten():
 def test_excel_export_hat_formeln_formatierung_und_referenzdetails():
     xlsx = erzeuge_grobkostenschaetzung_excel("Projekt Test", INPUTS, RESULT, "netto")
     wb = load_workbook(io.BytesIO(xlsx), data_only=False)
-    assert wb.sheetnames == ["Kostenschätzung", "Referenzdetails"]
+    assert wb.sheetnames == ["Kostenschätzung", "Referenzdetails", "Manuelle Werte"]
     ws = wb["Kostenschätzung"]
     assert ws["A1"].value == "Grobkostenschätzung Heizung"
     assert str(ws["B3"].value).startswith("=SUM(")
@@ -90,3 +90,32 @@ def test_unvollstaendiger_export_bezeichnet_summe_als_teilbetrag():
     pdf = erzeuge_grobkostenschaetzung_pdf("Projekt Test", INPUTS, result, "netto")
     text = "\n".join(page.extract_text() or "" for page in PdfReader(io.BytesIO(pdf)).pages)
     assert "Teilbetrag bekannte Positionen" in text
+
+
+def test_freigegebener_status_erscheint_in_pdf_und_excel():
+    inputs = {**INPUTS, "_schaetzung_status": "freigegeben", "_freigegeben_at": "2026-07-20T12:00:00"}
+    xlsx = erzeuge_grobkostenschaetzung_excel("Projekt Test", inputs, RESULT, "netto")
+    wb = load_workbook(io.BytesIO(xlsx), data_only=False)
+    assert wb["Kostenschätzung"]["H3"].value == "Freigegeben"
+
+    pdf = erzeuge_grobkostenschaetzung_pdf("Projekt Test", inputs, RESULT, "netto")
+    text = "\n".join(page.extract_text() or "" for page in PdfReader(io.BytesIO(pdf)).pages)
+    assert "Bearbeitungsstatus: Freigegeben" in text
+
+
+def test_manuelle_dokumentation_erscheint_in_pdf_und_excel():
+    inputs = {**INPUTS, "manuelle_notizen": {"netto": {"243.3a": {
+        "begruendung": "Richtofferte Unternehmer", "quelle": "Offerte vom 18.07.2026",
+        "bearbeiter": "Dominic", "geaendert_at": "2026-07-20T12:00:00",
+    }}}}
+    xlsx = erzeuge_grobkostenschaetzung_excel("Projekt Test", inputs, RESULT, "netto")
+    wb = load_workbook(io.BytesIO(xlsx), data_only=False)
+    manuell = wb["Manuelle Werte"]
+    assert manuell["A2"].value == "243.3a"
+    assert manuell["D2"].value == "Richtofferte Unternehmer"
+    assert manuell["F2"].value == "Dominic"
+
+    pdf = erzeuge_grobkostenschaetzung_pdf("Projekt Test", inputs, RESULT, "netto")
+    text = "\n".join(page.extract_text() or "" for page in PdfReader(io.BytesIO(pdf)).pages)
+    assert "Dokumentation manueller Werte" in text
+    assert "Richtofferte Unternehmer" in text

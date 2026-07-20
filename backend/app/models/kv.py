@@ -118,6 +118,21 @@ class Kostenschaetzung(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class KostenschaetzungVersion(Base):
+    """Unveränderlicher Stand bei jeder Freigabe; frühere Abgaben bleiben erhalten."""
+    __tablename__ = "kostenschaetzung_versionen"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, default=1, index=True)
+    project_id = Column(Integer, ForeignKey("hc_projects.id"), index=True)
+    version_nr = Column(Integer, nullable=False)
+    inputs_json = Column(Text, nullable=False)
+    result_json = Column(Text, nullable=False)
+    details_json = Column(Text, nullable=False, default="{}")
+    freigegeben_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    freigegeben_von = Column(Integer, nullable=True)
+
+
 class BauindexEintrag(Base):
     """Baupreisindex-Wert für eine Periode (halbjährlich, BFS). Verhältnis
     zwischen zwei Perioden skaliert ältere Referenz-Kosten auf heutiges

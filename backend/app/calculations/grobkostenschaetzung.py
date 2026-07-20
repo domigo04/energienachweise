@@ -551,6 +551,11 @@ def berechne_grobkostenschaetzung(ziel: dict, referenzen_roh: list, faktoren: li
         "referenzen_gefunden": len(top),
         "referenzen_im_segment": len(segment),
         "baupreisindex_aktiv": baupreisindex_aktiv,
-        "referenzen_verwendet": top,
+        # Die Übersicht braucht keine vollständigen Positions-Kostentabellen.
+        # Diese würden das gespeicherte/übertragene Ergebnis unnötig aufblasen.
+        "referenzen_verwendet": [
+            {k: v for k, v in r.items() if k not in {"positionen", "positionen_brutto", "positionen_netto"}}
+            for r in top
+        ],
         "referenzfilter": analysiere_referenzfilter(referenzen_roh, ziel),
     }

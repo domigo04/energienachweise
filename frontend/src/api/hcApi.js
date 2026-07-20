@@ -9,6 +9,8 @@ export const createProject = (data) => api.post(`${BASE}/projects`, data).then(r
 
 export const getProject = (id) => api.get(`${BASE}/projects/${id}`).then(r => r.data);
 
+export const getProjectFreigaben = (id) => api.get(`${BASE}/projects/${id}/freigaben`).then(r => r.data);
+
 export const updateProject = (id, data) => api.patch(`${BASE}/projects/${id}`, data).then(r => r.data);
 
 export const archiveProject = (id) => api.delete(`${BASE}/projects/${id}`);

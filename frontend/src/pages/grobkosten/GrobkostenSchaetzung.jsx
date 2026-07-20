@@ -52,6 +52,84 @@ function Select({ value, onChange, optionen }) {
   );
 }
 
+const STATUS_SCHRITTE = [
+  { key: "entwurf", label: "Entwurf" },
+  { key: "vollstaendig", label: "Vollständig" },
+  { key: "fachlich_geprueft", label: "Geprüft" },
+  { key: "freigegeben", label: "Freigegeben" },
+  { key: "exportiert", label: "Exportiert" },
+];
+
+function FreigabeFortschritt({ status, gesperrt, versionNr, freigegebenAt, laedt, unvollstaendig, onStatus }) {
+  const erreicht = status === "exportiert" ? 5
+    : status === "freigegeben" ? 4
+      : status === "fachlich_geprueft" ? 3
+        : unvollstaendig ? 1 : 2;
+  const naechsterSchritt = STATUS_SCHRITTE[Math.min(erreicht, 4)]?.label;
+
+  return (
+    <div className={`card overflow-hidden ${gesperrt ? "border-green-200" : "border-blue-200"}`}>
+      <div className={`px-5 py-4 ${gesperrt ? "bg-green-50/60" : "bg-blue-50/50"}`}>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
+              {gesperrt ? <LockKeyhole className="size-4 text-green-700" /> : <ListChecks className="size-4 text-blue-700" />}
+              Abschlussfortschritt
+              <span className="rounded-full bg-white/80 px-2 py-0.5 text-[11px] text-slate-600">{erreicht} von 5</span>
+            </div>
+            <p className="mt-1 text-xs text-slate-500">
+              {gesperrt
+                ? `Snapshot Version ${versionNr || 1}${freigegebenAt ? ` vom ${new Date(freigegebenAt).toLocaleString("de-CH")}` : ""} – die Zahlen bleiben unverändert.`
+                : unvollstaendig ? "Ergänze oder entferne die offenen Positionen, um den nächsten Meilenstein zu erreichen."
+                  : `Nächster Meilenstein: ${naechsterSchritt}.`}
+            </p>
+          </div>
+          <div className="h-2 w-32 overflow-hidden rounded-full bg-white/80 sm:w-44">
+            <div className={`h-full rounded-full transition-all ${gesperrt ? "bg-green-500" : "bg-blue-500"}`} style={{ width: `${erreicht * 20}%` }} />
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-5 gap-1.5">
+          {STATUS_SCHRITTE.map((schritt, index) => {
+            const fertig = index < erreicht;
+            return (
+              <div key={schritt.key} className="min-w-0 text-center">
+                <div className={`mx-auto flex size-7 items-center justify-center rounded-full border text-xs font-bold transition ${fertig
+                  ? gesperrt ? "border-green-500 bg-green-500 text-white" : "border-blue-500 bg-blue-500 text-white"
+                  : "border-slate-200 bg-white text-slate-400"}`}>
+                  {fertig ? <Check className="size-3.5" /> : index + 1}
+                </div>
+                <div className={`mt-1 truncate text-[10px] font-semibold sm:text-[11px] ${fertig ? "text-slate-700" : "text-slate-400"}`}>{schritt.label}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 px-5 py-3">
+        {gesperrt ? (
+          <button type="button" className="btn-secondary" disabled={laedt} onClick={() => onStatus("entwurf")}>
+            <Unlock className="size-4" /> Zur Bearbeitung öffnen
+          </button>
+        ) : status === "fachlich_geprueft" ? (
+          <>
+            <button type="button" className="btn-primary shadow-sm" disabled={laedt || unvollstaendig} onClick={() => onStatus("freigegeben")}>
+              <LockKeyhole className="size-4" /> Freigeben & Snapshot sichern
+            </button>
+            <button type="button" className="btn-secondary" disabled={laedt} onClick={() => onStatus("entwurf")}>Prüfung zurücknehmen</button>
+          </>
+        ) : !unvollstaendig ? (
+          <button type="button" className="btn-primary shadow-sm" disabled={laedt} onClick={() => onStatus("fachlich_geprueft")}>
+            <Check className="size-4" /> Fachprüfung abschliessen
+          </button>
+        ) : (
+          <span className="text-xs font-medium text-amber-800">Noch offene BKP-Positionen – der Abschluss ist noch gesperrt.</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function GrobkostenSchaetzung() {
   const { id } = useParams();
   const [projekt, setProjekt] = useState(null);
@@ -456,48 +534,9 @@ export default function GrobkostenSchaetzung() {
 
           {aktiv && (
             <>
-              <div className={`card flex flex-wrap items-center gap-3 px-4 py-3 ${istGesperrt
-                ? "border-green-200 bg-green-50/60" : "border-blue-200 bg-blue-50/50"}`}>
-                <div className={`flex size-9 items-center justify-center rounded-full ${istGesperrt ? "bg-green-100 text-green-700" : "bg-blue-100 text-blue-700"}`}>
-                  {istGesperrt ? <LockKeyhole className="size-4" /> : <Unlock className="size-4" />}
-                </div>
-                <div className="mr-auto">
-                  <div className="text-sm font-bold text-slate-800">Status: {{
-                    entwurf: "Entwurf", unvollstaendig: "Unvollständig", fachlich_geprueft: "Fachlich geprüft",
-                    freigegeben: "Freigegeben", exportiert: "Exportiert",
-                  }[anzeigeStatus] || "Entwurf"}</div>
-                  <div className="text-xs text-slate-500">
-                    {istGesperrt
-                      ? `Freigegebener Snapshot Version ${versionNr || 1}${freigegebenAt ? ` vom ${new Date(freigegebenAt).toLocaleString("de-CH")}` : ""} – Zahlen ändern sich nicht.`
-                      : anzeigeStatus === "fachlich_geprueft"
-                        ? "Prüfung bestätigt. Bereit für die verbindliche Freigabe."
-                        : anzeigeStatus === "unvollstaendig"
-                          ? "Fehlende Positionen müssen vor Prüfung und Freigabe ergänzt werden."
-                          : "Änderungen werden automatisch neu berechnet und gespeichert."}
-                  </div>
-                </div>
-                {istGesperrt ? (
-                  <button type="button" className="btn-secondary" disabled={statusLaedt} onClick={() => statusAendern("entwurf")}>
-                    <Unlock className="size-4" /> Entsperren
-                  </button>
-                ) : anzeigeStatus === "fachlich_geprueft" ? (
-                  <button type="button" className="btn-primary" disabled={statusLaedt || aktiv.ist_unvollstaendig}
-                    onClick={() => statusAendern("freigegeben")}>
-                    <LockKeyhole className="size-4" /> Freigeben und Snapshot speichern
-                  </button>
-                ) : !aktiv.ist_unvollstaendig ? (
-                  <button type="button" className="btn-primary" disabled={statusLaedt}
-                    onClick={() => statusAendern("fachlich_geprueft")}>
-                    <Check className="size-4" /> Als fachlich geprüft markieren
-                  </button>
-                ) : null}
-                {anzeigeStatus === "fachlich_geprueft" && (
-                  <button type="button" className="btn-secondary" disabled={statusLaedt} onClick={() => statusAendern("entwurf")}>Prüfung zurücknehmen</button>
-                )}
-                {!istGesperrt && aktiv.ist_unvollstaendig && (
-                  <div className="w-full text-xs text-red-700">Fachliche Prüfung ist erst möglich, wenn alle fehlenden BKP-Positionen ergänzt sind.</div>
-                )}
-              </div>
+              <FreigabeFortschritt status={anzeigeStatus} gesperrt={istGesperrt} versionNr={versionNr}
+                freigegebenAt={freigegebenAt} laedt={statusLaedt} unvollstaendig={aktiv.ist_unvollstaendig}
+                onStatus={statusAendern} />
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="text-xs text-slate-500">Exportiert wird die aktuell gewählte {variante}-Variante inklusive manueller Beträge.</p>
                 <div className="flex gap-2">

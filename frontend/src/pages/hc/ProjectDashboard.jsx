@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
-import { Share2, Calculator, Layers, ArrowRight, ArrowLeft, MapPin, User, Pencil, Archive } from "lucide-react";
-import { getProject, updateProject } from "../../api/hcApi";
+import { Share2, Calculator, Layers, ArrowRight, ArrowLeft, MapPin, User, Pencil, Archive, BadgeCheck, CircleDashed, LockKeyhole } from "lucide-react";
+import { getProject, getProjectFreigaben, updateProject } from "../../api/hcApi";
 import { GEBAEUDEKATEGORIEN } from "../../data/sia";
 
 const HEIZUNGSSYSTEM_LABELS = { FBH: "Fussbodenheizung", HK: "Heizkörper", gemischt: "Gemischt" };
@@ -15,10 +15,11 @@ export default function ProjectDashboard() {
   const [form, setForm] = useState({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [freigaben, setFreigaben] = useState(null);
 
   useEffect(() => {
-    getProject(id)
-      .then((p) => { setProject(p); setForm({ name: p.name, standort: p.standort || "", kunde: p.kunde || "", beschreibung: p.beschreibung || "" }); })
+    Promise.all([getProject(id), getProjectFreigaben(id)])
+      .then(([p, f]) => { setProject(p); setFreigaben(f); setForm({ name: p.name, standort: p.standort || "", kunde: p.kunde || "", beschreibung: p.beschreibung || "" }); })
       .catch(() => setError("Projekt konnte nicht geladen werden"))
       .finally(() => setLoading(false));
   }, [id]);
@@ -112,6 +113,46 @@ export default function ProjectDashboard() {
           </div>
         )}
       </div>
+
+      {/* Zentraler Freigabestand des Projekts */}
+      {freigaben && (
+        <div className="card mb-6 overflow-hidden">
+          <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+            <div>
+              <h2 className="text-sm font-bold text-slate-800">Freigaben im Projekt</h2>
+              <p className="mt-0.5 text-xs text-slate-500">Verbindliche Stände und gespeicherte Snapshots auf einen Blick.</p>
+            </div>
+            <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
+              {freigaben.anzahl_freigegeben} / {freigaben.anzahl_module} freigegeben
+            </div>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {freigaben.freigaben.map((item) => (
+              <Link key={item.key} to={`/projekte/${id}/kostenschaetzung`}
+                className="group flex items-center gap-4 px-5 py-4 transition hover:bg-slate-50">
+                <div className={`flex size-11 shrink-0 items-center justify-center rounded-2xl ${item.freigegeben ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"}`}>
+                  {item.freigegeben ? <BadgeCheck className="size-5" /> : <CircleDashed className="size-5" />}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-bold text-slate-900">{item.titel}</span>
+                    <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${item.freigegeben ? "bg-green-100 text-green-700" : item.status === "fachlich_geprueft" ? "bg-blue-100 text-blue-700" : item.status === "unvollstaendig" ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-600"}`}>
+                      {item.status_label}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    {item.freigegeben
+                      ? `${item.variante === "brutto" ? "Brutto" : "Netto"} · Snapshot Version ${item.version_nr}${item.freigegeben_at ? ` · ${new Date(item.freigegeben_at).toLocaleString("de-CH")}` : ""}`
+                      : item.status === "nicht_begonnen" ? "Noch keine Schätzung gespeichert" : "Noch kein verbindlicher Snapshot"}
+                  </div>
+                </div>
+                {item.freigegeben && <LockKeyhole className="size-4 text-green-600" />}
+                <ArrowRight className="size-4 text-slate-400 transition group-hover:translate-x-0.5 group-hover:text-brand-600" />
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Werkzeuge für dieses Projekt */}
       {!archiviert && (

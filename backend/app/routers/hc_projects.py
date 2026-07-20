@@ -9,6 +9,7 @@ from app.database import get_db
 from app.models.auth import Role, User
 from app.models.heizungscockpit import HcHeatingGroup, HcProject, HcProjectBaseData
 from app.models.kv import Kostenschaetzung
+from app.data.projektfreigaben import kostenschaetzung_freigabe, leere_kostenschaetzung_freigabe
 from app.schemas.hc_schemas import (
     HeatingGroupOut,
     ProjectCreate,
@@ -114,6 +115,22 @@ def create_project(body: ProjectCreate, user: User = Depends(get_current_user), 
 @router.get("/{project_id}", response_model=ProjectDetailOut)
 def get_project(project_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return _build_detail(_get_owned(db, user, project_id))
+
+
+@router.get("/{project_id}/freigaben")
+def get_project_freigaben(project_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Leichte Statusübersicht; lädt bewusst weder Ergebnis noch Referenzdetails."""
+    _get_owned(db, user, project_id)
+    ks = db.query(Kostenschaetzung).filter(
+        Kostenschaetzung.project_id == project_id,
+        Kostenschaetzung.tenant_id == user.tenant_id,
+    ).first()
+    item = kostenschaetzung_freigabe(ks.inputs_json, ks.updated_at) if ks else leere_kostenschaetzung_freigabe()
+    return {
+        "freigaben": [item],
+        "anzahl_freigegeben": int(item["freigegeben"]),
+        "anzahl_module": 1,
+    }
 
 
 @router.patch("/{project_id}", response_model=ProjectDetailOut)

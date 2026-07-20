@@ -74,7 +74,10 @@ def test_vollstaendige_schaetzung_wird_geprueft_freigegeben_und_entsperrt():
     assert db.added.version_nr == 1
 
     result = update_schaetzung_status(3, SchaetzungStatusPatch(status="entwurf"), user, db)
-    assert result == {"status": "entwurf", "freigegeben_at": None, "version_nr": 1}
+    assert result == {
+        "status": "entwurf", "freigegeben_at": None, "version_nr": 1,
+        "workflow_variante": "netto",
+    }
     assert json.loads(ks.inputs_json)["_workflow"]["freigegeben_von"] is None
 
 
@@ -87,6 +90,20 @@ def test_unvollstaendige_schaetzung_kann_nicht_geprueft_werden():
         )
     assert exc.value.status_code == 409
     assert "Unvollständige" in exc.value.detail
+
+
+def test_unvollstaendiges_brutto_blockiert_vollstaendiges_netto_nicht():
+    ks = _ks()
+    ks.result_json = json.dumps({
+        "brutto": {"ist_unvollstaendig": True},
+        "netto": {"ist_unvollstaendig": False},
+    })
+    result = update_schaetzung_status(
+        3, SchaetzungStatusPatch(status="fachlich_geprueft", variante="netto"),
+        SimpleNamespace(id=7, tenant_id=1), _Db(ks=ks),
+    )
+    assert result["status"] == "fachlich_geprueft"
+    assert result["workflow_variante"] == "netto"
 
 
 def test_freigabe_ohne_fachliche_pruefung_wird_abgelehnt():

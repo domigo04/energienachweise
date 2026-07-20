@@ -92,8 +92,8 @@ export const importRefsCsv = (file) => {
 export const gkSchaetzen = (data) => api.post(`${BASE}/grobkostenschaetzung/schaetzen`, data).then(r => r.data);
 export const gkProjektGet = (projectId) => api.get(`${BASE}/grobkostenschaetzung/projekt/${projectId}`).then(r => r.data);
 export const gkProjektSave = (projectId, data) => api.put(`${BASE}/grobkostenschaetzung/projekt/${projectId}`, data).then(r => r.data);
-export const gkProjektStatus = (projectId, status) =>
-  api.patch(`${BASE}/grobkostenschaetzung/projekt/${projectId}/status`, { status }).then(r => r.data);
+export const gkProjektStatus = (projectId, status, variante) =>
+  api.patch(`${BASE}/grobkostenschaetzung/projekt/${projectId}/status`, { status, variante }).then(r => r.data);
 export const gkPositionHerkunft = (projectId, variante, bkpNr) =>
   api.get(`${BASE}/grobkostenschaetzung/projekt/${projectId}/position/${variante}/${encodeURIComponent(bkpNr)}/herkunft`).then(r => r.data);
 export const gkProjektExportPdf = (projectId, variante) =>

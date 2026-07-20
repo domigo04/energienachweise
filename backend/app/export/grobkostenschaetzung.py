@@ -49,6 +49,8 @@ def _zahl(wert, stellen=0):
 
 
 def _status_farbe(position):
+    if position.get("quelle") == "ausgeschlossen":
+        return GRAU, HELL
     if position.get("quelle") == "manuell":
         return BLAU, BLAU_HELL
     status = position.get("status_datenbasis") or ""
@@ -179,7 +181,7 @@ def erzeuge_grobkostenschaetzung_pdf(projekt_name: str, inputs: dict, result: di
             daten.append([
                 p.get("bkp_nr") or "", Paragraph(p.get("bezeichnung") or "", styles["body"]),
                 Paragraph(f'<font color="#{fg}">{status}</font>', styles["small"]),
-                Paragraph(_chf(p.get("betrag")), styles["right"]),
+                Paragraph("Nicht erforderlich" if p.get("quelle") == "ausgeschlossen" else _chf(p.get("betrag")), styles["right"]),
             ])
         daten.append(["", Paragraph(f"<b>Zwischentotal {gruppe.get('gruppe_nr')} {gruppe.get('name') or ''}</b>", styles["body"]), "",
                       Paragraph(f"<b>{_chf(gruppe.get('betrag'))}</b>", styles["right"])])
@@ -230,7 +232,10 @@ def erzeuge_grobkostenschaetzung_pdf(projekt_name: str, inputs: dict, result: di
         ]))
         story.append(table)
 
-    herkunft = [(p, h) for p in _alle_positionen(result) for h in (p.get("herkunft") or [])]
+    herkunft = [
+        (p, h) for p in _alle_positionen(result) if p.get("quelle") != "ausgeschlossen"
+        for h in (p.get("herkunft") or [])
+    ]
     if herkunft:
         story += [PageBreak(), Paragraph("Herkunftsnachweis", styles["title"]),
                   Paragraph("Nur Referenzprojekte mit einer tatsächlich eingerechneten Kostenangabe sind aufgeführt.", styles["body"]),

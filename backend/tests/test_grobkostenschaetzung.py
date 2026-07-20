@@ -480,6 +480,18 @@ def test_berechne_ohne_referenzen_ist_null():
     assert r["gesamt_betrag"] == 0.0
 
 
+def test_nicht_erforderliche_position_ist_weder_nullkosten_noch_fehlend():
+    r = berechne_grobkostenschaetzung(
+        _ZIEL, [], faktoren=[], heute=date(2026, 7, 14),
+        ausgeschlossene_positionen={"243.3a"},
+    )
+    p = next(p for g in r["gruppen"] for p in g["positionen"] if p["bkp_nr"] == "243.3a")
+    assert p["quelle"] == "ausgeschlossen"
+    assert p["betrag"] is None
+    assert p["berechneter_betrag"] is None
+    assert "243.3a" not in r["fehlende_positionen"]
+
+
 # ── Beispieldaten-Generator (weiterhin gruppenweise; Seed verteilt auf Positionen) ──
 
 def test_beispieldaten_generator_deterministisch_und_konsistent():

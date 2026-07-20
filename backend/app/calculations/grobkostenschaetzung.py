@@ -480,7 +480,8 @@ def quercheck_chf_pro_einheit(positionen_der_gruppe: list, segment: list, ziel: 
 def berechne_grobkostenschaetzung(ziel: dict, referenzen_roh: list, faktoren: list,
                                   bauindex_eintraege: Optional[list] = None,
                                   heute: Optional[date] = None,
-                                  manuelle_betraege: Optional[dict] = None) -> dict:
+                                  manuelle_betraege: Optional[dict] = None,
+                                  ausgeschlossene_positionen: Optional[set] = None) -> dict:
     """Hauptfunktion: Zielprojekt-Eckdaten (`ziel`), alle Referenzprojekte
     (`referenzen_roh`, je mit `positionen`={bkp_nr: betrag} und
     `datum_abrechnung`) und die aktiven Korrekturfaktoren rein — Schätzung je
@@ -506,6 +507,7 @@ def berechne_grobkostenschaetzung(ziel: dict, referenzen_roh: list, faktoren: li
 
     gruppen_map = {}
     manuelle_betraege = manuelle_betraege or {}
+    ausgeschlossene_positionen = set(ausgeschlossene_positionen or set())
     for pos in positionen:
         e = schaetze_position(pos, segment, ziel)
         if faktor != 1.0 and e["betrag"]:
@@ -518,6 +520,14 @@ def berechne_grobkostenschaetzung(ziel: dict, referenzen_roh: list, faktoren: li
             e["manueller_betrag"] = float(manuell)
             e["betrag"] = float(manuell)
             e["quelle"] = "manuell"
+        if e["bkp_nr"] in ausgeschlossene_positionen:
+            e["betrag"] = None
+            e["berechneter_betrag"] = None
+            e["kennwert"] = None
+            e["bandbreite"] = None
+            e["manueller_betrag"] = None
+            e["quelle"] = "ausgeschlossen"
+            e["status_datenbasis"] = "Nicht erforderlich"
         g = gruppen_map.setdefault(e["gruppe_nr"], {"gruppe_nr": e["gruppe_nr"],
                                                     "name": BKP_GRUPPEN.get(e["gruppe_nr"], ""),
                                                     "positionen": [], "betrag": 0.0})
@@ -528,18 +538,20 @@ def berechne_grobkostenschaetzung(ziel: dict, referenzen_roh: list, faktoren: li
     gruppen = [gruppen_map[nr] for nr in BKP_GRUPPEN_ALLE if nr in gruppen_map]
     gesamt_betrag = sum(g["betrag"] for g in gruppen)
     fehlende_positionen = [
-        p["bkp_nr"] for g in gruppen for p in g["positionen"] if p["betrag"] is None
+        p["bkp_nr"] for g in gruppen for p in g["positionen"]
+        if p["betrag"] is None and p.get("quelle") != "ausgeschlossen"
     ]
     positionen_ohne_referenz = [
         p["bkp_nr"] for g in gruppen for p in g["positionen"]
-        if p["berechneter_betrag"] is None
+        if p["berechneter_betrag"] is None and p.get("quelle") != "ausgeschlossen"
     ]
 
     # CHF/Einheit-Gegencheck auf der Wärmeverteilung (243) — Ausreisser-Erkennung
     # (Dominic 2026-07-19). Rein informativ, ändert die Schätzung nicht.
     for g in gruppen:
         if g["gruppe_nr"] == "243":
-            g["quercheck_einheit"] = quercheck_chf_pro_einheit(g["positionen"], segment, ziel, faktor)
+            aktive_positionen = [p for p in g["positionen"] if p.get("quelle") != "ausgeschlossen"]
+            g["quercheck_einheit"] = quercheck_chf_pro_einheit(aktive_positionen, segment, ziel, faktor)
 
     return {
         "gesamt_betrag": gesamt_betrag,

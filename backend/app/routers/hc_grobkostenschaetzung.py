@@ -72,6 +72,7 @@ class SchaetzungIn(BaseModel):
     # Redaktionelle Dokumentation je Variante/BKP. Bearbeiter und Zeitpunkt
     # werden serverseitig gesetzt und können vom Client nicht gefälscht werden.
     manuelle_notizen: Dict[str, Dict[str, dict]] = Field(default_factory=dict)
+    ausgeschlossene_positionen: Dict[str, Dict[str, dict]] = Field(default_factory=dict)
     ignorierte_warnungen: List[str] = Field(default_factory=list)
 
 
@@ -82,15 +83,16 @@ class KorrekturfaktorPatch(BaseModel):
 
 class SchaetzungStatusPatch(BaseModel):
     status: str
+    variante: str = "netto"
 
 
 _GESPERRTE_STATUS = {"freigegeben", "exportiert"}
 
 
-def _status_fuer_resultat(result: dict) -> str:
-    return "unvollstaendig" if any(
-        (result.get(variante) or {}).get("ist_unvollstaendig") for variante in ("brutto", "netto")
-    ) else "entwurf"
+def _status_fuer_resultat(result: dict, variante: str = "netto") -> str:
+    """Vollständigkeit gilt für die Variante, die fachlich abgeschlossen wird.
+    Ein fehlender Brutto-Wert darf eine vollständige Netto-Schätzung nicht blockieren."""
+    return "unvollstaendig" if (result.get(variante) or {}).get("ist_unvollstaendig") else "entwurf"
 
 
 def _trenne_referenzdetails(result: dict) -> tuple[dict, dict]:
@@ -279,6 +281,7 @@ def _berechne(body: SchaetzungIn, user: User, db: Session) -> tuple:
         return berechne_grobkostenschaetzung(
             ziel, referenzen, faktoren, bauindex_eintraege=bauindex,
             manuelle_betraege=body.manuelle_betraege.get(variante, {}),
+            ausgeschlossene_positionen=set(body.ausgeschlossene_positionen.get(variante, {})),
         )
 
     result = {"brutto": rechne("positionen_brutto"), "netto": rechne("positionen_netto")}
@@ -315,6 +318,7 @@ def get_saved(project_id: int, user: User = Depends(get_current_user), db: Sessi
         "status": workflow.get("status") or _status_fuer_resultat(result),
         "freigegeben_at": workflow.get("freigegeben_at"),
         "version_nr": workflow.get("version_nr") or 0,
+        "workflow_variante": workflow.get("variante") or "netto",
     }
 
 
@@ -345,13 +349,14 @@ def compute_and_save(project_id: int, body: SchaetzungIn, user: User = Depends(g
         db.add(ks)
     ks.result_json = json.dumps(result)
     workflow = {
-        "status": _status_fuer_resultat(result), "freigegeben_at": None,
+        "status": _status_fuer_resultat(result, workflow.get("variante") or "netto"), "freigegeben_at": None,
         "freigegeben_von": None, "version_nr": workflow.get("version_nr") or 0,
+        "variante": workflow.get("variante") or "netto",
     }
     _speichere_inputs(ks, inputs, workflow, details)
     db.commit()
     return {"inputs": inputs, "result": result, "status": workflow["status"], "freigegeben_at": None,
-            "version_nr": workflow["version_nr"]}
+            "version_nr": workflow["version_nr"], "workflow_variante": workflow["variante"]}
 
 
 @router.get("/projekt/{project_id}/position/{variante}/{bkp_nr}/herkunft")
@@ -375,6 +380,8 @@ def update_schaetzung_status(project_id: int, body: SchaetzungStatusPatch,
     """Prüft/freigibt den Snapshot oder gibt ihn wieder zur Bearbeitung frei."""
     if body.status not in {"entwurf", "fachlich_geprueft", "freigegeben"}:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Ungültiger Statusübergang")
+    if body.variante not in {"brutto", "netto"}:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Variante muss brutto oder netto sein")
     ks = db.query(Kostenschaetzung).filter(
         Kostenschaetzung.project_id == project_id,
         Kostenschaetzung.tenant_id == user.tenant_id,
@@ -382,7 +389,7 @@ def update_schaetzung_status(project_id: int, body: SchaetzungStatusPatch,
     gespeichertes_resultat = json.loads(ks.result_json or "{}") if ks else {}
     if not ks or not gespeichertes_resultat:
         raise HTTPException(status.HTTP_409_CONFLICT, "Zuerst eine Kostenschätzung berechnen und speichern")
-    ist_unvollstaendig = _status_fuer_resultat(gespeichertes_resultat) == "unvollstaendig"
+    ist_unvollstaendig = _status_fuer_resultat(gespeichertes_resultat, body.variante) == "unvollstaendig"
     if body.status in {"fachlich_geprueft", "freigegeben"} and ist_unvollstaendig:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -390,7 +397,7 @@ def update_schaetzung_status(project_id: int, body: SchaetzungStatusPatch,
         )
     inputs, workflow, details = _lade_speicherinhalt(ks)
     if body.status == "freigegeben":
-        if workflow.get("status") != "fachlich_geprueft":
+        if workflow.get("status") != "fachlich_geprueft" or workflow.get("variante", "netto") != body.variante:
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
                 "Die Schätzung muss vor der Freigabe fachlich geprüft werden.",
@@ -399,6 +406,7 @@ def update_schaetzung_status(project_id: int, body: SchaetzungStatusPatch,
         workflow.update({
             "status": "freigegeben", "freigegeben_at": freigabe_zeit.isoformat(),
             "freigegeben_von": user.id, "version_nr": (workflow.get("version_nr") or 0) + 1,
+            "variante": body.variante,
         })
         db.add(KostenschaetzungVersion(
             tenant_id=user.tenant_id, project_id=project_id, version_nr=workflow["version_nr"],
@@ -407,17 +415,20 @@ def update_schaetzung_status(project_id: int, body: SchaetzungStatusPatch,
             freigegeben_von=user.id,
         ))
     elif body.status == "fachlich_geprueft":
-        workflow.update({"status": "fachlich_geprueft", "freigegeben_at": None, "freigegeben_von": None})
+        workflow.update({
+            "status": "fachlich_geprueft", "freigegeben_at": None,
+            "freigegeben_von": None, "variante": body.variante,
+        })
     else:
         workflow.update({
             "status": "unvollstaendig" if ist_unvollstaendig else "entwurf",
-            "freigegeben_at": None, "freigegeben_von": None,
+            "freigegeben_at": None, "freigegeben_von": None, "variante": body.variante,
         })
     _speichere_inputs(ks, inputs, workflow, details)
     db.commit()
     return {
         "status": workflow["status"], "freigegeben_at": workflow.get("freigegeben_at"),
-        "version_nr": workflow.get("version_nr") or 0,
+        "version_nr": workflow.get("version_nr") or 0, "workflow_variante": workflow.get("variante") or "netto",
     }
 
 
@@ -470,7 +481,7 @@ def export_pdf(project_id: int, variante: str = "netto",
                user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     projekt_name, inputs, result, ks, workflow = _export_daten(project_id, variante, user, db)
     pdf = erzeuge_grobkostenschaetzung_pdf(projekt_name, inputs, result, variante)
-    if workflow.get("status") == "freigegeben":
+    if workflow.get("status") == "freigegeben" and workflow.get("variante", "netto") == variante:
         gespeicherte_inputs, _, details = _lade_speicherinhalt(ks)
         workflow["status"] = "exportiert"
         _speichere_inputs(ks, gespeicherte_inputs, workflow, details)
@@ -486,7 +497,7 @@ def export_excel(project_id: int, variante: str = "netto",
                  user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     projekt_name, inputs, result, ks, workflow = _export_daten(project_id, variante, user, db)
     xlsx = erzeuge_grobkostenschaetzung_excel(projekt_name, inputs, result, variante)
-    if workflow.get("status") == "freigegeben":
+    if workflow.get("status") == "freigegeben" and workflow.get("variante", "netto") == variante:
         gespeicherte_inputs, _, details = _lade_speicherinhalt(ks)
         workflow["status"] = "exportiert"
         _speichere_inputs(ks, gespeicherte_inputs, workflow, details)

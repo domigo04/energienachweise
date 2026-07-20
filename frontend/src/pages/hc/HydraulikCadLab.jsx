@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Circle, Group, Layer, Line, Rect, Stage, Text } from "react-konva";
+import { Circle, Group, Layer, Line, Rect, Shape, Stage, Text } from "react-konva";
 import { ArrowLeft, Boxes, Check, GitCompareArrows, Hand, MousePointer2, Redo2, RotateCcw, Trash2, Undo2, ZoomIn, ZoomOut } from "lucide-react";
 import { getProject } from "../../api/hcApi";
 
@@ -77,17 +77,29 @@ function routeForEdge(nodes, edge) {
 }
 
 function Grid({ view, size }) {
-  const lines = useMemo(() => {
+  const bounds = useMemo(() => {
     const x0 = Math.floor((-view.x / view.scale) / GRID) * GRID - GRID;
     const y0 = Math.floor((-view.y / view.scale) / GRID) * GRID - GRID;
     const x1 = x0 + size.width / view.scale + GRID * 2;
     const y1 = y0 + size.height / view.scale + GRID * 2;
-    const result = [];
-    for (let x = x0; x <= x1; x += GRID) result.push({ key: `x${x}`, points: [x, y0, x, y1], major: x % 100 === 0 });
-    for (let y = y0; y <= y1; y += GRID) result.push({ key: `y${y}`, points: [x0, y, x1, y], major: y % 100 === 0 });
-    return result;
+    return { x0, y0, x1, y1 };
   }, [view, size]);
-  return lines.map((line) => <Line key={line.key} points={line.points} stroke={line.major ? "#cbd5e1" : "#e8edf3"} strokeWidth={line.major ? 1 : 0.55} listening={false} />);
+  const drawGrid = (major) => (context, shape) => {
+    context.beginPath();
+    for (let x = bounds.x0; x <= bounds.x1; x += GRID) {
+      if ((x % 100 === 0) !== major) continue;
+      context.moveTo(x, bounds.y0); context.lineTo(x, bounds.y1);
+    }
+    for (let y = bounds.y0; y <= bounds.y1; y += GRID) {
+      if ((y % 100 === 0) !== major) continue;
+      context.moveTo(bounds.x0, y); context.lineTo(bounds.x1, y);
+    }
+    context.fillStrokeShape(shape);
+  };
+  return <>
+    <Shape sceneFunc={drawGrid(false)} stroke="#e8edf3" strokeWidth={0.55} listening={false} perfectDrawEnabled={false} />
+    <Shape sceneFunc={drawGrid(true)} stroke="#cbd5e1" strokeWidth={1} listening={false} perfectDrawEnabled={false} />
+  </>;
 }
 
 function SpeicherSymbol() {
@@ -149,28 +161,35 @@ function HydraulikgruppeSymbol({ label }) {
   );
 }
 
-function CadNode({ node, selected, tool, connectionStart, onSelect, onMoveStart, onMove, onPort }) {
+function CadNode({ node, selected, tool, connectionStart, onSelect, onMoveStart, onMove, onMoveEnd, onPortDown, onPortUp }) {
   const spec = NODE_SPECS[node.type];
   return (
+    <>
     <Group x={node.x} y={node.y} draggable={tool === "select"}
       onClick={(event) => { event.cancelBubble = true; onSelect(node.id); }}
       onTap={(event) => { event.cancelBubble = true; onSelect(node.id); }}
       onDragStart={onMoveStart}
-      onDragMove={(event) => onMove(node.id, snap(event.target.x()), snap(event.target.y()))}
-      onDragEnd={(event) => { event.target.position({ x: snap(event.target.x()), y: snap(event.target.y()) }); onMove(node.id, snap(event.target.x()), snap(event.target.y())); }}>
+      onDragMove={(event) => onMove(node.id, event.target.x(), event.target.y())}
+      onDragEnd={(event) => onMoveEnd(node.id, snap(event.target.x()), snap(event.target.y()))}>
       {selected && <Rect x={-10} y={-10} width={spec.width + 20} height={spec.height + 20} cornerRadius={8} stroke="#2563eb" strokeWidth={2} dash={[7, 4]} listening={false} />}
       {node.type === "verteiler" && <VerteilerSymbol />}
       {node.type === "gruppe" && <HydraulikgruppeSymbol label={node.label} />}
       {node.type === "speicher" && <SpeicherSymbol />}
+      {node.type !== "gruppe" && <Text x={0} y={spec.height + 12} width={spec.width} text={node.label} align="center" fontSize={13} fill="#334155" />}
+    </Group>
+    {/* Eigene Interaktionsebene: Anschlussklicks können keinen Bauteil-Drag mehr starten. */}
+    <Group x={node.x} y={node.y}>
       {spec.ports.map((port) => {
         const active = connectionStart?.nodeId === node.id && connectionStart?.portId === port.id;
         return <Circle key={port.id} x={port.x} y={port.y} radius={active ? 9 : 7} fill={COLORS[port.kind]} stroke="white" strokeWidth={2}
           hitStrokeWidth={14} shadowColor={COLORS[port.kind]} shadowBlur={active ? 10 : 0} cursor="crosshair"
-          onClick={(event) => { event.cancelBubble = true; onPort(node.id, port); }}
-          onTap={(event) => { event.cancelBubble = true; onPort(node.id, port); }} />;
+          onMouseDown={(event) => { event.cancelBubble = true; onPortDown(node.id, port); }}
+          onMouseUp={(event) => { event.cancelBubble = true; onPortUp(node.id, port); }}
+          onTouchStart={(event) => { event.cancelBubble = true; onPortDown(node.id, port); }}
+          onTouchEnd={(event) => { event.cancelBubble = true; onPortUp(node.id, port); }} />;
       })}
-      {node.type !== "gruppe" && <Text x={0} y={spec.height + 12} width={spec.width} text={node.label} align="center" fontSize={13} fill="#334155" />}
     </Group>
+    </>
   );
 }
 
@@ -180,6 +199,13 @@ export default function HydraulikCadLab() {
   const stageRef = useRef(null);
   const undoRef = useRef([]);
   const redoRef = useRef([]);
+  const connectionStartRef = useRef(null);
+  const nodeFrameRef = useRef(null);
+  const pendingNodeMoveRef = useRef(null);
+  const edgeFrameRef = useRef(null);
+  const pendingEdgeMoveRef = useRef(null);
+  const pointerFrameRef = useRef(null);
+  const pendingPointerRef = useRef(null);
   const storageKey = `hc-cad-lab:v1:${projectId}`;
   const [projectName, setProjectName] = useState("Projekt");
   const [size, setSize] = useState({ width: 1000, height: 700 });
@@ -190,9 +216,17 @@ export default function HydraulikCadLab() {
   });
   const [selected, setSelected] = useState(null);
   const [connectionStart, setConnectionStart] = useState(null);
+  const [connectionPointer, setConnectionPointer] = useState(null);
+  const [liveNodePositions, setLiveNodePositions] = useState({});
+  const [liveEdgeMids, setLiveEdgeMids] = useState({});
 
   useEffect(() => { getProject(projectId).then((project) => setProjectName(project.name)).catch(() => {}); }, [projectId]);
-  useEffect(() => localStorage.setItem(storageKey, JSON.stringify(graph)), [graph, storageKey]);
+  // Während eines Drags niemals synchron serialisieren. Erst nach einer kurzen
+  // Ruhephase wird der abgeschlossene Graph in den separaten Lab-Speicher geschrieben.
+  useEffect(() => {
+    const timer = setTimeout(() => localStorage.setItem(storageKey, JSON.stringify(graph)), 500);
+    return () => clearTimeout(timer);
+  }, [graph, storageKey]);
   useEffect(() => {
     const observer = new ResizeObserver(([entry]) => setSize({ width: entry.contentRect.width, height: entry.contentRect.height }));
     if (containerRef.current) observer.observe(containerRef.current);
@@ -207,13 +241,13 @@ export default function HydraulikCadLab() {
     const previous = undoRef.current.pop();
     if (!previous) return;
     redoRef.current.push(JSON.parse(JSON.stringify(graph)));
-    setGraph(previous); setSelected(null); setConnectionStart(null);
+    setGraph(previous); setSelected(null); connectionStartRef.current = null; setConnectionStart(null);
   }, [graph]);
   const redo = useCallback(() => {
     const next = redoRef.current.pop();
     if (!next) return;
     undoRef.current.push(JSON.parse(JSON.stringify(graph)));
-    setGraph(next); setSelected(null); setConnectionStart(null);
+    setGraph(next); setSelected(null); connectionStartRef.current = null; setConnectionStart(null);
   }, [graph]);
 
   useEffect(() => {
@@ -228,7 +262,7 @@ export default function HydraulikCadLab() {
           : { ...current, edges: current.edges.filter((e) => e.id !== selected.id) });
         setSelected(null);
       }
-      if (event.key === "Escape") setConnectionStart(null);
+      if (event.key === "Escape") { connectionStartRef.current = null; setConnectionStart(null); setConnectionPointer(null); }
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
@@ -243,17 +277,68 @@ export default function HydraulikCadLab() {
     setGraph((current) => ({ ...current, nodes: [...current.nodes, node] }));
     setSelected({ kind: "node", id: node.id }); setTool("select");
   };
-  const moveNode = (nodeId, x, y) => setGraph((current) => ({ ...current, nodes: current.nodes.map((node) => node.id === nodeId ? { ...node, x, y } : node) }));
-  const clickPort = (nodeId, port) => {
-    const endpoint = { nodeId, portId: port.id };
-    if (!connectionStart) { setConnectionStart({ ...endpoint, kind: port.kind }); return; }
-    if (connectionStart.nodeId === nodeId && connectionStart.portId === port.id) { setConnectionStart(null); return; }
-    checkpoint();
-    setGraph((current) => ({ ...current, edges: [...current.edges, { id: uid("leitung"), start: { nodeId: connectionStart.nodeId, portId: connectionStart.portId }, end: endpoint, kind: connectionStart.kind === "neutral" ? port.kind : connectionStart.kind }] }));
-    setConnectionStart(null);
+  const renderNodes = useMemo(() => graph.nodes.map((node) => liveNodePositions[node.id]
+    ? { ...node, ...liveNodePositions[node.id] } : node), [graph.nodes, liveNodePositions]);
+  const renderEdges = useMemo(() => graph.edges.map((edge) => liveEdgeMids[edge.id]
+    ? { ...edge, mid: liveEdgeMids[edge.id] } : edge), [graph.edges, liveEdgeMids]);
+
+  const moveNodeLive = (nodeId, x, y) => {
+    pendingNodeMoveRef.current = { nodeId, x, y };
+    if (nodeFrameRef.current) return;
+    nodeFrameRef.current = requestAnimationFrame(() => {
+      const pending = pendingNodeMoveRef.current;
+      if (pending) setLiveNodePositions((current) => ({ ...current, [pending.nodeId]: { x: pending.x, y: pending.y } }));
+      nodeFrameRef.current = null;
+    });
   };
-  const updateEdgeMid = (edge, route, position) => setGraph((current) => ({ ...current, edges: current.edges.map((item) => item.id === edge.id
-    ? { ...item, mid: route.horizontal ? { x: snap(position.x) } : { y: snap(position.y) } } : item) }));
+  const moveNodeEnd = (nodeId, x, y) => {
+    if (nodeFrameRef.current) cancelAnimationFrame(nodeFrameRef.current);
+    nodeFrameRef.current = null; pendingNodeMoveRef.current = null;
+    setLiveNodePositions((current) => { const next = { ...current }; delete next[nodeId]; return next; });
+    setGraph((current) => ({ ...current, nodes: current.nodes.map((node) => node.id === nodeId ? { ...node, x, y } : node) }));
+  };
+
+  const cancelConnection = () => {
+    connectionStartRef.current = null; setConnectionStart(null); setConnectionPointer(null);
+  };
+  const startConnection = (nodeId, port) => {
+    const endpoint = { nodeId, portId: port.id, kind: port.kind, side: port.side };
+    connectionStartRef.current = endpoint; setConnectionStart(endpoint);
+    const position = portPosition(renderNodes, endpoint);
+    if (position) setConnectionPointer({ x: position.x, y: position.y });
+  };
+  const finishConnection = (nodeId, port) => {
+    const start = connectionStartRef.current;
+    if (!start || (start.nodeId === nodeId && start.portId === port.id)) return false;
+    const endpoint = { nodeId, portId: port.id };
+    checkpoint();
+    setGraph((current) => ({ ...current, edges: [...current.edges, { id: uid("leitung"), start: { nodeId: start.nodeId, portId: start.portId }, end: endpoint, kind: start.kind === "neutral" ? port.kind : start.kind }] }));
+    cancelConnection(); return true;
+  };
+  const portDown = (nodeId, port) => {
+    if (!connectionStartRef.current) startConnection(nodeId, port);
+    else finishConnection(nodeId, port); // zweiter Klick schliesst die Leitung
+  };
+  const portUp = (nodeId, port) => {
+    finishConnection(nodeId, port); // Ziehen von Anschluss zu Anschluss
+  };
+  const updateEdgeMidLive = (edge, route, position) => {
+    pendingEdgeMoveRef.current = { edgeId: edge.id, mid: route.horizontal ? { x: snap(position.x) } : { y: snap(position.y) } };
+    if (edgeFrameRef.current) return;
+    edgeFrameRef.current = requestAnimationFrame(() => {
+      const pending = pendingEdgeMoveRef.current;
+      if (pending) setLiveEdgeMids((current) => ({ ...current, [pending.edgeId]: pending.mid }));
+      edgeFrameRef.current = null;
+    });
+  };
+  const updateEdgeMidEnd = (edgeId) => {
+    if (edgeFrameRef.current) cancelAnimationFrame(edgeFrameRef.current);
+    edgeFrameRef.current = null;
+    const mid = pendingEdgeMoveRef.current?.edgeId === edgeId ? pendingEdgeMoveRef.current.mid : liveEdgeMids[edgeId];
+    pendingEdgeMoveRef.current = null;
+    if (mid) setGraph((current) => ({ ...current, edges: current.edges.map((edge) => edge.id === edgeId ? { ...edge, mid } : edge) }));
+    setLiveEdgeMids((current) => { const next = { ...current }; delete next[edgeId]; return next; });
+  };
   const updateSelectedLabel = (label) => setGraph((current) => ({ ...current, nodes: current.nodes.map((node) => selected?.kind === "node" && node.id === selected.id ? { ...node, label } : node) }));
   const selectedNode = selected?.kind === "node" ? graph.nodes.find((node) => node.id === selected.id) : null;
 
@@ -266,6 +351,26 @@ export default function HydraulikCadLab() {
     const world = { x: (pointer.x - view.x) / oldScale, y: (pointer.y - view.y) / oldScale };
     setView({ scale: nextScale, x: pointer.x - world.x * nextScale, y: pointer.y - world.y * nextScale });
   };
+  const trackConnectionPointer = () => {
+    if (!connectionStartRef.current || !stageRef.current) return;
+    const pointer = stageRef.current.getPointerPosition();
+    if (!pointer) return;
+    pendingPointerRef.current = { x: (pointer.x - view.x) / view.scale, y: (pointer.y - view.y) / view.scale };
+    if (pointerFrameRef.current) return;
+    pointerFrameRef.current = requestAnimationFrame(() => {
+      if (pendingPointerRef.current) setConnectionPointer(pendingPointerRef.current);
+      pointerFrameRef.current = null;
+    });
+  };
+  const connectionOrigin = connectionStart ? portPosition(renderNodes, connectionStart) : null;
+  const previewPoints = connectionOrigin && connectionPointer ? (() => {
+    if (["left", "right"].includes(connectionOrigin.side)) {
+      const midX = (connectionOrigin.x + connectionPointer.x) / 2;
+      return [connectionOrigin.x, connectionOrigin.y, midX, connectionOrigin.y, midX, connectionPointer.y, connectionPointer.x, connectionPointer.y];
+    }
+    const midY = (connectionOrigin.y + connectionPointer.y) / 2;
+    return [connectionOrigin.x, connectionOrigin.y, connectionOrigin.x, midY, connectionPointer.x, midY, connectionPointer.x, connectionPointer.y];
+  })() : null;
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-slate-100 text-slate-800">
@@ -298,7 +403,7 @@ export default function HydraulikCadLab() {
           <div className="mt-5 rounded-xl bg-slate-50 p-3 text-[11px] leading-relaxed text-slate-500">
             <b className="text-slate-700">Leitung zeichnen</b><br />Ersten Anschluss anklicken, danach den Zielanschluss. Den runden Griff auf der Leitung verschieben.
           </div>
-          {connectionStart && <button className="mt-3 w-full rounded-lg bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700" onClick={() => setConnectionStart(null)}>Verbindung abbrechen · Esc</button>}
+          {connectionStart && <button className="mt-3 w-full rounded-lg bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700" onClick={cancelConnection}>Verbindung abbrechen · Esc</button>}
         </aside>
 
         <main ref={containerRef} className="relative min-w-0 flex-1 overflow-hidden bg-[#f8fafc]">
@@ -306,26 +411,31 @@ export default function HydraulikCadLab() {
             draggable={tool === "pan"} onDragEnd={(event) => {
               if (event.target === event.target.getStage()) setView((current) => ({ ...current, x: event.target.x(), y: event.target.y() }));
             }}
-            onWheel={onWheel} onMouseDown={(event) => { if (event.target === event.target.getStage()) { setSelected(null); setConnectionStart(null); } }}
+            onWheel={onWheel} onMouseMove={trackConnectionPointer} onTouchMove={trackConnectionPointer}
+            onMouseDown={(event) => { if (event.target === event.target.getStage()) { setSelected(null); cancelConnection(); } }}
             onTouchStart={(event) => { if (event.target === event.target.getStage()) setSelected(null); }}>
-            <Layer><Grid view={view} size={size} /></Layer>
+            <Layer listening={false}><Grid view={view} size={size} /></Layer>
             <Layer>
-              {graph.edges.map((edge) => {
-                const route = routeForEdge(graph.nodes, edge);
+              {previewPoints && <Line points={previewPoints} stroke={COLORS[connectionStart.kind] || COLORS.neutral} strokeWidth={3} dash={[10, 6]} opacity={0.8} lineCap="round" lineJoin="round" listening={false} perfectDrawEnabled={false} />}
+              {renderEdges.map((edge) => {
+                const route = routeForEdge(renderNodes, edge);
                 if (!route) return null;
                 const isSelected = selected?.kind === "edge" && selected.id === edge.id;
                 return <Group key={edge.id}>
                   <Line points={route.points} stroke={COLORS[edge.kind] || COLORS.neutral} strokeWidth={isSelected ? 5 : 3} lineCap="round" lineJoin="round" hitStrokeWidth={18}
+                    perfectDrawEnabled={false}
                     onClick={(event) => { event.cancelBubble = true; setSelected({ kind: "edge", id: edge.id }); }}
                     onTap={(event) => { event.cancelBubble = true; setSelected({ kind: "edge", id: edge.id }); }} />
                   {isSelected && <Circle x={route.handle.x} y={route.handle.y} radius={9} fill="white" stroke={COLORS[edge.kind]} strokeWidth={3} draggable
                     dragBoundFunc={(position) => route.horizontal ? { x: snap(position.x), y: route.handle.y } : { x: route.handle.x, y: snap(position.y) }}
-                    onDragStart={checkpoint} onDragMove={(event) => updateEdgeMid(edge, route, event.target.position())} />}
+                    onDragStart={checkpoint} onDragMove={(event) => updateEdgeMidLive(edge, route, event.target.position())}
+                    onDragEnd={() => updateEdgeMidEnd(edge.id)} />}
                 </Group>;
               })}
-              {graph.nodes.map((node) => <CadNode key={node.id} node={node} tool={tool} selected={selected?.kind === "node" && selected.id === node.id}
+              {renderNodes.map((node) => <CadNode key={node.id} node={node} tool={tool} selected={selected?.kind === "node" && selected.id === node.id}
                 connectionStart={connectionStart} onSelect={(nodeId) => setSelected({ kind: "node", id: nodeId })}
-                onMoveStart={checkpoint} onMove={moveNode} onPort={clickPort} />)}
+                onMoveStart={checkpoint} onMove={moveNodeLive} onMoveEnd={moveNodeEnd}
+                onPortDown={portDown} onPortUp={portUp} />)}
             </Layer>
           </Stage>
 

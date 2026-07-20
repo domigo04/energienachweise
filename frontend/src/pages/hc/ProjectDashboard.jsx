@@ -66,7 +66,7 @@ export default function ProjectDashboard() {
   ];
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8 lg:px-8">
+    <div className="mx-auto max-w-5xl px-4 py-5 sm:py-8 lg:px-8">
       {/* Zurück zur Projektübersicht */}
       <Link to="/projekte" className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 transition hover:text-brand-600">
         <ArrowLeft className="size-4" /> Projekte
@@ -90,7 +90,7 @@ export default function ProjectDashboard() {
             </div>
           </div>
         ) : (
-          <div className="flex items-start justify-between gap-4">
+          <div className="flex flex-col items-stretch gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
               <div className="mb-2 flex items-center gap-3">
                 <h1 className="text-xl font-bold text-slate-900">{project.name}</h1>
@@ -105,9 +105,9 @@ export default function ProjectDashboard() {
               </div>
             </div>
             <div className="flex shrink-0 gap-2">
-              <button onClick={() => setEditing(true)} className="btn-secondary"><Pencil className="size-4" /> Bearbeiten</button>
+              <button onClick={() => setEditing(true)} className="btn-secondary min-h-11 flex-1 justify-center sm:flex-none"><Pencil className="size-4" /> Bearbeiten</button>
               {!archiviert && (
-                <button onClick={handleArchive} className="btn-ghost text-slate-400 hover:text-red-500"><Archive className="size-4" /></button>
+                <button onClick={handleArchive} aria-label="Projekt archivieren" className="btn-ghost min-h-11 min-w-11 text-slate-400 hover:text-red-500"><Archive className="size-4" /></button>
               )}
             </div>
           </div>
@@ -117,7 +117,7 @@ export default function ProjectDashboard() {
       {/* Zentraler Freigabestand des Projekts */}
       {freigaben && (
         <div className="card mb-6 overflow-hidden">
-          <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+          <div className="flex flex-col items-start gap-3 border-b border-slate-100 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
             <div>
               <h2 className="text-sm font-bold text-slate-800">Freigaben im Projekt</h2>
               <p className="mt-0.5 text-xs text-slate-500">Verbindliche Stände und gespeicherte Snapshots auf einen Blick.</p>
@@ -129,7 +129,7 @@ export default function ProjectDashboard() {
           <div className="divide-y divide-slate-100">
             {freigaben.freigaben.map((item) => (
               <Link key={item.key} to={`/projekte/${id}/kostenschaetzung`}
-                className="group flex items-center gap-4 px-5 py-4 transition hover:bg-slate-50">
+                className="group grid min-h-20 grid-cols-[auto_1fr_auto] items-center gap-3 px-4 py-4 transition hover:bg-slate-50 sm:flex sm:gap-4 sm:px-5">
                 <div className={`flex size-11 shrink-0 items-center justify-center rounded-2xl ${item.freigegeben ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"}`}>
                   {item.freigegeben ? <BadgeCheck className="size-5" /> : <CircleDashed className="size-5" />}
                 </div>
@@ -146,7 +146,7 @@ export default function ProjectDashboard() {
                       : item.status === "nicht_begonnen" ? "Noch keine Schätzung gespeichert" : "Noch kein verbindlicher Snapshot"}
                   </div>
                 </div>
-                {item.freigegeben && <LockKeyhole className="size-4 text-green-600" />}
+                {item.freigegeben && <LockKeyhole className="hidden size-4 text-green-600 sm:block" />}
                 <ArrowRight className="size-4 text-slate-400 transition group-hover:translate-x-0.5 group-hover:text-brand-600" />
               </Link>
             ))}

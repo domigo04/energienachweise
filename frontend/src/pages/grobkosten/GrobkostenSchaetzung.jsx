@@ -69,8 +69,8 @@ function FreigabeFortschritt({ status, gesperrt, versionNr, freigegebenAt, laedt
 
   return (
     <div className={`card overflow-hidden ${gesperrt ? "border-green-200" : "border-blue-200"}`}>
-      <div className={`px-5 py-4 ${gesperrt ? "bg-green-50/60" : "bg-blue-50/50"}`}>
-        <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className={`px-4 py-4 sm:px-5 ${gesperrt ? "bg-green-50/60" : "bg-blue-50/50"}`}>
+        <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
               {gesperrt ? <LockKeyhole className="size-4 text-green-700" /> : <ListChecks className="size-4 text-blue-700" />}
@@ -84,42 +84,42 @@ function FreigabeFortschritt({ status, gesperrt, versionNr, freigegebenAt, laedt
                   : `Nächster Meilenstein: ${naechsterSchritt}.`}
             </p>
           </div>
-          <div className="h-2 w-32 overflow-hidden rounded-full bg-white/80 sm:w-44">
+          <div className="h-2 w-full overflow-hidden rounded-full bg-white/80 sm:mt-1 sm:w-44">
             <div className={`h-full rounded-full transition-all ${gesperrt ? "bg-green-500" : "bg-blue-500"}`} style={{ width: `${erreicht * 20}%` }} />
           </div>
         </div>
 
-        <div className="mt-4 grid grid-cols-5 gap-1.5">
+        <div className="mt-4 grid grid-cols-1 gap-1.5 sm:grid-cols-5">
           {STATUS_SCHRITTE.map((schritt, index) => {
             const fertig = index < erreicht;
             return (
-              <div key={schritt.key} className="min-w-0 text-center">
-                <div className={`mx-auto flex size-7 items-center justify-center rounded-full border text-xs font-bold transition ${fertig
+              <div key={schritt.key} className={`flex min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left sm:block sm:px-0 sm:py-0 sm:text-center ${fertig ? "bg-white/60 sm:bg-transparent" : ""}`}>
+                <div className={`flex size-7 shrink-0 items-center justify-center rounded-full border text-xs font-bold transition sm:mx-auto ${fertig
                   ? gesperrt ? "border-green-500 bg-green-500 text-white" : "border-blue-500 bg-blue-500 text-white"
                   : "border-slate-200 bg-white text-slate-400"}`}>
                   {fertig ? <Check className="size-3.5" /> : index + 1}
                 </div>
-                <div className={`mt-1 truncate text-[10px] font-semibold sm:text-[11px] ${fertig ? "text-slate-700" : "text-slate-400"}`}>{schritt.label}</div>
+                <div className={`text-xs font-semibold sm:mt-1 sm:text-[11px] ${fertig ? "text-slate-700" : "text-slate-400"}`}>{schritt.label}</div>
               </div>
             );
           })}
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 px-5 py-3">
+      <div className="flex flex-col items-stretch gap-2 px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:px-5">
         {gesperrt ? (
-          <button type="button" className="btn-secondary" disabled={laedt} onClick={() => onStatus("entwurf")}>
+          <button type="button" className="btn-secondary min-h-11 w-full justify-center sm:w-auto" disabled={laedt} onClick={() => onStatus("entwurf")}>
             <Unlock className="size-4" /> Zur Bearbeitung öffnen
           </button>
         ) : status === "fachlich_geprueft" ? (
           <>
-            <button type="button" className="btn-primary shadow-sm" disabled={laedt || unvollstaendig} onClick={() => onStatus("freigegeben")}>
+            <button type="button" className="btn-primary min-h-11 w-full justify-center shadow-sm sm:w-auto" disabled={laedt || unvollstaendig} onClick={() => onStatus("freigegeben")}>
               <LockKeyhole className="size-4" /> Freigeben & Snapshot sichern
             </button>
-            <button type="button" className="btn-secondary" disabled={laedt} onClick={() => onStatus("entwurf")}>Prüfung zurücknehmen</button>
+            <button type="button" className="btn-secondary min-h-11 w-full justify-center sm:w-auto" disabled={laedt} onClick={() => onStatus("entwurf")}>Prüfung zurücknehmen</button>
           </>
         ) : !unvollstaendig ? (
-          <button type="button" className="btn-primary shadow-sm" disabled={laedt} onClick={() => onStatus("fachlich_geprueft")}>
+          <button type="button" className="btn-primary min-h-11 w-full justify-center shadow-sm sm:w-auto" disabled={laedt} onClick={() => onStatus("fachlich_geprueft")}>
             <Check className="size-4" /> Fachprüfung abschliessen
           </button>
         ) : (
@@ -404,7 +404,7 @@ export default function GrobkostenSchaetzung() {
             steht — auf dem Handy normal im Fluss, sonst würde sie das Ergebnis überdecken) */}
         <fieldset disabled={istGesperrt} className={`card lg:sticky lg:top-4 p-5 ${istGesperrt ? "bg-slate-50/70" : ""}`}>
           <h2 className="mb-4 text-sm font-bold text-slate-800">Eckdaten</h2>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Feld label="EBF [m²]">
               <input className="input" type="number" min="1" value={form.ebf_m2} onChange={(e) => set("ebf_m2", e.target.value)} placeholder="z.B. 1100" />
             </Feld>
@@ -475,7 +475,7 @@ export default function GrobkostenSchaetzung() {
               Falls schon bekannt (z.B. Bohrmeter aus der Sondendimensionierung), rechnen die
               zugehörigen Positionen direkt mit deiner Zahl.
             </p>
-            <div className="mt-3 grid grid-cols-3 gap-3">
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
               <Feld label="Bohrmeter"><input className="input" type="number" min="0" value={form.bohrmeter} onChange={(e) => set("bohrmeter", e.target.value)} /></Feld>
               <Feld label="Rohrmeter"><input className="input" type="number" min="0" value={form.rohrmeter} onChange={(e) => set("rohrmeter", e.target.value)} /></Feld>
               <Feld label="Heizkörper"><input className="input" type="number" min="0" value={form.hk_anzahl} onChange={(e) => set("hk_anzahl", e.target.value)} /></Feld>
@@ -537,13 +537,13 @@ export default function GrobkostenSchaetzung() {
               <FreigabeFortschritt status={anzeigeStatus} gesperrt={istGesperrt} versionNr={versionNr}
                 freigegebenAt={freigegebenAt} laedt={statusLaedt} unvollstaendig={aktiv.ist_unvollstaendig}
                 onStatus={statusAendern} />
-              <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
                 <p className="text-xs text-slate-500">Exportiert wird die aktuell gewählte {variante}-Variante inklusive manueller Beträge.</p>
-                <div className="flex gap-2">
-                  <button type="button" className="btn-secondary" disabled={!!exportLaedt || laden} onClick={() => exportieren("pdf")}>
+                <div className="grid grid-cols-2 gap-2 sm:flex">
+                  <button type="button" className="btn-secondary min-h-11 justify-center" disabled={!!exportLaedt || laden} onClick={() => exportieren("pdf")}>
                     <FileText className="size-4" /> {exportLaedt === "pdf" ? "PDF wird erstellt…" : "PDF"}
                   </button>
-                  <button type="button" className="btn-secondary" disabled={!!exportLaedt || laden} onClick={() => exportieren("excel")}>
+                  <button type="button" className="btn-secondary min-h-11 justify-center" disabled={!!exportLaedt || laden} onClick={() => exportieren("excel")}>
                     <FileSpreadsheet className="size-4" /> {exportLaedt === "excel" ? "Excel wird erstellt…" : "Excel"}
                   </button>
                 </div>

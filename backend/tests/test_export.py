@@ -83,6 +83,24 @@ def test_handle_positionen():
     assert handle_pos(g1, "rl") == (330 + 75, 186 + 400)
 
 
+def test_svg_uebernimmt_cad_stuetzpunkte_und_medien_layer():
+    nodes = [
+        {"id": "a", "type": "erzeuger", "position": {"x": 0, "y": 0}, "data": {}},
+        {"id": "b", "type": "erzeuger", "position": {"x": 300, "y": 0}, "data": {}},
+    ]
+    edges = [{
+        "id": "k_rl", "source": "a", "sourceHandle": "vl", "target": "b", "targetHandle": "vl",
+        "style": {"stroke": "#0e7490"},
+        "data": {"layer_id": "kaelte_rl", "points": [{"x": -300, "y": 200}, {"x": 200, "y": 200}]},
+    }]
+    svg = erzeuge_svg(nodes, edges, {})
+    assert "L -300.0 200.0 L 200.0 200.0" in svg
+    assert 'stroke="#0e7490"' in svg
+    assert 'stroke-dasharray="8,5"' in svg
+    # Ein Stützpunkt ausserhalb der Bauteile muss den PDF/SVG-Ausschnitt erweitern.
+    assert 'viewBox="-350.0' in svg
+
+
 # ── Legende + Berechnungen ──────────────────────────────────────────────────
 def test_legende(daten):
     nodes, edges, results = daten

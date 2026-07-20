@@ -155,3 +155,17 @@ hydraulisch **Hauptgruppe → Untergruppe(n) seriell** aneinander (z.B. Hauptlü
 mehrere Lufterhitzer-Monoblöcke). Fluss (ṁ_sek) **plus** Leistung Q und VL/RL der Gruppe werden an
 den gleichnamigen Anschluss-Marker übertragen; die Leitung ab dem Marker trägt diesen Fluss (→
 Dimensionierung), ohne dass eine lange Leitung quer durchs Schema gezeichnet werden muss.
+
+## 13. Medien-Layer und CAD-Topologie (2026-07-20)
+- Eine Leitung besitzt optional `data.layer_id`. Unterstützte Standard-Layer sind Heizung,
+  Kälte und Sole (je VL/RL), Brauchwarmwasser und Allgemein.
+- Die sichtbaren Farben unterscheiden die Medien. Für die Berechnung bleibt die fachliche Rolle
+  eindeutig: Ein Layer mit Suffix `_vl` wird wie Vorlauf, `_rl` wie Rücklauf behandelt. Damit
+  funktionieren Fluss, Dimensionierung und PDF auch bei Kälte und Sole unverändert korrekt.
+- Ausblenden ist ausschliesslich eine Zeichenansicht. Unsichtbare Layer bleiben gespeichert und
+  werden weiterhin berechnet.
+- Eine optische Leitungskreuzung erzeugt **keine** hydraulische Verbindung. Erst das bewusste
+  Ablegen eines Leitungsendes auf der Mitte einer Leitung teilt diese Leitung und erzeugt ein
+  echtes T-Stück im Graphen.
+- `data.points` speichert CAD-Stützpunkte einer Leitung. Diese ändern nur die Leitungsführung,
+  nicht die hydraulische Verbindung. Der PDF-Export übernimmt dieselbe Polylinie.

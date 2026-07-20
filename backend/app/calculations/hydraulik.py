@@ -156,6 +156,11 @@ def _strang_ausruestung(d: dict, res: dict) -> None:
 
 # ── Schema-Graph komplett rechnen ───────────────────────────────────────────
 def _stroke(e: dict) -> Optional[str]:
+    layer_id = str((e.get("data") or {}).get("layer_id") or "")
+    if layer_id.endswith("_vl"):
+        return VL_FARBE
+    if layer_id.endswith("_rl"):
+        return RL_FARBE
     return e.get("stroke") or (e.get("style") or {}).get("stroke")
 
 

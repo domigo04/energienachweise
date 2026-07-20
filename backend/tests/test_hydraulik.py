@@ -3,6 +3,7 @@ import pytest
 
 from app.calculations.heizgruppen import berechne_volumenstrom
 from app.calculations.hydraulik import (
+    _stroke,
     berechne_schema,
     berechne_verteiler_gruppen,
     dp_parallel,
@@ -11,6 +12,12 @@ from app.calculations.hydraulik import (
 
 VL = "#ef4444"
 RL = "#3b82f6"
+
+
+def test_medien_layer_werden_fachlich_als_vl_rl_erkannt():
+    assert _stroke({"style": {"stroke": "#06b6d4"}, "data": {"layer_id": "kaelte_vl"}}) == VL
+    assert _stroke({"style": {"stroke": "#0e7490"}, "data": {"layer_id": "kaelte_rl"}}) == RL
+    assert _stroke({"style": {"stroke": "#8b5cf6"}, "data": {"layer_id": "sole_vl"}}) == VL
 
 
 # ── §1 Volumenstrom ──────────────────────────────────────────────────────────

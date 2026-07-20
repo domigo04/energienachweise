@@ -461,11 +461,28 @@ def zeichne_edge(parts, edge, nodes_by_id, results):
     x1, y1 = handle_pos(quelle, edge.get("sourceHandle"))
     x2, y2 = handle_pos(ziel, edge.get("targetHandle"))
     stroke = edge.get("stroke") or (edge.get("style") or {}).get("stroke") or "#1e293b"
-    dash = ' stroke-dasharray="8,5"' if stroke == RL_FARBE else ""
+    layer_id = str((edge.get("data") or {}).get("layer_id") or "")
+    ist_rl = stroke == RL_FARBE or layer_id.endswith("_rl")
+    dash = ' stroke-dasharray="8,5"' if ist_rl else ""
     # CAD-Leitung wie FlowEdge.jsx: dünn, rechte Winkel mit kleinen runden Bögen (r=8).
     dx, dy = x2 - x1, y2 - y1
     r = 8
-    if abs(dx) < 0.5 or abs(dy) < 0.5:      # fluchtet → gerade
+    stuetzpunkte = (edge.get("data") or {}).get("points") or []
+    if stuetzpunkte:
+        punkte = [(x1, y1)] + [(_f(p.get("x")), _f(p.get("y"))) for p in stuetzpunkte] + [(x2, y2)]
+        pfad = "M " + " L ".join(f"{x} {y}" for x, y in punkte)
+        # Label ungefähr in der geometrischen Mitte der Polylinie.
+        laengen = [((punkte[i - 1], punkte[i]), ((punkte[i][0] - punkte[i - 1][0]) ** 2 + (punkte[i][1] - punkte[i - 1][1]) ** 2) ** 0.5) for i in range(1, len(punkte))]
+        halb = sum(laenge for _, laenge in laengen) / 2
+        lx, ly = punkte[0]
+        for ((ax, ay), (bx, by)), laenge in laengen:
+            if halb <= laenge:
+                anteil = halb / laenge if laenge else 0
+                lx, ly = ax + (bx - ax) * anteil, ay + (by - ay) * anteil
+                break
+            halb -= laenge
+        lx += 6
+    elif abs(dx) < 0.5 or abs(dy) < 0.5:      # fluchtet → gerade
         pfad = f"M {x1} {y1} L {x2} {y2}"
     elif abs(dy) >= abs(dx):                 # V-H-V mit runden Ecken
         my = (y1 + y2) / 2
@@ -483,8 +500,9 @@ def zeichne_edge(parts, edge, nodes_by_id, results):
         s3 = 1 if x2 > mx else -1
         pfad = (f"M {x1} {y1} L {mx - s1 * rr} {y1} Q {mx} {y1} {mx} {y1 + s2 * rr} "
                 f"L {mx} {y2 - s2 * rr} Q {mx} {y2} {mx + s3 * rr} {y2} L {x2} {y2}")
-    lx, ly = (x1 + x2) / 2 + 6, (y1 + y2) / 2
-    sw = 1.6 if stroke == RL_FARBE else 2
+    if not stuetzpunkte:
+        lx, ly = (x1 + x2) / 2 + 6, (y1 + y2) / 2
+    sw = 1.6 if ist_rl else 2
     parts.append(f'<path d="{pfad}" fill="none" stroke="{stroke}" stroke-width="{sw}"{dash}/>')
     fluss = (results.get("edge_flows") or {}).get(edge.get("id"))
     if fluss:
@@ -512,6 +530,10 @@ def erzeuge_svg(nodes: list, edges: list, results: dict) -> str:
         py = (n.get("position") or {}).get("y", 0)
         xs += [px, px + w]
         ys += [py, py + h]
+    for edge in edges:
+        for point in (edge.get("data") or {}).get("points") or []:
+            xs.append(_f(point.get("x")))
+            ys.append(_f(point.get("y")))
     rand = 50
     x0, y0 = min(xs) - rand, min(ys) - rand
     breite, hoehe = max(xs) - min(xs) + 2 * rand, max(ys) - min(ys) + 2 * rand

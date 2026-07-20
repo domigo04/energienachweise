@@ -1265,7 +1265,11 @@ function EditorInner() {
         <Link to={`/projekte/${projectId}`} style={{ fontSize:12, color:'#2563eb', whiteSpace:'nowrap' }}>← {projectName || 'Projekt'}</Link>
         <Link to={`/projekte/${projectId}/schema-cad`}
           style={{ fontSize:11, fontWeight:700, padding:'4px 9px', borderRadius:6, border:'1px solid #f59e0b', background:'#fffbeb', color:'#92400e', whiteSpace:'nowrap' }}>
-          CAD-Lab vergleichen
+          Konva vergleichen
+        </Link>
+        <Link to={`/projekte/${projectId}/schema-reactflow`}
+          style={{ fontSize:11, fontWeight:700, padding:'4px 9px', borderRadius:6, border:'1px solid #818cf8', background:'#eef2ff', color:'#4338ca', whiteSpace:'nowrap' }}>
+          React Flow vergleichen
         </Link>
         <span style={{ color:'#e2e8f0' }}>|</span>
         <input value={schemaName} onChange={e=>setSchemaName(e.target.value)}

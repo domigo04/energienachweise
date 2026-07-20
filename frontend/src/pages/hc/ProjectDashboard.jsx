@@ -157,12 +157,15 @@ export default function ProjectDashboard() {
       {/* Werkzeuge für dieses Projekt */}
       {!archiviert && (
         <>
-        <div className="mb-3 flex flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center">
+        <div className="mb-3 flex flex-col gap-3 rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-3 sm:flex-row sm:items-center">
           <div className="min-w-0 flex-1">
-            <div className="text-sm font-bold text-amber-900">Neuen CAD-Zeichenkern ausprobieren</div>
-            <div className="text-xs text-amber-800">Parallel zum bestehenden Editor – Verteiler, Hydraulikgruppen und Speicher vergleichen.</div>
+            <div className="text-sm font-bold text-indigo-950">CAD-Zeichenkerne direkt vergleichen</div>
+            <div className="text-xs text-indigo-800">Beide Versuche laufen getrennt vom bestehenden Editor. Der neue React-Flow-Versuch zeichnet Leitungen auf einer eigenen CAD-Ebene.</div>
           </div>
-          <Link to={`/projekte/${id}/schema-cad`} className="btn-secondary min-h-11 shrink-0 justify-center border-amber-300 bg-white text-amber-900">CAD-Lab öffnen</Link>
+          <div className="grid shrink-0 gap-2 sm:grid-cols-2">
+            <Link to={`/projekte/${id}/schema-reactflow`} className="btn-primary min-h-11 justify-center">React Flow testen</Link>
+            <Link to={`/projekte/${id}/schema-cad`} className="btn-secondary min-h-11 justify-center border-indigo-200 bg-white text-indigo-900">Konva testen</Link>
+          </div>
         </div>
         <div className="mb-6 grid gap-4 sm:grid-cols-3">
           {TOOLS.map(({ to, icon: Icon, title, text, primary }) => (

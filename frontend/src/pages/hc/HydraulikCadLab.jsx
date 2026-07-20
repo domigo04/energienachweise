@@ -559,6 +559,7 @@ export default function HydraulikCadLab() {
         <div className="ml-auto flex items-center gap-1">
           <button className="btn-ghost min-h-10" onClick={undo} title="Rückgängig"><Undo2 className="size-4" /></button>
           <button className="btn-ghost min-h-10" onClick={redo} title="Wiederholen"><Redo2 className="size-4" /></button>
+          <Link to={`/projekte/${projectId}/schema-reactflow`} className="btn-secondary min-h-10"><GitCompareArrows className="size-4" /> <span className="hidden sm:inline">React Flow testen</span><span className="sm:hidden">RF</span></Link>
           <Link to={`/projekte/${projectId}/schema`} className="btn-secondary min-h-10"><GitCompareArrows className="size-4" /> <span className="hidden sm:inline">Mit altem Editor vergleichen</span><span className="sm:hidden">Alt</span></Link>
         </div>
       </header>

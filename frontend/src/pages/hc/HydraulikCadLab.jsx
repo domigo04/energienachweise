@@ -1,13 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import Konva from "konva";
 import { Circle, Group, Layer, Line, Rect, Shape, Stage, Text } from "react-konva";
 import { ArrowLeft, Boxes, Check, GitCompareArrows, Hand, MousePointer2, Redo2, RotateCcw, Trash2, Undo2, ZoomIn, ZoomOut } from "lucide-react";
 import { getProject } from "../../api/hcApi";
 
 const GRID = 20;
+const FRAME_MS = 1000 / 24;
 const COLORS = { vl: "#ef4444", rl: "#3b82f6", neutral: "#334155" };
 const snap = (value) => Math.round(value / GRID) * GRID;
 const uid = (prefix) => `${prefix}_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+
+// Retina rendert Canvas sonst mit vierfacher Pixelzahl. Für technische Linien
+// ist 1:1 deutlich schneller und weiterhin scharf genug.
+Konva.pixelRatio = 1;
 
 const NODE_SPECS = {
   verteiler: {
@@ -60,7 +66,9 @@ function demoGraph() {
 function portPosition(nodes, endpoint) {
   const node = nodes.find((item) => item.id === endpoint.nodeId);
   const port = node && NODE_SPECS[node.type].ports.find((item) => item.id === endpoint.portId);
-  return node && port ? { x: node.x + port.x, y: node.y + port.y, ...port } : null;
+  // Reihenfolge ist wichtig: erst Port-Metadaten, danach absolute Koordinaten.
+  // Andernfalls überschreiben port.x/port.y die Canvas-Position des Bauteils.
+  return node && port ? { ...port, x: node.x + port.x, y: node.y + port.y } : null;
 }
 
 function routeForEdge(nodes, edge) {
@@ -104,7 +112,7 @@ function Grid({ view, size }) {
 
 function SpeicherSymbol() {
   return (
-    <Group>
+    <Group listening={false}>
       {/* 1:1 aus dem bestehenden SymSpeicher auf Canvas übertragen */}
       <Rect x={3} y={3} width={66} height={119} cornerRadius={8} fill="#fef2f2" stroke="#dc2626" strokeWidth={2.5} />
       <Line points={[3, 43, 69, 43]} stroke="#fca5a5" strokeWidth={1.2} dash={[5, 3]} />
@@ -122,7 +130,7 @@ function SpeicherSymbol() {
 function VerteilerSymbol() {
   const branches = [160, 300, 440];
   return (
-    <Group>
+    <Group listening={false}>
       {branches.map((x) => <Line key={x} points={[x, 50, x, 180]} stroke="#d7dee8" strokeWidth={1.3} dash={[5, 7]} />)}
       <Rect x={0} y={0} width={520} height={50} cornerRadius={5} fill={COLORS.vl} />
       <Rect x={0} y={180} width={520} height={50} cornerRadius={5} fill={COLORS.rl} />
@@ -143,7 +151,7 @@ function HydraulikgruppeSymbol({ label }) {
     </Group>
   );
   return (
-    <Group>
+    <Group listening={false}>
       <Line points={[cx, 0, cx, 85]} stroke={COLORS.vl} strokeWidth={3} />
       <Line points={[cx, 205, cx, 280]} stroke={COLORS.rl} strokeWidth={3} />
       {valve(24)}
@@ -171,6 +179,8 @@ function CadNode({ node, selected, tool, connectionStart, onSelect, onMoveStart,
       onDragStart={onMoveStart}
       onDragMove={(event) => onMove(node.id, event.target.x(), event.target.y())}
       onDragEnd={(event) => onMoveEnd(node.id, snap(event.target.x()), snap(event.target.y()))}>
+      {/* Pro Bauteil nur eine einzige Trefferfläche statt jedes SVG-Detail. */}
+      <Rect width={spec.width} height={spec.height} fill="rgba(255,255,255,0.001)" />
       {selected && <Rect x={-10} y={-10} width={spec.width + 20} height={spec.height + 20} cornerRadius={8} stroke="#2563eb" strokeWidth={2} dash={[7, 4]} listening={false} />}
       {node.type === "verteiler" && <VerteilerSymbol />}
       {node.type === "gruppe" && <HydraulikgruppeSymbol label={node.label} />}
@@ -232,6 +242,11 @@ export default function HydraulikCadLab() {
     if (containerRef.current) observer.observe(containerRef.current);
     return () => observer.disconnect();
   }, []);
+  useEffect(() => () => {
+    if (nodeFrameRef.current) clearTimeout(nodeFrameRef.current);
+    if (edgeFrameRef.current) clearTimeout(edgeFrameRef.current);
+    if (pointerFrameRef.current) clearTimeout(pointerFrameRef.current);
+  }, []);
 
   const checkpoint = useCallback(() => {
     undoRef.current = [...undoRef.current.slice(-39), JSON.parse(JSON.stringify(graph))];
@@ -285,14 +300,14 @@ export default function HydraulikCadLab() {
   const moveNodeLive = (nodeId, x, y) => {
     pendingNodeMoveRef.current = { nodeId, x, y };
     if (nodeFrameRef.current) return;
-    nodeFrameRef.current = requestAnimationFrame(() => {
+    nodeFrameRef.current = setTimeout(() => {
       const pending = pendingNodeMoveRef.current;
       if (pending) setLiveNodePositions((current) => ({ ...current, [pending.nodeId]: { x: pending.x, y: pending.y } }));
       nodeFrameRef.current = null;
-    });
+    }, FRAME_MS);
   };
   const moveNodeEnd = (nodeId, x, y) => {
-    if (nodeFrameRef.current) cancelAnimationFrame(nodeFrameRef.current);
+    if (nodeFrameRef.current) clearTimeout(nodeFrameRef.current);
     nodeFrameRef.current = null; pendingNodeMoveRef.current = null;
     setLiveNodePositions((current) => { const next = { ...current }; delete next[nodeId]; return next; });
     setGraph((current) => ({ ...current, nodes: current.nodes.map((node) => node.id === nodeId ? { ...node, x, y } : node) }));
@@ -325,14 +340,14 @@ export default function HydraulikCadLab() {
   const updateEdgeMidLive = (edge, route, position) => {
     pendingEdgeMoveRef.current = { edgeId: edge.id, mid: route.horizontal ? { x: snap(position.x) } : { y: snap(position.y) } };
     if (edgeFrameRef.current) return;
-    edgeFrameRef.current = requestAnimationFrame(() => {
+    edgeFrameRef.current = setTimeout(() => {
       const pending = pendingEdgeMoveRef.current;
       if (pending) setLiveEdgeMids((current) => ({ ...current, [pending.edgeId]: pending.mid }));
       edgeFrameRef.current = null;
-    });
+    }, FRAME_MS);
   };
   const updateEdgeMidEnd = (edgeId) => {
-    if (edgeFrameRef.current) cancelAnimationFrame(edgeFrameRef.current);
+    if (edgeFrameRef.current) clearTimeout(edgeFrameRef.current);
     edgeFrameRef.current = null;
     const mid = pendingEdgeMoveRef.current?.edgeId === edgeId ? pendingEdgeMoveRef.current.mid : liveEdgeMids[edgeId];
     pendingEdgeMoveRef.current = null;
@@ -357,10 +372,10 @@ export default function HydraulikCadLab() {
     if (!pointer) return;
     pendingPointerRef.current = { x: (pointer.x - view.x) / view.scale, y: (pointer.y - view.y) / view.scale };
     if (pointerFrameRef.current) return;
-    pointerFrameRef.current = requestAnimationFrame(() => {
+    pointerFrameRef.current = setTimeout(() => {
       if (pendingPointerRef.current) setConnectionPointer(pendingPointerRef.current);
       pointerFrameRef.current = null;
-    });
+    }, FRAME_MS);
   };
   const connectionOrigin = connectionStart ? portPosition(renderNodes, connectionStart) : null;
   const previewPoints = connectionOrigin && connectionPointer ? (() => {
@@ -379,6 +394,7 @@ export default function HydraulikCadLab() {
         <span className="hidden text-slate-200 sm:inline">|</span>
         <div className="flex items-center gap-2 font-bold"><Boxes className="size-4 text-brand-600" /> CAD-Lab</div>
         <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold text-amber-800">Prototyp · separat gespeichert</span>
+        <span className="rounded-full bg-green-100 px-2.5 py-1 text-[11px] font-bold text-green-700">24 FPS Interaktion</span>
         <div className="ml-auto flex items-center gap-1">
           <button className="btn-ghost min-h-10" onClick={undo} title="Rückgängig"><Undo2 className="size-4" /></button>
           <button className="btn-ghost min-h-10" onClick={redo} title="Wiederholen"><Redo2 className="size-4" /></button>

@@ -7,7 +7,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   AlertTriangle, Calculator, Check, ChevronRight, Database,
-  FileSpreadsheet, FileText, Pencil, RefreshCw, RotateCcw, X,
+  FileSpreadsheet, FileText, ListChecks, Pencil, RefreshCw, RotateCcw, X,
 } from "lucide-react";
 import {
   bauindexAutomatischAktualisieren, getBauindex, getProject,
@@ -144,9 +144,25 @@ export default function GrobkostenSchaetzung() {
 
   const aktiv = result?.[variante];
   const refsVerwendet = aktiv?.referenzen_verwendet || [];
-  const positionenOhneAngabe = aktiv?.gruppen.flatMap((g) => g.positionen)
-    .filter((p) => p.betrag == null) || [];
+  const allePositionen = aktiv?.gruppen.flatMap((g) => g.positionen) || [];
+  const positionenOhneAngabe = allePositionen.filter((p) => p.betrag == null);
   const ignorierteWarnungen = new Set(form.ignorierte_warnungen || []);
+  const manuellePositionen = allePositionen.filter((p) => p.quelle === "manuell");
+  const schwachePositionen = allePositionen.filter((p) =>
+    p.quelle !== "manuell" && p.betrag != null && p.mit_kostenangabe <= 3
+  );
+  const belastbarePositionen = allePositionen.filter((p) =>
+    p.quelle !== "manuell" && p.betrag != null && p.mit_kostenangabe > 3
+  );
+  const offenePruefungen = [...positionenOhneAngabe, ...schwachePositionen].filter((p) =>
+    !ignorierteWarnungen.has(`position:${p.bkp_nr}:datenbasis`)
+  );
+  const naechstePruefungOeffnen = () => {
+    const bkpNr = offenePruefungen[0]?.bkp_nr;
+    if (!bkpNr) return;
+    setOffen(bkpNr);
+    setTimeout(() => document.getElementById(`bkp-${bkpNr}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
+  };
   const warnungIgnorieren = (warnungId) => setForm((f) => ({
     ...f,
     ignorierte_warnungen: [...new Set([...(f.ignorierte_warnungen || []), warnungId])],
@@ -313,9 +329,28 @@ export default function GrobkostenSchaetzung() {
             <div className="card border-red-200 bg-red-50/60 px-5 py-5">
               <h3 className="text-sm font-bold text-slate-800">Keine passenden Referenzprojekte gefunden</h3>
               <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
-                Damit eine Referenz zählt, müssen <b>Nutzung</b> (z.B. MFH), <b>Wärmepumpen-Art</b>,
+                Damit eine Referenz zählt, müssen <b>Nutzung</b> (z.B. MFH), <b>Wärmeerzeuger-Kombination</b>,
                 <b> Projektart</b> und <b>Erdsonden ja/nein</b> exakt übereinstimmen. In der Auswertung gibt
-                es dafür noch kein passendes Referenzprojekt mit BKP-Kosten — erfasse eines oder lade die Beispieldaten.
+                es dafür noch kein Projekt, das alle Merkmale gleichzeitig erfüllt.
+              </p>
+              {aktiv.referenzfilter && (
+                <div className="mt-3 grid gap-1.5 text-xs sm:grid-cols-2">
+                  {[
+                    ["Nutzung", aktiv.referenzfilter.nutzung],
+                    ["Wärmeerzeuger", aktiv.referenzfilter.waermeerzeuger],
+                    ["Projektart", aktiv.referenzfilter.projektart],
+                    ["Erdsonden", aktiv.referenzfilter.erdsonden],
+                  ].map(([label, anzahl]) => (
+                    <div key={label} className={`flex justify-between rounded border px-2.5 py-1.5 ${anzahl > 0
+                      ? "border-slate-200 bg-white text-slate-600"
+                      : "border-red-200 bg-red-100/60 text-red-800"}`}>
+                      <span>{label} passend</span><b>{anzahl} / {aktiv.referenzfilter.gesamt}</b>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p className="mt-2 text-xs text-slate-500">
+                Die Zählungen gelten je Merkmal einzeln. Erfasse eine passende Referenz oder ergänze die Beträge manuell.
               </p>
               <Link to="/auswertung" className="btn-secondary mt-3"><Database className="size-4" /> Zur Auswertung</Link>
             </div>
@@ -355,7 +390,9 @@ export default function GrobkostenSchaetzung() {
               {/* Kopf: Gesamt + Brutto/Netto-Umschalter + Datenbasis */}
               <div className="grid gap-4 sm:grid-cols-3">
                 <div className="card px-5 py-4">
-                  <div className="text-xs font-medium text-slate-400">Gesamtschätzung ({variante})</div>
+                  <div className="text-xs font-medium text-slate-400">
+                    {aktiv.ist_unvollstaendig ? "Teilbetrag bekannte Positionen" : "Gesamtschätzung"} ({variante})
+                  </div>
                   <div className="mt-1 text-2xl font-bold tabular-nums text-slate-900">{chf(aktiv.gesamt_betrag)}</div>
                   {aktiv.baupreisindex_aktiv && <div className="mt-0.5 text-[11px] text-slate-400">auf heutigem Preisniveau (Baupreisindex)</div>}
                 </div>
@@ -381,6 +418,32 @@ export default function GrobkostenSchaetzung() {
                     <div className="mt-0.5 text-[11px] text-amber-700">Korrektur: {aktiv.korrekturfaktoren.join(" · ")}</div>
                   )}
                 </div>
+              </div>
+
+              {/* Arbeitsstand: macht aus Warnungen eine abarbeitbare Prüfliste. */}
+              <div className="card px-4 py-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="mr-auto flex items-center gap-2">
+                    <ListChecks className="size-4 text-slate-500" />
+                    <span className="text-sm font-semibold text-slate-700">Prüfstand</span>
+                  </div>
+                  <span className="rounded bg-green-50 px-2 py-1 text-xs font-medium text-green-700">{belastbarePositionen.length} belastbar</span>
+                  <span className="rounded bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700">{schwachePositionen.length} prüfen</span>
+                  <span className="rounded bg-red-50 px-2 py-1 text-xs font-medium text-red-700">{positionenOhneAngabe.length} fehlen</span>
+                  <span className="rounded bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700">{manuellePositionen.length} manuell</span>
+                  {offenePruefungen.length > 0 ? (
+                    <button type="button" className="btn-secondary ml-1" onClick={naechstePruefungOeffnen}>
+                      Nächste offene Position
+                    </button>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700">
+                      <Check className="size-3.5" /> Alle Hinweise bearbeitet
+                    </span>
+                  )}
+                </div>
+                <p className="mt-1.5 text-[11px] text-slate-400">
+                  „Prüfen“ bedeutet höchstens drei verwendbare Kostenangaben. Ignorierte Hinweise gelten als bearbeitet.
+                </p>
               </div>
 
               {/* Norm-Leistungsverzeichnis: Positionen je Gruppe + Zwischentotale */}
@@ -409,8 +472,8 @@ export default function GrobkostenSchaetzung() {
                       ))}
                       <tr className="border-t-2 border-slate-300 bg-slate-100 font-bold text-slate-900">
                         <td className="px-4 py-3" colSpan={3}>
-                          Total BKP 24 Heizungsanlage
-                          {positionenOhneAngabe.length > 0 && <span className="ml-2 text-xs font-normal text-amber-700">(unvollständig)</span>}
+                          {positionenOhneAngabe.length > 0 ? "Teilbetrag BKP 24 – bekannte Positionen" : "Total BKP 24 Heizungsanlage"}
+                          {positionenOhneAngabe.length > 0 && <span className="ml-2 text-xs font-normal text-red-700">(kein Gesamttotal)</span>}
                         </td>
                         <td className="px-2 py-3 text-right tabular-nums">{chf(aktiv.gesamt_betrag)}</td>
                         <td />
@@ -526,7 +589,7 @@ function GruppenBlock({
         const hatWarnung = keineAngaben || p.mit_kostenangabe <= 3;
         return (
           <Fragment key={key}>
-            <tr onClick={() => setOffen(auf ? null : key)}
+            <tr id={`bkp-${key}`} onClick={() => setOffen(auf ? null : key)}
               className="cursor-pointer border-t border-slate-50 hover:bg-slate-50/70">
               <td className="py-1.5 pl-8 pr-2 tabular-nums text-slate-500">{p.bkp_nr}</td>
               <td className={"px-2 py-1.5 " + (hasBetrag ? "text-slate-700" : "text-slate-400")}>
@@ -636,6 +699,9 @@ function GruppenBlock({
                               {r.id ? <Link to={`/auswertung/${r.id}`} state={{ zurueck: { to: `/projekte/${projektId}/kostenschaetzung`, label: "Grobkostenschätzung" } }}
                                 className="font-medium hover:text-brand-600 hover:underline">{ohnePrefix(r.name)}</Link> : ohnePrefix(r.name)}
                               <span className="ml-1">({num(r.ebf_m2)} m² / {num(r.leistung_kw)} kW)</span>
+                              {(r.waermeerzeuger || []).length > 0 && (
+                                <div className="text-[10px] text-slate-400">{r.waermeerzeuger.join(" + ")}</div>
+                              )}
                             </td>
                             <td className="px-2 py-1.5 text-right tabular-nums">{r.kosten != null ? chf(r.kosten) : "Keine Angabe"}</td>
                             <td className="px-2 py-1.5 text-right tabular-nums">{r.treiber_wert != null ? num(r.treiber_wert) : "–"}</td>
@@ -662,8 +728,14 @@ function ManuellerBetragEditor({ p, variante, wert, autoFocus, onSpeichern, onBe
   const [eingabe, setEingabe] = useState(wert ?? "");
   const inputRef = useRef(null);
   useEffect(() => { if (autoFocus) inputRef.current?.focus(); }, [autoFocus]);
-  const zahlWert = eingabe === "" ? null : Number(eingabe);
+  const normalisiert = String(eingabe).replace(/[’'\s]/g, "").replace(",", ".");
+  const zahlWert = normalisiert === "" ? null : Number(normalisiert);
   const gueltig = zahlWert != null && Number.isFinite(zahlWert) && zahlWert >= 0;
+  const vorschlagEinsetzen = (faktor = 1) => {
+    if (p.berechneter_betrag == null) return;
+    setEingabe(String(Math.round(p.berechneter_betrag * faktor / 100) * 100));
+    inputRef.current?.focus();
+  };
   return (
     <form className={`mt-3 rounded-md border p-3 ${autoFocus ? "border-blue-300 bg-blue-50/40" : "border-slate-200 bg-white"}`}
       onSubmit={(e) => { e.preventDefault(); if (gueltig) onSpeichern(zahlWert); }}>
@@ -678,11 +750,24 @@ function ManuellerBetragEditor({ p, variante, wert, autoFocus, onSpeichern, onBe
         </div>
         {p.quelle === "manuell" && <span className="rounded bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-700">Manueller Wert aktiv</span>}
       </div>
+      {p.berechneter_betrag != null && (
+        <div className="mb-2 flex flex-wrap items-center gap-1.5">
+          <span className="mr-1 text-[11px] text-slate-400">Ausgangspunkt:</span>
+          <button type="button" className="rounded border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 hover:border-blue-300 hover:text-blue-700"
+            onClick={() => vorschlagEinsetzen(1)}>Vorschlag</button>
+          <button type="button" className="rounded border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 hover:border-blue-300 hover:text-blue-700"
+            onClick={() => vorschlagEinsetzen(0.9)}>−10 %</button>
+          <button type="button" className="rounded border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 hover:border-blue-300 hover:text-blue-700"
+            onClick={() => vorschlagEinsetzen(1.1)}>+10 %</button>
+          <button type="button" className="rounded border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 hover:border-blue-300 hover:text-blue-700"
+            onClick={() => vorschlagEinsetzen(1.2)}>+20 %</button>
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-[220px] flex-1">
           <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 font-semibold text-slate-400">CHF</span>
-          <input ref={inputRef} type="number" min="0" step="100" className="input pl-12 text-right font-semibold tabular-nums"
-            value={eingabe} placeholder="Betrag eingeben"
+          <input ref={inputRef} type="text" inputMode="decimal" className="input pl-12 text-right font-semibold tabular-nums"
+            value={eingabe} placeholder="z.B. 45'000"
             onChange={(e) => setEingabe(e.target.value)} />
         </div>
         <button type="submit" className="btn-primary" disabled={!gueltig}>
@@ -695,7 +780,13 @@ function ManuellerBetragEditor({ p, variante, wert, autoFocus, onSpeichern, onBe
         )}
         {autoFocus && <button type="button" className="rounded p-2 text-slate-400 hover:bg-slate-100" title="Abbrechen" onClick={onAbbrechen}><X className="size-4" /></button>}
       </div>
-      <p className="mt-1.5 text-[11px] text-slate-400">Erst mit «Übernehmen» wird der Wert gespeichert und in das Total aufgenommen.</p>
+      <p className={`mt-1.5 text-[11px] ${eingabe !== "" && !gueltig ? "text-red-600" : "text-slate-400"}`}>
+        {eingabe !== "" && !gueltig
+          ? "Bitte einen gültigen CHF-Betrag eingeben. Apostrophe und Leerzeichen sind erlaubt."
+          : gueltig
+            ? `${chf(zahlWert)} wird mit «Übernehmen» gespeichert und in das Total aufgenommen.`
+            : "Betrag eingeben und mit «Übernehmen» in das Total aufnehmen."}
+      </p>
     </form>
   );
 }

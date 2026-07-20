@@ -10,7 +10,7 @@ Ausgabe auf Ebene der BKP-EINZELPOSITIONEN (Norm-Leistungsverzeichnis, Dominic
 dürfen den Kennwert deshalb nicht als fiktive 0 Franken nach unten ziehen.
 
 Ablauf:
-1. Ähnlichkeitssuche (Hard-Filter + Score + Zeitgewicht) — unverändert.
+1. Ähnlichkeitssuche (Hard-Filter + Score + Zeitgewicht).
 2. Je Position: gewichteter Kennwert (Betrag ÷ Bezugsgrösse) nur über
    Referenzen mit einer positiven Kostenangabe → × Bezugsgrösse des Zielprojekts.
 3. Korrekturfaktoren (Sanierung/Weiterbetrieb/Etappierung) und Baupreisindex.
@@ -21,6 +21,7 @@ from typing import Optional
 
 from app.calculations.kostenschaetzung import index_faktor  # Baupreisindex — gleiche Logik wie im alten System
 from app.data.bkp_positionen import BKP_GRUPPEN, abgabe_klassen_von, filter_positionen, treiber_fuer_bkp
+from app.data.waermeerzeuger import erzeuger_signatur_von
 
 WOHNNUTZUNGEN = {"MFH", "EFH"}
 BKP_GRUPPEN_ALLE = ["241", "242", "243", "247", "248", "249"]
@@ -56,17 +57,52 @@ def alter_in_jahren(datum_abrechnung: date, heute: Optional[date] = None) -> flo
 
 # ── Ähnlichkeitssuche ───────────────────────────────────────────────────────
 
+def _erzeuger_filterwert(projekt: dict):
+    signatur = projekt.get("erzeuger_signatur")
+    if signatur is None and "waermeerzeuger" in projekt:
+        signatur = erzeuger_signatur_von(projekt.get("waermeerzeuger"))
+    return signatur
+
+
+def _erzeuger_gleich(kandidat: dict, ziel: dict) -> bool:
+    kandidat_signatur = _erzeuger_filterwert(kandidat)
+    ziel_signatur = _erzeuger_filterwert(ziel)
+    if kandidat_signatur is not None or ziel_signatur is not None:
+        return kandidat_signatur == ziel_signatur
+    return kandidat.get("wp_typ") == ziel.get("wp_typ")
+
+
 def hard_filter(kandidat: dict, ziel: dict) -> bool:
     """Muss EXAKT identisch sein, sonst scheidet die Referenz aus (Dominic
-    2026-07-19): Nutzung/Gebäudekategorie, Wärmepumpen-Art, Projektart,
+    2026-07-19): Nutzung/Gebäudekategorie, Erzeuger-Kombination, Projektart,
     Erdsonden ja/nein. Die Wärmeabgabe ist bewusst NICHT hier — sie steuert
-    nur, welche Kosten-Positionen übernommen werden (siehe schaetze_position)."""
+    nur, welche Kosten-Positionen übernommen werden (siehe schaetze_position).
+    Die Signatur präzisiert dabei die bestehende WP-Art: Gas, Öl, Fernwärme und
+    Hybridanlagen dürfen nicht gemeinsam unter ``wp_typ=None`` landen."""
     return (
         kandidat.get("nutzung") == ziel.get("nutzung")
-        and kandidat.get("wp_typ") == ziel.get("wp_typ")
+        and _erzeuger_gleich(kandidat, ziel)
         and kandidat.get("projektart") == ziel.get("projektart")
         and bool(kandidat.get("hat_erdsonden")) == bool(ziel.get("hat_erdsonden"))
     )
+
+
+def analysiere_referenzfilter(kandidaten: list, ziel: dict) -> dict:
+    """Macht den harten Filter erklärbar, ohne seine Regeln zu verändern.
+
+    Die Einzelzahlen sind unabhängig voneinander: So sieht man auch bei null
+    Endtreffern, für welches Merkmal grundsätzlich Daten vorhanden wären.
+    """
+    return {
+        "gesamt": len(kandidaten),
+        "nutzung": sum(k.get("nutzung") == ziel.get("nutzung") for k in kandidaten),
+        "waermeerzeuger": sum(_erzeuger_gleich(k, ziel) for k in kandidaten),
+        "projektart": sum(k.get("projektart") == ziel.get("projektart") for k in kandidaten),
+        "erdsonden": sum(
+            bool(k.get("hat_erdsonden")) == bool(ziel.get("hat_erdsonden")) for k in kandidaten
+        ),
+        "alle_kriterien": sum(hard_filter(k, ziel) for k in kandidaten),
+    }
 
 
 def groessennaehe(a: Optional[float], b: Optional[float]) -> float:
@@ -342,6 +378,8 @@ def schaetze_position(pos: dict, segment: list, ziel: dict) -> dict:
             "datum_abrechnung": r.get("datum_abrechnung"),
             "ebf_m2": r.get("ebf_m2"), "leistung_kw": r.get("leistung_kw"),
             "anzahl_ne": r.get("anzahl_ne"),
+            "waermeerzeuger": list(r.get("waermeerzeuger") or []),
+            "erzeuger_signatur": r.get("erzeuger_signatur"),
             "abgabe_klassen": sorted(r.get("abgabe_klassen") or []),
             "treiber_wert": drv, "kosten": betrag,
             "kennwert": None, "gewicht": round(positionsgewicht, 4),
@@ -514,4 +552,5 @@ def berechne_grobkostenschaetzung(ziel: dict, referenzen_roh: list, faktoren: li
         "referenzen_im_segment": len(segment),
         "baupreisindex_aktiv": baupreisindex_aktiv,
         "referenzen_verwendet": top,
+        "referenzfilter": analysiere_referenzfilter(referenzen_roh, ziel),
     }

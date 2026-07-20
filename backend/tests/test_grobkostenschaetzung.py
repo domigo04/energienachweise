@@ -6,6 +6,7 @@ import pytest
 
 from app.calculations.grobkostenschaetzung import (
     abgabe_naehe,
+    analysiere_referenzfilter,
     abgabetyp_naehe,
     aehnlichkeits_score,
     alter_in_jahren,
@@ -25,6 +26,7 @@ from app.calculations.grobkostenschaetzung import (
     zertifizierungs_naehe,
 )
 from app.data.bkp_positionen import abgabe_klassen_von, filter_positionen
+from app.data.waermeerzeuger import erzeuger_klassen_von, erzeuger_signatur_von
 
 
 # ── Zeitgewicht ──────────────────────────────────────────────────────────────
@@ -241,6 +243,50 @@ def test_hard_filter():
     assert hard_filter({**passt, "wp_typ": "luft"}, ziel) is False
     assert hard_filter({**passt, "projektart": "Sanierung"}, ziel) is False
     assert hard_filter({**passt, "hat_erdsonden": False}, ziel) is False
+
+
+def test_erzeuger_signatur_ist_reihenfolgeunabhaengig_und_eindeutig():
+    assert erzeuger_klassen_von(["Gas", "Erdsonden-WP", "Gas"]) == ("gas", "sole_wp")
+    assert erzeuger_signatur_von(["Gas", "Erdsonden-WP"]) == erzeuger_signatur_von(
+        ["Erdsonden-WP", "Gas"]
+    )
+    assert erzeuger_signatur_von(["Gas"]) != erzeuger_signatur_von(["Öl"])
+
+
+def test_hard_filter_trennt_nicht_wp_erzeuger_trotz_wp_typ_none():
+    ziel = {
+        "nutzung": "MFH", "projektart": "Neubau", "wp_typ": None,
+        "hat_erdsonden": False, "waermeerzeuger": ["Gas"],
+    }
+    assert hard_filter({**ziel}, ziel) is True
+    assert hard_filter({**ziel, "waermeerzeuger": ["Öl"]}, ziel) is False
+    assert hard_filter({**ziel, "waermeerzeuger": ["Fernwärme"]}, ziel) is False
+
+
+def test_hard_filter_hybridanlage_nur_mit_exakt_gleicher_kombination():
+    basis = {"nutzung": "MFH", "projektart": "Neubau", "wp_typ": "sole", "hat_erdsonden": True}
+    ziel = {**basis, "waermeerzeuger": ["Erdsonden-WP", "Gas"]}
+    assert hard_filter({**basis, "waermeerzeuger": ["Gas", "Erdsonden-WP"]}, ziel) is True
+    assert hard_filter({**basis, "waermeerzeuger": ["Erdsonden-WP"]}, ziel) is False
+    assert hard_filter({**basis, "waermeerzeuger": ["Erdsonden-WP", "Öl"]}, ziel) is False
+
+
+def test_referenzfilter_analyse_zeigt_jedes_kriterium_einzeln():
+    ziel = {
+        "nutzung": "MFH", "projektart": "Neubau", "wp_typ": None,
+        "hat_erdsonden": False, "waermeerzeuger": ["Gas"],
+    }
+    refs = [
+        {**ziel, "name": "passt"},
+        {**ziel, "name": "Öl", "waermeerzeuger": ["Öl"]},
+        {**ziel, "name": "Büro", "nutzung": "Büro"},
+        {**ziel, "name": "Sanierung", "projektart": "Sanierung"},
+    ]
+    analyse = analysiere_referenzfilter(refs, ziel)
+    assert analyse == {
+        "gesamt": 4, "nutzung": 3, "waermeerzeuger": 3,
+        "projektart": 3, "erdsonden": 4, "alle_kriterien": 1,
+    }
 
 
 def test_aehnlichkeits_score_perfekter_treffer_ist_1():

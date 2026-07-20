@@ -9,8 +9,8 @@ Ebene der BKP-Einzelpositionen auf (wie ein Norm-Leistungsverzeichnis).
 - POST/DELETE /beispieldaten   → ~80 Demo-Referenzprojekte in der Auswertung
 
 Zielprojekt und Referenzprojekte werden gleich beschrieben: Wärmeerzeuger- und
-Wärmeabgabe-Auswahl (Mehrfach) → Wärmepumpen-Art / Erdsonden / dominanter
-Abgabetyp über dieselben Hilfsfunktionen. Die Kostenzeilen der Referenzen sind
+Wärmeabgabe-Auswahl (Mehrfach) → Erzeuger-Signatur / Wärmepumpen-Art /
+Erdsonden / dominanter Abgabetyp über dieselben Hilfsfunktionen. Die Kostenzeilen der Referenzen sind
 bereits auf Positions-Ebene erfasst (RefKostenzeile.bkp_nr = z.B. «243.1»), der
 Adapter reicht sie brutto und netto durch.
 """
@@ -29,6 +29,7 @@ from app.calculations.grobkostenschaetzung import BKP_GRUPPEN_ALLE, berechne_gro
 from app.calculations.kostenschaetzung import netto_aus_brutto
 from app.data.beispiel_referenzprojekte import BEISPIEL_PREFIX, BEISPIEL_PROJEKTE
 from app.data.bkp_positionen import BKP_POSITIONEN, abgabe_klassen_von
+from app.data.waermeerzeuger import erzeuger_signatur_von
 from app.database import get_db
 from app.export.grobkostenschaetzung import (
     erzeuge_grobkostenschaetzung_excel,
@@ -125,12 +126,15 @@ def _positionen(r: RefProjekt, netto: bool) -> dict:
 
 
 def _ref_to_calc_dict(r: RefProjekt) -> dict:
+    waermeerzeuger = list(r.waermeerzeuger or [])
     return {
         "id": r.id, "name": r.name,
         "ebf_m2": r.ebf_m2, "leistung_kw": r.heizleistung_kw,
         "nutzung": r.gebaeudetyp, "projektart": r.projektart,
         "zertifizierung": r.zertifizierung,
-        "wp_typ": _wp_typ_von(r.waermeerzeuger),
+        "waermeerzeuger": waermeerzeuger,
+        "erzeuger_signatur": erzeuger_signatur_von(waermeerzeuger),
+        "wp_typ": _wp_typ_von(waermeerzeuger),
         "abgabe_dominant": _abgabe_dominant_von(r.waermeabgabe),
         "abgabe_klassen": abgabe_klassen_von(r.waermeabgabe),  # welche Abgabe-Kosten die Referenz liefern darf
         "hat_erdsonden": _hat_erdsonden(r.waermeerzeuger),
@@ -159,6 +163,7 @@ def _berechne(body: SchaetzungIn, user: User, db: Session) -> tuple:
         for e in db.query(BauindexEintrag).filter(BauindexEintrag.tenant_id == user.tenant_id).all()
     ]
     ziel = body.model_dump(mode="json")
+    ziel["erzeuger_signatur"] = erzeuger_signatur_von(body.waermeerzeuger)
     ziel["wp_typ"] = _wp_typ_von(body.waermeerzeuger)
     ziel["hat_erdsonden"] = _hat_erdsonden(body.waermeerzeuger)
     ziel["abgabe_dominant"] = _abgabe_dominant_von(body.waermeabgabe)

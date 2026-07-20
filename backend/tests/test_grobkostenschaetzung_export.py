@@ -30,6 +30,7 @@ RESULT = {
                     "status_datenbasis": "Begrenzte Datengrundlage",
                     "herkunft": [{
                         "name": "Referenz MFH", "datum_abrechnung": "2025-05-01",
+                        "waermeerzeuger": ["Erdsonden-WP", "Gas"],
                         "ebf_m2": 1650, "leistung_kw": 58, "kosten": 87000,
                         "treiber_wert": 58, "kennwert": 1500, "gewicht": 0.91,
                     }],
@@ -76,4 +77,16 @@ def test_excel_export_hat_formeln_formatierung_und_referenzdetails():
     assert ws.cell(manuell_row, 8).value == "Manuell"
     refs = wb["Referenzdetails"]
     assert refs["C2"].value == "Referenz MFH"
-    assert refs["G2"].value == 87000
+    assert refs["D2"].value == "Erdsonden-WP + Gas"
+    assert refs["H2"].value == 87000
+
+
+def test_unvollstaendiger_export_bezeichnet_summe_als_teilbetrag():
+    result = {**RESULT, "ist_unvollstaendig": True, "fehlende_positionen": ["243.1"]}
+    xlsx = erzeuge_grobkostenschaetzung_excel("Projekt Test", INPUTS, result, "netto")
+    wb = load_workbook(io.BytesIO(xlsx), data_only=False)
+    assert wb["Kostenschätzung"]["A3"].value == "Teilbetrag bekannte Positionen"
+
+    pdf = erzeuge_grobkostenschaetzung_pdf("Projekt Test", INPUTS, result, "netto")
+    text = "\n".join(page.extract_text() or "" for page in PdfReader(io.BytesIO(pdf)).pages)
+    assert "Teilbetrag bekannte Positionen" in text

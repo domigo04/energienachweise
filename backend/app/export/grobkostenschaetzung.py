@@ -140,8 +140,9 @@ def erzeuge_grobkostenschaetzung_pdf(projekt_name: str, inputs: dict, result: di
         if unvollstaendig else "Schätzung vollständig: alle angezeigten Positionen besitzen einen Endbetrag."
     )
     callout_fg, callout_bg = (ROT, ROT_HELL) if unvollstaendig else (GRUEN, GRUEN_HELL)
+    summen_label = "Teilbetrag bekannte Positionen" if unvollstaendig else "Gesamtschätzung"
     summary = Table([
-        [Paragraph("Gesamtschätzung", styles["body"]), Paragraph(f"<b>{_chf(result.get('gesamt_betrag'))}</b>", styles["right"])],
+        [Paragraph(summen_label, styles["body"]), Paragraph(f"<b>{_chf(result.get('gesamt_betrag'))}</b>", styles["right"])],
         [Paragraph(callout_text, styles["body"]), ""],
     ], colWidths=[115 * mm, 57 * mm])
     summary.setStyle(TableStyle([
@@ -194,10 +195,14 @@ def erzeuge_grobkostenschaetzung_pdf(projekt_name: str, inputs: dict, result: di
         story += [PageBreak(), Paragraph("Herkunftsnachweis", styles["title"]),
                   Paragraph("Nur Referenzprojekte mit einer tatsächlich eingerechneten Kostenangabe sind aufgeführt.", styles["body"]),
                   Spacer(1, 3 * mm)]
-        daten = [["BKP", "Referenzprojekt", "Kosten", "Kennwert", "Gewicht"]]
+        daten = [["BKP", "Referenzprojekt / Erzeuger", "Kosten", "Kennwert", "Gewicht"]]
         for p, h in herkunft:
+            erzeuger = " + ".join(h.get("waermeerzeuger") or [])
+            projekt_text = h.get("name") or "-"
+            if erzeuger:
+                projekt_text = f"{projekt_text}<br/><font color='#{GRAU}'>{erzeuger}</font>"
             daten.append([
-                p.get("bkp_nr") or "", Paragraph(h.get("name") or "-", styles["small"]),
+                p.get("bkp_nr") or "", Paragraph(projekt_text, styles["small"]),
                 _chf(h.get("kosten")), f"{_zahl(h.get('kennwert'), 2)} {p.get('einheit') or ''}",
                 f"{_zahl((h.get('gewicht') or 0) * 100, 1)} %",
             ])
@@ -242,7 +247,7 @@ def erzeuge_grobkostenschaetzung_excel(projekt_name: str, inputs: dict, result: 
     ws["G2"] = "Stand"
     ws["H2"] = date.today()
     ws["H2"].number_format = "dd.mm.yyyy"
-    ws["A3"] = "Gesamtschätzung"
+    ws["A3"] = "Teilbetrag bekannte Positionen" if result.get("ist_unvollstaendig") else "Gesamtschätzung"
     ws["A3"].font = Font(bold=True, color=DUNKEL)
     ws["B3"].font = Font(size=14, bold=True, color=DUNKEL)
     ws["B3"].number_format = '#,##0 "CHF"'
@@ -333,7 +338,7 @@ def erzeuge_grobkostenschaetzung_excel(projekt_name: str, inputs: dict, result: 
 
     ref_ws = wb.create_sheet("Referenzdetails")
     ref_ws.sheet_view.showGridLines = False
-    ref_headers = ["BKP", "Position", "Referenzprojekt", "Datum", "EBF [m²]", "Leistung [kW]", "Kosten [CHF]", "Bezugsgrösse", "Kennwert", "Gewicht"]
+    ref_headers = ["BKP", "Position", "Referenzprojekt", "Wärmeerzeuger", "Datum", "EBF [m²]", "Leistung [kW]", "Kosten [CHF]", "Bezugsgrösse", "Kennwert", "Gewicht"]
     for col, header in enumerate(ref_headers, 1):
         cell = ref_ws.cell(1, col, header)
         cell.fill = PatternFill("solid", fgColor=DUNKEL)
@@ -342,20 +347,21 @@ def erzeuge_grobkostenschaetzung_excel(projekt_name: str, inputs: dict, result: 
     for p in _alle_positionen(result):
         for h in p.get("herkunft") or []:
             werte = [
-                p.get("bkp_nr"), p.get("bezeichnung"), h.get("name"), h.get("datum_abrechnung"),
+                p.get("bkp_nr"), p.get("bezeichnung"), h.get("name"),
+                " + ".join(h.get("waermeerzeuger") or []), h.get("datum_abrechnung"),
                 h.get("ebf_m2"), h.get("leistung_kw"), h.get("kosten"), h.get("treiber_wert"),
                 h.get("kennwert"), h.get("gewicht"),
             ]
             for col, wert in enumerate(werte, 1):
                 ref_ws.cell(ref_row, col, wert)
                 ref_ws.cell(ref_row, col).border = Border(bottom=thin)
-            ref_ws.cell(ref_row, 7).number_format = '#,##0 "CHF"'
-            ref_ws.cell(ref_row, 9).number_format = "#,##0.00"
-            ref_ws.cell(ref_row, 10).number_format = "0.0%"
+            ref_ws.cell(ref_row, 8).number_format = '#,##0 "CHF"'
+            ref_ws.cell(ref_row, 10).number_format = "#,##0.00"
+            ref_ws.cell(ref_row, 11).number_format = "0.0%"
             ref_row += 1
     ref_ws.freeze_panes = "A2"
-    ref_ws.auto_filter.ref = f"A1:J{max(1, ref_row - 1)}"
-    for index, width in enumerate([12, 40, 30, 13, 13, 16, 17, 17, 15, 12], 1):
+    ref_ws.auto_filter.ref = f"A1:K{max(1, ref_row - 1)}"
+    for index, width in enumerate([12, 40, 30, 24, 13, 13, 16, 17, 17, 15, 12], 1):
         ref_ws.column_dimensions[get_column_letter(index)].width = width
     ref_ws.print_title_rows = "1:1"
     ref_ws.sheet_properties.pageSetUpPr.fitToPage = True

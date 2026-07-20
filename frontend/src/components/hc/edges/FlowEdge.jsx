@@ -70,7 +70,15 @@ export function FlowEdge({
         <circle key={`${id}-${side}`} cx={x} cy={y} r={8}
           fill="white" stroke={color} strokeWidth={3.5}
           style={{ pointerEvents: 'all', cursor: 'crosshair' }}
-          onPointerDown={(event) => { event.stopPropagation(); data._onEndpointPointerDown?.(event, id, side); }} />
+          onPointerDown={(event) => {
+            event.stopPropagation();
+            if (event.button === 0) data._onEndpointPointerDown?.(event, id, side);
+          }}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            data._onEndpointContextMenu?.(event, id, side);
+          }} />
       ))}
 
       {/* Nur echte T-Verbindungen erhalten einen kleinen Verbindungspunkt.

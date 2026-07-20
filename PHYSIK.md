@@ -170,6 +170,10 @@ Dimensionierung), ohne dass eine lange Leitung quer durchs Schema gezeichnet wer
 - Der produktive Editor verwendet dieselbe CAD-Zeichenlogik wie der React-Flow-Probeeditor:
   Polylinie wählen, frei in der Fläche beginnen, Klick setzt einen Stützpunkt, Enter oder
   Rechtsklick beendet die Leitung. Shift fängt auf 0°, 45° und 90°.
+- Rechtsklick auf den Anfangs- oder Endgriff einer bestehenden Leitung bietet
+  **«Linie weiterziehen»** an. Die neuen Klickpunkte werden an `data.points` derselben Kante
+  angefügt (am Anfang in umgekehrter Reihenfolge); es entstehen keine unabhängigen
+  Einzelsegmente. Anschluss- und T-Snap gelten auch beim Weiterziehen.
 - `data.cad_polyline=true` kennzeichnet eine bewusst gezeichnete Polylinie; `data.points`
   speichert ihre inneren Stützpunkte. Beides ändert nur die Leitungsführung, nicht die
   hydraulische Verbindung. Der PDF-Export übernimmt dieselbe Polylinie.

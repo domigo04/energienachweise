@@ -190,7 +190,7 @@ function LeitungPanel({ edge, leitungResults, onUpdateEdge, onUpdateLayer, onDel
       )}
       <Div />
       <div style={{ fontSize:9, lineHeight:1.5, color:'#64748b' }}>
-        <b style={{ color:'#334155' }}>Leitungsführung wie im Probe-Editor:</b> Endgriffe oder Stützpunkte direkt ziehen. Doppelklick auf die Leitung fügt einen Punkt ein. Shift rastet auf 0°, 45° oder 90°; Doppelklick auf einen Punkt entfernt ihn.
+        <b style={{ color:'#334155' }}>Leitungsführung wie im Probe-Editor:</b> Rechtsklick auf einen Endgriff → «Linie weiterziehen». Jeder Klick setzt danach einen echten Eckpunkt derselben Polylinie. Endgriffe und Punkte lassen sich direkt ziehen; Shift rastet auf 0°, 45° oder 90°.
       </div>
       <Div /><DelBtn onClick={() => onDelete(edge.id)} />
     </div>
@@ -943,6 +943,7 @@ function EditorInner() {
   const [leitungsEntwurf, setLeitungsEntwurf] = useState(null);
   const [leitungsCursor, setLeitungsCursor] = useState(null);
   const [leitungsSnap, setLeitungsSnap] = useState(null);
+  const [endpointMenu, setEndpointMenu] = useState(null); // { x, y, edgeId, side }
   const [schemaName, setSchemaName] = useState('Schema');
   const [projectName, setProjectName] = useState('');
   const [schemaId, setSchemaId]     = useState(null);
@@ -1275,12 +1276,13 @@ function EditorInner() {
     return draft.startPoint;
   }, [handlePosition]);
 
-  const leitungsEntwurfStarten = useCallback((startPoint, startEndpoint = null) => {
+  const leitungsEntwurfStarten = useCallback((startPoint, startEndpoint = null, options = {}) => {
     const draft = {
-      layerId:activeLayer.id,
+      layerId:options.layerId || activeLayer.id,
       startPoint,
       startEndpoint,
       points:[],
+      ...options,
     };
     leitungsEntwurfRef.current = draft;
     setLeitungsEntwurf(draft);
@@ -1290,7 +1292,25 @@ function EditorInner() {
     setSelected(null);
     setSelectedEdgeId(null);
     setWerkzeug('line');
+    setEndpointMenu(null);
   }, [activeLayer.id]);
+
+  const leitungWeiterziehen = useCallback((edgeId, side) => {
+    const edge = edgesRef.current.find(item => item.id === edgeId);
+    if (!edge) return;
+    const route = routePunkte(edge);
+    if (route.length < 2) return;
+    const startPoint = side === 'source' ? route[0] : route.at(-1);
+    const nodeId = side === 'source' ? edge.source : edge.target;
+    const handleId = side === 'source' ? edge.sourceHandle : edge.targetHandle;
+    const layer = layerVonEdge(edge);
+    layerWaehlen(layer.id);
+    leitungsEntwurfStarten(startPoint, { nodeId, handleId }, {
+      layerId:layer.id,
+      extendEdgeId:edge.id,
+      extendSide:side,
+    });
+  }, [layerWaehlen, leitungsEntwurfStarten, routePunkte]);
 
   const leitungsEntwurfAbschliessen = useCallback((rawPoint, snapHit = null, shift = false) => {
     const draft = leitungsEntwurfRef.current;
@@ -1306,6 +1326,68 @@ function EditorInner() {
     if (!startPoint || Math.hypot(endPoint.x - startPoint.x, endPoint.y - startPoint.y) < 2) return;
 
     snap();
+
+    if (draft.extendEdgeId) {
+      const existing = edgesRef.current.find(item => item.id === draft.extendEdgeId);
+      if (!existing) return;
+      const side = draft.extendSide;
+      const oldEndpointNodeId = side === 'source' ? existing.source : existing.target;
+      const oldEndpointNode = nodesRef.current.find(node => node.id === oldEndpointNodeId);
+      const incidentCount = edgesRef.current.filter(item => item.source === oldEndpointNodeId || item.target === oldEndpointNodeId).length;
+      const reusableAnchorId = oldEndpointNode?.type === 'junction'
+        && oldEndpointNode.data?.cad_anchor
+        && incidentCount === 1
+        ? oldEndpointNode.id
+        : null;
+      const finalAnchorId = snapHit?.type === 'port' ? null : reusableAnchorId || newId();
+
+      if (finalAnchorId && finalAnchorId !== reusableAnchorId) {
+        setNodes(items => [...items, cadAnker(finalAnchorId, endPoint, layer)]);
+      } else if (finalAnchorId) {
+        setNodes(items => items.map(node => node.id === finalAnchorId ? { ...node, position:endPoint } : node));
+      } else if (reusableAnchorId) {
+        setNodes(items => items.filter(node => node.id !== reusableAnchorId));
+      }
+
+      const existingRoute = routePunkte(existing);
+      const oldInnerPoints = existing.data?.cad_polyline
+        ? [...(existing.data?.points || [])]
+        : existingRoute.slice(1, -1);
+      const newEndpoint = snapHit?.type === 'port'
+        ? { nodeId:snapHit.nodeId, handleId:snapHit.handleId }
+        : { nodeId:finalAnchorId, handleId:side === 'source' ? 'center-source' : 'center-target' };
+      const nextPoints = side === 'source'
+        ? [...(draft.points || [])].reverse().concat(startPoint, oldInnerPoints)
+        : oldInnerPoints.concat(startPoint, draft.points || []);
+      const extended = {
+        ...existing,
+        ...(side === 'source'
+          ? { source:newEndpoint.nodeId, sourceHandle:newEndpoint.handleId }
+          : { target:newEndpoint.nodeId, targetHandle:newEndpoint.handleId }),
+        data:{ ...(existing.data || {}), layer_id:layer.id, cad_polyline:true, points:nextPoints },
+        style:{ ...(existing.style || {}), stroke:layer.color, strokeWidth:4.5 },
+      };
+
+      if (snapHit?.type === 'line') {
+        const [first, second] = leitungTeilen(snapHit, finalAnchorId, layer.id);
+        setEdges(items => [
+          ...items.filter(item => item.id !== existing.id && item.id !== snapHit.edge.id),
+          first, second, extended,
+        ]);
+      } else {
+        setEdges(items => items.map(item => item.id === existing.id ? extended : item));
+      }
+
+      leitungsEntwurfRef.current = null;
+      setLeitungsEntwurf(null);
+      setLeitungsSnap(null);
+      setLeitungsCursor(null);
+      leitungsCursorRef.current = null;
+      setWerkzeug('select');
+      setSelectedEdgeId(existing.id);
+      return;
+    }
+
     const createdNodes = [];
     const sourceAnchorId = draft.startEndpoint ? null : newId();
     const targetAnchorId = snapHit?.type === 'port' ? null : newId();
@@ -1339,7 +1421,7 @@ function EditorInner() {
     leitungsCursorRef.current = null;
     setWerkzeug('select');
     setSelectedEdgeId(edgeId);
-  }, [activeLayer, cadAnker, handlePosition, letzterEntwurfsPunkt, leitungTeilen, setEdges, setNodes, snap]);
+  }, [activeLayer, cadAnker, handlePosition, letzterEntwurfsPunkt, leitungTeilen, routePunkte, setEdges, setNodes, snap]);
 
   const cadKlick = useCallback((event, nurBeiAnschluss = false) => {
     if (werkzeug !== 'line') return false;
@@ -1364,7 +1446,8 @@ function EditorInner() {
       return true;
     }
     if (nurBeiAnschluss) return true;
-    const lineHit = naechsteLeitung(raw, layer.id, 22 / zoom);
+    const excludedEdges = draft.extendEdgeId ? new Set([draft.extendEdgeId]) : new Set();
+    const lineHit = naechsteLeitung(raw, layer.id, 22 / zoom, excludedEdges);
     if (lineHit) {
       leitungsEntwurfAbschliessen(lineHit, { ...lineHit, type:'line' }, event.shiftKey || shiftPressed);
       return true;
@@ -1419,7 +1502,8 @@ function EditorInner() {
         setLeitungsSnap({ ...portHit, ...portHit.position, type:'port' });
         return;
       }
-      const lineHit = naechsteLeitung(raw, layer.id, 22 / zoom);
+      const excludedEdges = draft.extendEdgeId ? new Set([draft.extendEdgeId]) : new Set();
+      const lineHit = naechsteLeitung(raw, layer.id, 22 / zoom, excludedEdges);
       setLeitungsSnap(lineHit ? { ...lineHit, type:'line' } : null);
     });
   }, [activeLayer, getZoom, naechsteLeitung, naechsterBauteilAnschluss, screenToFlowPosition]);
@@ -1548,6 +1632,12 @@ function EditorInner() {
     setSelected(null);
   }, [cadAnker, routePunkte, setEdges, setNodes, snap]);
 
+  const endpointContextMenu = useCallback((event, edgeId, side) => {
+    setSelectedEdgeId(edgeId);
+    setSelected(null);
+    setEndpointMenu({ x:event.clientX, y:event.clientY, edgeId, side });
+  }, []);
+
   useEffect(() => {
     const punktFuerEvent = (event, drag) => {
       const raw = screenToFlowPosition({ x:event.clientX, y:event.clientY });
@@ -1618,6 +1708,10 @@ function EditorInner() {
           data: { ...src.data, ...(NUMMERIERT.includes(src.type) ? { nr: naechsteNr(ns) } : {}) } }]);
       }
       if (!ev.metaKey && !ev.ctrlKey) {
+        if (ev.key === 'Escape' && endpointMenu) {
+          setEndpointMenu(null);
+          return;
+        }
         if (ev.key === 'Escape' && leitungsEntwurfRef.current) {
           leitungsEntwurfRef.current = null;
           leitungsCursorRef.current = null;
@@ -1654,7 +1748,7 @@ function EditorInner() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [undo, selected, selectedEdgeId, snap, rotateNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed]);
+  }, [undo, selected, selectedEdgeId, snap, rotateNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu]);
 
   // Berechnete Werte (Backend) in die Node-Daten spiegeln — nur für die Anzeige.
   // Verteiler-Rahmen: nur die Balken sind greifbar (dragHandle), die Lücke
@@ -1769,6 +1863,7 @@ function EditorInner() {
         _onRemovePoint:punktEntfernen,
         _onPointPointerDown:punktDragStart,
         _onEndpointPointerDown:endpointDragStart,
+        _onEndpointContextMenu:endpointContextMenu,
         _sourceJunctionDegree:nodesRef.current.some(node => node.id === edge.source && node.type === 'junction') ? junctionDegrees.get(edge.source) || 0 : 0,
         _targetJunctionDegree:nodesRef.current.some(node => node.id === edge.target && node.type === 'junction') ? junctionDegrees.get(edge.target) || 0 : 0,
       },
@@ -1778,7 +1873,7 @@ function EditorInner() {
       labelBgPadding: [3,5],
       style: { ...edge.style, stroke:color },
     };
-  }), [edges, edgeFlows, endpointDragStart, junctionDegrees, layerVisibility, leitungResults, punktDragStart, punktEntfernen, punktHinzufuegen, selectedEdgeId]);
+  }), [edges, edgeFlows, endpointContextMenu, endpointDragStart, junctionDegrees, layerVisibility, leitungResults, punktDragStart, punktEntfernen, punktHinzufuegen, selectedEdgeId]);
 
   const loadSchema = (key) => {
     const s = SCHALTUNGEN[key];
@@ -1886,17 +1981,20 @@ function EditorInner() {
 
   const onNodeClick = useCallback((event, node) => {
     if (werkzeug === 'line') { cadKlick(event, true); return; }
+    setEndpointMenu(null);
     setSelected(node);
     setSelectedEdgeId(null);
   }, [cadKlick, werkzeug]);
   const onNodeDoubleClick = useCallback((_, node) => { if (werkzeug !== 'line') setAuslegung(node); }, [werkzeug]);
   const onEdgeClick = useCallback((event, edge) => {
     if (werkzeug === 'line') { cadKlick(event); return; }
+    setEndpointMenu(null);
     setSelectedEdgeId(edge.id);
     setSelected(null);
   }, [cadKlick, werkzeug]);
   const onPaneClick = useCallback((event) => {
     if (werkzeug === 'line') { cadKlick(event); return; }
+    setEndpointMenu(null);
     setSelected(null);
     setSelectedEdgeId(null);
   }, [cadKlick, werkzeug]);
@@ -2056,7 +2154,7 @@ function EditorInner() {
               </div>
             </div>
           )}
-          <span style={{ fontSize:9, color:'#94a3b8', marginLeft:5 }}>Polylinie: Klick = Punkt · Enter/Rechtsklick = fertig · Shift = 0°/45°/90°</span>
+          <span style={{ fontSize:9, color:'#94a3b8', marginLeft:5 }}>Klick = Eckpunkt · Enter/Rechtsklick = fertig · Rechtsklick Endgriff = weiterziehen · Shift = 0°/45°/90°</span>
         </div>
       </div>
 
@@ -2126,7 +2224,13 @@ function EditorInner() {
               <Panel position="top-center">
                 <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:8, padding:'7px 12px', borderRadius:18,
                   background:'#4f46e5', color:'white', fontSize:10, fontWeight:700, boxShadow:'0 6px 16px rgba(79,70,229,.28)' }}>
-                  {leitungsSnap?.type === 'port' ? 'Am Bauteil einrasten' : leitungsSnap?.type === 'line' ? 'T-Verbindung erstellen' : 'Leitung zeichnen · Klick = Punkt · Enter = fertig'}
+                  {leitungsSnap?.type === 'port'
+                    ? 'Am Bauteil einrasten'
+                    : leitungsSnap?.type === 'line'
+                      ? 'T-Verbindung erstellen'
+                      : leitungsEntwurf.extendEdgeId
+                        ? 'Linie weiterziehen · Klick = neuer Eckpunkt · Enter = fertig'
+                        : 'Leitung zeichnen · Klick = Eckpunkt · Enter = fertig'}
                   <button onClick={()=>leitungsCursorRef.current && leitungsEntwurfAbschliessen(leitungsCursorRef.current, leitungsSnap, shiftPressed)}
                     style={{ width:22, height:22, borderRadius:11, border:0, background:'rgba(255,255,255,.2)', color:'white', cursor:'pointer', fontWeight:800 }}
                     title="Leitung abschliessen">✓</button>
@@ -2228,6 +2332,25 @@ function EditorInner() {
           )}
         </div>
       </div>
+
+      {endpointMenu && (
+        <div onPointerDown={()=>setEndpointMenu(null)} style={{ position:'fixed', inset:0, zIndex:3600 }}>
+          <div onPointerDown={event=>event.stopPropagation()}
+            style={{ position:'fixed', left:Math.min(endpointMenu.x, window.innerWidth - 215), top:Math.min(endpointMenu.y, window.innerHeight - 110),
+              width:205, padding:6, borderRadius:10, background:'white', border:'1px solid #cbd5e1',
+              boxShadow:'0 14px 34px rgba(15,23,42,.24)' }}>
+            <div style={{ padding:'4px 8px 6px', fontSize:9, fontWeight:800, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'.06em' }}>
+              {endpointMenu.side === 'source' ? 'Leitungsanfang' : 'Leitungsende'}
+            </div>
+            <button onClick={()=>leitungWeiterziehen(endpointMenu.edgeId, endpointMenu.side)}
+              style={{ display:'flex', alignItems:'center', gap:8, width:'100%', minHeight:38, padding:'7px 9px', border:0,
+                borderRadius:7, background:'#eef2ff', color:'#3730a3', fontSize:11, fontWeight:800, cursor:'pointer', textAlign:'left' }}>
+              <span style={{ fontSize:17 }}>⌁</span>
+              <span>Linie weiterziehen<div style={{ marginTop:1, fontSize:8, fontWeight:500, color:'#6366f1' }}>Weitere Klicks setzen Eckpunkte</div></span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {auslegungNode && (
         <AuslegungModal

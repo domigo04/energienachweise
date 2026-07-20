@@ -14,21 +14,35 @@ import {
   ArrowLeft,
   Box,
   Check,
+  CircleGauge,
+  Flame,
   GitBranch,
   Hand,
+  Heater,
   MousePointer2,
   Network,
   Redo2,
   RotateCcw,
+  SlidersHorizontal,
   Trash2,
   Undo2,
   Waypoints,
 } from "lucide-react";
 import { getProject } from "../../api/hcApi";
-import { SymSpeicher, SymVerteiler } from "../../components/hc/nodes/symbols";
+import {
+  SymCheckValve,
+  SymPWT,
+  SymPump,
+  SymShutoff,
+  SymSpeicher,
+  SymValve2V,
+  SymValve3,
+  SymVerteiler,
+  SymWE,
+} from "../../components/hc/nodes/symbols";
 
 const GRID = 20;
-const COLORS = { vl: "#ef4444", rl: "#3b82f6" };
+const COLORS = { vl: "#ef4444", rl: "#3b82f6", neutral: "#475569" };
 const uid = (prefix) => `${prefix}_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
 const snapPoint = (point) => ({
   x: Math.round(point.x / GRID) * GRID,
@@ -41,11 +55,11 @@ const NODE_SPECS = {
     width: 200,
     height: 78,
     ports: [
-      { id: "vl-main", x: 0, y: 16, kind: "vl" },
-      { id: "rl-main", x: 0, y: 58, kind: "rl" },
+      { id: "vl-main", x: 0, y: 16, kind: "vl", side: "left" },
+      { id: "rl-main", x: 0, y: 58, kind: "rl", side: "left" },
       ...[36, 83, 130, 177].flatMap((x, index) => [
-        { id: `vl-${index + 1}`, x, y: 0, kind: "vl" },
-        { id: `rl-${index + 1}`, x, y: 42, kind: "rl" },
+        { id: `vl-${index + 1}`, x, y: 0, kind: "vl", side: "top" },
+        { id: `rl-${index + 1}`, x, y: 42, kind: "rl", side: "top" },
       ]),
     ],
   },
@@ -54,8 +68,8 @@ const NODE_SPECS = {
     width: 112,
     height: 250,
     ports: [
-      { id: "vl", x: 56, y: 0, kind: "vl" },
-      { id: "rl", x: 56, y: 250, kind: "rl" },
+      { id: "vl", x: 56, y: 0, kind: "vl", side: "top" },
+      { id: "rl", x: 56, y: 250, kind: "rl", side: "bottom" },
     ],
   },
   speicher: {
@@ -63,8 +77,79 @@ const NODE_SPECS = {
     width: 56,
     height: 100,
     ports: [
-      { id: "oben", x: 28, y: 0, kind: "vl" },
-      { id: "unten", x: 28, y: 100, kind: "rl" },
+      { id: "oben", x: 17, y: 0, kind: "vl", side: "top" },
+      { id: "oben-rechts", x: 39, y: 0, kind: "vl", side: "top" },
+      { id: "unten", x: 17, y: 100, kind: "rl", side: "bottom" },
+      { id: "unten-rechts", x: 39, y: 100, kind: "rl", side: "bottom" },
+      { id: "links", x: 0, y: 50, kind: "neutral", side: "left" },
+      { id: "rechts", x: 56, y: 50, kind: "neutral", side: "right" },
+    ],
+  },
+  erzeuger: {
+    label: "Wärmeerzeuger", width: 88, height: 68,
+    ports: [
+      { id: "vl", x: 44, y: 0, kind: "vl", side: "top" },
+      { id: "rl", x: 44, y: 68, kind: "rl", side: "bottom" },
+      { id: "links", x: 0, y: 34, kind: "neutral", side: "left" },
+      { id: "rechts", x: 88, y: 34, kind: "neutral", side: "right" },
+    ],
+  },
+  heizkreis: {
+    label: "Heizkreis", width: 74, height: 74,
+    ports: [
+      { id: "vl", x: 0, y: 28, kind: "vl", side: "left" },
+      { id: "rl", x: 74, y: 28, kind: "rl", side: "right" },
+      { id: "oben", x: 37, y: 0, kind: "neutral", side: "top" },
+      { id: "unten", x: 37, y: 74, kind: "neutral", side: "bottom" },
+    ],
+  },
+  pumpe: {
+    label: "Pumpe", width: 40, height: 40,
+    ports: [
+      { id: "oben", x: 20, y: 0, kind: "neutral", side: "top" },
+      { id: "unten", x: 20, y: 40, kind: "neutral", side: "bottom" },
+      { id: "links", x: 0, y: 20, kind: "neutral", side: "left" },
+      { id: "rechts", x: 40, y: 20, kind: "neutral", side: "right" },
+    ],
+  },
+  ventil2: {
+    label: "2-Weg-Ventil", width: 44, height: 40,
+    ports: [
+      { id: "oben", x: 33, y: 0, kind: "neutral", side: "top" },
+      { id: "unten", x: 33, y: 40, kind: "neutral", side: "bottom" },
+    ],
+  },
+  ventil3: {
+    label: "3-Weg-Ventil", width: 52, height: 40,
+    ports: [
+      { id: "oben", x: 33, y: 0, kind: "neutral", side: "top" },
+      { id: "unten", x: 33, y: 40, kind: "neutral", side: "bottom" },
+      { id: "rechts", x: 52, y: 20, kind: "neutral", side: "right" },
+    ],
+  },
+  rueckschlag: {
+    label: "Rückschlagventil", width: 44, height: 44,
+    ports: [
+      { id: "oben", x: 22, y: 0, kind: "neutral", side: "top" },
+      { id: "unten", x: 22, y: 44, kind: "neutral", side: "bottom" },
+      { id: "links", x: 0, y: 22, kind: "neutral", side: "left" },
+      { id: "rechts", x: 44, y: 22, kind: "neutral", side: "right" },
+    ],
+  },
+  absperrung: {
+    label: "Absperrventil", width: 19, height: 41,
+    ports: [
+      { id: "oben", x: 9.5, y: 0, kind: "neutral", side: "top" },
+      { id: "unten", x: 9.5, y: 41, kind: "neutral", side: "bottom" },
+    ],
+  },
+  pwt: {
+    label: "Plattenwärmetauscher", width: 94, height: 68,
+    ports: [
+      { id: "primaer-vl", x: 25, y: 0, kind: "vl", side: "top" },
+      { id: "primaer-rl", x: 25, y: 68, kind: "rl", side: "bottom" },
+      { id: "sekundaer-vl", x: 56, y: 0, kind: "vl", side: "top" },
+      { id: "sekundaer-rl", x: 56, y: 68, kind: "rl", side: "bottom" },
     ],
   },
 };
@@ -100,6 +185,17 @@ function HydraulikgruppeSymbol() {
   );
 }
 
+function HeizkreisSymbol({ label }) {
+  return (
+    <div className="flex size-[74px] flex-col items-center justify-center rounded-full border-[2.5px] border-green-600 bg-green-100/70 text-center shadow-sm">
+      <Heater className="mb-1 size-5 text-green-700" />
+      <span className="max-w-14 truncate text-[9px] font-extrabold leading-tight text-green-800">{label || "Heizkreis"}</span>
+      <span className="absolute -left-5 top-[20px] text-[8px] font-extrabold text-red-600">VL</span>
+      <span className="absolute -right-5 top-[20px] text-[8px] font-extrabold text-blue-600">RL</span>
+    </div>
+  );
+}
+
 const CadComponentNode = memo(function CadComponentNode({ id, data, selected }) {
   const spec = NODE_SPECS[data.kind];
   return (
@@ -110,16 +206,40 @@ const CadComponentNode = memo(function CadComponentNode({ id, data, selected }) 
       {data.kind === "verteiler" && <SymVerteiler />}
       {data.kind === "gruppe" && <HydraulikgruppeSymbol />}
       {data.kind === "speicher" && <SymSpeicher />}
-      {spec.ports.map((port) => (
-        <button
-          key={port.id}
-          type="button"
-          title={`${port.kind === "vl" ? "Vorlauf" : "Rücklauf"} verbinden`}
-          className="nodrag nopan absolute z-20 size-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-md transition hover:scale-150"
-          style={{ left: port.x, top: port.y, background: COLORS[port.kind] }}
-          onPointerDown={(event) => data.onPortPointerDown?.(event, id, port)}
-        />
-      ))}
+      {data.kind === "erzeuger" && <SymWE />}
+      {data.kind === "heizkreis" && <HeizkreisSymbol label={data.label} />}
+      {data.kind === "pumpe" && <SymPump />}
+      {data.kind === "ventil2" && <SymValve2V />}
+      {data.kind === "ventil3" && <SymValve3 />}
+      {data.kind === "rueckschlag" && <SymCheckValve />}
+      {data.kind === "absperrung" && <SymShutoff />}
+      {data.kind === "pwt" && <SymPWT />}
+      {spec.ports.map((port) => {
+        const portKey = `${id}:${port.id}`;
+        const connected = data.connectedPorts?.has(portKey);
+        const targeted = data.activePortKey === portKey;
+        const color = COLORS[port.kind] || COLORS.neutral;
+        return (
+          <button
+            key={port.id}
+            type="button"
+            title={`${port.kind === "vl" ? "Vorlauf" : port.kind === "rl" ? "Rücklauf" : "Anschluss"}${connected ? " · verbunden" : " · frei"}`}
+            aria-label={`${data.label}: Anschluss ${port.id}`}
+            className={`nodrag nopan absolute z-20 size-8 -translate-x-1/2 -translate-y-1/2 rounded-full transition ${data.isDrawing || selected ? "bg-white/40" : "bg-transparent"}`}
+            style={{ left: port.x, top: port.y }}
+            onPointerDown={(event) => data.onPortPointerDown?.(event, id, port)}
+            onPointerEnter={() => data.onPortPointerEnter?.(id, port)}
+            onPointerLeave={() => data.onPortPointerLeave?.(id, port)}
+          >
+            {targeted && <span className="absolute inset-0 animate-pulse rounded-full border-[3px] border-emerald-500 bg-emerald-100/60" />}
+            <span
+              className={`absolute left-1/2 top-1/2 size-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-white shadow-md transition ${connected ? "ring-2 ring-slate-800 ring-offset-1" : "hover:scale-125"}`}
+              style={{ background: color }}
+            />
+            {connected && <span className="absolute left-1/2 top-1/2 size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white" />}
+          </button>
+        );
+      })}
       <div className="pointer-events-none absolute left-1/2 top-full mt-2 -translate-x-1/2 whitespace-nowrap rounded bg-white/90 px-2 py-1 text-[11px] font-bold text-slate-700 shadow-sm">
         {data.label}
       </div>
@@ -145,6 +265,21 @@ function endpointPosition(nodes, junctions, endpoint) {
     : null;
 }
 
+function endpointPort(nodes, endpoint) {
+  if (!endpoint?.nodeId) return null;
+  const node = nodes.find((item) => item.id === endpoint.nodeId);
+  return node ? NODE_SPECS[node.data.kind]?.ports.find((port) => port.id === endpoint.portId) || null : null;
+}
+
+function orthogonalJoin(anchor, end, endPort) {
+  if (!anchor || !end || anchor.x === end.x || anchor.y === end.y) return null;
+  if (["top", "bottom"].includes(endPort?.side)) return { x: end.x, y: anchor.y };
+  if (["left", "right"].includes(endPort?.side)) return { x: anchor.x, y: end.y };
+  return Math.abs(end.x - anchor.x) >= Math.abs(end.y - anchor.y)
+    ? { x: end.x, y: anchor.y }
+    : { x: anchor.x, y: end.y };
+}
+
 function lineRoute(nodes, junctions, line) {
   const start = endpointPosition(nodes, junctions, line.start);
   const end = endpointPosition(nodes, junctions, line.end);
@@ -152,11 +287,13 @@ function lineRoute(nodes, junctions, line) {
   return [start, ...(line.points || []), end];
 }
 
-function nearestPort(nodes, point, radius = 22) {
+function nearestPort(nodes, point, radius = 22, excludedEndpoint = null, desiredKind = null) {
   let nearest = null;
   for (const node of nodes) {
     const spec = NODE_SPECS[node.data.kind];
     for (const port of spec.ports) {
+      if (excludedEndpoint?.nodeId === node.id && excludedEndpoint?.portId === port.id) continue;
+      if (desiredKind && port.kind !== "neutral" && port.kind !== desiredKind) continue;
       const position = { x: node.position.x + port.x, y: node.position.y + port.y };
       const distance = Math.hypot(point.x - position.x, point.y - position.y);
       if (distance <= radius && (!nearest || distance < nearest.distance)) {
@@ -227,12 +364,13 @@ function EditorInner() {
   const [lineKind, setLineKind] = useState("vl");
   const [orthogonal, setOrthogonal] = useState(true);
   const [selectedLineId, setSelectedLineId] = useState(null);
+  const [selectedNodeId, setSelectedNodeId] = useState(null);
   const [draft, setDraft] = useState(null);
   const [cursor, setCursor] = useState(null);
   const [snapPreview, setSnapPreview] = useState(null);
   const [undoStack, setUndoStack] = useState([]);
   const [redoStack, setRedoStack] = useState([]);
-  const { screenToFlowPosition, fitView } = useReactFlow();
+  const { screenToFlowPosition, fitView, getZoom } = useReactFlow();
   const nodesRef = useRef(nodes);
   const linesRef = useRef(lines);
   const junctionsRef = useRef(junctions);
@@ -240,7 +378,9 @@ function EditorInner() {
   const draftRef = useRef(draft);
   const cursorRef = useRef(cursor);
   const orthogonalRef = useRef(orthogonal);
+  const lineKindRef = useRef(lineKind);
   const dragRef = useRef(null);
+  const portGestureRef = useRef(null);
   const frameRef = useRef(null);
   const cursorFrameRef = useRef(null);
 
@@ -251,6 +391,7 @@ function EditorInner() {
   useEffect(() => { draftRef.current = draft; }, [draft]);
   useEffect(() => { cursorRef.current = cursor; }, [cursor]);
   useEffect(() => { orthogonalRef.current = orthogonal; }, [orthogonal]);
+  useEffect(() => { lineKindRef.current = lineKind; }, [lineKind]);
 
   useEffect(() => {
     getProject(projectId).then((project) => setProjectName(project.name)).catch(() => {});
@@ -275,6 +416,7 @@ function EditorInner() {
     setLines(state.lines);
     setJunctions(state.junctions);
     setSelectedLineId(null);
+    setSelectedNodeId(null);
     setDraft(null);
   }, [setNodes]);
 
@@ -306,68 +448,222 @@ function EditorInner() {
     return activeDraft.points.at(-1) || endpointPosition(nodesRef.current, junctionsRef.current, activeDraft.start);
   }, []);
 
-  const finishDraft = useCallback((endpoint) => {
+  const beginDraft = useCallback((nextDraft, nextKind = nextDraft.kind) => {
+    draftRef.current = nextDraft;
+    modeRef.current = "line";
+    lineKindRef.current = nextKind;
+    setDraft(nextDraft);
+    setMode("line");
+    setLineKind(nextKind);
+    setSelectedLineId(null);
+    setSelectedNodeId(null);
+  }, []);
+
+  const finishDraft = useCallback((endpoint, junctionHit = null) => {
     const activeDraft = draftRef.current;
     const activeCursor = cursorRef.current;
     if (!activeDraft) return;
-    const resolvedEnd = endpoint || (activeCursor ? { ...constrainedPoint(activeCursor, lastDraftPoint(activeDraft), orthogonalRef.current) } : null);
+    const junction = junctionHit
+      ? { id: uid("junction"), x: junctionHit.x, y: junctionHit.y, hostLineId: junctionHit.lineId }
+      : null;
+    const resolvedEnd = junction
+      ? { junctionId: junction.id }
+      : endpoint || (activeCursor ? { ...constrainedPoint(activeCursor, lastDraftPoint(activeDraft), orthogonalRef.current) } : null);
     if (!resolvedEnd) return;
+    const endPosition = junction || endpointPosition(nodesRef.current, junctionsRef.current, resolvedEnd) || resolvedEnd;
+    const anchor = lastDraftPoint(activeDraft);
+    const endPort = endpointPort(nodesRef.current, resolvedEnd);
+    const join = orthogonalRef.current ? orthogonalJoin(anchor, endPosition, endPort) : null;
+    const finalPoints = join
+      && (join.x !== anchor?.x || join.y !== anchor?.y)
+      && (join.x !== endPosition.x || join.y !== endPosition.y)
+      ? [...activeDraft.points, join]
+      : activeDraft.points;
     checkpoint();
-    if (activeDraft.extendLineId) {
-      setLines((items) => items.map((line) => {
+    if (junction) setJunctions((items) => [...items, junction]);
+    setLines((items) => {
+      let nextItems = junction ? items.map((line) => {
+        if (line.id !== junctionHit.lineId) return line;
+        const points = [...(line.points || [])];
+        points.splice(junctionHit.segmentIndex, 0, { x: junction.x, y: junction.y, junctionId: junction.id });
+        return { ...line, points };
+      }) : items;
+      if (activeDraft.extendLineId) {
+        nextItems = nextItems.map((line) => {
         if (line.id !== activeDraft.extendLineId) return line;
         const oldPosition = endpointPosition(nodesRef.current, junctionsRef.current, activeDraft.start);
         if (activeDraft.extendSide === "end") {
-          return { ...line, points: [...(line.points || []), oldPosition, ...activeDraft.points], end: resolvedEnd };
+            return { ...line, points: [...(line.points || []), oldPosition, ...finalPoints], end: resolvedEnd };
         }
-        return { ...line, points: [...activeDraft.points].reverse().concat(oldPosition, line.points || []), start: resolvedEnd };
-      }));
-    } else {
-      setLines((items) => [...items, { id: uid("line"), kind: activeDraft.kind, start: activeDraft.start, points: activeDraft.points, end: resolvedEnd }]);
-    }
+          return { ...line, points: [...finalPoints].reverse().concat(oldPosition, line.points || []), start: resolvedEnd };
+        });
+      } else {
+        nextItems = [...nextItems, { id: uid("line"), kind: activeDraft.kind, start: activeDraft.start, points: finalPoints, end: resolvedEnd }];
+      }
+      return nextItems;
+    });
     draftRef.current = null;
     setDraft(null);
+    modeRef.current = "select";
     setMode("select");
+    setSnapPreview(null);
   }, [checkpoint, lastDraftPoint]);
+
+  const finishDraftAtPoint = useCallback((rawPoint) => {
+    const activeDraft = draftRef.current;
+    if (!activeDraft) return;
+    const radius = 28 / Math.max(getZoom(), 0.2);
+    const portHit = nearestPort(nodesRef.current, rawPoint, radius, activeDraft.start, activeDraft.kind);
+    if (portHit) {
+      finishDraft(portHit.endpoint);
+      return;
+    }
+    const lineHit = nearestLineMiddle(
+      nodesRef.current,
+      junctionsRef.current,
+      linesRef.current,
+      rawPoint,
+      activeDraft.extendLineId,
+      22 / Math.max(getZoom(), 0.2),
+    );
+    if (lineHit) {
+      finishDraft(null, lineHit);
+      return;
+    }
+    cursorRef.current = rawPoint;
+    finishDraft();
+  }, [finishDraft, getZoom]);
 
   const handlePaneClick = useCallback((event) => {
     if (mode !== "line") {
       setSelectedLineId(null);
+      setSelectedNodeId(null);
       return;
     }
     const raw = pointerFlow(event);
     if (!draft) {
       const start = snapPoint(raw);
-      setDraft({ kind: lineKind, start, points: [], extendLineId: null, extendSide: null });
+      beginDraft({ kind: lineKind, start, points: [], extendLineId: null, extendSide: null });
       setCursor(start);
+      return;
+    }
+    if (snapPreview?.type === "port") {
+      finishDraft(snapPreview.endpoint);
+      return;
+    }
+    if (snapPreview?.type === "junction") {
+      finishDraft(null, snapPreview);
       return;
     }
     const point = constrainedPoint(raw, lastDraftPoint(draft), orthogonal);
     setDraft((active) => ({ ...active, points: [...active.points, point] }));
-  }, [draft, lastDraftPoint, lineKind, mode, orthogonal, pointerFlow]);
+  }, [beginDraft, draft, finishDraft, lastDraftPoint, lineKind, mode, orthogonal, pointerFlow, snapPreview]);
 
   const handlePortPointerDown = useCallback((event, nodeId, port) => {
     event.preventDefault();
     event.stopPropagation();
     const endpoint = { nodeId, portId: port.id };
+    const kind = port.kind === "neutral" ? lineKindRef.current : port.kind;
+    if (draftRef.current && port.kind !== "neutral" && port.kind !== draftRef.current.kind) return;
     if (modeRef.current !== "line") {
-      setMode("line");
-      setLineKind(port.kind);
-      setDraft({ kind: port.kind, start: endpoint, points: [], extendLineId: null, extendSide: null });
+      beginDraft({ kind, start: endpoint, points: [], extendLineId: null, extendSide: null }, kind);
+      portGestureRef.current = { x: event.clientX, y: event.clientY, moved: false };
       return;
     }
     if (!draftRef.current) {
-      setLineKind(port.kind);
-      setDraft({ kind: port.kind, start: endpoint, points: [], extendLineId: null, extendSide: null });
+      beginDraft({ kind, start: endpoint, points: [], extendLineId: null, extendSide: null }, kind);
+      portGestureRef.current = { x: event.clientX, y: event.clientY, moved: false };
     } else {
       finishDraft(endpoint);
     }
-  }, [finishDraft]);
+  }, [beginDraft, finishDraft]);
+
+  const handlePortPointerEnter = useCallback((nodeId, port) => {
+    if (!draftRef.current) return;
+    if (port.kind !== "neutral" && port.kind !== draftRef.current.kind) return;
+    const node = nodesRef.current.find((item) => item.id === nodeId);
+    if (!node) return;
+    setSnapPreview({
+      x: node.position.x + port.x,
+      y: node.position.y + port.y,
+      type: "port",
+      endpoint: { nodeId, portId: port.id },
+    });
+  }, []);
+
+  const handlePortPointerLeave = useCallback((nodeId, port) => {
+    setSnapPreview((current) => current?.type === "port"
+      && current.endpoint.nodeId === nodeId
+      && current.endpoint.portId === port.id ? null : current);
+  }, []);
+
+  const updateDraftPointer = useCallback((rawPoint) => {
+    const activeDraft = draftRef.current;
+    if (!activeDraft) return;
+    if (cursorFrameRef.current) cancelAnimationFrame(cursorFrameRef.current);
+    cursorFrameRef.current = requestAnimationFrame(() => {
+      cursorRef.current = rawPoint;
+      setCursor(rawPoint);
+      const zoom = Math.max(getZoom(), 0.2);
+      const portHit = nearestPort(nodesRef.current, rawPoint, 28 / zoom, activeDraft.start, activeDraft.kind);
+      if (portHit) {
+        setSnapPreview({ ...portHit.position, type: "port", endpoint: portHit.endpoint });
+        return;
+      }
+      const lineHit = nearestLineMiddle(
+        nodesRef.current,
+        junctionsRef.current,
+        linesRef.current,
+        rawPoint,
+        activeDraft.extendLineId,
+        22 / zoom,
+      );
+      setSnapPreview(lineHit ? { ...lineHit, type: "junction" } : null);
+    });
+  }, [getZoom]);
+
+  useEffect(() => {
+    const handleGestureMove = (event) => {
+      const gesture = portGestureRef.current;
+      if (!gesture) return;
+      if (Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) > 4) gesture.moved = true;
+      if (gesture.moved) updateDraftPointer(screenToFlowPosition({ x: event.clientX, y: event.clientY }));
+    };
+    const handleGestureUp = (event) => {
+      const gesture = portGestureRef.current;
+      if (!gesture) return;
+      portGestureRef.current = null;
+      if (gesture.moved) finishDraftAtPoint(screenToFlowPosition({ x: event.clientX, y: event.clientY }));
+    };
+    window.addEventListener("pointermove", handleGestureMove, { passive: true });
+    window.addEventListener("pointerup", handleGestureUp);
+    return () => {
+      window.removeEventListener("pointermove", handleGestureMove);
+      window.removeEventListener("pointerup", handleGestureUp);
+    };
+  }, [finishDraftAtPoint, screenToFlowPosition, updateDraftPointer]);
+
+  const connectedPorts = useMemo(() => {
+    const keys = new Set();
+    lines.forEach((line) => {
+      if (line.start?.nodeId) keys.add(`${line.start.nodeId}:${line.start.portId}`);
+      if (line.end?.nodeId) keys.add(`${line.end.nodeId}:${line.end.portId}`);
+    });
+    return keys;
+  }, [lines]);
 
   const displayNodes = useMemo(() => nodes.map((node) => ({
     ...node,
-    data: { ...node.data, onPortPointerDown: handlePortPointerDown },
-  })), [handlePortPointerDown, nodes]);
+    data: {
+      ...node.data,
+      onPortPointerDown: handlePortPointerDown,
+      onPortPointerEnter: handlePortPointerEnter,
+      onPortPointerLeave: handlePortPointerLeave,
+      connectedPorts,
+      activePortKey: snapPreview?.type === "port" ? `${snapPreview.endpoint.nodeId}:${snapPreview.endpoint.portId}` : null,
+      isDrawing: mode === "line",
+    },
+  })), [connectedPorts, handlePortPointerDown, handlePortPointerEnter, handlePortPointerLeave, mode, nodes, snapPreview]);
 
   const addComponent = useCallback((kind) => {
     checkpoint();
@@ -382,13 +678,15 @@ function EditorInner() {
   }, [checkpoint, setNodes]);
 
   const finishEndpointDrop = useCallback((lineId, side, point) => {
-    const portHit = nearestPort(nodesRef.current, point);
+    const zoom = Math.max(getZoom(), 0.2);
+    const lineKindForSnap = linesRef.current.find((line) => line.id === lineId)?.kind;
+    const portHit = nearestPort(nodesRef.current, point, 28 / zoom, null, lineKindForSnap);
     if (portHit) {
       setLines((items) => items.map((line) => line.id === lineId ? { ...line, [side]: portHit.endpoint } : line));
       setSnapPreview(null);
       return;
     }
-    const lineHit = nearestLineMiddle(nodesRef.current, junctionsRef.current, linesRef.current, point, lineId);
+    const lineHit = nearestLineMiddle(nodesRef.current, junctionsRef.current, linesRef.current, point, lineId, 22 / zoom);
     if (lineHit) {
       const junctionId = uid("junction");
       const junction = { id: junctionId, x: lineHit.x, y: lineHit.y, hostLineId: lineHit.lineId };
@@ -406,12 +704,30 @@ function EditorInner() {
     }
     setLines((items) => items.map((line) => line.id === lineId ? { ...line, [side]: snapPoint(point) } : line));
     setSnapPreview(null);
-  }, []);
+  }, [getZoom]);
 
   const beginHandleDrag = useCallback((event, lineId, handleType, index = null) => {
     event.preventDefault();
     event.stopPropagation();
     checkpoint();
+    if (handleType === "start" || handleType === "end") {
+      const line = linesRef.current.find((item) => item.id === lineId);
+      const junctionId = line?.[handleType]?.junctionId;
+      const junction = junctionId && junctionsRef.current.find((item) => item.id === junctionId);
+      if (junction) {
+        const stillUsed = linesRef.current.some((item) => item.id !== lineId
+          && (item.start?.junctionId === junctionId || item.end?.junctionId === junctionId));
+        setLines((items) => items.map((item) => {
+          let next = item;
+          if (item.id === lineId) next = { ...next, [handleType]: { x: junction.x, y: junction.y } };
+          if (!stillUsed && (item.points || []).some((point) => point.junctionId === junctionId)) {
+            next = { ...next, points: (next.points || []).filter((point) => point.junctionId !== junctionId) };
+          }
+          return next;
+        }));
+        if (!stillUsed) setJunctions((items) => items.filter((item) => item.id !== junctionId));
+      }
+    }
     dragRef.current = { lineId, handleType, index };
     setSelectedLineId(lineId);
   }, [checkpoint]);
@@ -441,9 +757,11 @@ function EditorInner() {
           return { ...line, [drag.handleType]: point };
         }));
         if (drag.handleType === "start" || drag.handleType === "end") {
-          const portHit = nearestPort(nodesRef.current, point);
-          const lineHit = portHit ? null : nearestLineMiddle(nodesRef.current, junctionsRef.current, linesRef.current, point, drag.lineId);
-          setSnapPreview(portHit ? { ...portHit.position, type: "port" } : lineHit ? { x: lineHit.x, y: lineHit.y, type: "junction" } : null);
+          const zoom = Math.max(getZoom(), 0.2);
+          const lineKindForSnap = linesRef.current.find((line) => line.id === drag.lineId)?.kind;
+          const portHit = nearestPort(nodesRef.current, point, 28 / zoom, null, lineKindForSnap);
+          const lineHit = portHit ? null : nearestLineMiddle(nodesRef.current, junctionsRef.current, linesRef.current, point, drag.lineId, 22 / zoom);
+          setSnapPreview(portHit ? { ...portHit.position, type: "port", endpoint: portHit.endpoint } : lineHit ? { ...lineHit, type: "junction" } : null);
         }
       });
     };
@@ -463,7 +781,7 @@ function EditorInner() {
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
       if (cursorFrameRef.current) cancelAnimationFrame(cursorFrameRef.current);
     };
-  }, [finishEndpointDrop, screenToFlowPosition]);
+  }, [finishEndpointDrop, getZoom, screenToFlowPosition]);
 
   const deleteSelectedLine = useCallback(() => {
     if (!selectedLineId) return;
@@ -481,13 +799,28 @@ function EditorInner() {
     setSelectedLineId(null);
   }, [checkpoint, selectedLineId]);
 
+  const deleteSelectedNode = useCallback(() => {
+    if (!selectedNodeId) return;
+    checkpoint();
+    const remaining = linesRef.current.filter((line) => line.start?.nodeId !== selectedNodeId && line.end?.nodeId !== selectedNodeId);
+    const usedJunctionIds = new Set();
+    remaining.forEach((line) => {
+      if (line.start?.junctionId) usedJunctionIds.add(line.start.junctionId);
+      if (line.end?.junctionId) usedJunctionIds.add(line.end.junctionId);
+    });
+    const keptJunctions = junctionsRef.current.filter((junction) => usedJunctionIds.has(junction.id));
+    const keptIds = new Set(keptJunctions.map((junction) => junction.id));
+    setNodes((items) => items.filter((node) => node.id !== selectedNodeId));
+    setLines(remaining.map((line) => ({ ...line, points: (line.points || []).filter((point) => !point.junctionId || keptIds.has(point.junctionId)) })));
+    setJunctions(keptJunctions);
+    setSelectedNodeId(null);
+  }, [checkpoint, selectedNodeId, setNodes]);
+
   const extendLine = useCallback((side) => {
     const line = lines.find((item) => item.id === selectedLineId);
     if (!line) return;
-    setDraft({ kind: line.kind, start: line[side], points: [], extendLineId: line.id, extendSide: side });
-    setLineKind(line.kind);
-    setMode("line");
-  }, [lines, selectedLineId]);
+    beginDraft({ kind: line.kind, start: line[side], points: [], extendLineId: line.id, extendSide: side }, line.kind);
+  }, [beginDraft, lines, selectedLineId]);
 
   const resetLab = useCallback(() => {
     if (!window.confirm("React-Flow-Versuch auf den Ausgangszustand zurücksetzen?")) return;
@@ -497,6 +830,7 @@ function EditorInner() {
 
   useEffect(() => {
     const handleKey = (event) => {
+      if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
       const meta = event.ctrlKey || event.metaKey;
       if (meta && event.key.toLowerCase() === "z") {
         event.preventDefault();
@@ -509,15 +843,20 @@ function EditorInner() {
         return;
       }
       if (event.key === "Escape") {
+        draftRef.current = null;
+        modeRef.current = "select";
         setDraft(null);
         setMode("select");
         setSnapPreview(null);
       } else if (event.key === "Enter" && draft) {
         event.preventDefault();
-        finishDraft();
+        if (cursorRef.current) finishDraftAtPoint(cursorRef.current);
       } else if ((event.key === "Delete" || event.key === "Backspace") && selectedLineId && !draft) {
         event.preventDefault();
         deleteSelectedLine();
+      } else if ((event.key === "Delete" || event.key === "Backspace") && selectedNodeId && !draft) {
+        event.preventDefault();
+        deleteSelectedNode();
       } else if (event.key === "Backspace" && draft?.points.length) {
         event.preventDefault();
         setDraft((active) => ({ ...active, points: active.points.slice(0, -1) }));
@@ -525,17 +864,26 @@ function EditorInner() {
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [deleteSelectedLine, draft, finishDraft, redo, selectedLineId, undo]);
+  }, [deleteSelectedLine, deleteSelectedNode, draft, finishDraftAtPoint, redo, selectedLineId, selectedNodeId, undo]);
 
   const draftRoute = useMemo(() => {
     if (!draft) return [];
     const start = endpointPosition(nodes, junctions, draft.start);
     const anchor = draft.points.at(-1) || start;
-    const preview = cursor ? constrainedPoint(cursor, anchor, orthogonal) : null;
-    return [start, ...draft.points, preview].filter(Boolean);
-  }, [cursor, draft, junctions, nodes, orthogonal]);
+    const preview = snapPreview
+      ? { x: snapPreview.x, y: snapPreview.y }
+      : cursor ? constrainedPoint(cursor, anchor, orthogonal) : null;
+    const previewPort = snapPreview?.type === "port" ? endpointPort(nodes, snapPreview.endpoint) : null;
+    const join = orthogonal && snapPreview ? orthogonalJoin(anchor, preview, previewPort) : null;
+    return [start, ...draft.points, join, preview].filter((point, index, all) => point
+      && (!index || point.x !== all[index - 1]?.x || point.y !== all[index - 1]?.y));
+  }, [cursor, draft, junctions, nodes, orthogonal, snapPreview]);
 
   const selectedLine = lines.find((line) => line.id === selectedLineId);
+  const selectedNode = nodes.find((node) => node.id === selectedNodeId);
+  const selectedNodeConnections = selectedNodeId
+    ? lines.filter((line) => line.start?.nodeId === selectedNodeId || line.end?.nodeId === selectedNodeId).length
+    : 0;
   const nodeCount = nodes.length;
 
   return (
@@ -548,14 +896,14 @@ function EditorInner() {
         </div>
 
         <div className="flex items-center gap-1 rounded-xl bg-slate-100 p-1">
-          <ToolButton active={mode === "select"} title="Auswählen" onClick={() => { setMode("select"); setDraft(null); }} icon={MousePointer2} />
-          <ToolButton active={mode === "pan"} title="Verschieben" onClick={() => { setMode("pan"); setDraft(null); }} icon={Hand} />
-          <ToolButton active={mode === "line"} title="Polylinie" onClick={() => setMode("line")} icon={Waypoints} />
+          <ToolButton active={mode === "select"} title="Auswählen" onClick={() => { modeRef.current = "select"; draftRef.current = null; setMode("select"); setDraft(null); }} icon={MousePointer2} />
+          <ToolButton active={mode === "pan"} title="Verschieben" onClick={() => { modeRef.current = "pan"; draftRef.current = null; setMode("pan"); setDraft(null); }} icon={Hand} />
+          <ToolButton active={mode === "line"} title="Polylinie" onClick={() => { modeRef.current = "line"; setMode("line"); }} icon={Waypoints} />
         </div>
 
         <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1">
-          <button onClick={() => setLineKind("vl")} className={`min-h-9 rounded-lg px-3 text-xs font-extrabold ${lineKind === "vl" ? "bg-red-100 text-red-700" : "text-slate-500 hover:bg-slate-50"}`}>VL</button>
-          <button onClick={() => setLineKind("rl")} className={`min-h-9 rounded-lg px-3 text-xs font-extrabold ${lineKind === "rl" ? "bg-blue-100 text-blue-700" : "text-slate-500 hover:bg-slate-50"}`}>RL</button>
+          <button onClick={() => { lineKindRef.current = "vl"; setLineKind("vl"); }} className={`min-h-9 rounded-lg px-3 text-xs font-extrabold ${lineKind === "vl" ? "bg-red-100 text-red-700" : "text-slate-500 hover:bg-slate-50"}`}>VL</button>
+          <button onClick={() => { lineKindRef.current = "rl"; setLineKind("rl"); }} className={`min-h-9 rounded-lg px-3 text-xs font-extrabold ${lineKind === "rl" ? "bg-blue-100 text-blue-700" : "text-slate-500 hover:bg-slate-50"}`}>RL</button>
           <button onClick={() => setOrthogonal((value) => !value)} className={`min-h-9 rounded-lg px-3 text-xs font-bold ${orthogonal ? "bg-indigo-100 text-indigo-700" : "text-slate-500"}`}>90°</button>
         </div>
 
@@ -568,15 +916,25 @@ function EditorInner() {
       </header>
 
       <div className="relative min-h-0 flex-1">
-        <aside className="absolute left-3 top-3 z-30 w-[184px] rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-xl backdrop-blur sm:left-4 sm:top-4 sm:w-[208px]">
-          <div className="mb-2 text-[11px] font-extrabold uppercase tracking-wide text-slate-400">Bauteile</div>
+        <aside className="absolute bottom-3 left-3 top-3 z-30 w-[184px] overflow-y-auto rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-xl backdrop-blur sm:bottom-4 sm:left-4 sm:top-4 sm:w-[220px]">
+          <div className="mb-2 text-[11px] font-extrabold uppercase tracking-wide text-slate-400">Erzeugung & Verteilung</div>
+          <ComponentButton icon={Flame} label="Wärmeerzeuger" onClick={() => addComponent("erzeuger")} />
           <ComponentButton icon={Network} label="Verteiler" onClick={() => addComponent("verteiler")} />
           <ComponentButton icon={GitBranch} label="Hydraulikgruppe" onClick={() => addComponent("gruppe")} />
           <ComponentButton icon={Box} label="Speicher" onClick={() => addComponent("speicher")} />
+          <ComponentButton icon={Heater} label="Heizkreis" onClick={() => addComponent("heizkreis")} />
+          <div className="my-3 border-t border-slate-100" />
+          <div className="mb-2 text-[11px] font-extrabold uppercase tracking-wide text-slate-400">Armaturen</div>
+          <ComponentButton icon={CircleGauge} label="Pumpe" onClick={() => addComponent("pumpe")} />
+          <ComponentButton icon={SlidersHorizontal} label="2-Weg-Ventil" onClick={() => addComponent("ventil2")} />
+          <ComponentButton icon={SlidersHorizontal} label="3-Weg-Ventil" onClick={() => addComponent("ventil3")} />
+          <ComponentButton icon={SlidersHorizontal} label="Rückschlagventil" onClick={() => addComponent("rueckschlag")} />
+          <ComponentButton icon={SlidersHorizontal} label="Absperrventil" onClick={() => addComponent("absperrung")} />
+          <ComponentButton icon={Network} label="Plattenwärmetauscher" onClick={() => addComponent("pwt")} />
           <div className="my-3 border-t border-slate-100" />
           <div className="space-y-1 text-[11px] leading-relaxed text-slate-500">
+            <div><b>Schnell verbinden:</b> Anschluss greifen, zum Ziel ziehen und loslassen.</div>
             <div><b>Freier Start:</b> Polylinie wählen und in die Fläche klicken.</div>
-            <div><b>Abschliessen:</b> Anschluss anklicken, Enter oder Rechtsklick.</div>
             <div><b>T-Stück:</b> Nur ein Leitungsende auf die Mitte einer Leitung ziehen.</div>
           </div>
         </aside>
@@ -586,7 +944,9 @@ function EditorInner() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-sm font-extrabold">{selectedLine.kind === "vl" ? "Vorlauf" : "Rücklauf"}-Leitung</div>
-                <div className="mt-0.5 text-[11px] text-slate-500">Punkte und Enden direkt ziehen.</div>
+                <div className="mt-0.5 text-[11px] text-slate-500">
+                  Anfang: {selectedLine.start?.nodeId ? "verbunden" : selectedLine.start?.junctionId ? "T-Stück" : "frei"} · Ende: {selectedLine.end?.nodeId ? "verbunden" : selectedLine.end?.junctionId ? "T-Stück" : "frei"}
+                </div>
               </div>
               <button className="btn-ghost min-h-9 px-2 text-red-600" onClick={deleteSelectedLine} title="Leitung löschen"><Trash2 className="size-4" /></button>
             </div>
@@ -597,10 +957,32 @@ function EditorInner() {
           </aside>
         )}
 
+        {selectedNode && !selectedLine && (
+          <aside className="absolute bottom-4 right-4 z-30 w-[280px] rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-xl backdrop-blur">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-extrabold">{NODE_SPECS[selectedNode.data.kind]?.label}</div>
+                <div className="mt-0.5 text-[11px] text-slate-500">{selectedNodeConnections} verbundene {selectedNodeConnections === 1 ? "Leitung" : "Leitungen"}</div>
+              </div>
+              <button className="btn-ghost min-h-9 px-2 text-red-600" onClick={deleteSelectedNode} title="Bauteil samt angeschlossenen Leitungen löschen"><Trash2 className="size-4" /></button>
+            </div>
+            <label className="mt-3 block text-[10px] font-extrabold uppercase tracking-wide text-slate-400">Bezeichnung</label>
+            <input
+              className="input mt-1"
+              value={selectedNode.data.label || ""}
+              onFocus={checkpoint}
+              onChange={(event) => setNodes((items) => items.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, label: event.target.value } } : node))}
+            />
+            <div className="mt-3 rounded-xl bg-emerald-50 p-3 text-[11px] leading-relaxed text-emerald-800">
+              Farbiger Punkt = frei · Punkt mit dunklem Ring = verbunden. Leitung am Endgriff wegziehen, um sie zu lösen oder neu einzurasten.
+            </div>
+          </aside>
+        )}
+
         {draft && (
           <div className="absolute left-1/2 top-3 z-40 flex -translate-x-1/2 items-center gap-2 rounded-full bg-indigo-600 px-4 py-2 text-xs font-bold text-white shadow-lg">
-            <Waypoints className="size-4" /> Leitung zeichnen · Klick = Punkt · Enter/Rechtsklick = fertig
-            <button onClick={() => finishDraft()} className="ml-1 rounded-full bg-white/20 p-1 hover:bg-white/30" title="Abschliessen"><Check className="size-4" /></button>
+            <Waypoints className="size-4" /> {snapPreview?.type === "port" ? "Am Bauteilanschluss einrasten" : snapPreview?.type === "junction" ? "T-Verbindung erstellen" : "Leitung zeichnen · Klick = Punkt · Enter = fertig"}
+            <button onClick={() => cursorRef.current && finishDraftAtPoint(cursorRef.current)} className="ml-1 rounded-full bg-white/20 p-1 hover:bg-white/30" title="Abschliessen"><Check className="size-4" /></button>
           </div>
         )}
 
@@ -610,23 +992,22 @@ function EditorInner() {
           nodeTypes={NODE_TYPES}
           onNodesChange={onNodesChange}
           onNodeDragStart={checkpoint}
+          onNodeClick={(event, node) => { event.stopPropagation(); setSelectedLineId(null); setSelectedNodeId(node.id); }}
           onPaneClick={handlePaneClick}
           onPaneMouseMove={(event) => {
             if (!draft) return;
-            const point = pointerFlow(event);
-            if (cursorFrameRef.current) cancelAnimationFrame(cursorFrameRef.current);
-            cursorFrameRef.current = requestAnimationFrame(() => setCursor(point));
+            updateDraftPointer(pointerFlow(event));
           }}
           onPaneContextMenu={(event) => {
             if (!draft) return;
             event.preventDefault();
-            setCursor(pointerFlow(event));
-            finishDraft(snapPoint(pointerFlow(event)));
+            finishDraftAtPoint(pointerFlow(event));
           }}
           onMoveStart={() => setSnapPreview(null)}
           panOnDrag={mode === "pan" || mode === "select"}
           nodesDraggable={mode === "select"}
           nodesConnectable={false}
+          deleteKeyCode={null}
           elementsSelectable={mode === "select"}
           selectNodesOnDrag={false}
           snapToGrid
@@ -656,7 +1037,7 @@ function EditorInner() {
                       strokeLinejoin="round"
                       strokeLinecap="round"
                       style={{ pointerEvents: "stroke", cursor: "pointer" }}
-                      onPointerDown={(event) => { event.stopPropagation(); setSelectedLineId(line.id); setMode("select"); }}
+                      onPointerDown={(event) => { event.stopPropagation(); modeRef.current = "select"; setSelectedNodeId(null); setSelectedLineId(line.id); setMode("select"); }}
                     />
                     {selected && <polyline points={pointsAttribute(route)} fill="none" stroke="#0f172a" strokeWidth="10" opacity="0.14" strokeLinejoin="round" strokeLinecap="round" />}
                     <polyline points={pointsAttribute(route)} fill="none" stroke={COLORS[line.kind]} strokeWidth="5" strokeLinejoin="round" strokeLinecap="round" />

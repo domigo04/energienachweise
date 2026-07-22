@@ -38,3 +38,41 @@ export function roundedPolylinePath(points, radius = 8) {
   const end = points.at(-1);
   return `${path} L ${end.x} ${end.y}`;
 }
+
+export function pairedHandleId(nodeType, handleId) {
+  if (!handleId) return null;
+  if (handleId === 'vl') return 'rl';
+  if (handleId === 'vl-main') return 'rl-main';
+  if (/^vl-\d+$/.test(handleId)) return handleId.replace(/^vl-/, 'rl-');
+  if (['speicher', 'bww'].includes(nodeType)) {
+    if (handleId === 'top-l') return 'bot-l';
+    if (handleId === 'top-r') return 'bot-r';
+  }
+  if (nodeType === 'verbraucher' && handleId === 'top') return 'bottom';
+  if (nodeType === 'pwt') {
+    if (handleId === 'left') return 'bottom';
+    if (handleId === 'top') return 'right';
+  }
+  return null;
+}
+
+export function parallelWaypoints(points, start, end, pairStart, pairEnd) {
+  if (!points?.length) return [];
+  const route = [start, ...points, end];
+  const segmentLengths = route.slice(1).map((point, index) => Math.hypot(
+    point.x - route[index].x,
+    point.y - route[index].y,
+  ));
+  const total = segmentLengths.reduce((sum, length) => sum + length, 0) || 1;
+  const sourceDelta = { x:pairStart.x - start.x, y:pairStart.y - start.y };
+  const targetDelta = { x:pairEnd.x - end.x, y:pairEnd.y - end.y };
+  let travelled = 0;
+  return points.map((point, index) => {
+    travelled += segmentLengths[index];
+    const ratio = travelled / total;
+    return {
+      x:point.x + sourceDelta.x * (1 - ratio) + targetDelta.x * ratio,
+      y:point.y + sourceDelta.y * (1 - ratio) + targetDelta.y * ratio,
+    };
+  });
+}

@@ -2,14 +2,14 @@ import React, { useCallback, useState, useMemo, useRef, useEffect } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   ReactFlow, Background, Controls, MiniMap,
-  addEdge, useNodesState, useEdgesState,
+  useNodesState, useEdgesState,
   Panel, ConnectionMode, useReactFlow, ReactFlowProvider,
   NodeToolbar, Position, useUpdateNodeInternals, ViewportPortal,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { NODE_TYPES, NUMMERIERT, ROTATABLE } from '../../components/hc/nodes/HydraulikNodes';
 import { EDGE_TYPES } from '../../components/hc/edges/FlowEdge';
-import { roundedPolylinePath } from '../../components/hc/edges/geometry';
+import { pairedHandleId, parallelWaypoints, roundedPolylinePath } from '../../components/hc/edges/geometry';
 import { SCHALTUNGEN } from '../../components/hc/nodes/schaltungen';
 import { getProject, listSchemas, createSchema, saveSchema, hydraulikBerechnen } from '../../api/hcApi';
 import { api } from '../../api';
@@ -33,6 +33,8 @@ const DEFAULT_DRAWING_CONFIG = {
   grid_size:CAD_GRID,
   shortcut_polyline:'p',
   shortcut_line:'l',
+  auto_return:true,
+  return_offset:60,
 };
 
 const rasterPunkt = (point, grid = CAD_GRID) => ({
@@ -47,7 +49,14 @@ const normalisiereDrawingConfig = (config = {}) => ({
   grid_size:[5, 10, 20].includes(Number(config.grid_size)) ? Number(config.grid_size) : DEFAULT_DRAWING_CONFIG.grid_size,
   shortcut_polyline:shortcutTaste(config.shortcut_polyline, DEFAULT_DRAWING_CONFIG.shortcut_polyline),
   shortcut_line:shortcutTaste(config.shortcut_line, DEFAULT_DRAWING_CONFIG.shortcut_line),
+  auto_return:config.auto_return !== false,
+  return_offset:Math.max(20, Math.min(240, Number(config.return_offset ?? DEFAULT_DRAWING_CONFIG.return_offset) || DEFAULT_DRAWING_CONFIG.return_offset)),
 });
+
+const ruecklaufLayerVon = (layer) => {
+  if (layer?.role !== 'vl' || !layer.id.endsWith('_vl')) return null;
+  return LEITUNGS_LAYER.find(item => item.id === layer.id.replace(/_vl$/, '_rl')) || null;
+};
 
 const layerVonEdge = (edge) => {
   const gespeichert = LEITUNGS_LAYER.find(layer => layer.id === edge.data?.layer_id);
@@ -185,6 +194,16 @@ function LeitungPanel({ edge, leitungResults, onUpdateEdge, onUpdateLayer, onDel
         <span style={{ width:26, borderTop:`3px ${layer.dashed?'dashed':'solid'} ${layer.color}` }}/>
         {layer.role ? `Fachlich ${layer.role.toUpperCase()}` : 'Ohne VL/RL-Zuordnung'}
       </div>
+      {edge.data?.paired_edge_id && (
+        <div style={{ marginTop:6, padding:'5px 7px', borderRadius:6, background:'#eff6ff', color:'#1d4ed8', fontSize:9, lineHeight:1.4 }}>
+          VL/RL-Paar · Diese Leitung bleibt unabhängig bearbeitbar.
+        </div>
+      )}
+      {edge.data?.auto_pair_open && (
+        <div style={{ ...warnSt, background:'#fff7ed', border:'1px solid #fdba74', color:'#c2410c', marginTop:6 }}>
+          Automatischer Rücklauf besitzt noch ein freies Ende. Endgriff auf den gewünschten Fangpunkt ziehen.
+        </div>
+      )}
       {lg ? (
         <>
           {ro('Dimension (automatisch)', lg.dn, '', true)}
@@ -195,7 +214,12 @@ function LeitungPanel({ edge, leitungResults, onUpdateEdge, onUpdateLayer, onDel
               onChange={e => onUpdateEdge(edge.id, 'laenge_m', e.target.value)} placeholder="z.B. 12" />
           </div>
           {lg.dp_kpa != null
-            ? ro('Δp dieser Leitung', lg.dp_kpa.toFixed(2), 'kPa', true)
+            ? <>
+              {ro('Δp dieser Leitung', lg.dp_kpa.toFixed(2), 'kPa', true)}
+              <div style={{ marginTop:-3, marginBottom:7, fontSize:8.5, color:'#64748b', fontFamily:'monospace' }}>
+                {lg.pam.toFixed(1)} Pa/m × {Number(lg.laenge_m).toFixed(1)} m ÷ 1000
+              </div>
+            </>
             : <div style={{ fontSize: 9, color: '#94a3b8' }}>Länge eingeben für Δp dieser Leitung.</div>}
           {lg.warnung && <div style={{ ...warnSt, background:'#fef2f2', border:'1px solid #fca5a5', color:'#b91c1c', marginTop:6 }}>⚠ {lg.warnung}</div>}
         </>
@@ -1231,6 +1255,21 @@ function EditorInner() {
     };
   }, [getInternalNode]);
 
+  const exakteHandlePosition = useCallback((nodeId, handleId) => {
+    if (!handleId) return null;
+    const internal = getInternalNode(nodeId);
+    if (!internal) return null;
+    const bounds = [
+      ...(internal.internals.handleBounds?.source || []),
+      ...(internal.internals.handleBounds?.target || []),
+    ];
+    const handle = bounds.find(item => item.id === handleId);
+    const absolute = internal.internals.positionAbsolute;
+    return handle && absolute
+      ? { x:absolute.x + handle.x + handle.width / 2, y:absolute.y + handle.y + handle.height / 2 }
+      : null;
+  }, [getInternalNode]);
+
   const routePunkte = useCallback((edge) => {
     const start = handlePosition(edge.source, edge.sourceHandle);
     const end = handlePosition(edge.target, edge.targetHandle);
@@ -1316,6 +1355,72 @@ function EditorInner() {
     draggable:false,
     data:{ cad_anchor:true, layer_id:layer.id, color:layer.color },
   }), []);
+
+  const ruecklaufPaarErstellen = useCallback((primaryEdge, startPoint, endPoint) => {
+    const primaryLayer = layerVonEdge(primaryEdge);
+    const returnLayer = drawingConfig.auto_return ? ruecklaufLayerVon(primaryLayer) : null;
+    if (!returnLayer || !startPoint || !endPoint) return null;
+
+    const createdNodes = [];
+    const endpoint = (nodeId, handleId, point, side) => {
+      const node = nodesRef.current.find(item => item.id === nodeId);
+      const returnHandleId = node && node.type !== 'junction' ? pairedHandleId(node.type, handleId) : null;
+      const pairedPosition = returnHandleId ? exakteHandlePosition(nodeId, returnHandleId) : null;
+      if (pairedPosition) {
+        return { nodeId, handleId:returnHandleId, position:pairedPosition, mapped:true };
+      }
+      const anchorId = newId();
+      const position = { x:point.x, y:point.y + drawingConfig.return_offset };
+      createdNodes.push(cadAnker(anchorId, position, returnLayer));
+      return {
+        nodeId:anchorId,
+        handleId:side === 'source' ? 'center-source' : 'center-target',
+        position,
+        mapped:false,
+      };
+    };
+
+    // Der Rücklauf verläuft fachlich entgegengesetzt: vom Ziel des Vorlaufs
+    // zurück zur Quelle. Die sichtbare Geometrie bleibt parallel, nur die
+    // topologische Richtung und Reihenfolge der Stützpunkte werden gedreht.
+    const sourceCounterpart = endpoint(primaryEdge.source, primaryEdge.sourceHandle, startPoint, 'target');
+    const targetCounterpart = endpoint(primaryEdge.target, primaryEdge.targetHandle, endPoint, 'source');
+    const returnEdgeId = newId();
+    const returnPoints = parallelWaypoints(
+      primaryEdge.data?.points || [],
+      startPoint,
+      endPoint,
+      sourceCounterpart.position,
+      targetCounterpart.position,
+    ).reverse();
+    const returnEdge = {
+      id:returnEdgeId,
+      source:targetCounterpart.nodeId,
+      sourceHandle:targetCounterpart.handleId,
+      target:sourceCounterpart.nodeId,
+      targetHandle:sourceCounterpart.handleId,
+      type:'flow',
+      selected:false,
+      data:{
+        layer_id:returnLayer.id,
+        cad_polyline:Boolean(primaryEdge.data?.cad_polyline),
+        corner_radius:drawingConfig.corner_radius,
+        points:returnPoints,
+        paired_edge_id:primaryEdge.id,
+        auto_paired:true,
+        auto_pair_open:!sourceCounterpart.mapped || !targetCounterpart.mapped,
+      },
+      style:{ stroke:returnLayer.color, strokeWidth:4.5 },
+    };
+    return {
+      primaryEdge:{
+        ...primaryEdge,
+        data:{ ...(primaryEdge.data || {}), paired_edge_id:returnEdgeId },
+      },
+      returnEdge,
+      createdNodes,
+    };
+  }, [cadAnker, drawingConfig, exakteHandlePosition]);
 
   const letzterEntwurfsPunkt = useCallback((draft) => {
     if (!draft) return null;
@@ -1447,13 +1552,12 @@ function EditorInner() {
     const targetAnchorId = snapHit?.type === 'port' ? null : newId();
     if (sourceAnchorId) createdNodes.push(cadAnker(sourceAnchorId, startPoint, layer));
     if (targetAnchorId) createdNodes.push(cadAnker(targetAnchorId, endPoint, layer));
-    if (createdNodes.length) setNodes(items => [...items, ...createdNodes]);
 
     const edgeId = newId();
     const istDirekteFangpunktVerbindung = Boolean(
       draft.startEndpoint && snapHit?.type === 'port' && !(draft.points || []).length,
     );
-    const edge = {
+    let edge = {
       id:edgeId,
       source:draft.startEndpoint?.nodeId || sourceAnchorId,
       sourceHandle:draft.startEndpoint?.handleId || 'center-source',
@@ -1468,12 +1572,19 @@ function EditorInner() {
       },
       style:{ stroke:layer.color, strokeWidth:4.5 },
     };
+    const returnPair = ruecklaufPaarErstellen(edge, startPoint, endPoint);
+    if (returnPair) {
+      edge = returnPair.primaryEdge;
+      createdNodes.push(...returnPair.createdNodes);
+    }
+    if (createdNodes.length) setNodes(items => [...items, ...createdNodes]);
+    const pairedEdges = returnPair ? [returnPair.returnEdge] : [];
 
     if (snapHit?.type === 'line') {
       const [first, second] = leitungTeilen(snapHit, targetAnchorId, layer.id);
-      setEdges(items => [...items.filter(item => item.id !== snapHit.edge.id), first, second, edge]);
+      setEdges(items => [...items.filter(item => item.id !== snapHit.edge.id), first, second, edge, ...pairedEdges]);
     } else {
-      setEdges(items => [...items, edge]);
+      setEdges(items => [...items, edge, ...pairedEdges]);
     }
 
     leitungsEntwurfRef.current = null;
@@ -1483,7 +1594,7 @@ function EditorInner() {
     leitungsCursorRef.current = null;
     setWerkzeug('select');
     setSelectedEdgeId(edgeId);
-  }, [activeLayer, cadAnker, drawingConfig, handlePosition, letzterEntwurfsPunkt, leitungTeilen, routePunkte, setEdges, setNodes, snap]);
+  }, [activeLayer, cadAnker, drawingConfig, handlePosition, letzterEntwurfsPunkt, leitungTeilen, routePunkte, ruecklaufPaarErstellen, setEdges, setNodes, snap]);
 
   const cadKlick = useCallback((event, nurBeiAnschluss = false) => {
     if (werkzeug !== 'line') return false;
@@ -1727,9 +1838,15 @@ function EditorInner() {
       if (portHit) {
         setEdges(items => items.map(edge => {
           if (edge.id !== drag.edgeId) return edge;
-          return drag.side === 'source'
+          const otherNodeId = drag.side === 'source' ? edge.target : edge.source;
+          const otherNode = nodesRef.current.find(node => node.id === otherNodeId);
+          const otherDegree = edgesRef.current.filter(item => item.source === otherNodeId || item.target === otherNodeId).length;
+          const nextEdge = drag.side === 'source'
             ? { ...edge, source:portHit.nodeId, sourceHandle:portHit.handleId }
             : { ...edge, target:portHit.nodeId, targetHandle:portHit.handleId };
+          return edge.data?.auto_paired
+            ? { ...nextEdge, data:{ ...(nextEdge.data || {}), auto_pair_open:otherNode?.type === 'junction' && otherDegree <= 1 } }
+            : nextEdge;
         }));
         setNodes(items => items.filter(node => node.id !== drag.anchorId));
         return;
@@ -1740,7 +1857,18 @@ function EditorInner() {
         setNodes(items => items.map(node => node.id === drag.anchorId
           ? { ...node, position:{ x:lineHit.x, y:lineHit.y } }
           : node));
-        setEdges(items => [...items.filter(edge => edge.id !== lineHit.edge.id), first, second]);
+        setEdges(items => {
+          const draggedEdge = items.find(edge => edge.id === drag.edgeId);
+          const otherNodeId = drag.side === 'source' ? draggedEdge?.target : draggedEdge?.source;
+          const otherNode = nodesRef.current.find(node => node.id === otherNodeId);
+          const otherDegree = items.filter(edge => edge.source === otherNodeId || edge.target === otherNodeId).length;
+          const base = items
+            .filter(edge => edge.id !== lineHit.edge.id)
+            .map(edge => edge.id === drag.edgeId && edge.data?.auto_paired
+              ? { ...edge, data:{ ...(edge.data || {}), auto_pair_open:otherNode?.type === 'junction' && otherDegree <= 1 } }
+              : edge);
+          return [...base, first, second];
+        });
         return;
       }
       setNodes(items => items.map(node => node.id === drag.anchorId ? { ...node, position:point } : node));
@@ -1983,12 +2111,23 @@ function EditorInner() {
 
   const onConnect = useCallback((params) => {
     snap();
-    setEdges(eds => addEdge({
-      ...params, type:'flow',
+    let edge = {
+      ...params, id:newId(), type:'flow',
       data:{ ...(params.data || {}), layer_id:activeLayer.id, corner_radius:drawingConfig.corner_radius },
       style:{ stroke:activeLayer.color, strokeWidth:2.5 },
-    }, eds));
-  }, [activeLayer, drawingConfig.corner_radius, setEdges, snap]);
+    };
+    const startPoint = handlePosition(params.source, params.sourceHandle);
+    const endPoint = handlePosition(params.target, params.targetHandle);
+    const returnPair = ruecklaufPaarErstellen(edge, startPoint, endPoint);
+    if (returnPair) edge = returnPair.primaryEdge;
+    const exists = edgesRef.current.some(item => item.source === params.source
+      && item.target === params.target
+      && item.sourceHandle === params.sourceHandle
+      && item.targetHandle === params.targetHandle);
+    if (exists) return;
+    if (returnPair?.createdNodes.length) setNodes(nodesNow => [...nodesNow, ...returnPair.createdNodes]);
+    setEdges(items => [...items, edge, ...(returnPair ? [returnPair.returnEdge] : [])]);
+  }, [activeLayer, drawingConfig.corner_radius, handlePosition, ruecklaufPaarErstellen, setEdges, setNodes, snap]);
 
   const onConnectStart = useCallback((_, params) => { connectStart.current = params; }, []);
 
@@ -2009,9 +2148,8 @@ function EditorInner() {
     const vonQuelle = cs.handleType !== 'target';
     const hit = naechsteLeitung(p, activeLayer.id, 22 / Math.max(getZoom(), 0.2));
     const junctionPoint = hit ? { x:hit.x, y:hit.y } : p;
-    setNodes(ns => [...ns, cadAnker(jid, junctionPoint, activeLayer)]);
 
-    const branch = {
+    let branch = {
       id:newId(),
       source:vonQuelle ? cs.nodeId : jid,
       sourceHandle:vonQuelle ? cs.handleId : 'center-source',
@@ -2021,9 +2159,19 @@ function EditorInner() {
       data:{ layer_id:activeLayer.id, cad_polyline:true, corner_radius:drawingConfig.corner_radius, points:[] },
       style:{ stroke:activeLayer.color, strokeWidth:4.5 },
     };
+    const startPoint = vonQuelle ? origin : junctionPoint;
+    const endPoint = vonQuelle ? junctionPoint : origin;
+    const returnPair = ruecklaufPaarErstellen(branch, startPoint, endPoint);
+    if (returnPair) branch = returnPair.primaryEdge;
+    setNodes(items => [
+      ...items,
+      cadAnker(jid, junctionPoint, activeLayer),
+      ...(returnPair?.createdNodes || []),
+    ]);
+    const pairedEdges = returnPair ? [returnPair.returnEdge] : [];
 
     if (!hit) {
-      setEdges(es => addEdge(branch, es));
+      setEdges(items => [...items, branch, ...pairedEdges]);
       return;
     }
 
@@ -2031,9 +2179,9 @@ function EditorInner() {
     // T-Stück. Die bestehende Leitung wird topologisch in zwei Teile geteilt;
     // eine reine optische Kreuzung bleibt dagegen weiterhin unverbunden.
     const [first, second] = leitungTeilen(hit, jid, activeLayer.id);
-    setEdges(es => [...es.filter(edge => edge.id !== hit.edge.id), first, second, branch]);
+    setEdges(es => [...es.filter(edge => edge.id !== hit.edge.id), first, second, branch, ...pairedEdges]);
     setSelectedEdgeId(null);
-  }, [activeLayer, cadAnker, drawingConfig.corner_radius, drawingConfig.grid_size, getZoom, handlePosition, leitungTeilen, naechsteLeitung, screenToFlowPosition, setNodes, setEdges, snap]);
+  }, [activeLayer, cadAnker, drawingConfig.corner_radius, drawingConfig.grid_size, getZoom, handlePosition, leitungTeilen, naechsteLeitung, ruecklaufPaarErstellen, screenToFlowPosition, setNodes, setEdges, snap]);
 
   const onDragOver = useCallback(e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }, []);
 
@@ -2106,7 +2254,14 @@ function EditorInner() {
 
   const deleteEdge = (id) => {
     snap();
-    const remaining = edgesRef.current.filter(edge => edge.id !== id);
+    const remaining = edgesRef.current
+      .filter(edge => edge.id !== id)
+      .map(edge => {
+        if (edge.data?.paired_edge_id !== id) return edge;
+        const data = { ...edge.data };
+        delete data.paired_edge_id;
+        return { ...edge, data };
+      });
     const usedNodes = new Set(remaining.flatMap(edge => [edge.source, edge.target]));
     setEdges(remaining);
     setNodes(items => items.filter(node => node.type !== 'junction' || usedNodes.has(node.id)));
@@ -2228,6 +2383,23 @@ function EditorInner() {
                   <option value="20">20 px · grob</option>
                 </select>
               </label>
+              <div style={{ borderTop:'1px solid #f1f5f9', paddingTop:9, marginBottom:9 }}>
+                <label style={{ display:'flex', alignItems:'center', gap:7, fontSize:10, fontWeight:700, color:'#334155', cursor:'pointer' }}>
+                  <input type="checkbox" checked={drawingConfig.auto_return}
+                    onChange={event=>drawingConfigAktualisieren('auto_return', event.target.checked)} />
+                  Rücklauf bei VL automatisch erzeugen
+                </label>
+                <label style={{ display:'grid', gridTemplateColumns:'1fr 58px', gap:8, alignItems:'center', marginTop:7, fontSize:9, color:'#64748b' }}>
+                  Abstand bei freien Enden
+                  <input type="number" min="20" max="240" step="10" disabled={!drawingConfig.auto_return}
+                    value={drawingConfig.return_offset}
+                    onChange={event=>drawingConfigAktualisieren('return_offset', event.target.value)}
+                    style={{ width:58, border:'1px solid #cbd5e1', borderRadius:5, padding:'4px', fontSize:10 }} />
+                </label>
+                <div style={{ marginTop:5, fontSize:8.5, lineHeight:1.4, color:'#94a3b8' }}>
+                  Gilt für Heizung, Kälte und Sole. Der erzeugte RL bleibt eine normale, unabhängig bearbeitbare Leitung.
+                </div>
+              </div>
               <div style={{ borderTop:'1px solid #f1f5f9', paddingTop:9, display:'grid', gridTemplateColumns:'1fr 42px', gap:'7px 8px', alignItems:'center', fontSize:10, color:'#475569' }}>
                 <label htmlFor="shortcut-line">Leitung ab Fangpunkt</label>
                 <input id="shortcut-line" maxLength="1" value={drawingConfig.shortcut_line}
@@ -2263,6 +2435,12 @@ function EditorInner() {
             <span style={{ width:12, height:12, borderRadius:3, background:activeLayer.color, border:activeLayer.dashed?'2px dashed white':'none' }}/>
             {activeLayer.label} ▾
           </button>
+          {drawingConfig.auto_return && ruecklaufLayerVon(activeLayer) && (
+            <span title="Beim Zeichnen wird ein unabhängig bearbeitbarer Rücklauf erzeugt"
+              style={{ padding:'2px 6px', borderRadius:8, background:'#eff6ff', color:'#1d4ed8', fontSize:8, fontWeight:800, whiteSpace:'nowrap' }}>
+              + Auto-RL
+            </span>
+          )}
           {showLayers && (
             <div style={{ position:'absolute', right:0, top:34, width:230, zIndex:100, background:'white', border:'1px solid #cbd5e1', borderRadius:10,
               boxShadow:'0 12px 28px rgba(15,23,42,.18)', padding:7 }}>

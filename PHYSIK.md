@@ -176,6 +176,12 @@ Dimensionierung), ohne dass eine lange Leitung quer durchs Schema gezeichnet wer
   `drawing_config` speichert Standardradius, Zeichenraster und die frei wählbaren Shortcuts für
   Leitung und Polylinie. Direkte Fangpunkt-Verbindungen ohne eigene Eckpunkte verwenden weiterhin
   die automatische React-Flow-Winkelroute und passen sich beim Verschieben der Bauteile vollständig an.
+- Ist **Auto-RL** in der `drawing_config` aktiv, erzeugt eine neu gezeichnete VL-Leitung automatisch
+  eine fachlich entgegengesetzt gerichtete Leitung auf dem zugehörigen RL-Layer. Semantische
+  Fangpunkte (`vl`/`rl`, Verteilerabgänge, Speicher- und PWT-Paare) werden direkt zugeordnet; für
+  nicht eindeutig zuordenbare Anschlüsse entsteht ein sichtbarer Hinweis und ein freier RL-Endgriff.
+  VL und RL speichern gegenseitig `data.paired_edge_id`, bleiben danach aber vollständig unabhängige
+  Edges: Stützpunkte, Endgriffe, Layer und hydraulische Länge lassen sich separat bearbeiten.
 - Rechtsklick auf den Anfangs- oder Endgriff einer bestehenden Leitung bietet
   **«Linie weiterziehen»** an. Die neuen Klickpunkte werden an `data.points` derselben Kante
   angefügt (am Anfang in umgekehrter Reihenfolge); es entstehen keine unabhängigen

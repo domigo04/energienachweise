@@ -156,11 +156,22 @@ def _ensure_indexes():
 
 
 def _seed_group_templates(db):
+    # Die Systemvorlage wird auch in bestehenden Installationen nachgezogen.
+    # Bereits im Schema gespeicherte Projektwerte bleiben davon unberührt.
+    modern = db.query(HcGroupTemplate).filter(
+        HcGroupTemplate.name == "Heizkörper modern (HK)",
+        HcGroupTemplate.is_system.is_(True),
+    ).first()
+    if modern and (modern.standard_vl != 50.0 or modern.standard_rl != 40.0):
+        modern.standard_vl = 50.0
+        modern.standard_rl = 40.0
+        modern.beschreibung = "VL 50 / RL 40 °C"
+        db.commit()
     if db.query(HcGroupTemplate).count() > 0:
         return
     templates = [
         HcGroupTemplate(name="Fussbodenheizung (FBH)", typ=HcGruppeTyp.fbh, standard_vl=35.0, standard_rl=28.0, beschreibung="VL 35 / RL 28 °C", is_system=True),
-        HcGroupTemplate(name="Heizkörper modern (HK)", typ=HcGruppeTyp.hk, standard_vl=55.0, standard_rl=45.0, beschreibung="VL 55 / RL 45 °C", is_system=True),
+        HcGroupTemplate(name="Heizkörper modern (HK)", typ=HcGruppeTyp.hk, standard_vl=50.0, standard_rl=40.0, beschreibung="VL 50 / RL 40 °C", is_system=True),
         HcGroupTemplate(name="Heizkörper alt (HK)", typ=HcGruppeTyp.hk, standard_vl=70.0, standard_rl=55.0, beschreibung="VL 70 / RL 55 °C", is_system=True),
         HcGroupTemplate(name="Lufterhitzer", typ=HcGruppeTyp.lufterhitzer, standard_vl=60.0, standard_rl=45.0, beschreibung="VL 60 / RL 45 °C", is_system=True),
         HcGroupTemplate(name="Brauchwarmwasser (BWW)", typ=HcGruppeTyp.bww, standard_vl=65.0, standard_rl=55.0, beschreibung="VL 65 / RL 55 °C", is_system=True),
@@ -200,20 +211,21 @@ def _seed_admin(db):
     gesetztes altes Passwort für immer aktiv blieb. Aber ein Passwort, das
     Dominic übers Konto SELBST geändert hat, darf der nächste Neustart nicht
     mehr stillschweigend überschreiben (Sicherheits-Review 2026-07-19)."""
+    admin_email = os.getenv("ADMIN_EMAIL", "").lower().strip()
+    admin_pw = os.getenv("ADMIN_INITIAL_PASSWORD", "")
+    if not admin_email or not admin_pw:
+        print("[INFO] Admin-Seed übersprungen — ADMIN_EMAIL und "
+              "ADMIN_INITIAL_PASSWORD müssen beide als Umgebungsvariablen gesetzt sein.")
+        return None
     firma = db.query(Firma).filter(Firma.id == 1).first()
     if not firma:
         db.add(Firma(id=1, name="SIREGO GmbH"))
         db.commit()
-    admin_email = os.getenv("ADMIN_EMAIL", "dominicgoulon@icloud.com").lower().strip()
-    admin_pw = os.getenv("ADMIN_INITIAL_PASSWORD", "Sirego2004!")
-    if not os.getenv("ADMIN_INITIAL_PASSWORD"):
-        print("[WARNUNG] ADMIN_INITIAL_PASSWORD nicht gesetzt — Code-Default wird verwendet. "
-              "Für Produktion unbedingt eine eigene, geheime Umgebungsvariable setzen.")
     pw_fingerprint = hashlib.sha256(admin_pw.encode()).hexdigest()
 
     admin = db.query(User).filter(User.email == admin_email).first()
     if not admin:
-        admin = User(tenant_id=1, email=admin_email, name="Dominic Goulon")
+        admin = User(tenant_id=1, email=admin_email, name=os.getenv("ADMIN_NAME", "Administrator"))
         db.add(admin)
         admin.password_hash = hash_password(admin_pw)
         admin.admin_pw_seed_fingerprint = pw_fingerprint
@@ -228,6 +240,7 @@ def _seed_admin(db):
     admin.is_verified = True
     admin.is_active = True
     db.commit()
+    return admin_email
 
 
 @app.on_event("startup")
@@ -259,8 +272,9 @@ def init_db_and_seed():
             print("Seed error (group templates):")
             traceback.print_exc()
         try:
-            _seed_admin(db)
-            print(f"[INIT] Admin-Konto sichergestellt: {os.getenv('ADMIN_EMAIL', 'dominicgoulon@icloud.com').lower().strip()}")
+            admin_email = _seed_admin(db)
+            if admin_email:
+                print(f"[INIT] Admin-Konto sichergestellt: {admin_email}")
         except Exception:
             db.rollback()
             print("Seed error (admin):")

@@ -167,9 +167,15 @@ Dimensionierung), ohne dass eine lange Leitung quer durchs Schema gezeichnet wer
 - Eine optische Leitungskreuzung erzeugt **keine** hydraulische Verbindung. Erst das bewusste
   Ablegen eines Leitungsendes auf der Mitte einer Leitung teilt diese Leitung und erzeugt ein
   echtes T-Stück im Graphen.
-- Der produktive Editor verwendet dieselbe CAD-Zeichenlogik wie der React-Flow-Probeeditor:
-  Polylinie wählen, frei in der Fläche beginnen, Klick setzt einen Stützpunkt, Enter oder
+- Der produktive Editor besitzt zwei CAD-Zeichenmodi mit derselben Geometrie: **Leitung** beginnt
+  zwingend an einem Bauteil-Fangpunkt und endet nach beliebig vielen Eckpunkten an einem zweiten
+  Fangpunkt; **Polylinie** darf zusätzlich frei in der Fläche beginnen und enden. Enter oder
   Rechtsklick beendet die Leitung. Shift fängt auf 0°, 45° und 90°.
+- Alle bewusst gesetzten Ecken werden im Editor und PDF mit einem einheitlichen technischen Bogen
+  gezeichnet. `data.corner_radius` speichert dessen Radius pro Leitung; die globale
+  `drawing_config` speichert Standardradius, Zeichenraster und die frei wählbaren Shortcuts für
+  Leitung und Polylinie. Direkte Fangpunkt-Verbindungen ohne eigene Eckpunkte verwenden weiterhin
+  die automatische React-Flow-Winkelroute und passen sich beim Verschieben der Bauteile vollständig an.
 - Rechtsklick auf den Anfangs- oder Endgriff einer bestehenden Leitung bietet
   **«Linie weiterziehen»** an. Die neuen Klickpunkte werden an `data.points` derselben Kante
   angefügt (am Anfang in umgekehrter Reihenfolge); es entstehen keine unabhängigen

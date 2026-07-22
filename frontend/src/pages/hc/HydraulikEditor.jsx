@@ -9,6 +9,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import { NODE_TYPES, NUMMERIERT, ROTATABLE } from '../../components/hc/nodes/HydraulikNodes';
 import { EDGE_TYPES } from '../../components/hc/edges/FlowEdge';
+import { roundedPolylinePath } from '../../components/hc/edges/geometry';
 import { SCHALTUNGEN } from '../../components/hc/nodes/schaltungen';
 import { getProject, listSchemas, createSchema, saveSchema, hydraulikBerechnen } from '../../api/hcApi';
 import { api } from '../../api';
@@ -27,13 +28,26 @@ const LEITUNGS_LAYER = [
 ];
 const DEFAULT_LAYER_VISIBILITY = Object.fromEntries(LEITUNGS_LAYER.map(layer => [layer.id, true]));
 const CAD_GRID = 10;
+const DEFAULT_DRAWING_CONFIG = {
+  corner_radius:8,
+  grid_size:CAD_GRID,
+  shortcut_polyline:'p',
+  shortcut_line:'l',
+};
 
-const rasterPunkt = (point) => ({
-  x:Math.round(point.x / CAD_GRID) * CAD_GRID,
-  y:Math.round(point.y / CAD_GRID) * CAD_GRID,
+const rasterPunkt = (point, grid = CAD_GRID) => ({
+  x:Math.round(point.x / grid) * grid,
+  y:Math.round(point.y / grid) * grid,
 });
 
-const punkteAttribut = (points) => points.map(point => `${point.x},${point.y}`).join(' ');
+const shortcutTaste = (value, fallback) => String(value || fallback).trim().slice(-1).toLowerCase();
+
+const normalisiereDrawingConfig = (config = {}) => ({
+  corner_radius:Math.max(0, Math.min(40, Number(config.corner_radius ?? DEFAULT_DRAWING_CONFIG.corner_radius) || 0)),
+  grid_size:[5, 10, 20].includes(Number(config.grid_size)) ? Number(config.grid_size) : DEFAULT_DRAWING_CONFIG.grid_size,
+  shortcut_polyline:shortcutTaste(config.shortcut_polyline, DEFAULT_DRAWING_CONFIG.shortcut_polyline),
+  shortcut_line:shortcutTaste(config.shortcut_line, DEFAULT_DRAWING_CONFIG.shortcut_line),
+});
 
 const layerVonEdge = (edge) => {
   const gespeichert = LEITUNGS_LAYER.find(layer => layer.id === edge.data?.layer_id);
@@ -80,7 +94,7 @@ function ConstrainedConnectionLine({ fromX, fromY, toX, toY, connectionLineStyle
 }
 const WAERMEABGABE = [
   { label: 'Fussbodenheizung (FBH)',  vl: 35, rl: 28 },
-  { label: 'Heizkörper modern (HK)', vl: 55, rl: 45 },
+  { label: 'Heizkörper modern (HK)', vl: 50, rl: 40 },
   { label: 'Heizkörper alt (HK)',    vl: 70, rl: 55 },
   { label: 'Lufterhitzer',           vl: 60, rl: 45 },
   { label: 'BWW Aufheizung',         vl: 65, rl: 55 },
@@ -940,6 +954,9 @@ function EditorInner() {
   const [showLayers, setShowLayers] = useState(false);
   const [shiftPressed, setShiftPressed] = useState(false);
   const [werkzeug, setWerkzeug] = useState('select'); // select | line
+  const [lineStartMode, setLineStartMode] = useState('free'); // free | handle
+  const [drawingConfig, setDrawingConfig] = useState(DEFAULT_DRAWING_CONFIG);
+  const [showDrawingSettings, setShowDrawingSettings] = useState(false);
   const [leitungsEntwurf, setLeitungsEntwurf] = useState(null);
   const [leitungsCursor, setLeitungsCursor] = useState(null);
   const [leitungsSnap, setLeitungsSnap] = useState(null);
@@ -1050,8 +1067,16 @@ function EditorInner() {
           return (NUMMERIERT.includes(n.type) && n.data?.nr == null)
             ? { ...n, data: { ...n.data, nr: ++maxNr } } : n;
         });
+        const geladeneDrawingConfig = normalisiereDrawingConfig(s.graph?.drawing_config);
+        setDrawingConfig(geladeneDrawingConfig);
         setNodes(geladen);
-        setEdges(s.graph?.edges || []);
+        setEdges((s.graph?.edges || []).map(edge => ({
+          ...edge,
+          data:{
+            ...(edge.data || {}),
+            corner_radius:edge.data?.corner_radius ?? geladeneDrawingConfig.corner_radius,
+          },
+        })));
         const layerConfig = s.graph?.layer_config;
         if (LEITUNGS_LAYER.some(layer => layer.id === layerConfig?.active_layer_id)) {
           const active = LEITUNGS_LAYER.find(layer => layer.id === layerConfig.active_layer_id);
@@ -1075,6 +1100,7 @@ function EditorInner() {
         await saveSchema(schemaId, { name: schemaName, graph: {
           nodes, edges,
           layer_config: { active_layer_id: activeLayerId, visibility: layerVisibility },
+          drawing_config:drawingConfig,
         } });
         setSaveState('saved');
       } catch {
@@ -1082,7 +1108,7 @@ function EditorInner() {
       }
     }, 800);
     return () => clearTimeout(t);
-  }, [nodes, edges, schemaName, loaded, schemaId, activeLayerId, layerVisibility]);
+  }, [nodes, edges, schemaName, loaded, schemaId, activeLayerId, layerVisibility, drawingConfig]);
 
   // Undo-History
   const snapshots = useRef([]);
@@ -1098,6 +1124,28 @@ function EditorInner() {
     const prev = snapshots.current[snapshots.current.length - 1];
     if (prev) { setNodes(prev.n); setEdges(prev.e); setSelected(null); }
   }, [setNodes, setEdges]);
+
+  const drawingConfigAktualisieren = useCallback((key, value) => {
+    const next = normalisiereDrawingConfig({ ...drawingConfig, [key]:value });
+    setDrawingConfig(next);
+    if (key === 'corner_radius') {
+      setEdges(items => items.map(edge => ({
+        ...edge,
+        data:{ ...(edge.data || {}), corner_radius:next.corner_radius },
+      })));
+    }
+  }, [drawingConfig, setEdges]);
+
+  const zeichenmodusWaehlen = useCallback((mode = null) => {
+    leitungsEntwurfRef.current = null;
+    leitungsCursorRef.current = null;
+    setLeitungsEntwurf(null);
+    setLeitungsCursor(null);
+    setLeitungsSnap(null);
+    setEndpointMenu(null);
+    if (mode) setLineStartMode(mode);
+    setWerkzeug(mode ? 'line' : 'select');
+  }, []);
 
   // CSS-Animationen + grössere Hitboxen
   React.useEffect(() => {
@@ -1322,7 +1370,7 @@ function EditorInner() {
     const anchor = letzterEntwurfsPunkt(draft) || startPoint;
     const endPoint = snapHit
       ? { x:snapHit.x, y:snapHit.y }
-      : shift ? auf45GradFangen(anchor, rawPoint, CAD_GRID) : rasterPunkt(rawPoint);
+      : shift ? auf45GradFangen(anchor, rawPoint, drawingConfig.grid_size) : rasterPunkt(rawPoint, drawingConfig.grid_size);
     if (!startPoint || Math.hypot(endPoint.x - startPoint.x, endPoint.y - startPoint.y) < 2) return;
 
     snap();
@@ -1364,7 +1412,13 @@ function EditorInner() {
         ...(side === 'source'
           ? { source:newEndpoint.nodeId, sourceHandle:newEndpoint.handleId }
           : { target:newEndpoint.nodeId, targetHandle:newEndpoint.handleId }),
-        data:{ ...(existing.data || {}), layer_id:layer.id, cad_polyline:true, points:nextPoints },
+        data:{
+          ...(existing.data || {}),
+          layer_id:layer.id,
+          cad_polyline:true,
+          corner_radius:drawingConfig.corner_radius,
+          points:nextPoints,
+        },
         style:{ ...(existing.style || {}), stroke:layer.color, strokeWidth:4.5 },
       };
 
@@ -1396,6 +1450,9 @@ function EditorInner() {
     if (createdNodes.length) setNodes(items => [...items, ...createdNodes]);
 
     const edgeId = newId();
+    const istDirekteFangpunktVerbindung = Boolean(
+      draft.startEndpoint && snapHit?.type === 'port' && !(draft.points || []).length,
+    );
     const edge = {
       id:edgeId,
       source:draft.startEndpoint?.nodeId || sourceAnchorId,
@@ -1403,7 +1460,12 @@ function EditorInner() {
       target:snapHit?.type === 'port' ? snapHit.nodeId : targetAnchorId,
       targetHandle:snapHit?.type === 'port' ? snapHit.handleId : 'center-target',
       type:'flow',
-      data:{ layer_id:layer.id, cad_polyline:true, points:[...(draft.points || [])] },
+      data:{
+        layer_id:layer.id,
+        cad_polyline:!istDirekteFangpunktVerbindung,
+        corner_radius:drawingConfig.corner_radius,
+        points:[...(draft.points || [])],
+      },
       style:{ stroke:layer.color, strokeWidth:4.5 },
     };
 
@@ -1421,7 +1483,7 @@ function EditorInner() {
     leitungsCursorRef.current = null;
     setWerkzeug('select');
     setSelectedEdgeId(edgeId);
-  }, [activeLayer, cadAnker, handlePosition, letzterEntwurfsPunkt, leitungTeilen, routePunkte, setEdges, setNodes, snap]);
+  }, [activeLayer, cadAnker, drawingConfig, handlePosition, letzterEntwurfsPunkt, leitungTeilen, routePunkte, setEdges, setNodes, snap]);
 
   const cadKlick = useCallback((event, nurBeiAnschluss = false) => {
     if (werkzeug !== 'line') return false;
@@ -1437,7 +1499,8 @@ function EditorInner() {
 
     if (!draft) {
       if (nurBeiAnschluss && !portHit) return true;
-      const startPoint = portHit?.position || rasterPunkt(raw);
+      if (lineStartMode === 'handle' && !portHit) return true;
+      const startPoint = portHit?.position || rasterPunkt(raw, drawingConfig.grid_size);
       leitungsEntwurfStarten(startPoint, portHit ? { nodeId:portHit.nodeId, handleId:portHit.handleId } : null);
       return true;
     }
@@ -1454,13 +1517,13 @@ function EditorInner() {
     }
     const previous = letzterEntwurfsPunkt(draft);
     const point = event.shiftKey || shiftPressed
-      ? auf45GradFangen(previous, raw, CAD_GRID)
-      : rasterPunkt(raw);
+      ? auf45GradFangen(previous, raw, drawingConfig.grid_size)
+      : rasterPunkt(raw, drawingConfig.grid_size);
     const next = { ...draft, points:[...(draft.points || []), point] };
     leitungsEntwurfRef.current = next;
     setLeitungsEntwurf(next);
     return true;
-  }, [activeLayer, getZoom, letzterEntwurfsPunkt, leitungsEntwurfAbschliessen, leitungsEntwurfStarten, naechsteLeitung, naechsterBauteilAnschluss, screenToFlowPosition, shiftPressed, werkzeug]);
+  }, [activeLayer, drawingConfig, getZoom, letzterEntwurfsPunkt, leitungsEntwurfAbschliessen, leitungsEntwurfStarten, lineStartMode, naechsteLeitung, naechsterBauteilAnschluss, screenToFlowPosition, shiftPressed, werkzeug]);
 
   const cadHandlePointerDown = useCallback((event) => {
     if (werkzeug !== 'line') return;
@@ -1517,7 +1580,7 @@ function EditorInner() {
     const preview = leitungsSnap
       ? { x:leitungsSnap.x, y:leitungsSnap.y }
       : leitungsCursor
-        ? shiftPressed ? auf45GradFangen(previous, leitungsCursor, CAD_GRID) : rasterPunkt(leitungsCursor)
+        ? shiftPressed ? auf45GradFangen(previous, leitungsCursor, drawingConfig.grid_size) : rasterPunkt(leitungsCursor, drawingConfig.grid_size)
         : null;
     return [start, ...leitungsEntwurf.points, preview].filter((point, index, all) => point
       && (!index || point.x !== all[index - 1]?.x || point.y !== all[index - 1]?.y));
@@ -1544,13 +1607,13 @@ function EditorInner() {
       : route.slice(1, -1);
     const origin = route[best.segmentIndex];
     const point = event.shiftKey
-      ? auf45GradFangen(origin, best)
-      : { x:Math.round(best.x / 10) * 10, y:Math.round(best.y / 10) * 10 };
+      ? auf45GradFangen(origin, best, drawingConfig.grid_size)
+      : rasterPunkt(best, drawingConfig.grid_size);
     basePoints.splice(best.segmentIndex, 0, point);
     setEdges(items => items.map(item => item.id === edgeId
       ? { ...item, data:{ ...(item.data || {}), cad_polyline:true, points:basePoints } }
       : item));
-  }, [routePunkte, screenToFlowPosition, setEdges, snap]);
+  }, [drawingConfig.grid_size, routePunkte, screenToFlowPosition, setEdges, snap]);
 
   const punktEntfernen = useCallback((edgeId, pointIndex) => {
     snap();
@@ -1577,8 +1640,8 @@ function EditorInner() {
         : handlePosition(edge.source, edge.sourceHandle);
       const raw = screenToFlowPosition({ x:event.clientX, y:event.clientY });
       const point = event.shiftKey
-        ? auf45GradFangen(origin, raw)
-        : { x:Math.round(raw.x / 10) * 10, y:Math.round(raw.y / 10) * 10 };
+        ? auf45GradFangen(origin, raw, drawingConfig.grid_size)
+        : rasterPunkt(raw, drawingConfig.grid_size);
       if (edgePointFrame.current) cancelAnimationFrame(edgePointFrame.current);
       edgePointFrame.current = requestAnimationFrame(() => {
         setEdges(items => items.map(item => {
@@ -1597,7 +1660,7 @@ function EditorInner() {
       window.removeEventListener('pointerup', up);
       if (edgePointFrame.current) cancelAnimationFrame(edgePointFrame.current);
     };
-  }, [handlePosition, screenToFlowPosition, setEdges]);
+  }, [drawingConfig.grid_size, handlePosition, screenToFlowPosition, setEdges]);
 
   const endpointDragStart = useCallback((event, edgeId, side) => {
     event.preventDefault();
@@ -1641,7 +1704,9 @@ function EditorInner() {
   useEffect(() => {
     const punktFuerEvent = (event, drag) => {
       const raw = screenToFlowPosition({ x:event.clientX, y:event.clientY });
-      return event.shiftKey ? auf45GradFangen(drag.otherPoint, raw, CAD_GRID) : rasterPunkt(raw);
+      return event.shiftKey
+        ? auf45GradFangen(drag.otherPoint, raw, drawingConfig.grid_size)
+        : rasterPunkt(raw, drawingConfig.grid_size);
     };
     const move = (event) => {
       const drag = edgeEndpointDrag.current;
@@ -1686,9 +1751,10 @@ function EditorInner() {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
     };
-  }, [getZoom, leitungTeilen, naechsteLeitung, naechsterBauteilAnschluss, screenToFlowPosition, setEdges, setNodes]);
+  }, [drawingConfig.grid_size, getZoom, leitungTeilen, naechsteLeitung, naechsterBauteilAnschluss, screenToFlowPosition, setEdges, setNodes]);
 
-  // Keyboard-Shortcuts: V = VL, R = RL, D = Drehen, Cmd+Z = Undo, Cmd+C/V = Kopieren/Einfügen
+  // Keyboard-Shortcuts: Zeichenwerkzeuge sind konfigurierbar; V/R wechseln
+  // weiterhin schnell den Heizungs-Layer, D dreht ein Bauteil.
   React.useEffect(() => {
     const handler = (ev) => {
       const tag = document.activeElement?.tagName;
@@ -1708,6 +1774,17 @@ function EditorInner() {
           data: { ...src.data, ...(NUMMERIERT.includes(src.type) ? { nr: naechsteNr(ns) } : {}) } }]);
       }
       if (!ev.metaKey && !ev.ctrlKey) {
+        const key = ev.key.toLowerCase();
+        if (key === drawingConfig.shortcut_polyline) {
+          ev.preventDefault();
+          zeichenmodusWaehlen('free');
+          return;
+        }
+        if (key === drawingConfig.shortcut_line) {
+          ev.preventDefault();
+          zeichenmodusWaehlen('handle');
+          return;
+        }
         if (ev.key === 'Escape' && endpointMenu) {
           setEndpointMenu(null);
           return;
@@ -1748,7 +1825,7 @@ function EditorInner() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [undo, selected, selectedEdgeId, snap, rotateNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu]);
+  }, [undo, selected, selectedEdgeId, snap, rotateNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, drawingConfig, zeichenmodusWaehlen]);
 
   // Berechnete Werte (Backend) in die Node-Daten spiegeln — nur für die Anzeige.
   // Verteiler-Rahmen: nur die Balken sind greifbar (dragHandle), die Lücke
@@ -1878,7 +1955,10 @@ function EditorInner() {
   const loadSchema = (key) => {
     const s = SCHALTUNGEN[key];
     setNodes(s.nodes.map(n=>({...n})));
-    setEdges(s.edges.map(e=>({...e})));
+    setEdges(s.edges.map(e=>({
+      ...e,
+      data:{ ...(e.data || {}), corner_radius:drawingConfig.corner_radius },
+    })));
     setSelected(null);
   };
 
@@ -1905,10 +1985,10 @@ function EditorInner() {
     snap();
     setEdges(eds => addEdge({
       ...params, type:'flow',
-      data:{ ...(params.data || {}), layer_id:activeLayer.id },
+      data:{ ...(params.data || {}), layer_id:activeLayer.id, corner_radius:drawingConfig.corner_radius },
       style:{ stroke:activeLayer.color, strokeWidth:2.5 },
     }, eds));
-  }, [activeLayer, setEdges, snap]);
+  }, [activeLayer, drawingConfig.corner_radius, setEdges, snap]);
 
   const onConnectStart = useCallback((_, params) => { connectStart.current = params; }, []);
 
@@ -1922,8 +2002,8 @@ function EditorInner() {
     const raw = screenToFlowPosition({ x: clientX, y: clientY });
     const origin = handlePosition(cs.nodeId, cs.handleId);
     const p = event.shiftKey
-      ? auf45GradFangen(origin, raw)
-      : { x:Math.round(raw.x / 10) * 10, y:Math.round(raw.y / 10) * 10 };
+      ? auf45GradFangen(origin, raw, drawingConfig.grid_size)
+      : rasterPunkt(raw, drawingConfig.grid_size);
     const jid = newId();
     snap();
     const vonQuelle = cs.handleType !== 'target';
@@ -1938,7 +2018,7 @@ function EditorInner() {
       target:vonQuelle ? jid : cs.nodeId,
       targetHandle:vonQuelle ? 'center-target' : cs.handleId,
       type:'flow',
-      data:{ layer_id:activeLayer.id, cad_polyline:true, points:[] },
+      data:{ layer_id:activeLayer.id, cad_polyline:true, corner_radius:drawingConfig.corner_radius, points:[] },
       style:{ stroke:activeLayer.color, strokeWidth:4.5 },
     };
 
@@ -1953,7 +2033,7 @@ function EditorInner() {
     const [first, second] = leitungTeilen(hit, jid, activeLayer.id);
     setEdges(es => [...es.filter(edge => edge.id !== hit.edge.id), first, second, branch]);
     setSelectedEdgeId(null);
-  }, [activeLayer, cadAnker, getZoom, handlePosition, leitungTeilen, naechsteLeitung, screenToFlowPosition, setNodes, setEdges, snap]);
+  }, [activeLayer, cadAnker, drawingConfig.corner_radius, drawingConfig.grid_size, getZoom, handlePosition, leitungTeilen, naechsteLeitung, screenToFlowPosition, setNodes, setEdges, snap]);
 
   const onDragOver = useCallback(e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }, []);
 
@@ -2103,21 +2183,76 @@ function EditorInner() {
           )}
         </button>
 
-        <div style={{ display:'flex', gap:3, padding:3, borderRadius:8, background:'#f1f5f9' }}>
-          <button onClick={()=>{
-            leitungsEntwurfRef.current = null;
-            leitungsCursorRef.current = null;
-            setLeitungsEntwurf(null); setLeitungsCursor(null); setLeitungsSnap(null); setWerkzeug('select');
-          }}
+        <div style={{ display:'flex', gap:3, padding:3, borderRadius:8, background:'#f1f5f9', position:'relative' }}>
+          <button onClick={()=>zeichenmodusWaehlen()}
             style={{ fontSize:10, fontWeight:700, padding:'4px 8px', border:0, borderRadius:6, cursor:'pointer',
               background:werkzeug==='select'?'#334155':'transparent', color:werkzeug==='select'?'white':'#64748b' }}>
             ↖ Auswahl
           </button>
-          <button onClick={()=>setWerkzeug('line')}
+          <button onClick={()=>zeichenmodusWaehlen('handle')}
             style={{ fontSize:10, fontWeight:700, padding:'4px 8px', border:0, borderRadius:6, cursor:'pointer',
-              background:werkzeug==='line'?'#4f46e5':'transparent', color:werkzeug==='line'?'white':'#64748b' }}>
-            ⌁ Polylinie
+              background:werkzeug==='line'&&lineStartMode==='handle'?'#4f46e5':'transparent', color:werkzeug==='line'&&lineStartMode==='handle'?'white':'#64748b' }}>
+            ⤴ Leitung ({drawingConfig.shortcut_line.toUpperCase()})
           </button>
+          <button onClick={()=>zeichenmodusWaehlen('free')}
+            style={{ fontSize:10, fontWeight:700, padding:'4px 8px', border:0, borderRadius:6, cursor:'pointer',
+              background:werkzeug==='line'&&lineStartMode==='free'?'#4f46e5':'transparent', color:werkzeug==='line'&&lineStartMode==='free'?'white':'#64748b' }}>
+            ⌁ Polylinie ({drawingConfig.shortcut_polyline.toUpperCase()})
+          </button>
+          <button onClick={()=>setShowDrawingSettings(value=>!value)} title="Zeicheneinstellungen"
+            style={{ fontSize:12, fontWeight:700, width:28, border:0, borderRadius:6, cursor:'pointer',
+              background:showDrawingSettings?'#e0e7ff':'transparent', color:'#64748b' }}>
+            ⚙
+          </button>
+          {showDrawingSettings && (
+            <div style={{ position:'absolute', left:0, top:38, width:270, zIndex:120, background:'white', border:'1px solid #cbd5e1', borderRadius:11,
+              boxShadow:'0 14px 34px rgba(15,23,42,.2)', padding:12 }}>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:11 }}>
+                <strong style={{ fontSize:11, color:'#1e293b' }}>Zeicheneinstellungen</strong>
+                <button onClick={()=>setShowDrawingSettings(false)} style={{ border:0, background:'transparent', color:'#94a3b8', cursor:'pointer' }}>×</button>
+              </div>
+              <label style={{ display:'grid', gridTemplateColumns:'92px 1fr 42px', alignItems:'center', gap:7, marginBottom:10, fontSize:10, color:'#475569' }}>
+                Bogenradius
+                <input type="range" min="0" max="40" step="1" value={drawingConfig.corner_radius}
+                  onChange={event=>drawingConfigAktualisieren('corner_radius', event.target.value)} />
+                <input type="number" min="0" max="40" value={drawingConfig.corner_radius}
+                  onChange={event=>drawingConfigAktualisieren('corner_radius', event.target.value)}
+                  style={{ width:42, border:'1px solid #cbd5e1', borderRadius:5, padding:'3px 4px', fontSize:10 }} />
+              </label>
+              <label style={{ display:'grid', gridTemplateColumns:'92px 1fr', alignItems:'center', gap:7, marginBottom:10, fontSize:10, color:'#475569' }}>
+                Zeichenraster
+                <select value={drawingConfig.grid_size} onChange={event=>drawingConfigAktualisieren('grid_size', event.target.value)}
+                  style={{ border:'1px solid #cbd5e1', borderRadius:5, padding:'4px 6px', fontSize:10, background:'white' }}>
+                  <option value="5">5 px · fein</option>
+                  <option value="10">10 px · normal</option>
+                  <option value="20">20 px · grob</option>
+                </select>
+              </label>
+              <div style={{ borderTop:'1px solid #f1f5f9', paddingTop:9, display:'grid', gridTemplateColumns:'1fr 42px', gap:'7px 8px', alignItems:'center', fontSize:10, color:'#475569' }}>
+                <label htmlFor="shortcut-line">Leitung ab Fangpunkt</label>
+                <input id="shortcut-line" maxLength="1" value={drawingConfig.shortcut_line}
+                  onFocus={event=>event.currentTarget.select()}
+                  onChange={event=>drawingConfigAktualisieren('shortcut_line', event.target.value)}
+                  style={{ textAlign:'center', textTransform:'uppercase', border:'1px solid #cbd5e1', borderRadius:5, padding:'4px', fontSize:10, fontWeight:800 }} />
+                <label htmlFor="shortcut-polyline">Freie Polylinie</label>
+                <input id="shortcut-polyline" maxLength="1" value={drawingConfig.shortcut_polyline}
+                  onFocus={event=>event.currentTarget.select()}
+                  onChange={event=>drawingConfigAktualisieren('shortcut_polyline', event.target.value)}
+                  style={{ textAlign:'center', textTransform:'uppercase', border:'1px solid #cbd5e1', borderRadius:5, padding:'4px', fontSize:10, fontWeight:800 }} />
+              </div>
+              {drawingConfig.shortcut_line === drawingConfig.shortcut_polyline && (
+                <div style={{ marginTop:8, padding:'6px 8px', borderRadius:6, background:'#fff7ed', color:'#c2410c', fontSize:9 }}>
+                  Bitte zwei unterschiedliche Tasten wählen.
+                </div>
+              )}
+              <button onClick={()=>{
+                setDrawingConfig(DEFAULT_DRAWING_CONFIG);
+                setEdges(items => items.map(edge => ({ ...edge, data:{ ...(edge.data || {}), corner_radius:DEFAULT_DRAWING_CONFIG.corner_radius } })));
+              }} style={{ marginTop:10, border:0, background:'transparent', color:'#4f46e5', fontSize:9, fontWeight:700, cursor:'pointer', padding:0 }}>
+                Standard wiederherstellen
+              </button>
+            </div>
+          )}
         </div>
 
         <div style={{ display:'flex', gap:5, alignItems:'center', marginLeft:'auto', position:'relative' }}>
@@ -2154,7 +2289,7 @@ function EditorInner() {
               </div>
             </div>
           )}
-          <span style={{ fontSize:9, color:'#94a3b8', marginLeft:5 }}>Klick = Eckpunkt · Enter/Rechtsklick = fertig · Rechtsklick Endgriff = weiterziehen · Shift = 0°/45°/90°</span>
+          <span style={{ fontSize:9, color:'#94a3b8', marginLeft:5 }}>Klick = Eckpunkt · Fangpunkt = verbinden · Enter/Rechtsklick = fertig · Shift = 0°/45°/90°</span>
         </div>
       </div>
 
@@ -2207,7 +2342,7 @@ function EditorInner() {
             connectionMode={ConnectionMode.Loose}
             connectionLineComponent={connectionLineRenderer}
             connectionLineStyle={{ stroke:activeLayer.color, strokeWidth:2.5 }}
-            snapToGrid snapGrid={[10,10]}
+            snapToGrid snapGrid={[drawingConfig.grid_size,drawingConfig.grid_size]}
             selectionOnDrag={werkzeug === 'select'}
             nodesDraggable={werkzeug === 'select'}
             nodesConnectable={werkzeug === 'select'}
@@ -2217,9 +2352,17 @@ function EditorInner() {
             fitView
             className={werkzeug === 'line' ? 'cursor-crosshair' : ''}
           >
-            <Background color="#e2e8f0" gap={20}/>
+            <Background color="#e2e8f0" gap={drawingConfig.grid_size * 2}/>
             <Controls/>
             <MiniMap zoomable pannable nodeStrokeWidth={3}/>
+            {werkzeug === 'line' && lineStartMode === 'handle' && !leitungsEntwurf && (
+              <Panel position="top-center">
+                <div style={{ marginTop:8, padding:'7px 12px', borderRadius:18, background:'#eef2ff', border:'1px solid #c7d2fe',
+                  color:'#4338ca', fontSize:10, fontWeight:700, boxShadow:'0 4px 12px rgba(79,70,229,.12)' }}>
+                  Fangpunkt anklicken · Eckpunkte setzen · am zweiten Fangpunkt abschliessen
+                </div>
+              </Panel>
+            )}
             {leitungsEntwurf && (
               <Panel position="top-center">
                 <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:8, padding:'7px 12px', borderRadius:18,
@@ -2240,7 +2383,7 @@ function EditorInner() {
             <ViewportPortal>
               <svg width="1" height="1" style={{ position:'absolute', left:0, top:0, overflow:'visible', pointerEvents:'none' }}>
                 {cadEntwurfRoute.length >= 2 && (
-                  <polyline points={punkteAttribut(cadEntwurfRoute)} fill="none"
+                  <path d={roundedPolylinePath(cadEntwurfRoute, drawingConfig.corner_radius)} fill="none"
                     stroke={(LEITUNGS_LAYER.find(layer => layer.id === leitungsEntwurf?.layerId) || activeLayer).color}
                     strokeWidth="4.5" strokeDasharray="12 7" strokeLinecap="round" strokeLinejoin="round" />
                 )}

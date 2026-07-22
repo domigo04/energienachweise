@@ -1,8 +1,5 @@
 import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath } from '@xyflow/react';
-
-function polylinePath(points) {
-  return points.length ? `M ${points.map((point) => `${point.x} ${point.y}`).join(' L ')}` : '';
-}
+import { roundedPolylinePath } from './geometry';
 
 function halfwayPoint(points) {
   if (points.length < 2) return points[0] || { x: 0, y: 0 };
@@ -32,9 +29,10 @@ export function FlowEdge({
   const isRL = data._layerRole === 'rl' || style.stroke === '#3b82f6';
   const waypoints = Array.isArray(data.points) ? data.points : [];
   const vertices = [{ x: sourceX, y: sourceY }, ...waypoints, { x: targetX, y: targetY }];
-  const smooth = getSmoothStepPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, borderRadius: 8 });
+  const cornerRadius = Math.max(0, Number(data.corner_radius ?? data._cornerRadius ?? 8) || 0);
+  const smooth = getSmoothStepPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, borderRadius: cornerRadius });
   const isCadPolyline = data.cad_polyline || waypoints.length > 0;
-  const edgePath = isCadPolyline ? polylinePath(vertices) : smooth[0];
+  const edgePath = isCadPolyline ? roundedPolylinePath(vertices, cornerRadius) : smooth[0];
   const labelPoint = isCadPolyline ? halfwayPoint(vertices) : { x: smooth[1], y: smooth[2] };
   const dash = data._dashed || isRL ? '10 7' : undefined;
   const color = style.stroke || '#334155';

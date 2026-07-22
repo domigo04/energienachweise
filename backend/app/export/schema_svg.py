@@ -8,6 +8,7 @@ WICHTIG: Die Geometrie-Konstanten müssen mit dem Editor übereinstimmen
 (frontend/src/components/hc/nodes/HydraulikNodes.jsx).
 """
 import html
+import math
 import re
 from typing import Optional
 
@@ -462,6 +463,47 @@ def zeichne_standard(parts, node, results):
     _nr_badge(parts, x + w, y, d.get("nr"))
 
 
+def _svg_num(value):
+    """Kompakte, stabile Zahlendarstellung für SVG-Pfade."""
+    return f"{float(value):.6f}".rstrip("0").rstrip(".") or "0"
+
+
+def _gerundeter_polylinien_pfad(punkte, radius=8):
+    """Technische Polylinie mit einheitlichen quadratischen Eckbögen.
+
+    Der Radius wird bei kurzen Segmenten automatisch reduziert. Damit liefert
+    der PDF-Export dieselbe Geometrie wie FlowEdge.jsx im Editor.
+    """
+    if not punkte:
+        return ""
+    if len(punkte) == 1:
+        return f"M {_svg_num(punkte[0][0])} {_svg_num(punkte[0][1])}"
+    r = max(0.0, float(radius or 0))
+    pfad = f"M {_svg_num(punkte[0][0])} {_svg_num(punkte[0][1])}"
+    for index in range(1, len(punkte) - 1):
+        vorher = punkte[index - 1]
+        ecke = punkte[index]
+        danach = punkte[index + 1]
+        in_dx, in_dy = ecke[0] - vorher[0], ecke[1] - vorher[1]
+        out_dx, out_dy = danach[0] - ecke[0], danach[1] - ecke[1]
+        in_laenge = math.hypot(in_dx, in_dy)
+        out_laenge = math.hypot(out_dx, out_dy)
+        richtung = ((in_dx * out_dx + in_dy * out_dy) / (in_laenge * out_laenge)) if in_laenge and out_laenge else 1
+        if not r or not in_laenge or not out_laenge or abs(richtung) > 0.999:
+            pfad += f" L {_svg_num(ecke[0])} {_svg_num(ecke[1])}"
+            continue
+        schnitt = min(r, in_laenge / 2, out_laenge / 2)
+        davor = (ecke[0] - in_dx / in_laenge * schnitt, ecke[1] - in_dy / in_laenge * schnitt)
+        danach_punkt = (ecke[0] + out_dx / out_laenge * schnitt, ecke[1] + out_dy / out_laenge * schnitt)
+        pfad += (
+            f" L {_svg_num(davor[0])} {_svg_num(davor[1])}"
+            f" Q {_svg_num(ecke[0])} {_svg_num(ecke[1])}"
+            f" {_svg_num(danach_punkt[0])} {_svg_num(danach_punkt[1])}"
+        )
+    ende = punkte[-1]
+    return f"{pfad} L {_svg_num(ende[0])} {_svg_num(ende[1])}"
+
+
 def zeichne_edge(parts, edge, nodes_by_id, results):
     quelle = nodes_by_id.get(edge.get("source"))
     ziel = nodes_by_id.get(edge.get("target"))
@@ -476,13 +518,15 @@ def zeichne_edge(parts, edge, nodes_by_id, results):
     # CAD-Leitung wie FlowEdge.jsx: echte Polylinie; klassische React-Flow-
     # Kanten ohne cad_polyline behalten ihre automatische Winkelroute.
     dx, dy = x2 - x1, y2 - y1
-    r = 8
     edge_data = edge.get("data") or {}
+    gespeicherter_radius = _f(edge_data.get("corner_radius"))
+    r = max(0, gespeicherter_radius if gespeicherter_radius is not None else 8)
     stuetzpunkte = edge_data.get("points") or []
     ist_cad_polyline = bool(edge_data.get("cad_polyline")) or bool(stuetzpunkte)
     if ist_cad_polyline:
-        punkte = [(x1, y1)] + [(_f(p.get("x")), _f(p.get("y"))) for p in stuetzpunkte] + [(x2, y2)]
-        pfad = "M " + " L ".join(f"{x} {y}" for x, y in punkte)
+        gueltige_stuetzpunkte = [(_f(p.get("x")), _f(p.get("y"))) for p in stuetzpunkte]
+        punkte = [(x1, y1)] + [p for p in gueltige_stuetzpunkte if None not in p] + [(x2, y2)]
+        pfad = _gerundeter_polylinien_pfad(punkte, r)
         # Label ungefähr in der geometrischen Mitte der Polylinie.
         laengen = [((punkte[i - 1], punkte[i]), ((punkte[i][0] - punkte[i - 1][0]) ** 2 + (punkte[i][1] - punkte[i - 1][1]) ** 2) ** 0.5) for i in range(1, len(punkte))]
         halb = sum(laenge for _, laenge in laengen) / 2

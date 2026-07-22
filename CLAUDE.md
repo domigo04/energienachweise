@@ -84,7 +84,8 @@ niemand hat sie seither angefasst).
   oder Neugründung. Freischaltung durch Dominic (einziger globaler Admin,
   `pages/admin/BenutzerFreischaltung.jsx`). **Warum:** vorher landete jede Registrierung hart auf
   Dominics `tenant_id=1` — echter Privacy-Bug, gefixt.
-  Admin-Konto wird bei **jedem Start** auf `ADMIN_EMAIL`/`ADMIN_INITIAL_PASSWORD` synchronisiert
+  Admin-Konto wird bei **jedem Start** auf `ADMIN_EMAIL`/`ADMIN_INITIAL_PASSWORD` synchronisiert,
+  sofern beide Umgebungsvariablen gesetzt sind. Ohne sie wird kein unsicheres Standardkonto angelegt
   (`main.py::_seed_admin`, idempotent — vorher nur beim ersten Anlegen, ein einmal gesetztes altes
   Passwort blieb sonst für immer aktiv).
 - **Konto-Seite** (`pages/KontoPage.jsx`, Route `/konto`, erreichbar über Profil in der Sidebar):
@@ -436,17 +437,18 @@ ODER siehe Werkzeug-Wechsel oben, falls das den Vorrang bekommt):**
 Externes Feedback. **Jeder Punkt im echten Code verifiziert, bevor er umgesetzt wird**
 (✅ behoben / 🔍 bestätigt, offen / ❌ nicht zutreffend). Umsetzungs-Log direkt bei den Punkten.
 
-1. **✅ teilweise behoben (2026-07-19) — Zugangsdaten/JWT-Schlüssel.**
+1. **✅ Code behoben (2026-07-22), Rotation extern offen — Zugangsdaten/JWT-Schlüssel.**
    - `_seed_admin` (`main.py`) setzt das Adminpasswort jetzt nur noch zurück, wenn sich
      `ADMIN_INITIAL_PASSWORD` seit dem letzten Start WIRKLICH geändert hat (Fingerprint-Vergleich, neue
      Spalte `hc_users.admin_pw_seed_fingerprint`). Lokal verifiziert: (a) normaler Neustart lässt ein
      manuell übers Konto geändertes Passwort unangetastet, (b) eine bewusste Änderung der Env-Var setzt
      das Passwort wie gewollt neu — beides mit echtem Login getestet (HTTP 200).
-   - `auth.py`/`main.py` geben jetzt beim Start eine sichtbare `[WARNUNG]` aus, wenn `SECRET_KEY` bzw.
-     `ADMIN_INITIAL_PASSWORD` nicht gesetzt sind und der unsichere Code-Default aktiv ist.
-   - **[Offene Handlung bei Dominic]** Das ist eine reine Code-Verbesserung — sie rotiert NICHT die
-     tatsächlichen Geheimnisse. `Sirego2004!` steht weiterhin als Code-Default im Repo (Git-Historie).
-     **Dominic muss auf dem Produktions-Server selbst** (Hosting-Dashboard/Env-Vars) `ADMIN_INITIAL_PASSWORD`
+   - `main.py` besitzt keine hart codierte Admin-Mail und kein Standardpasswort mehr. Fehlen
+     `ADMIN_EMAIL` oder `ADMIN_INITIAL_PASSWORD`, wird der Admin-Seed sicher übersprungen. `auth.py`
+     warnt weiterhin sichtbar, solange für lokale Entwicklung der unsichere JWT-Code-Default aktiv ist.
+   - **[Offene Handlung bei Dominic]** Das entfernt oder rotiert NICHT die früher veröffentlichten
+     Geheimnisse aus der Git-Historie. **Dominic muss auf dem Produktions-Server selbst**
+     (Hosting-Dashboard/Env-Vars) `ADMIN_INITIAL_PASSWORD`
      auf ein neues, nur ihm bekanntes Passwort setzen UND eine eigene, zufällige `SECRET_KEY` setzen (z.B.
      `openssl rand -hex 32`) — dazu hat Claude keinen Zugriff, das kann nur er selbst im Hosting-Panel tun.
      Nach dem Setzen: einmal neu deployen, dann im Log auf die `[WARNUNG]`-Zeilen prüfen (dürfen nicht

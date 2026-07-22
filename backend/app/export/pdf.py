@@ -7,6 +7,7 @@ import io
 from datetime import date
 
 from reportlab.graphics import renderPDF
+from reportlab.lib.utils import ImageReader
 from reportlab.lib.pagesizes import A3, A4, landscape
 from reportlab.pdfgen import canvas as pdfcanvas
 from svglib.svglib import svg2rlg
@@ -240,18 +241,36 @@ def _deckblatt(c, projekt_name, schema_name, inhalt):
     c.showPage()
 
 
-def _schema_seite(c, svg_string, projekt_name, schema_name):
+def _schema_seite(c, svg_string, projekt_name, schema_name, schema_png: bytes | None = None):
     seite = landscape(A3)
     c.setPageSize(seite)
-    zeichnung = svg2rlg(io.StringIO(svg_string))
     rand = 30
     nutz_b, nutz_h = seite[0] - 2 * rand, seite[1] - 2 * rand - 20
-    skala = min(nutz_b / zeichnung.width, nutz_h / zeichnung.height, 1.5)
-    zeichnung.scale(skala, skala)
-    zeichnung.width *= skala
-    zeichnung.height *= skala
-    renderPDF.draw(zeichnung, c, rand + (nutz_b - zeichnung.width) / 2,
-                   rand + 20 + (nutz_h - zeichnung.height) / 2)
+    if schema_png:
+        # Momentaufnahme derselben React-Flow-DOM: Symbol, Drehung, Route und
+        # Position stammen damit exakt aus der Zeichenansicht.
+        bild = ImageReader(io.BytesIO(schema_png))
+        bild_b, bild_h = bild.getSize()
+        skala = min(nutz_b / bild_b, nutz_h / bild_h)
+        ziel_b, ziel_h = bild_b * skala, bild_h * skala
+        c.drawImage(
+            bild,
+            rand + (nutz_b - ziel_b) / 2,
+            rand + 20 + (nutz_h - ziel_h) / 2,
+            width=ziel_b,
+            height=ziel_h,
+            preserveAspectRatio=True,
+            mask="auto",
+        )
+    else:
+        # Fallback für API-Aufrufe ohne Browser-Momentaufnahme.
+        zeichnung = svg2rlg(io.StringIO(svg_string))
+        skala = min(nutz_b / zeichnung.width, nutz_h / zeichnung.height, 1.5)
+        zeichnung.scale(skala, skala)
+        zeichnung.width *= skala
+        zeichnung.height *= skala
+        renderPDF.draw(zeichnung, c, rand + (nutz_b - zeichnung.width) / 2,
+                       rand + 20 + (nutz_h - zeichnung.height) / 2)
     c.setFont("Helvetica", 8)
     c.setFillColorRGB(0.45, 0.5, 0.55)
     c.drawString(rand, 18, f"{projekt_name} · {schema_name} · {date.today().strftime('%d.%m.%Y')} · {PLANER}")
@@ -344,15 +363,18 @@ def _berechnungs_seiten(c, abschnitte, projekt_name):
 
 
 def erzeuge_pdf(projekt_name: str, schema_name: str, inhalt: str,
-                nodes: list, edges: list, results: dict) -> bytes:
+                nodes: list, edges: list, results: dict,
+                schema_png: bytes | None = None) -> bytes:
     """Komplettes PDF gemäss gewähltem Inhalt (Deckblatt immer dabei)."""
     buf = io.BytesIO()
     c = pdfcanvas.Canvas(buf, pagesize=A4)
     c.setTitle(f"{projekt_name} — {schema_name}")
     _deckblatt(c, projekt_name, schema_name, inhalt)
     if inhalt in ("schema", "beides"):
-        svg = erzeuge_svg(nodes, edges, results)
-        _schema_seite(c, svg, projekt_name, schema_name)
+        # Bei einem Browser-Snapshot ist der alte Parallel-Renderer weder
+        # nötig noch erwünscht: das spart Zeit und verhindert Abweichungen.
+        svg = "" if schema_png else erzeuge_svg(nodes, edges, results)
+        _schema_seite(c, svg, projekt_name, schema_name, schema_png)
         _legende_seiten(c, legende_zeilen(nodes, results), projekt_name, results.get("anschluss_warnings"))
     if inhalt in ("berechnungen", "beides"):
         _berechnungs_seiten(c, berechnungs_abschnitte(nodes, results), projekt_name)

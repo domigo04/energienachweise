@@ -64,6 +64,7 @@ export function FlowEdge({
         style={{ ...style, strokeWidth: 4.5, strokeDasharray: dash, strokeLinecap: 'round', strokeLinejoin: 'round', fill: 'none' }} />
 
       {selected && <path d={edgePath} fill="none" stroke="#0f172a" strokeWidth={9} opacity={0.11} pointerEvents="none" />}
+      {data._groupSelected && !selected && <path d={edgePath} fill="none" stroke="#7c3aed" strokeWidth={9} opacity={0.18} pointerEvents="none" />}
 
       {/* Breiter unsichtbarer Klick-Bereich */}
       <path d={edgePath} fill="none" stroke="transparent" strokeWidth={18}
@@ -73,6 +74,11 @@ export function FlowEdge({
             event.stopPropagation();
             data._onSegmentPointerDown?.(event, id);
           }
+        }}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          data._onContextMenu?.(event, id);
         }}
         onDoubleClick={(event) => { event.stopPropagation(); data._onAddPoint?.(event, id); }} />
 

@@ -16,6 +16,7 @@
     "@tailwindcss/vite": "^4.1.11",
     "@xyflow/react": "^12.11.1",
     "axios": "^1.11.0",
+    "html-to-image": "^1.11.13",
     "konva": "^10.3.0",
     "lucide-react": "^0.542.0",
     "react": "^19.1.1",

@@ -40,8 +40,11 @@ export const reorderGroups = (projectId, groupIds) =>
   api.post(`${BASE}/projects/${projectId}/groups/reorder`, { group_ids: groupIds }).then(r => r.data);
 
 // --- Anlagenschema (Hydraulik) ---
-export const listSchemas = (projectId) =>
-  api.get(`${BASE}/projects/${projectId}/schemas`).then(r => r.data);
+export const listSchemas = (projectId, params = {}) =>
+  api.get(`${BASE}/projects/${projectId}/schemas`, { params }).then(r => r.data);
+
+export const getSchemaEditor = (projectId) =>
+  api.get(`${BASE}/projects/${projectId}/schema-editor`).then(r => r.data);
 
 export const createSchema = (projectId, data) =>
   api.post(`${BASE}/projects/${projectId}/schemas`, data).then(r => r.data);
@@ -52,12 +55,15 @@ export const getSchema = (schemaId) =>
 export const saveSchema = (schemaId, data) =>
   api.put(`${BASE}/schemas/${schemaId}`, data).then(r => r.data);
 
+export const saveSchemaGraph = (schemaId, data) =>
+  api.put(`${BASE}/schemas/${schemaId}/graph`, data).then(r => r.data);
+
 export const deleteSchema = (schemaId) =>
   api.delete(`${BASE}/schemas/${schemaId}`);
 
 // --- Hydraulik-Berechnung (Backend = einzige Rechen-Wahrheit) ---
-export const hydraulikBerechnen = (graph) =>
-  api.post(`${BASE}/hydraulik/berechnen`, graph).then(r => r.data);
+export const hydraulikBerechnen = (graph, config = {}) =>
+  api.post(`${BASE}/hydraulik/berechnen`, graph, config).then(r => r.data);
 
 // --- BKP-Kostenschätzung (Phase 3, Katalog steht ab Tag 1) ---
 export const getBkpPositionen = (params) =>

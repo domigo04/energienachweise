@@ -7,11 +7,12 @@ import {
 
 // Alle Handles als "source" + ConnectionMode.Loose → jeder mit jedem verbindbar
 // Grössere Handles für einfacheres Verbinden
-const H = (pos, id, style = {}) => (
+const H = (pos, id, style = {}, className = '') => (
   <Handle
     type="source"
     position={pos}
     id={id}
+    className={className}
     style={{
       width: 14, height: 14, borderRadius: 3,
       background: '#475569', border: '2px solid white',
@@ -40,13 +41,12 @@ function Label() {
 
 // ── Pumpe ─────────────────────────────────────────────────────
 export function PumpNode({ data, selected: sel }) {
-  // Ohne Motor ist der Kreis mittig → Anschlüsse oben/unten zentriert.
+  // Genau zwei Anschlüsse auf der Pumpenachse; bei einer Drehung wandern sie
+  // zusammen mit dem Symbol.
   return (
     <div style={wrap(sel)}>
-      {H(Position.Top,    'top',    { top: -6 })}
-      {H(Position.Bottom, 'bottom', { bottom: -6 })}
-      {H(Position.Left,   'left',   { left: -6 })}
-      {H(Position.Right,  'right',  { right: -6 })}
+      {H(Position.Top,    'top',    { top: -4 }, 'hc-pump-handle')}
+      {H(Position.Bottom, 'bottom', { bottom: -4 }, 'hc-pump-handle')}
       <SymPump />
       <Label text={data.label} />
     </div>
@@ -635,11 +635,12 @@ const BASIS_TYPES = {
   label:       LabelNode,
 };
 
-// ── Drehung um 90° (data.rotation) — nur für die Armaturen sinnvoll ──────────
-// Kreise (Zähler/HK) und beschriftete Kästen (WE/Speicher) bleiben aufrecht.
+// ── Drehung um 90° (data.rotation) ───────────────────────────────────────────
 export const ROTATABLE = new Set([
   'pump', 'valve2', 'valve3', 'checkvalve', 'shutoff',
   'stad', 'temperatur', 'sicherheitsventil', 'pwt',
+  'waermezaehler', 'erzeuger', 'verbraucher', 'speicher', 'bww',
+  'expansion', 'anschluss',
 ]);
 
 // eslint-disable-next-line no-unused-vars

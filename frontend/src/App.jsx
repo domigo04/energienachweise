@@ -14,7 +14,6 @@ import KontoPage from "./pages/KontoPage";
 import ProjectList from "./pages/hc/ProjectList";
 import ProjectDashboard from "./pages/hc/ProjectDashboard";
 import HeizgruppenPage from "./pages/hc/HeizgruppenPage";
-import HydraulikEditor from "./pages/hc/HydraulikEditor";
 import VentilPage from "./pages/hc/VentilPage";
 import DruckverlustPage from "./pages/hc/DruckverlustPage";
 import RavelPage from "./pages/hc/RavelPage";
@@ -29,6 +28,7 @@ import BaupreisindexAdmin from "./pages/admin/BaupreisindexAdmin";
 // tatsächlich geöffnet wird. Bestehende Projektseiten bleiben dadurch schnell.
 const HydraulikCadLab = lazy(() => import("./pages/hc/HydraulikCadLab"));
 const HydraulikReactFlowLab = lazy(() => import("./pages/hc/HydraulikReactFlowLab"));
+const HydraulikEditor = lazy(() => import("./pages/hc/HydraulikEditor"));
 
 export default function App() {
   return (
@@ -66,7 +66,7 @@ export default function App() {
           </Route>
 
           {/* Schema-Editor: Vollbild-Canvas, ausserhalb der gepolsterten Shell */}
-          <Route path="/projekte/:id/schema" element={<ProtectedRoute><HydraulikEditor /></ProtectedRoute>} />
+          <Route path="/projekte/:id/schema" element={<ProtectedRoute><Suspense fallback={<div className="flex h-screen items-center justify-center text-sm text-slate-500">Hydraulikschema wird geladen…</div>}><HydraulikEditor /></Suspense></ProtectedRoute>} />
           <Route path="/projekte/:id/schema-cad" element={<ProtectedRoute><Suspense fallback={<div className="flex h-screen items-center justify-center text-sm text-slate-500">CAD-Zeichenfläche wird geladen…</div>}><HydraulikCadLab /></Suspense></ProtectedRoute>} />
           <Route path="/projekte/:id/schema-reactflow" element={<ProtectedRoute><Suspense fallback={<div className="flex h-screen items-center justify-center text-sm text-slate-500">React-Flow-CAD wird geladen…</div>}><HydraulikReactFlowLab /></Suspense></ProtectedRoute>} />
 

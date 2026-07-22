@@ -2,7 +2,7 @@ from datetime import datetime
 import json
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
@@ -54,15 +54,39 @@ def _require_schema(schema_id: int, user: User, db: Session) -> HcSchema:
 
 
 @router.get("/projects/{project_id}/schemas", response_model=List[SchemaOut])
-def list_schemas(project_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def list_schemas(project_id: int, limit: int | None = Query(None, ge=1, le=100),
+                 user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     _require_project(project_id, user, db)
-    rows = (
+    query = (
         db.query(HcSchema)
         .filter(HcSchema.project_id == project_id, HcSchema.tenant_id == user.tenant_id)
         .order_by(HcSchema.created_at)
-        .all()
     )
+    if limit is not None:
+        query = query.limit(limit)
+    rows = query.all()
     return [_to_out(s) for s in rows]
+
+
+@router.get("/projects/{project_id}/schema-editor")
+def get_schema_editor(project_id: int, user: User = Depends(get_current_user),
+                      db: Session = Depends(get_db)):
+    """Schlanker Editor-Start: Projektname und erstes Schema in einer Anfrage.
+
+    Das vollständige ProjectDetail mit Heizgruppen und Summen wird für die
+    Zeichenfläche nicht benötigt und war bei grossen Projekten unnötig teuer.
+    """
+    project = _require_project(project_id, user, db)
+    schema = (
+        db.query(HcSchema)
+        .filter(HcSchema.project_id == project_id, HcSchema.tenant_id == user.tenant_id)
+        .order_by(HcSchema.created_at)
+        .first()
+    )
+    return {
+        "project": {"id": project.id, "name": project.name},
+        "schema": _to_out(schema).model_dump(mode="json") if schema else None,
+    }
 
 
 @router.post("/projects/{project_id}/schemas", response_model=SchemaOut, status_code=201)
@@ -96,6 +120,20 @@ def save_schema(schema_id: int, body: SchemaUpdate, user: User = Depends(get_cur
     db.commit()
     db.refresh(s)
     return _to_out(s)
+
+
+@router.put("/schemas/{schema_id}/graph")
+def save_schema_graph(schema_id: int, body: SchemaUpdate,
+                      user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Kompakter Autosave ohne den grossen Graph erneut zurückzusenden."""
+    s = _require_schema(schema_id, user, db)
+    if body.name is not None:
+        s.name = body.name
+    if body.graph is not None:
+        s.graph_json = json.dumps(body.graph, separators=(",", ":"), ensure_ascii=False)
+    s.updated_at = datetime.utcnow()
+    db.commit()
+    return {"id": s.id, "updated_at": s.updated_at}
 
 
 @router.delete("/schemas/{schema_id}", status_code=204)

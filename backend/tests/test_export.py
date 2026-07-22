@@ -1,4 +1,5 @@
 """PDF-Export + Schema-SVG — Zahlen im Dokument müssen stimmen (Abnahme F4)."""
+import base64
 import io
 
 import pytest
@@ -168,6 +169,18 @@ def test_pdf_nur_schema_und_nur_berechnungen(daten):
     text_berech = "\n".join(p.extract_text() or "" for p in nur_berech.pages)
     assert "Legende" in text_schema and "Berechnungen —" not in text_schema
     assert "Berechnungen —" in text_berech and "Legende" not in text_berech
+
+
+def test_pdf_verwendet_browser_momentaufnahme_fuer_identische_zeichnung(daten):
+    """Der exakte Exportpfad akzeptiert den Screenshot derselben React-Flow-DOM."""
+    nodes, edges, results = daten
+    png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII="
+    )
+    pdf = erzeuge_pdf("P", "S", "schema", nodes, edges, results, schema_png=png)
+    reader = PdfReader(io.BytesIO(pdf))
+    assert pdf.startswith(b"%PDF")
+    assert len(reader.pages) == 3  # Deckblatt + identische Zeichnung + Legende
 
 
 # ── Leitungsdimensionierung im SVG (PHYSIK §10) ─────────────────────────────

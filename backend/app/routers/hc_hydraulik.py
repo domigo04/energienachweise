@@ -1,3 +1,5 @@
+from functools import lru_cache
+import json
 from typing import List, Optional
 
 from fastapi import APIRouter
@@ -30,6 +32,12 @@ class GraphInput(BaseModel):
     edges: List[GraphEdge]
 
 
+@lru_cache(maxsize=128)
+def _berechne_gecacht(nodes_json: str, edges_json: str):
+    """Reine Hydraulikberechnung für identische Graphen wiederverwenden."""
+    return berechne_schema(json.loads(nodes_json), json.loads(edges_json))
+
+
 @router.post("/berechnen")
 def hydraulik_berechnen(body: GraphInput):
     """Rechnet das komplette Anlagenschema (PHYSIK.md §1–§4).
@@ -37,7 +45,9 @@ def hydraulik_berechnen(body: GraphInput):
     Der Editor schickt den Graphen, das Backend liefert Flüsse je Leitung/
     Knoten plus Verteiler- und Gruppen-Resultate. Einzige Rechen-Wahrheit.
     """
-    return berechne_schema(
-        [n.model_dump() for n in body.nodes],
-        [e.model_dump() for e in body.edges],
+    nodes = [n.model_dump() for n in body.nodes]
+    edges = [e.model_dump() for e in body.edges]
+    return _berechne_gecacht(
+        json.dumps(nodes, sort_keys=True, separators=(",", ":")),
+        json.dumps(edges, sort_keys=True, separators=(",", ":")),
     )

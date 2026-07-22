@@ -46,7 +46,13 @@ export function FlowEdge({
 
       {/* Breiter unsichtbarer Klick-Bereich */}
       <path d={edgePath} fill="none" stroke="transparent" strokeWidth={18}
-        style={{ cursor: 'crosshair', pointerEvents: 'stroke' }}
+        style={{ cursor: selected ? 'grab' : 'pointer', pointerEvents: 'stroke' }}
+        onPointerDown={(event) => {
+          if (selected && event.button === 0) {
+            event.stopPropagation();
+            data._onSegmentPointerDown?.(event, id);
+          }
+        }}
         onDoubleClick={(event) => { event.stopPropagation(); data._onAddPoint?.(event, id); }} />
 
       {/* Echte CAD-Stützpunkte: Doppelklick auf die Leitung fügt einen ein.

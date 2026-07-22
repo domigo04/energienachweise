@@ -45,6 +45,8 @@ export function PumpNode({ data, selected: sel }) {
     <div style={wrap(sel)}>
       {H(Position.Top,    'top',    { top: -6 })}
       {H(Position.Bottom, 'bottom', { bottom: -6 })}
+      {H(Position.Left,   'left',   { left: -6 })}
+      {H(Position.Right,  'right',  { right: -6 })}
       <SymPump />
       <Label text={data.label} />
     </div>

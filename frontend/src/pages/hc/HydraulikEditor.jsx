@@ -4,7 +4,7 @@ import {
   ReactFlow, Background, Controls, MiniMap,
   useNodesState, useEdgesState,
   Panel, ConnectionMode, useReactFlow, ReactFlowProvider,
-  NodeToolbar, Position, useUpdateNodeInternals, ViewportPortal,
+  NodeToolbar, Position, useStore, useUpdateNodeInternals, ViewportPortal,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { NODE_TYPES, NUMMERIERT, ROTATABLE } from '../../components/hc/nodes/HydraulikNodes';
@@ -80,26 +80,46 @@ function auf45GradFangen(origin, point, grid = 10) {
   return { x: origin.x + sx * distance, y: origin.y + sy * distance };
 }
 
-// Revit-artiger Achsfang: Nähert sich der Cursor der horizontalen oder
-// vertikalen Achse des letzten Eckpunkts, bleibt die Leitung exakt darauf.
-function orthogonalerCursorfang(origin, point, tolerance = 10, grid = CAD_GRID) {
+// Objektfang über alle bekannten Bauteil-Handles und Leitungsendpunkte. X und
+// Y werden getrennt bewertet, damit auch der Schnittpunkt zweier verschiedener
+// Ausrichtungslinien gefangen werden kann.
+function objektAusrichtung(point, snapPoints, tolerance = 10, grid = CAD_GRID) {
   const raster = rasterPunkt(point, grid);
-  if (!origin) return { point:raster, guides:[] };
-  const dx = Math.abs(point.x - origin.x);
-  const dy = Math.abs(point.y - origin.y);
-  if (dx <= tolerance && dx <= dy) {
-    return {
-      point:{ x:origin.x, y:raster.y },
-      guides:[{ axis:'x', value:origin.x }],
-    };
+  let xMatch = null;
+  let yMatch = null;
+  snapPoints.forEach(snapPoint => {
+    const dx = Math.abs(point.x - snapPoint.x);
+    const dy = Math.abs(point.y - snapPoint.y);
+    const distance = Math.hypot(point.x - snapPoint.x, point.y - snapPoint.y);
+    const xScore = dx * 10000 + distance - (snapPoint.priority || 0);
+    const yScore = dy * 10000 + distance - (snapPoint.priority || 0);
+    if (dx <= tolerance && (!xMatch || xScore < xMatch.score)) xMatch = { snapPoint, score:xScore };
+    if (dy <= tolerance && (!yMatch || yScore < yMatch.score)) yMatch = { snapPoint, score:yScore };
+  });
+  const snapped = {
+    x:xMatch ? xMatch.snapPoint.x : raster.x,
+    y:yMatch ? yMatch.snapPoint.y : raster.y,
+  };
+  const guides = [];
+  if (xMatch && Math.abs(snapped.y - xMatch.snapPoint.y) > 1) {
+    guides.push({
+      x1:xMatch.snapPoint.x,
+      y1:xMatch.snapPoint.y,
+      x2:snapped.x,
+      y2:snapped.y,
+      snapType:xMatch.snapPoint.kind,
+    });
   }
-  if (dy <= tolerance) {
-    return {
-      point:{ x:raster.x, y:origin.y },
-      guides:[{ axis:'y', value:origin.y }],
-    };
+  if (yMatch && Math.abs(snapped.x - yMatch.snapPoint.x) > 1) {
+    guides.push({
+      x1:yMatch.snapPoint.x,
+      y1:yMatch.snapPoint.y,
+      x2:snapped.x,
+      y2:snapped.y,
+      snapType:yMatch.snapPoint.kind,
+    });
   }
-  return { point:raster, guides:[] };
+  return { point:snapped, guides, xMatch:xMatch?.snapPoint, yMatch:yMatch?.snapPoint };
 }
 
 function anschlussSeite(handle, internal) {
@@ -1017,6 +1037,14 @@ function EditorInner() {
   const { id: projectId } = useParams();
   const { screenToFlowPosition, getInternalNode, getZoom } = useReactFlow();
   const updateNodeInternals = useUpdateNodeInternals();
+  const nodeGeometryVersion = useStore(state => {
+    let signature = '';
+    state.nodeLookup.forEach(node => {
+      const position = node.internals?.positionAbsolute || node.position || {};
+      signature += `${node.id}:${position.x || 0}:${position.y || 0}:${node.measured?.width || 0}:${node.measured?.height || 0}|`;
+    });
+    return signature;
+  });
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selected, setSelected]     = useState(null);
@@ -1346,6 +1374,86 @@ function EditorInner() {
     const y = (start.y + end.y) / 2;
     return [start, { x:start.x, y }, { x:end.x, y }, end];
   }, [handlePosition]);
+
+  // Eine einzige, pro Graphänderung neu aufgebaute Fangpunktliste hält den
+  // Pointer-Move-Pfad leichtgewichtig. Darin liegen alle Bauteilanschlüsse und
+  // die beiden Endpunkte jeder sichtbaren Leitung.
+  const objektFangpunkte = useMemo(() => {
+    // Der Wert wird als Revisionsschlüssel verwendet: Nach Messung oder
+    // Verschieben eines React-Flow-Nodes werden die absoluten Handle-Koordinaten
+    // neu aus dem internen Store gelesen.
+    void nodeGeometryVersion;
+    const result = [];
+    const seen = new Set();
+    const add = (point) => {
+      if (!Number.isFinite(point?.x) || !Number.isFinite(point?.y)) return;
+      const key = `${Math.round(point.x * 10)}:${Math.round(point.y * 10)}:${point.nodeId || ''}:${point.handleId || ''}:${point.kind}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      result.push(point);
+    };
+
+    nodes.forEach(node => {
+      if (['junction', 'label'].includes(node.type)) return;
+      const internal = getInternalNode(node.id);
+      const absolute = internal?.internals.positionAbsolute;
+      if (!internal || !absolute) return;
+      const handles = [
+        ...(internal.internals.handleBounds?.source || []),
+        ...(internal.internals.handleBounds?.target || []),
+      ];
+      handles.forEach(handle => add({
+        x:absolute.x + handle.x + handle.width / 2,
+        y:absolute.y + handle.y + handle.height / 2,
+        kind:'handle',
+        nodeId:node.id,
+        nodeType:node.type,
+        handleId:handle.id,
+        handlePosition:anschlussSeite(handle, internal),
+      }));
+    });
+
+    edges.forEach(edge => {
+      const layer = layerVonEdge(edge);
+      if (layerVisibility[layer.id] === false) return;
+      const route = routePunkte(edge);
+      if (route.length < 2) return;
+      add({
+        ...route[0],
+        kind:'endpoint',
+        edgeId:edge.id,
+        layerId:layer.id,
+        nodeId:edge.source,
+        nodeType:nodesRef.current.find(node => node.id === edge.source)?.type,
+        handleId:edge.sourceHandle,
+        handlePosition:handleAusrichtung(edge.source, edge.sourceHandle),
+      });
+      add({
+        ...route.at(-1),
+        kind:'endpoint',
+        edgeId:edge.id,
+        layerId:layer.id,
+        nodeId:edge.target,
+        nodeType:nodesRef.current.find(node => node.id === edge.target)?.type,
+        handleId:edge.targetHandle,
+        handlePosition:handleAusrichtung(edge.target, edge.targetHandle),
+      });
+    });
+    return result;
+  }, [edges, getInternalNode, handleAusrichtung, layerVisibility, nodeGeometryVersion, nodes, routePunkte]);
+
+  const naechsterFreierLeitungsEndpunkt = useCallback((point, layerId, radius = 14, excludedEdgeId = null) => {
+    let best = null;
+    objektFangpunkte.forEach(snapPoint => {
+      if (snapPoint.kind !== 'endpoint' || snapPoint.nodeType !== 'junction'
+        || snapPoint.layerId !== layerId || snapPoint.edgeId === excludedEdgeId) return;
+      const distance = Math.hypot(point.x - snapPoint.x, point.y - snapPoint.y);
+      if (distance <= radius && (!best || distance < best.distance)) {
+        best = { ...snapPoint, distance, position:{ x:snapPoint.x, y:snapPoint.y } };
+      }
+    });
+    return best;
+  }, [objektFangpunkte]);
 
   const naechsteLeitung = useCallback((point, layerId, radius = 18, excludedEdgeIds = new Set()) => {
     let best = null;
@@ -1687,16 +1795,22 @@ function EditorInner() {
       : activeLayer;
     const zoom = Math.max(getZoom(), 0.2);
     const portHit = naechsterBauteilAnschluss(raw, null, layer.role, 28 / zoom);
+    const endpointHit = portHit ? null : naechsterFreierLeitungsEndpunkt(raw, layer.id, 16 / zoom, draft?.extendEdgeId);
 
     if (!draft) {
-      if (nurBeiAnschluss && !portHit) return true;
-      if (lineStartMode === 'handle' && !portHit) return true;
-      const startPoint = portHit?.position || rasterPunkt(raw, drawingConfig.grid_size);
-      leitungsEntwurfStarten(startPoint, portHit ? { nodeId:portHit.nodeId, handleId:portHit.handleId } : null);
+      if (nurBeiAnschluss && !portHit && !endpointHit) return true;
+      if (lineStartMode === 'handle' && !portHit && !endpointHit) return true;
+      const startHit = portHit || endpointHit;
+      const startPoint = startHit?.position || rasterPunkt(raw, drawingConfig.grid_size);
+      leitungsEntwurfStarten(startPoint, startHit ? { nodeId:startHit.nodeId, handleId:startHit.handleId } : null);
       return true;
     }
     if (portHit) {
       leitungsEntwurfAbschliessen(portHit.position, { ...portHit, ...portHit.position, type:'port' }, event.shiftKey || shiftPressed);
+      return true;
+    }
+    if (endpointHit) {
+      leitungsEntwurfAbschliessen(endpointHit.position, { ...endpointHit, ...endpointHit.position, type:'port' }, event.shiftKey || shiftPressed);
       return true;
     }
     if (nurBeiAnschluss) return true;
@@ -1709,12 +1823,15 @@ function EditorInner() {
     const previous = letzterEntwurfsPunkt(draft);
     const point = event.shiftKey || shiftPressed
       ? auf45GradFangen(previous, raw, drawingConfig.grid_size)
-      : orthogonalerCursorfang(previous, raw, 10 / zoom, drawingConfig.grid_size).point;
+      : objektAusrichtung(raw, [
+        ...objektFangpunkte,
+        ...(previous ? [{ ...previous, kind:'draft', priority:1000 }] : []),
+      ], 10 / zoom, drawingConfig.grid_size).point;
     const next = { ...draft, points:[...(draft.points || []), point] };
     leitungsEntwurfRef.current = next;
     setLeitungsEntwurf(next);
     return true;
-  }, [activeLayer, drawingConfig, getZoom, letzterEntwurfsPunkt, leitungsEntwurfAbschliessen, leitungsEntwurfStarten, lineStartMode, naechsteLeitung, naechsterBauteilAnschluss, screenToFlowPosition, shiftPressed, werkzeug]);
+  }, [activeLayer, drawingConfig, getZoom, letzterEntwurfsPunkt, leitungsEntwurfAbschliessen, leitungsEntwurfStarten, lineStartMode, naechsteLeitung, naechsterBauteilAnschluss, naechsterFreierLeitungsEndpunkt, objektFangpunkte, screenToFlowPosition, shiftPressed, werkzeug]);
 
   const cadHandlePointerDown = useCallback((event) => {
     if (werkzeug !== 'line') return;
@@ -1761,11 +1878,23 @@ function EditorInner() {
         leitungsCursorRef.current = portHit.position;
         setLeitungsCursor(portHit.position);
         setLeitungsSnap({ ...portHit, ...portHit.position, type:'port' });
-        setLeitungsGuides(portHit.handlePosition === 'left' || portHit.handlePosition === 'right'
-          ? [{ axis:'y', value:portHit.position.y }]
-          : portHit.handlePosition === 'top' || portHit.handlePosition === 'bottom'
-            ? [{ axis:'x', value:portHit.position.x }]
-            : []);
+        const previous = letzterEntwurfsPunkt(draft);
+        const corner = orthogonalerAnschlussEckpunkt(previous, portHit.position, portHit.handlePosition);
+        setLeitungsGuides(corner ? [{
+          x1:portHit.position.x,
+          y1:portHit.position.y,
+          x2:corner.x,
+          y2:corner.y,
+          snapType:'handle',
+        }] : []);
+        return;
+      }
+      const endpointHit = naechsterFreierLeitungsEndpunkt(raw, layer.id, 16 / zoom, draft.extendEdgeId);
+      if (endpointHit) {
+        leitungsCursorRef.current = endpointHit.position;
+        setLeitungsCursor(endpointHit.position);
+        setLeitungsSnap({ ...endpointHit, ...endpointHit.position, type:'port' });
+        setLeitungsGuides([]);
         return;
       }
       const excludedEdges = draft.extendEdgeId ? new Set([draft.extendEdgeId]) : new Set();
@@ -1780,13 +1909,16 @@ function EditorInner() {
       const previous = letzterEntwurfsPunkt(draft);
       const guided = event.shiftKey || shiftPressed
         ? { point:auf45GradFangen(previous, raw, drawingConfig.grid_size), guides:[] }
-        : orthogonalerCursorfang(previous, raw, 10 / zoom, drawingConfig.grid_size);
+        : objektAusrichtung(raw, [
+          ...objektFangpunkte,
+          ...(previous ? [{ ...previous, kind:'draft', priority:1000 }] : []),
+        ], 10 / zoom, drawingConfig.grid_size);
       leitungsCursorRef.current = guided.point;
       setLeitungsCursor(guided.point);
       setLeitungsSnap(null);
       setLeitungsGuides(guided.guides);
     });
-  }, [activeLayer, drawingConfig.grid_size, getZoom, letzterEntwurfsPunkt, naechsteLeitung, naechsterBauteilAnschluss, screenToFlowPosition, shiftPressed]);
+  }, [activeLayer, drawingConfig.grid_size, getZoom, letzterEntwurfsPunkt, naechsteLeitung, naechsterBauteilAnschluss, naechsterFreierLeitungsEndpunkt, objektFangpunkte, screenToFlowPosition, shiftPressed]);
 
   const cadEntwurfRoute = (() => {
     if (!leitungsEntwurf) return [];
@@ -2814,12 +2946,12 @@ function EditorInner() {
                     stroke={(LEITUNGS_LAYER.find(layer => layer.id === leitungsEntwurf?.layerId) || activeLayer).color}
                     strokeWidth="4.5" strokeDasharray="12 7" strokeLinecap="round" strokeLinejoin="round" />
                 )}
-                {leitungsGuides.map((guide, index) => guide.axis === 'x' ? (
-                  <line key={`guide-${index}`} x1={guide.value} y1={-10000} x2={guide.value} y2={10000}
-                    stroke="#22c55e" strokeWidth="1.5" strokeDasharray="7 5" opacity="0.9" />
-                ) : (
-                  <line key={`guide-${index}`} x1={-10000} y1={guide.value} x2={10000} y2={guide.value}
-                    stroke="#22c55e" strokeWidth="1.5" strokeDasharray="7 5" opacity="0.9" />
+                {leitungsGuides.map((guide, index) => (
+                  <g key={`guide-${index}`}>
+                    <line x1={guide.x1} y1={guide.y1} x2={guide.x2} y2={guide.y2}
+                      stroke="#22c55e" strokeWidth="1.5" strokeDasharray="7 5" opacity="0.95" />
+                    <circle cx={guide.x1} cy={guide.y1} r="4" fill="#f0fdf4" stroke="#16a34a" strokeWidth="1.5" />
+                  </g>
                 ))}
                 {leitungsSnap && (
                   <circle cx={leitungsSnap.x} cy={leitungsSnap.y} r="12" fill="none"

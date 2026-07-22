@@ -1,4 +1,4 @@
-import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath } from '@xyflow/react';
+import { BaseEdge, EdgeLabelRenderer } from '@xyflow/react';
 import { roundedPolylinePath } from './geometry';
 
 function halfwayPoint(points) {
@@ -19,21 +19,42 @@ function halfwayPoint(points) {
   return points.at(-1);
 }
 
-// CAD-Leitung: automatische Smooth-Step-Führung oder frei bearbeitbare
-// Polylinie. Rücklauf-Layer sind gestrichelt; Stützpunkte erscheinen nur bei
-// Auswahl und bleiben Teil des gespeicherten Schema-Graphen.
+function automatischeEckpunkte(sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition) {
+  if (Math.abs(sourceX - targetX) < 0.5 || Math.abs(sourceY - targetY) < 0.5) return [];
+  const sourceHorizontal = ['left', 'right'].includes(String(sourcePosition).toLowerCase());
+  const targetHorizontal = ['left', 'right'].includes(String(targetPosition).toLowerCase());
+  if (sourceHorizontal && targetHorizontal) {
+    const x = (sourceX + targetX) / 2;
+    return [{ x, y:sourceY }, { x, y:targetY }];
+  }
+  if (!sourceHorizontal && !targetHorizontal) {
+    const y = (sourceY + targetY) / 2;
+    return [{ x:sourceX, y }, { x:targetX, y }];
+  }
+  return sourceHorizontal
+    ? [{ x:targetX, y:sourceY }]
+    : [{ x:sourceX, y:targetY }];
+}
+
+// Jede Schema-Leitung ist eine echte Polylinie. Der Editor liefert adaptive
+// Eckpunkte, die beim Verschieben der angeschlossenen Bauteile neu projiziert
+// werden; andere Ansichten erhalten mindestens eine orthogonale Fallback-Route.
 export function FlowEdge({
   id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style = {}, label, data = {}, selected,
 }) {
   const isVL = data._layerRole === 'vl' || style.stroke === '#ef4444';
   const isRL = data._layerRole === 'rl' || style.stroke === '#3b82f6';
-  const waypoints = Array.isArray(data.points) ? data.points : [];
+  const hasEffectiveRoute = Array.isArray(data._routePoints);
+  const storedWaypoints = Array.isArray(data.points) ? data.points : [];
+  const waypoints = hasEffectiveRoute
+    ? data._routePoints
+    : storedWaypoints.length
+      ? storedWaypoints
+      : automatischeEckpunkte(sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition);
   const vertices = [{ x: sourceX, y: sourceY }, ...waypoints, { x: targetX, y: targetY }];
   const cornerRadius = Math.max(0, Number(data.corner_radius ?? data._cornerRadius ?? 8) || 0);
-  const smooth = getSmoothStepPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, borderRadius: cornerRadius });
-  const isCadPolyline = data.cad_polyline || waypoints.length > 0;
-  const edgePath = isCadPolyline ? roundedPolylinePath(vertices, cornerRadius) : smooth[0];
-  const labelPoint = isCadPolyline ? halfwayPoint(vertices) : { x: smooth[1], y: smooth[2] };
+  const edgePath = roundedPolylinePath(vertices, cornerRadius);
+  const labelPoint = halfwayPoint(vertices);
   const dash = data._dashed || isRL ? '10 7' : undefined;
   const color = style.stroke || '#334155';
 

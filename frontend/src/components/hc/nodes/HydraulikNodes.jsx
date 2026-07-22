@@ -235,7 +235,7 @@ export function SpeicherNode({ data, selected: sel }) {
       {H(Position.Bottom, 'bot-r',  { bottom: -6, left: '70%' })}
       {H(Position.Left,   'left',   { left: -6 })}
       {H(Position.Right,  'right',  { right: -6 })}
-      <SymSpeicher />
+      <SymSpeicher liter={data.speicher_liter} />
       <Label text={data.label || 'Speicher'} />
     </div>
   );

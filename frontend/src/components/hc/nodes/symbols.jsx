@@ -158,13 +158,33 @@ export function SymShutoff() {
 }
 
 export function SymWE() {
-  // Grösser (Dominic-Feedback); VL-Anschluss oben, RL unten
+  // Wärmepumpe nach Dominics Vorlage. Die Anschluss-Handles liegen bewusst
+  // ausserhalb des SVG und können im Schema unabhängig davon konfiguriert werden.
   return (
-    <svg viewBox="0 0 88 68" width="88" height="68">
-      <rect x="2" y="2" width="84" height="64" rx="4" fill="white" stroke="#1e293b" strokeWidth="2.5" />
-      <text x="44" y="41" textAnchor="middle" fontSize="17" fontWeight="700" fill="#1e293b">WP</text>
-      <rect x="36" y="0" width="16" height="5" rx="2" fill="#ef4444" />
-      <rect x="36" y="63" width="16" height="5" rx="2" fill="#3b82f6" />
+    <svg viewBox="0 0 200 220" width="104" height="114" role="img" aria-label="Wärmepumpe">
+      <g fill="none" stroke="#111827" strokeWidth="2.5" strokeLinejoin="round">
+        <rect x="8" y="8" width="184" height="204" fill="#e5e7eb" strokeWidth="3" />
+
+        <rect x="20" y="20" width="60" height="180" fill="#f3f4f6" />
+        <line x1="20" y1="20" x2="80" y2="200" />
+        <rect x="120" y="20" width="60" height="180" fill="#f3f4f6" />
+        <line x1="180" y1="20" x2="120" y2="200" />
+
+        {/* Verdichter: zwei gegenläufige Kennlinien mit sichtbarer Trennung. */}
+        <circle cx="100" cy="55" r="26" fill="#e5e7eb" />
+        <path d="M80 68 Q91 61 96.5 57.5" strokeLinecap="round" />
+        <path d="M103.5 52.5 Q109 49 120 42" strokeLinecap="round" />
+        <path d="M80 42 Q91 49 96.5 52.5" strokeLinecap="round" />
+        <path d="M103.5 57.5 Q109 61 120 68" strokeLinecap="round" />
+
+        {/* Kleiner und tiefer als in der Rohvorlage, damit das Symbol Luft hat. */}
+        <path d="M78 184 L100 195 L78 206 Z" fill="#f9fafb" />
+        <path d="M122 184 L100 195 L122 206 Z" fill="#f9fafb" />
+      </g>
+      <g fontFamily="Arial, sans-serif" fontSize="16" fontWeight="700" fill="#111827">
+        <text x="32" y="38">V</text>
+        <text x="148" y="38">K</text>
+      </g>
     </svg>
   );
 }
@@ -178,23 +198,33 @@ export function SymVerbraucher() {
   );
 }
 
-export function SymSpeicher() {
-  // Grösser + Rot
+export function SymSpeicher({ liter }) {
+  const wert = Number(liter);
+  const literText = Number.isFinite(wert) && wert > 0
+    ? `${Math.round(wert).toLocaleString('de-CH')} L`
+    : '… L';
   return (
-    <svg viewBox="0 0 56 100" width="56" height="100">
-      {/* Zylinder-Körper */}
-      <rect x="3" y="3" width="50" height="94" rx="6" fill="#fef2f2" stroke="#dc2626" strokeWidth="2.5" />
-      {/* Füll-Linien */}
-      <line x1="3" y1="35" x2="53" y2="35" stroke="#fca5a5" strokeWidth="1.2" strokeDasharray="5,3" />
-      <line x1="3" y1="65" x2="53" y2="65" stroke="#fca5a5" strokeWidth="1.2" strokeDasharray="5,3" />
-      {/* Wasserstand-Füllung */}
-      <rect x="4" y="66" width="48" height="30" rx="4" fill="rgba(252,165,165,0.25)" />
-      {/* SP Label */}
-      <text x="28" y="54" textAnchor="middle" fontSize="13" fontWeight="700" fill="#dc2626">TS</text>
-      {/* Anschluss-Stutzen oben VL */}
-      <rect x="20" y="0" width="16" height="6" rx="2" fill="#ef4444" />
-      {/* Anschluss-Stutzen unten RL */}
-      <rect x="20" y="94" width="16" height="6" rx="2" fill="#3b82f6" />
+    <svg viewBox="0 0 140 290" width="72" height="149" role="img" aria-label={`Speicher ${literText}`}>
+      {/* Behälter ohne Anschlussleitungen; die Ports kommen aus React Flow. */}
+      <path d="M65 4 L75 14 M75 4 L65 14" fill="none" stroke="#111827" strokeWidth="2" />
+      <path d="M20 45 A50 25 0 0 1 120 45 L120 245 A50 25 0 0 1 20 245 Z"
+        fill="#e5e7eb" stroke="#111827" strokeWidth="3" />
+      <line x1="20" y1="45" x2="120" y2="45" stroke="#111827" strokeWidth="3" />
+
+      <text x="70" y="78" textAnchor="middle" fontSize="16" fontWeight="700"
+        fontFamily="Arial, sans-serif" fill="#111827">{literText}</text>
+
+      {/* Temperaturfühler oben und unten. */}
+      <g fill="none" stroke="#111827" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <g transform="translate(65 116)">
+          <circle r="7" />
+          <path d="M-13 13 L14 -14 M14 -14 L7 -12 M14 -14 L12 -7" />
+        </g>
+        <g transform="translate(65 196)">
+          <circle r="7" />
+          <path d="M-13 13 L14 -14 M14 -14 L7 -12 M14 -14 L12 -7" />
+        </g>
+      </g>
     </svg>
   );
 }

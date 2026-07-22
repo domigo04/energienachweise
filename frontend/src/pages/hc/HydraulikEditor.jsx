@@ -80,6 +80,112 @@ function auf45GradFangen(origin, point, grid = 10) {
   return { x: origin.x + sx * distance, y: origin.y + sy * distance };
 }
 
+// Standard im Schema ist bewusst orthogonal. 45° entsteht nur über Shift;
+// ohne Shift gewinnt die Achse, in deren Richtung der Cursor weiter entfernt
+// liegt. Dadurch kann kein zufälliger flacher Winkel gespeichert werden.
+function orthogonalerSegmentfang(origin, point, grid = CAD_GRID) {
+  if (!origin) return rasterPunkt(point, grid);
+  const raster = rasterPunkt(point, grid);
+  return Math.abs(point.x - origin.x) >= Math.abs(point.y - origin.y)
+    ? { x:raster.x, y:origin.y }
+    : { x:origin.x, y:raster.y };
+}
+
+const richtungsVektor = (side) => ({
+  left:{ x:-1, y:0 }, right:{ x:1, y:0 },
+  top:{ x:0, y:-1 }, bottom:{ x:0, y:1 },
+}[side] || null);
+
+function erlaubterLeitungswinkel(a, b) {
+  const dx = Math.abs(b.x - a.x);
+  const dy = Math.abs(b.y - a.y);
+  return dx < 0.5 || dy < 0.5 || Math.abs(dx - dy) < 0.5;
+}
+
+function vereinfachteRoute(points) {
+  const unique = points.filter((point, index, all) => point
+    && (!index || Math.hypot(point.x - all[index - 1].x, point.y - all[index - 1].y) > 0.5));
+  return unique.filter((point, index, all) => {
+    if (!index || index === all.length - 1) return true;
+    const before = all[index - 1];
+    const after = all[index + 1];
+    const cross = (point.x - before.x) * (after.y - point.y)
+      - (point.y - before.y) * (after.x - point.x);
+    return Math.abs(cross) > 0.5;
+  });
+}
+
+// Gespeicherte Eckpunkte sind geometrische Hinweise. Die beiden Punkte an den
+// Bauteilen werden bei jeder Darstellung aus den aktuellen Handle-Koordinaten
+// neu projiziert. Verschieben oder Vergrössern eines Bauteils hält dadurch den
+// ersten und letzten Abschnitt rechtwinklig, ohne die restliche Route zu verlieren.
+function adaptivePolyline(start, end, storedPoints = [], sourceSide = null, targetSide = null) {
+  if (!start || !end) return [];
+  const raw = (storedPoints || []).filter(point => Number.isFinite(point?.x) && Number.isFinite(point?.y));
+  const sourceVector = richtungsVektor(sourceSide);
+  const targetVector = richtungsVektor(targetSide);
+  const distance = Math.hypot(end.x - start.x, end.y - start.y);
+  const lead = Math.max(24, Math.min(60, distance / 4 || 24));
+
+  let hints;
+  if (!raw.length) {
+    const sourceLead = sourceVector
+      ? { x:start.x + sourceVector.x * lead, y:start.y + sourceVector.y * lead }
+      : { ...start };
+    const targetLead = targetVector
+      ? { x:end.x + targetVector.x * lead, y:end.y + targetVector.y * lead }
+      : { ...end };
+    hints = [sourceLead, { x:targetLead.x, y:sourceLead.y }, targetLead];
+  } else {
+    const first = raw[0];
+    const last = raw.at(-1);
+    const sourceLead = sourceSide === 'left' || sourceSide === 'right'
+      ? { x:first.x, y:start.y }
+      : sourceSide === 'top' || sourceSide === 'bottom'
+        ? { x:start.x, y:first.y }
+        : { ...first };
+    const targetLead = targetSide === 'left' || targetSide === 'right'
+      ? { x:last.x, y:end.y }
+      : targetSide === 'top' || targetSide === 'bottom'
+        ? { x:end.x, y:last.y }
+        : { ...last };
+    hints = raw.length === 1
+      ? [sourceLead, targetLead]
+      : [sourceLead, ...raw.slice(1, -1), targetLead];
+  }
+
+  const route = [{ ...start }];
+  [...hints, { ...end }].forEach(point => {
+    const previous = route.at(-1);
+    if (Math.hypot(point.x - previous.x, point.y - previous.y) < 0.5) return;
+    if (!erlaubterLeitungswinkel(previous, point)) {
+      const before = route.at(-2);
+      const previousWasHorizontal = before && Math.abs(previous.y - before.y) < 0.5;
+      const previousWasVertical = before && Math.abs(previous.x - before.x) < 0.5;
+      const elbow = previousWasVertical
+        ? { x:previous.x, y:point.y }
+        : previousWasHorizontal
+          ? { x:point.x, y:previous.y }
+          : Math.abs(point.x - previous.x) >= Math.abs(point.y - previous.y)
+            ? { x:point.x, y:previous.y }
+            : { x:previous.x, y:point.y };
+      if (Math.hypot(elbow.x - previous.x, elbow.y - previous.y) > 0.5) route.push(elbow);
+    }
+    route.push(point);
+  });
+  return vereinfachteRoute(route);
+}
+
+function guidesAmPunkt(guides, point) {
+  return (guides || []).flatMap(guide => {
+    const vertical = Math.abs(guide.x1 - guide.x2) < 0.5;
+    const horizontal = Math.abs(guide.y1 - guide.y2) < 0.5;
+    if (vertical && Math.abs(point.x - guide.x1) < 0.5) return [{ ...guide, x2:point.x, y2:point.y }];
+    if (horizontal && Math.abs(point.y - guide.y1) < 0.5) return [{ ...guide, x2:point.x, y2:point.y }];
+    return [];
+  });
+}
+
 // Objektfang über alle bekannten Bauteil-Handles und Leitungsendpunkte. X und
 // Y werden getrennt bewertet, damit auch der Schnittpunkt zweier verschiedener
 // Ausrichtungslinien gefangen werden kann.
@@ -164,9 +270,13 @@ function projektionAufSegment(point, a, b) {
 const streckenLaenge = (points) => points.slice(1)
   .reduce((sum, point, index) => sum + Math.hypot(point.x - points[index].x, point.y - points[index].y), 0);
 
-function ConstrainedConnectionLine({ fromX, fromY, toX, toY, connectionLineStyle = {}, shift = false }) {
-  const target = shift ? auf45GradFangen({ x:fromX, y:fromY }, { x:toX, y:toY }, 1) : { x:toX, y:toY };
-  return <path d={`M ${fromX} ${fromY} L ${target.x} ${target.y}`} fill="none"
+function ConstrainedConnectionLine({ fromX, fromY, toX, toY, fromPosition, connectionLineStyle = {}, shift = false }) {
+  const start = { x:fromX, y:fromY };
+  const target = shift
+    ? auf45GradFangen(start, { x:toX, y:toY }, 1)
+    : orthogonalerSegmentfang(start, { x:toX, y:toY }, 1);
+  const route = adaptivePolyline(start, target, [], String(fromPosition || '').toLowerCase(), null);
+  return <path d={roundedPolylinePath(route, 8)} fill="none"
     stroke={connectionLineStyle.stroke || '#64748b'} strokeWidth={2.5} strokeDasharray="8 5" />;
 }
 const WAERMEABGABE = [
@@ -184,7 +294,7 @@ const WAERMEABGABE = [
 const PALETTE_GRUPPEN = [
   { titel: 'Erzeugung & Speicher', items: [
     { type: 'erzeuger',   label: 'Wärmeerzeuger (WE)',  desc: '→ M10 RAVEL' },
-    { type: 'speicher',   label: 'Speicher',            desc: 'technischer Speicher (rot)' },
+    { type: 'speicher',   label: 'Speicher',            desc: 'Inhalt wird direkt im Symbol angezeigt' },
     { type: 'bww',        label: 'BWW-Speicher',        desc: 'Brauchwarmwasser (grün) — SIA 385 folgt' },
     { type: 'pwt',        label: 'Plattentauscher (PWT)', desc: 'Wärmetauscher, 2 Kreise' },
   ]},
@@ -559,6 +669,21 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         {fld('VL Temperatur','vl_temp','','°C')}
         {fld('RL Temperatur','rl_temp','','°C')}
         <button style={btnBlue} onClick={()=>navigate('/rechner/ravel')}>→ RAVEL Wirtschaftlichkeit</button>
+        <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
+      </div>
+    );
+  }
+
+  // ── SPEICHER ──
+  if (node.type === 'speicher') {
+    return (
+      <div style={panelSt}>
+        <PT>Speicher</PT>
+        {fld('Bezeichnung','label','Speicher','','text')}
+        {fld('Speicherinhalt','speicher_liter','z.B. 800','L')}
+        <div style={{ fontSize:9, lineHeight:1.5, color:'#64748b', background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:6, padding:'6px 7px' }}>
+          Der Inhalt erscheint direkt im Speicher-Symbol. Die Anzahl und Lage der Anschlüsse bleibt davon unabhängig.
+        </div>
         <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
     );
@@ -961,6 +1086,18 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, onUpdate, onClose, navig
         <button style={btnBlue} onClick={()=>navigate('/rechner/ravel')}>→ RAVEL Wirtschaftlichkeit</button>
       </div>
     );
+  } else if (node.type === 'speicher') {
+    body = (
+      <div style={{ display:'grid', gap:10 }}>
+        <div><label style={lbl}>Speicherinhalt [L]</label>
+          <input type="number" min="0" style={inp} value={d.speicher_liter??''} onChange={e=>set('speicher_liter',e.target.value)} placeholder="z.B. 800"/></div>
+        <BigVal label="Anzeige im Schema" value={d.speicher_liter || null} unit="L" color="#334155"
+          sub="Der Wert wird direkt im Speicherbehälter dargestellt."/>
+        <div style={{ fontSize:11, color:'#64748b' }}>
+          Die sichtbaren Fangpunkte bleiben unabhängig vom Inhalt. Eine frei konfigurierbare 3-/4-Punkt-Anbindung folgt als eigener Schritt.
+        </div>
+      </div>
+    );
   } else {
     body = <div style={{ fontSize:12, color:'#94a3b8' }}>Für dieses Bauteil ist in Phase 1 noch keine Auslegung hinterlegt.</div>;
   }
@@ -1031,6 +1168,29 @@ function PvBox({ pv, v, kvs_eff }) {
   );
 }
 
+function ToolbarMenu({ label, badge, children }) {
+  return (
+    <details style={{ position:'relative' }}>
+      <summary style={{ listStyle:'none', display:'flex', alignItems:'center', gap:5, padding:'5px 9px', border:'1px solid #e2e8f0',
+        borderRadius:7, background:'#fff', color:'#334155', fontSize:10, fontWeight:700, cursor:'pointer', userSelect:'none', whiteSpace:'nowrap' }}>
+        {label} <span style={{ color:'#94a3b8', fontSize:8 }}>▾</span>
+        {badge > 0 && <span style={{ minWidth:16, height:16, borderRadius:8, padding:'0 4px', display:'inline-flex', alignItems:'center', justifyContent:'center', background:'#dc2626', color:'white', fontSize:8 }}>{badge}</span>}
+      </summary>
+      <div style={{ position:'absolute', left:0, top:34, minWidth:205, padding:6, borderRadius:10, border:'1px solid #cbd5e1',
+        background:'white', boxShadow:'0 14px 32px rgba(15,23,42,.18)', zIndex:180 }}>
+        {children}
+      </div>
+    </details>
+  );
+}
+
+const menuActionStyle = {
+  width:'100%', display:'flex', alignItems:'center', gap:7, padding:'7px 9px', border:0, borderRadius:7,
+  background:'transparent', color:'#334155', fontSize:10, fontWeight:600, textDecoration:'none', textAlign:'left', cursor:'pointer', whiteSpace:'nowrap',
+};
+
+const closeToolbarMenu = (event) => event.currentTarget.closest('details')?.removeAttribute('open');
+
 // ── Haupt-Editor ──────────────────────────────────────────────
 function EditorInner() {
   const navigate = useNavigate();
@@ -1052,11 +1212,16 @@ function EditorInner() {
   const [activeLayerId, setActiveLayerId] = useState('heizung_vl');
   const [layerVisibility, setLayerVisibility] = useState(DEFAULT_LAYER_VISIBILITY);
   const [showLayers, setShowLayers] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(true);
+  const [paletteGroupsOpen, setPaletteGroupsOpen] = useState(() => ({
+    'Erzeugung & Speicher':true,
+    Verteilung:true,
+  }));
+  const [showMiniMap, setShowMiniMap] = useState(false);
   const [shiftPressed, setShiftPressed] = useState(false);
   const [werkzeug, setWerkzeug] = useState('select'); // select | line
   const [lineStartMode, setLineStartMode] = useState('free'); // free | handle
   const [drawingConfig, setDrawingConfig] = useState(DEFAULT_DRAWING_CONFIG);
-  const [showDrawingSettings, setShowDrawingSettings] = useState(false);
   const [leitungsEntwurf, setLeitungsEntwurf] = useState(null);
   const [leitungsCursor, setLeitungsCursor] = useState(null);
   const [leitungsSnap, setLeitungsSnap] = useState(null);
@@ -1175,6 +1340,8 @@ function EditorInner() {
           ...edge,
           data:{
             ...(edge.data || {}),
+            cad_polyline:true,
+            polyline_version:1,
             corner_radius:edge.data?.corner_radius ?? geladeneDrawingConfig.corner_radius,
           },
         })));
@@ -1363,17 +1530,12 @@ function EditorInner() {
     const start = handlePosition(edge.source, edge.sourceHandle);
     const end = handlePosition(edge.target, edge.targetHandle);
     if (!start || !end) return [];
-    if (edge.data?.cad_polyline || (Array.isArray(edge.data?.points) && edge.data.points.length)) {
-      return [start, ...(edge.data?.points || []), end];
-    }
-    // Annäherung an die sichtbare Smooth-Step-Route für magnetische T-Snaps.
-    if (Math.abs(end.x - start.x) >= Math.abs(end.y - start.y)) {
-      const x = (start.x + end.x) / 2;
-      return [start, { x, y:start.y }, { x, y:end.y }, end];
-    }
-    const y = (start.y + end.y) / 2;
-    return [start, { x:start.x, y }, { x:end.x, y }, end];
-  }, [handlePosition]);
+    const sourceNode = nodesRef.current.find(node => node.id === edge.source);
+    const targetNode = nodesRef.current.find(node => node.id === edge.target);
+    const sourceSide = sourceNode?.type === 'junction' ? null : handleAusrichtung(edge.source, edge.sourceHandle);
+    const targetSide = targetNode?.type === 'junction' ? null : handleAusrichtung(edge.target, edge.targetHandle);
+    return adaptivePolyline(start, end, edge.data?.points || [], sourceSide, targetSide);
+  }, [handleAusrichtung, handlePosition]);
 
   // Eine einzige, pro Graphänderung neu aufgebaute Fangpunktliste hält den
   // Pointer-Move-Pfad leichtgewichtig. Darin liegen alle Bauteilanschlüsse und
@@ -1527,7 +1689,7 @@ function EditorInner() {
     const oldLength = Number.parseFloat(host.data?.laenge_m);
     const firstShare = totalGeometry ? streckenLaenge(firstRoute) / totalGeometry : 0.5;
     const splitData = (points, share) => ({
-      ...(host.data || {}), layer_id:layerId, points,
+      ...(host.data || {}), layer_id:layerId, cad_polyline:true, polyline_version:1, points,
       ...(Number.isFinite(oldLength) ? { laenge_m:Number((oldLength * share).toFixed(2)) } : {}),
     });
     return [{
@@ -1584,7 +1746,8 @@ function EditorInner() {
       selected:false,
       data:{
         layer_id:returnLayer.id,
-        cad_polyline:Boolean(primaryEdge.data?.cad_polyline),
+        cad_polyline:true,
+        polyline_version:1,
         corner_radius:drawingConfig.corner_radius,
         points:returnPoints,
         paired_edge_id:primaryEdge.id,
@@ -1656,7 +1819,7 @@ function EditorInner() {
     const anchor = letzterEntwurfsPunkt(draft) || startPoint;
     const endPoint = snapHit
       ? { x:snapHit.x, y:snapHit.y }
-      : shift ? auf45GradFangen(anchor, rawPoint, drawingConfig.grid_size) : rasterPunkt(rawPoint, drawingConfig.grid_size);
+      : shift ? auf45GradFangen(anchor, rawPoint, drawingConfig.grid_size) : orthogonalerSegmentfang(anchor, rawPoint, drawingConfig.grid_size);
     if (!startPoint || Math.hypot(endPoint.x - startPoint.x, endPoint.y - startPoint.y) < 2) return;
     const finalPoints = [...(draft.points || [])];
     const connectionCorner = snapHit?.type === 'port'
@@ -1689,9 +1852,7 @@ function EditorInner() {
       }
 
       const existingRoute = routePunkte(existing);
-      const oldInnerPoints = existing.data?.cad_polyline
-        ? [...(existing.data?.points || [])]
-        : existingRoute.slice(1, -1);
+      const oldInnerPoints = existingRoute.slice(1, -1);
       const newEndpoint = snapHit?.type === 'port'
         ? { nodeId:snapHit.nodeId, handleId:snapHit.handleId }
         : { nodeId:finalAnchorId, handleId:side === 'source' ? 'center-source' : 'center-target' };
@@ -1741,9 +1902,11 @@ function EditorInner() {
     if (targetAnchorId) createdNodes.push(cadAnker(targetAnchorId, endPoint, layer));
 
     const edgeId = newId();
-    const istDirekteFangpunktVerbindung = Boolean(
-      draft.startEndpoint && snapHit?.type === 'port' && !finalPoints.length,
-    );
+    const sourceSide = draft.startEndpoint
+      ? handleAusrichtung(draft.startEndpoint.nodeId, draft.startEndpoint.handleId)
+      : null;
+    const targetSide = snapHit?.type === 'port' ? snapHit.handlePosition : null;
+    const polylinePoints = adaptivePolyline(startPoint, endPoint, finalPoints, sourceSide, targetSide).slice(1, -1);
     let edge = {
       id:edgeId,
       source:draft.startEndpoint?.nodeId || sourceAnchorId,
@@ -1753,9 +1916,10 @@ function EditorInner() {
       type:'flow',
       data:{
         layer_id:layer.id,
-        cad_polyline:!istDirekteFangpunktVerbindung,
+        cad_polyline:true,
+        polyline_version:1,
         corner_radius:drawingConfig.corner_radius,
-        points:finalPoints,
+        points:polylinePoints,
       },
       style:{ stroke:layer.color, strokeWidth:4.5 },
     };
@@ -1782,7 +1946,7 @@ function EditorInner() {
     setLeitungsGuides([]);
     setWerkzeug('select');
     setSelectedEdgeId(edgeId);
-  }, [activeLayer, cadAnker, drawingConfig, handlePosition, letzterEntwurfsPunkt, leitungTeilen, routePunkte, ruecklaufPaarErstellen, setEdges, setNodes, snap]);
+  }, [activeLayer, cadAnker, drawingConfig, handleAusrichtung, handlePosition, letzterEntwurfsPunkt, leitungTeilen, routePunkte, ruecklaufPaarErstellen, setEdges, setNodes, snap]);
 
   const cadKlick = useCallback((event, nurBeiAnschluss = false) => {
     if (werkzeug !== 'line') return false;
@@ -1821,12 +1985,13 @@ function EditorInner() {
       return true;
     }
     const previous = letzterEntwurfsPunkt(draft);
-    const point = event.shiftKey || shiftPressed
-      ? auf45GradFangen(previous, raw, drawingConfig.grid_size)
-      : objektAusrichtung(raw, [
+    const alignment = objektAusrichtung(raw, [
         ...objektFangpunkte,
         ...(previous ? [{ ...previous, kind:'draft', priority:1000 }] : []),
-      ], 10 / zoom, drawingConfig.grid_size).point;
+      ], 10 / zoom, drawingConfig.grid_size);
+    const point = event.shiftKey || shiftPressed
+      ? auf45GradFangen(previous, alignment.point, drawingConfig.grid_size)
+      : orthogonalerSegmentfang(previous, alignment.point, drawingConfig.grid_size);
     const next = { ...draft, points:[...(draft.points || []), point] };
     leitungsEntwurfRef.current = next;
     setLeitungsEntwurf(next);
@@ -1907,16 +2072,17 @@ function EditorInner() {
         return;
       }
       const previous = letzterEntwurfsPunkt(draft);
-      const guided = event.shiftKey || shiftPressed
-        ? { point:auf45GradFangen(previous, raw, drawingConfig.grid_size), guides:[] }
-        : objektAusrichtung(raw, [
+      const alignment = objektAusrichtung(raw, [
           ...objektFangpunkte,
           ...(previous ? [{ ...previous, kind:'draft', priority:1000 }] : []),
         ], 10 / zoom, drawingConfig.grid_size);
-      leitungsCursorRef.current = guided.point;
-      setLeitungsCursor(guided.point);
+      const point = event.shiftKey || shiftPressed
+        ? auf45GradFangen(previous, alignment.point, drawingConfig.grid_size)
+        : orthogonalerSegmentfang(previous, alignment.point, drawingConfig.grid_size);
+      leitungsCursorRef.current = point;
+      setLeitungsCursor(point);
       setLeitungsSnap(null);
-      setLeitungsGuides(guided.guides);
+      setLeitungsGuides(guidesAmPunkt(alignment.guides, point));
     });
   }, [activeLayer, drawingConfig.grid_size, getZoom, letzterEntwurfsPunkt, naechsteLeitung, naechsterBauteilAnschluss, naechsterFreierLeitungsEndpunkt, objektFangpunkte, screenToFlowPosition, shiftPressed]);
 
@@ -1934,8 +2100,18 @@ function EditorInner() {
     const connectionCorner = leitungsSnap?.type === 'port'
       ? orthogonalerAnschlussEckpunkt(previous, preview, leitungsSnap.handlePosition)
       : null;
-    return [start, ...leitungsEntwurf.points, connectionCorner, preview].filter((point, index, all) => point
-      && (!index || point.x !== all[index - 1]?.x || point.y !== all[index - 1]?.y));
+    if (!start || !preview) return [];
+    const sourceSide = leitungsEntwurf.startEndpoint
+      ? handleAusrichtung(leitungsEntwurf.startEndpoint.nodeId, leitungsEntwurf.startEndpoint.handleId)
+      : null;
+    const targetSide = leitungsSnap?.type === 'port' ? leitungsSnap.handlePosition : null;
+    return adaptivePolyline(
+      start,
+      preview,
+      [...leitungsEntwurf.points, ...(connectionCorner ? [connectionCorner] : [])],
+      sourceSide,
+      targetSide,
+    );
   })();
 
   const punktHinzufuegen = useCallback((event, edgeId) => {
@@ -1954,13 +2130,14 @@ function EditorInner() {
     snap();
     setSelectedEdgeId(edgeId);
     setSelected(null);
-    const basePoints = Array.isArray(edge.data?.points) && edge.data.points.length
-      ? [...edge.data.points]
-      : route.slice(1, -1);
+    const basePoints = route.slice(1, -1);
     const origin = route[best.segmentIndex];
+    const raster = rasterPunkt(best, drawingConfig.grid_size);
     const point = event.shiftKey
       ? auf45GradFangen(origin, best, drawingConfig.grid_size)
-      : rasterPunkt(best, drawingConfig.grid_size);
+      : erlaubterLeitungswinkel(origin, raster)
+        ? raster
+        : orthogonalerSegmentfang(origin, best, drawingConfig.grid_size);
     basePoints.splice(best.segmentIndex, 0, point);
     setEdges(items => items.map(item => item.id === edgeId
       ? { ...item, data:{ ...(item.data || {}), cad_polyline:true, points:basePoints } }
@@ -1969,16 +2146,24 @@ function EditorInner() {
 
   const punktEntfernen = useCallback((edgeId, pointIndex) => {
     snap();
-    setEdges(items => items.map(item => item.id === edgeId
-      ? { ...item, data:{ ...(item.data || {}), points:(item.data?.points || []).filter((_, index) => index !== pointIndex) } }
-      : item));
-  }, [setEdges, snap]);
+    setEdges(items => items.map(item => {
+      if (item.id !== edgeId) return item;
+      const points = routePunkte(item).slice(1, -1).filter((_, index) => index !== pointIndex);
+      return { ...item, data:{ ...(item.data || {}), cad_polyline:true, points } };
+    }));
+  }, [routePunkte, setEdges, snap]);
 
   const punktDragStart = useCallback((event, edgeId, pointIndex) => {
     event.preventDefault();
     snap();
-    edgePointDrag.current = { edgeId, pointIndex };
-  }, [snap]);
+    const edge = edgesRef.current.find(item => item.id === edgeId);
+    if (!edge) return;
+    const points = routePunkte(edge).slice(1, -1);
+    edgePointDrag.current = { edgeId, pointIndex, points };
+    setEdges(items => items.map(item => item.id === edgeId
+      ? { ...item, data:{ ...(item.data || {}), cad_polyline:true, points } }
+      : item));
+  }, [routePunkte, setEdges, snap]);
 
   const segmentDragStart = useCallback((event, edgeId) => {
     const edge = edgesRef.current.find(item => item.id === edgeId);
@@ -2072,20 +2257,21 @@ function EditorInner() {
       if (!drag) return;
       const edge = edgesRef.current.find(item => item.id === drag.edgeId);
       if (!edge) return;
-      const points = edge.data?.points || [];
+      const points = drag.points || [];
       const origin = drag.pointIndex > 0
         ? points[drag.pointIndex - 1]
         : handlePosition(edge.source, edge.sourceHandle);
       const raw = screenToFlowPosition({ x:event.clientX, y:event.clientY });
       const point = event.shiftKey
         ? auf45GradFangen(origin, raw, drawingConfig.grid_size)
-        : rasterPunkt(raw, drawingConfig.grid_size);
+        : orthogonalerSegmentfang(origin, raw, drawingConfig.grid_size);
       if (edgePointFrame.current) cancelAnimationFrame(edgePointFrame.current);
       edgePointFrame.current = requestAnimationFrame(() => {
         setEdges(items => items.map(item => {
           if (item.id !== drag.edgeId) return item;
-          const next = [...(item.data?.points || [])];
+          const next = [...points];
           next[drag.pointIndex] = point;
+          drag.points = next;
           return { ...item, data:{ ...(item.data || {}), points:next } };
         }));
       });
@@ -2144,7 +2330,7 @@ function EditorInner() {
       const raw = screenToFlowPosition({ x:event.clientX, y:event.clientY });
       return event.shiftKey
         ? auf45GradFangen(drag.otherPoint, raw, drawingConfig.grid_size)
-        : rasterPunkt(raw, drawingConfig.grid_size);
+        : orthogonalerSegmentfang(drag.otherPoint, raw, drawingConfig.grid_size);
     };
     const move = (event) => {
       const drag = edgeEndpointDrag.current;
@@ -2354,6 +2540,8 @@ function EditorInner() {
           werte = ex && !ex.fehler ? `VN ${ex.vn_l} l → ${ex.vorschlag_l} l · p0 ${ex.p0_bar} / pe ${ex.pe_bar} bar` : ex?.fehler ? `⚠ ${ex.fehler}` : '—';
         } else if (n.type === 'erzeuger') {
           werte = [d.typ, d.leistung_kw ? `${d.leistung_kw} kW` : null].filter(Boolean).join(' · ') || '—';
+        } else if (n.type === 'speicher') {
+          werte = d.speicher_liter ? `${d.speicher_liter} L` : '—';
         }
         return { nr: d.nr, bauteil: TITLES[n.type] || n.type, bez: d.label || '', werte };
       });
@@ -2369,9 +2557,12 @@ function EditorInner() {
   }, [edges]);
 
   // Edges: VL durchgezogen, RL gestrichelt, V' als Label
-  const displayEdges = useMemo(() => edges.map(edge => {
+  const displayEdges = useMemo(() => {
+    void nodeGeometryVersion;
+    return edges.map(edge => {
     const layer = layerVonEdge(edge);
     const color = layer.color;
+    const effectiveRoute = routePunkte(edge);
     const v = edgeFlows[edge.id];
     const lg = leitungResults[edge.id];
     // Neues Label-Format (Dominic 2026-07-06): DN gross oben, Massenstrom m' in kg/h
@@ -2390,6 +2581,8 @@ function EditorInner() {
       hidden: layerVisibility[layer.id] === false,
       data: {
         ...(edge.data || {}),
+        cad_polyline:true,
+        _routePoints:effectiveRoute.slice(1, -1),
         _layerRole:layer.role,
         _dashed:layer.dashed,
         _onAddPoint:punktHinzufuegen,
@@ -2406,15 +2599,16 @@ function EditorInner() {
       labelBgStyle: { fill:'rgba(255,255,255,0.9)', borderRadius:3 },
       labelBgPadding: [3,5],
       style: { ...edge.style, stroke:color },
-    };
-  }), [edges, edgeFlows, endpointContextMenu, endpointDragStart, junctionDegrees, layerVisibility, leitungResults, punktDragStart, punktEntfernen, punktHinzufuegen, segmentDragStart, selectedEdgeId]);
+      };
+    });
+  }, [edges, edgeFlows, endpointContextMenu, endpointDragStart, junctionDegrees, layerVisibility, leitungResults, nodeGeometryVersion, punktDragStart, punktEntfernen, punktHinzufuegen, routePunkte, segmentDragStart, selectedEdgeId]);
 
   const loadSchema = (key) => {
     const s = SCHALTUNGEN[key];
     setNodes(s.nodes.map(n=>({...n})));
     setEdges(s.edges.map(e=>({
       ...e,
-      data:{ ...(e.data || {}), corner_radius:drawingConfig.corner_radius },
+      data:{ ...(e.data || {}), cad_polyline:true, polyline_version:1, corner_radius:drawingConfig.corner_radius },
     })));
     setSelected(null);
   };
@@ -2440,13 +2634,22 @@ function EditorInner() {
 
   const onConnect = useCallback((params) => {
     snap();
-    let edge = {
-      ...params, id:newId(), type:'flow',
-      data:{ ...(params.data || {}), layer_id:activeLayer.id, corner_radius:drawingConfig.corner_radius },
-      style:{ stroke:activeLayer.color, strokeWidth:2.5 },
-    };
     const startPoint = handlePosition(params.source, params.sourceHandle);
     const endPoint = handlePosition(params.target, params.targetHandle);
+    const sourceSide = handleAusrichtung(params.source, params.sourceHandle);
+    const targetSide = handleAusrichtung(params.target, params.targetHandle);
+    let edge = {
+      ...params, id:newId(), type:'flow',
+      data:{
+        ...(params.data || {}),
+        layer_id:activeLayer.id,
+        cad_polyline:true,
+        polyline_version:1,
+        corner_radius:drawingConfig.corner_radius,
+        points:adaptivePolyline(startPoint, endPoint, [], sourceSide, targetSide).slice(1, -1),
+      },
+      style:{ stroke:activeLayer.color, strokeWidth:2.5 },
+    };
     const returnPair = ruecklaufPaarErstellen(edge, startPoint, endPoint);
     if (returnPair) edge = returnPair.primaryEdge;
     const exists = edgesRef.current.some(item => item.source === params.source
@@ -2456,7 +2659,7 @@ function EditorInner() {
     if (exists) return;
     if (returnPair?.createdNodes.length) setNodes(nodesNow => [...nodesNow, ...returnPair.createdNodes]);
     setEdges(items => [...items, edge, ...(returnPair ? [returnPair.returnEdge] : [])]);
-  }, [activeLayer, drawingConfig.corner_radius, handlePosition, ruecklaufPaarErstellen, setEdges, setNodes, snap]);
+  }, [activeLayer, drawingConfig.corner_radius, handleAusrichtung, handlePosition, ruecklaufPaarErstellen, setEdges, setNodes, snap]);
 
   const onConnectStart = useCallback((_, params) => { connectStart.current = params; }, []);
 
@@ -2471,7 +2674,7 @@ function EditorInner() {
     const origin = handlePosition(cs.nodeId, cs.handleId);
     const p = event.shiftKey
       ? auf45GradFangen(origin, raw, drawingConfig.grid_size)
-      : rasterPunkt(raw, drawingConfig.grid_size);
+      : orthogonalerSegmentfang(origin, raw, drawingConfig.grid_size);
     const jid = newId();
     snap();
     const vonQuelle = cs.handleType !== 'target';
@@ -2485,7 +2688,19 @@ function EditorInner() {
       target:vonQuelle ? jid : cs.nodeId,
       targetHandle:vonQuelle ? 'center-target' : cs.handleId,
       type:'flow',
-      data:{ layer_id:activeLayer.id, cad_polyline:true, corner_radius:drawingConfig.corner_radius, points:[] },
+      data:{
+        layer_id:activeLayer.id,
+        cad_polyline:true,
+        polyline_version:1,
+        corner_radius:drawingConfig.corner_radius,
+        points:adaptivePolyline(
+          vonQuelle ? origin : junctionPoint,
+          vonQuelle ? junctionPoint : origin,
+          [],
+          vonQuelle ? handleAusrichtung(cs.nodeId, cs.handleId) : null,
+          vonQuelle ? null : handleAusrichtung(cs.nodeId, cs.handleId),
+        ).slice(1, -1),
+      },
       style:{ stroke:activeLayer.color, strokeWidth:4.5 },
     };
     const startPoint = vonQuelle ? origin : junctionPoint;
@@ -2510,7 +2725,7 @@ function EditorInner() {
     const [first, second] = leitungTeilen(hit, jid, activeLayer.id);
     setEdges(es => [...es.filter(edge => edge.id !== hit.edge.id), first, second, branch, ...pairedEdges]);
     setSelectedEdgeId(null);
-  }, [activeLayer, cadAnker, drawingConfig.corner_radius, drawingConfig.grid_size, getZoom, handlePosition, leitungTeilen, naechsteLeitung, ruecklaufPaarErstellen, screenToFlowPosition, setNodes, setEdges, snap]);
+  }, [activeLayer, cadAnker, drawingConfig.corner_radius, drawingConfig.grid_size, getZoom, handleAusrichtung, handlePosition, leitungTeilen, naechsteLeitung, ruecklaufPaarErstellen, screenToFlowPosition, setNodes, setEdges, snap]);
 
   const onDragOver = useCallback(e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }, []);
 
@@ -2675,207 +2890,121 @@ function EditorInner() {
 
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100vh', fontFamily:'system-ui,sans-serif' }}>
-      {/* Topbar */}
-      <div style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 14px', background:'white', borderBottom:'1px solid #e2e8f0', flexShrink:0, flexWrap:'wrap', position:'relative', zIndex:50 }}>
-        <Link to={`/projekte/${projectId}`} style={{ fontSize:12, color:'#2563eb', whiteSpace:'nowrap' }}>← {projectName || 'Projekt'}</Link>
-        <Link to={`/projekte/${projectId}/schema-cad`}
-          style={{ fontSize:11, fontWeight:700, padding:'4px 9px', borderRadius:6, border:'1px solid #f59e0b', background:'#fffbeb', color:'#92400e', whiteSpace:'nowrap' }}>
-          Konva vergleichen
-        </Link>
-        <Link to={`/projekte/${projectId}/schema-reactflow`}
-          style={{ fontSize:11, fontWeight:700, padding:'4px 9px', borderRadius:6, border:'1px solid #818cf8', background:'#eef2ff', color:'#4338ca', whiteSpace:'nowrap' }}>
-          React Flow vergleichen
-        </Link>
-        <span style={{ color:'#e2e8f0' }}>|</span>
-        <input value={schemaName} onChange={e=>setSchemaName(e.target.value)}
-          style={{ fontSize:13, fontWeight:700, border:'1px solid #f1f5f9', borderRadius:4, padding:'2px 8px', color:'#1e293b', minWidth:160 }}/>
-        <span style={{ fontSize:11, whiteSpace:'nowrap', color: saveState==='error' ? '#dc2626' : saveState==='saving' ? '#94a3b8' : '#16a34a' }}>
-          {saveState==='saving' ? '● Speichere…' : saveState==='error' ? '● Nicht gespeichert' : loaded ? '● Gespeichert' : ''}
-        </span>
+      {/* Kompakte Topbar: seltene Funktionen liegen in Menüs, Zeichnen und Layer bleiben direkt erreichbar. */}
+      <div style={{ display:'flex', alignItems:'center', gap:7, minHeight:46, padding:'6px 12px', background:'white', borderBottom:'1px solid #e2e8f0', flexShrink:0, position:'relative', zIndex:50, flexWrap:'wrap' }}>
+        <Link to={`/projekte/${projectId}`} style={{ fontSize:11, color:'#2563eb', fontWeight:700, whiteSpace:'nowrap' }}>← {projectName || 'Projekt'}</Link>
+        <input value={schemaName} onChange={e=>setSchemaName(e.target.value)} aria-label="Schemaname"
+          style={{ width:165, fontSize:12, fontWeight:750, border:'1px solid #e2e8f0', borderRadius:7, padding:'5px 8px', color:'#1e293b' }}/>
+        <span title={!loaded?'Wird geladen':saveState==='error'?'Nicht gespeichert':saveState==='saving'?'Speichert':'Gespeichert'}
+          style={{ width:8, height:8, borderRadius:4, background:!loaded?'#94a3b8':saveState==='error'?'#dc2626':saveState==='saving'?'#f59e0b':'#22c55e', flexShrink:0 }}/>
 
-        <span style={{ fontSize:11, color:'#94a3b8' }}>Vorlage:</span>
-        {Object.entries(SCHALTUNGEN).map(([k,s])=>(
-          <button key={k} onClick={()=>loadSchema(k)}
-            style={{ fontSize:11, padding:'3px 8px', borderRadius:4, border:'1px solid #e2e8f0', background:'#f8fafc', cursor:'pointer', color:'#374151', whiteSpace:'nowrap' }}>
-            {s.name}
-          </button>
-        ))}
+        <ToolbarMenu label="Projekt">
+          <Link onClick={closeToolbarMenu} to={`/projekte/${projectId}/schema-cad`} style={menuActionStyle}>Konva-Ansicht vergleichen</Link>
+          <Link onClick={closeToolbarMenu} to={`/projekte/${projectId}/schema-reactflow`} style={menuActionStyle}>React-Flow-Ansicht vergleichen</Link>
+        </ToolbarMenu>
+        <ToolbarMenu label="Vorlagen">
+          {Object.entries(SCHALTUNGEN).map(([key, schema])=>(
+            <button key={key} onClick={event=>{ loadSchema(key); closeToolbarMenu(event); }} style={menuActionStyle}>{schema.name}</button>
+          ))}
+        </ToolbarMenu>
+        <ToolbarMenu label="Export">
+          {[['schema','Schema als PDF'],['berechnungen','Berechnungen als PDF'],['beides','Schema + Berechnungen']].map(([key,text])=>(
+            <button key={key} disabled={!schemaId} onClick={event=>{ downloadPdf(key); closeToolbarMenu(event); }} style={{ ...menuActionStyle, opacity:schemaId?1:.45 }}>⤓ {text}</button>
+          ))}
+        </ToolbarMenu>
+        <ToolbarMenu label="Ansicht" badge={alleWarnungen.length}>
+          <button onClick={event=>{ setPaletteOpen(value=>!value); closeToolbarMenu(event); }} style={menuActionStyle}>{paletteOpen?'✓ ':''}Bauteilpalette</button>
+          <button onClick={event=>{ setShowMiniMap(value=>!value); closeToolbarMenu(event); }} style={menuActionStyle}>{showMiniMap?'✓ ':''}Übersichtskarte</button>
+          <button onClick={event=>{ setShowLegende(value=>!value); setShowWarnungen(false); closeToolbarMenu(event); }} style={menuActionStyle}>{showLegende?'✓ ':''}Legende</button>
+          <button onClick={event=>{ setShowWarnungen(value=>!value); setShowLegende(false); closeToolbarMenu(event); }} style={{ ...menuActionStyle, color:alleWarnungen.length?'#b91c1c':'#334155' }}>Warnungen ({alleWarnungen.length})</button>
+        </ToolbarMenu>
 
-        <span style={{ fontSize:11, color:'#94a3b8', marginLeft:6 }}>PDF:</span>
-        {[['schema','Schema'],['berechnungen','Rechnung'],['beides','Beides']].map(([k,t])=>(
-          <button key={k} disabled={!schemaId}
-            onClick={()=>downloadPdf(k)}
-            style={{ fontSize:11, padding:'3px 8px', borderRadius:4, border:'1px solid #bfdbfe', background:'#eff6ff', color:'#1d4ed8', cursor:'pointer', whiteSpace:'nowrap' }}>
-            ⤓ {t}
-          </button>
-        ))}
-        <button onClick={()=>{ setShowLegende(v=>!v); setShowWarnungen(false); }}
-          style={{ fontSize:11, padding:'3px 8px', borderRadius:4, border:'1px solid #e2e8f0', background: showLegende?'#1e293b':'#f8fafc', color: showLegende?'white':'#374151', cursor:'pointer', whiteSpace:'nowrap' }}>
-          Legende
-        </button>
-        <button onClick={()=>{ setShowWarnungen(v=>!v); setShowLegende(false); }}
-          style={{ fontSize:11, padding:'3px 8px', borderRadius:4, border:`1px solid ${alleWarnungen.length?'#fca5a5':'#e2e8f0'}`, background: showWarnungen?'#b91c1c':(alleWarnungen.length?'#fef2f2':'#f8fafc'), color: showWarnungen?'white':(alleWarnungen.length?'#b91c1c':'#374151'), cursor:'pointer', whiteSpace:'nowrap', display:'flex', alignItems:'center', gap:5 }}>
-          Warnungen
-          {alleWarnungen.length>0 && (
-            <span style={{ background: showWarnungen?'white':'#dc2626', color: showWarnungen?'#b91c1c':'white', borderRadius:9, minWidth:16, height:16, fontSize:9, fontWeight:700, display:'inline-flex', alignItems:'center', justifyContent:'center', padding:'0 4px' }}>
-              {alleWarnungen.length}
-            </span>
-          )}
-        </button>
-
-        <div style={{ display:'flex', gap:3, padding:3, borderRadius:8, background:'#f1f5f9', position:'relative' }}>
-          <button onClick={()=>zeichenmodusWaehlen()}
-            style={{ fontSize:10, fontWeight:700, padding:'4px 8px', border:0, borderRadius:6, cursor:'pointer',
-              background:werkzeug==='select'?'#334155':'transparent', color:werkzeug==='select'?'white':'#64748b' }}>
-            ↖ Auswahl
-          </button>
-          <button onClick={()=>zeichenmodusWaehlen('handle')}
-            style={{ fontSize:10, fontWeight:700, padding:'4px 8px', border:0, borderRadius:6, cursor:'pointer',
-              background:werkzeug==='line'&&lineStartMode==='handle'?'#4f46e5':'transparent', color:werkzeug==='line'&&lineStartMode==='handle'?'white':'#64748b' }}>
-            ⤴ Leitung ({drawingConfig.shortcut_line.toUpperCase()})
-          </button>
-          <button onClick={()=>zeichenmodusWaehlen('free')}
-            style={{ fontSize:10, fontWeight:700, padding:'4px 8px', border:0, borderRadius:6, cursor:'pointer',
-              background:werkzeug==='line'&&lineStartMode==='free'?'#4f46e5':'transparent', color:werkzeug==='line'&&lineStartMode==='free'?'white':'#64748b' }}>
-            ⌁ Polylinie ({drawingConfig.shortcut_polyline.toUpperCase()})
-          </button>
-          <button onClick={()=>setShowDrawingSettings(value=>!value)} title="Zeicheneinstellungen"
-            style={{ fontSize:12, fontWeight:700, width:28, border:0, borderRadius:6, cursor:'pointer',
-              background:showDrawingSettings?'#e0e7ff':'transparent', color:'#64748b' }}>
-            ⚙
-          </button>
-          {showDrawingSettings && (
-            <div style={{ position:'absolute', left:0, top:38, width:270, zIndex:120, background:'white', border:'1px solid #cbd5e1', borderRadius:11,
-              boxShadow:'0 14px 34px rgba(15,23,42,.2)', padding:12 }}>
-              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:11 }}>
-                <strong style={{ fontSize:11, color:'#1e293b' }}>Zeicheneinstellungen</strong>
-                <button onClick={()=>setShowDrawingSettings(false)} style={{ border:0, background:'transparent', color:'#94a3b8', cursor:'pointer' }}>×</button>
-              </div>
-              <label style={{ display:'grid', gridTemplateColumns:'92px 1fr 42px', alignItems:'center', gap:7, marginBottom:10, fontSize:10, color:'#475569' }}>
-                Bogenradius
-                <input type="range" min="0" max="40" step="1" value={drawingConfig.corner_radius}
-                  onChange={event=>drawingConfigAktualisieren('corner_radius', event.target.value)} />
-                <input type="number" min="0" max="40" value={drawingConfig.corner_radius}
-                  onChange={event=>drawingConfigAktualisieren('corner_radius', event.target.value)}
-                  style={{ width:42, border:'1px solid #cbd5e1', borderRadius:5, padding:'3px 4px', fontSize:10 }} />
-              </label>
-              <label style={{ display:'grid', gridTemplateColumns:'92px 1fr', alignItems:'center', gap:7, marginBottom:10, fontSize:10, color:'#475569' }}>
-                Zeichenraster
-                <select value={drawingConfig.grid_size} onChange={event=>drawingConfigAktualisieren('grid_size', event.target.value)}
-                  style={{ border:'1px solid #cbd5e1', borderRadius:5, padding:'4px 6px', fontSize:10, background:'white' }}>
-                  <option value="5">5 px · fein</option>
-                  <option value="10">10 px · normal</option>
-                  <option value="20">20 px · grob</option>
-                </select>
-              </label>
-              <div style={{ borderTop:'1px solid #f1f5f9', paddingTop:9, marginBottom:9 }}>
-                <label style={{ display:'flex', alignItems:'center', gap:7, fontSize:10, fontWeight:700, color:'#334155', cursor:'pointer' }}>
-                  <input type="checkbox" checked={drawingConfig.auto_return}
-                    onChange={event=>drawingConfigAktualisieren('auto_return', event.target.checked)} />
-                  Rücklauf bei VL automatisch erzeugen
-                </label>
-                <div style={{ marginTop:5, fontSize:8.5, lineHeight:1.4, color:'#94a3b8' }}>
-                  Nur zwischen Bauteilen mit eindeutig gespiegelten VL/RL-Fangpunkten. Pumpen und Armaturen erzeugen keinen Rücklauf.
-                </div>
-              </div>
-              <div style={{ borderTop:'1px solid #f1f5f9', paddingTop:9, display:'grid', gridTemplateColumns:'1fr 42px', gap:'7px 8px', alignItems:'center', fontSize:10, color:'#475569' }}>
-                <label htmlFor="shortcut-line">Leitung ab Fangpunkt</label>
-                <input id="shortcut-line" maxLength="1" value={drawingConfig.shortcut_line}
-                  onFocus={event=>event.currentTarget.select()}
-                  onChange={event=>drawingConfigAktualisieren('shortcut_line', event.target.value)}
-                  style={{ textAlign:'center', textTransform:'uppercase', border:'1px solid #cbd5e1', borderRadius:5, padding:'4px', fontSize:10, fontWeight:800 }} />
-                <label htmlFor="shortcut-polyline">Freie Polylinie</label>
-                <input id="shortcut-polyline" maxLength="1" value={drawingConfig.shortcut_polyline}
-                  onFocus={event=>event.currentTarget.select()}
-                  onChange={event=>drawingConfigAktualisieren('shortcut_polyline', event.target.value)}
-                  style={{ textAlign:'center', textTransform:'uppercase', border:'1px solid #cbd5e1', borderRadius:5, padding:'4px', fontSize:10, fontWeight:800 }} />
-              </div>
-              {drawingConfig.shortcut_line === drawingConfig.shortcut_polyline && (
-                <div style={{ marginTop:8, padding:'6px 8px', borderRadius:6, background:'#fff7ed', color:'#c2410c', fontSize:9 }}>
-                  Bitte zwei unterschiedliche Tasten wählen.
-                </div>
-              )}
-              <button onClick={()=>{
-                setDrawingConfig(DEFAULT_DRAWING_CONFIG);
-                setEdges(items => items.map(edge => ({ ...edge, data:{ ...(edge.data || {}), corner_radius:DEFAULT_DRAWING_CONFIG.corner_radius } })));
-              }} style={{ marginTop:10, border:0, background:'transparent', color:'#4f46e5', fontSize:9, fontWeight:700, cursor:'pointer', padding:0 }}>
-                Standard wiederherstellen
-              </button>
-            </div>
-          )}
+        <div style={{ width:1, height:26, background:'#e2e8f0', margin:'0 2px' }}/>
+        <div style={{ display:'flex', gap:3, padding:3, borderRadius:9, background:'#f1f5f9' }}>
+          <button onClick={()=>zeichenmodusWaehlen()} style={{ fontSize:10, fontWeight:700, padding:'5px 8px', border:0, borderRadius:6, cursor:'pointer', background:werkzeug==='select'?'#334155':'transparent', color:werkzeug==='select'?'white':'#64748b' }}>↖ Auswahl</button>
+          <button onClick={()=>zeichenmodusWaehlen('handle')} style={{ fontSize:10, fontWeight:700, padding:'5px 8px', border:0, borderRadius:6, cursor:'pointer', background:werkzeug==='line'&&lineStartMode==='handle'?'#4f46e5':'transparent', color:werkzeug==='line'&&lineStartMode==='handle'?'white':'#64748b' }}>Leitung ab Punkt</button>
+          <button onClick={()=>zeichenmodusWaehlen('free')} style={{ fontSize:10, fontWeight:700, padding:'5px 8px', border:0, borderRadius:6, cursor:'pointer', background:werkzeug==='line'&&lineStartMode==='free'?'#4f46e5':'transparent', color:werkzeug==='line'&&lineStartMode==='free'?'white':'#64748b' }}>Freie Leitung</button>
         </div>
 
-        <div style={{ display:'flex', gap:5, alignItems:'center', marginLeft:'auto', position:'relative' }}>
-          <span style={{ fontSize:11, color:'#94a3b8' }}>Layer:</span>
-          <button onClick={()=>setShowLayers(value=>!value)}
-            style={{ display:'flex', alignItems:'center', gap:6, height:28, padding:'0 9px', borderRadius:7,
-              border:`1px solid ${activeLayer.color}`, background:'white', color:'#334155', cursor:'pointer', fontSize:10, fontWeight:700 }}>
-            <span style={{ width:12, height:12, borderRadius:3, background:activeLayer.color, border:activeLayer.dashed?'2px dashed white':'none' }}/>
-            {activeLayer.label} ▾
-          </button>
-          {ruecklaufLayerVon(activeLayer) && (
-            <button onClick={()=>drawingConfigAktualisieren('auto_return', !drawingConfig.auto_return)}
-              title="Auto-RL für die nächste geeignete Verbindung ein-/ausschalten"
-              style={{ padding:'3px 7px', borderRadius:8, border:`1px solid ${drawingConfig.auto_return?'#93c5fd':'#cbd5e1'}`,
-                background:drawingConfig.auto_return?'#eff6ff':'#f8fafc', color:drawingConfig.auto_return?'#1d4ed8':'#64748b',
-                fontSize:8, fontWeight:800, whiteSpace:'nowrap', cursor:'pointer' }}>
-              Auto-RL {drawingConfig.auto_return?'AN':'AUS'}
-            </button>
-          )}
-          {showLayers && (
-            <div style={{ position:'absolute', right:0, top:34, width:230, zIndex:100, background:'white', border:'1px solid #cbd5e1', borderRadius:10,
-              boxShadow:'0 12px 28px rgba(15,23,42,.18)', padding:7 }}>
-              <div style={{ padding:'3px 5px 7px', fontSize:9, fontWeight:800, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'.06em' }}>
-                Medien-Layer
-              </div>
-              {LEITUNGS_LAYER.map(layer=>(
-                <div key={layer.id} style={{ display:'grid', gridTemplateColumns:'30px 1fr auto', alignItems:'center', gap:5,
-                  borderRadius:7, background:activeLayer.id===layer.id?'#eef2ff':'transparent', padding:'3px 4px' }}>
-                  <button title={layerVisibility[layer.id]===false?'Layer einblenden':'Layer ausblenden'}
-                    onClick={()=>setLayerVisibility(current=>({ ...current, [layer.id]:current[layer.id]===false }))}
-                    style={{ border:0, background:'transparent', cursor:'pointer', fontSize:13, opacity:layerVisibility[layer.id]===false?.35:1 }}>
-                    {layerVisibility[layer.id]===false?'○':'●'}
-                  </button>
-                  <button onClick={()=>{layerWaehlen(layer.id); setShowLayers(false);}}
-                    style={{ display:'flex', alignItems:'center', gap:7, minHeight:28, border:0, background:'transparent', cursor:'pointer', textAlign:'left', fontSize:10, fontWeight:activeLayer.id===layer.id?800:600, color:'#334155' }}>
-                    <span style={{ width:22, borderTop:`3px ${layer.dashed?'dashed':'solid'} ${layer.color}` }}/>{layer.label}
-                  </button>
-                  <span style={{ fontSize:8, color:layer.role==='vl'?'#b91c1c':layer.role==='rl'?'#1d4ed8':'#64748b' }}>{layer.role?.toUpperCase() || '–'}</span>
-                </div>
-              ))}
-              <div style={{ marginTop:5, borderTop:'1px solid #f1f5f9', padding:'7px 5px 3px', fontSize:9, lineHeight:1.4, color:'#64748b' }}>
-                Ausgeblendete Layer bleiben gespeichert und werden weiterhin fachlich berechnet.
-              </div>
+        <ToolbarMenu label="Zeichnen">
+          <div style={{ width:270, padding:6 }}>
+            <label style={{ display:'grid', gridTemplateColumns:'88px 1fr 42px', alignItems:'center', gap:7, marginBottom:10, fontSize:10, color:'#475569' }}>
+              Bogenradius
+              <input type="range" min="0" max="40" step="1" value={drawingConfig.corner_radius} onChange={event=>drawingConfigAktualisieren('corner_radius', event.target.value)} />
+              <input type="number" min="0" max="40" value={drawingConfig.corner_radius} onChange={event=>drawingConfigAktualisieren('corner_radius', event.target.value)} style={{ width:42, border:'1px solid #cbd5e1', borderRadius:5, padding:3, fontSize:10 }}/>
+            </label>
+            <label style={{ display:'grid', gridTemplateColumns:'88px 1fr', alignItems:'center', gap:7, marginBottom:10, fontSize:10, color:'#475569' }}>
+              Raster
+              <select value={drawingConfig.grid_size} onChange={event=>drawingConfigAktualisieren('grid_size', event.target.value)} style={{ border:'1px solid #cbd5e1', borderRadius:5, padding:4, background:'white', fontSize:10 }}>
+                <option value="5">5 px · fein</option><option value="10">10 px · normal</option><option value="20">20 px · grob</option>
+              </select>
+            </label>
+            <label style={{ display:'flex', gap:7, alignItems:'center', padding:'8px 0', borderTop:'1px solid #f1f5f9', fontSize:10, fontWeight:700, color:'#334155' }}>
+              <input type="checkbox" checked={drawingConfig.auto_return} onChange={event=>drawingConfigAktualisieren('auto_return', event.target.checked)}/> Auto-Rücklauf bei passenden VL/RL-Anschlüssen
+            </label>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 38px', gap:6, alignItems:'center', paddingTop:8, borderTop:'1px solid #f1f5f9', fontSize:10, color:'#475569' }}>
+              <label htmlFor="shortcut-line">Ab Fangpunkt</label><input id="shortcut-line" maxLength="1" value={drawingConfig.shortcut_line} onFocus={event=>event.currentTarget.select()} onChange={event=>drawingConfigAktualisieren('shortcut_line', event.target.value)} style={{ textAlign:'center', textTransform:'uppercase', border:'1px solid #cbd5e1', borderRadius:5, padding:4, fontWeight:800 }}/>
+              <label htmlFor="shortcut-polyline">Freie Leitung</label><input id="shortcut-polyline" maxLength="1" value={drawingConfig.shortcut_polyline} onFocus={event=>event.currentTarget.select()} onChange={event=>drawingConfigAktualisieren('shortcut_polyline', event.target.value)} style={{ textAlign:'center', textTransform:'uppercase', border:'1px solid #cbd5e1', borderRadius:5, padding:4, fontWeight:800 }}/>
             </div>
-          )}
-          <span style={{ fontSize:9, color:'#94a3b8', marginLeft:5 }}>Klick = Eckpunkt · Grün = orthogonaler Fang · Enter/Rechtsklick = fertig · Shift = 0°/45°/90°</span>
+            {drawingConfig.shortcut_line === drawingConfig.shortcut_polyline && (
+              <div style={{ marginTop:8, padding:'6px 8px', borderRadius:6, background:'#fff7ed', color:'#c2410c', fontSize:9 }}>
+                Bitte zwei unterschiedliche Tasten wählen.
+              </div>
+            )}
+            <button onClick={event=>{
+              setDrawingConfig(DEFAULT_DRAWING_CONFIG);
+              setEdges(items => items.map(edge => ({ ...edge, data:{ ...(edge.data || {}), corner_radius:DEFAULT_DRAWING_CONFIG.corner_radius } })));
+              closeToolbarMenu(event);
+            }} style={{ ...menuActionStyle, marginTop:8, paddingLeft:0, color:'#4f46e5' }}>
+              Standard wiederherstellen
+            </button>
+          </div>
+        </ToolbarMenu>
+
+        <div style={{ display:'flex', gap:5, alignItems:'center', marginLeft:'auto', position:'relative' }}>
+          <button onClick={()=>setShowLayers(value=>!value)} style={{ display:'flex', alignItems:'center', gap:6, height:30, padding:'0 9px', borderRadius:7, border:`1px solid ${activeLayer.color}`, background:'white', color:'#334155', cursor:'pointer', fontSize:10, fontWeight:700 }}>
+            <span style={{ width:12, height:12, borderRadius:3, background:activeLayer.color }}/>{activeLayer.label} ▾
+          </button>
+          {ruecklaufLayerVon(activeLayer) && <button onClick={()=>drawingConfigAktualisieren('auto_return', !drawingConfig.auto_return)} style={{ padding:'4px 7px', borderRadius:7, border:`1px solid ${drawingConfig.auto_return?'#93c5fd':'#cbd5e1'}`, background:drawingConfig.auto_return?'#eff6ff':'#f8fafc', color:drawingConfig.auto_return?'#1d4ed8':'#64748b', fontSize:8, fontWeight:800, cursor:'pointer' }}>Auto-RL {drawingConfig.auto_return?'AN':'AUS'}</button>}
+          {showLayers && <div style={{ position:'absolute', right:0, top:35, width:230, zIndex:190, background:'white', border:'1px solid #cbd5e1', borderRadius:10, boxShadow:'0 12px 28px rgba(15,23,42,.18)', padding:7 }}>
+            {LEITUNGS_LAYER.map(layer=><div key={layer.id} style={{ display:'grid', gridTemplateColumns:'28px 1fr auto', alignItems:'center', gap:4, borderRadius:7, background:activeLayer.id===layer.id?'#eef2ff':'transparent', padding:3 }}>
+              <button title={layerVisibility[layer.id]===false?'Einblenden':'Ausblenden'} onClick={()=>setLayerVisibility(current=>({ ...current, [layer.id]:current[layer.id]===false }))} style={{ border:0, background:'transparent', cursor:'pointer', opacity:layerVisibility[layer.id]===false?.35:1 }}>{layerVisibility[layer.id]===false?'○':'●'}</button>
+              <button onClick={()=>{ layerWaehlen(layer.id); setShowLayers(false); }} style={{ display:'flex', alignItems:'center', gap:7, minHeight:27, border:0, background:'transparent', cursor:'pointer', fontSize:10, fontWeight:activeLayer.id===layer.id?800:600, color:'#334155' }}><span style={{ width:22, borderTop:`3px ${layer.dashed?'dashed':'solid'} ${layer.color}` }}/>{layer.label}</button>
+              <span style={{ fontSize:8, color:'#94a3b8' }}>{layer.role?.toUpperCase() || '–'}</span>
+            </div>)}
+          </div>}
         </div>
       </div>
 
       <div style={{ display:'flex', flex:1, overflow:'hidden' }}>
-        {/* Palette links — nach Bauteil-Klassen gruppiert */}
-        <div style={{ width:168, background:'#f8fafc', borderRight:'1px solid #e2e8f0', overflowY:'auto', flexShrink:0 }}>
-          <div style={{ padding:'8px 10px 2px', fontSize:9, fontWeight:700, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.08em' }}>
-            SIA 410 Bauteile
+        {/* Einklappbare Bauteilpalette mit Akkordeon-Untermenüs. */}
+        <div style={{ width:paletteOpen?210:42, background:'#f8fafc', borderRight:'1px solid #e2e8f0', overflowY:'auto', overflowX:'hidden', flexShrink:0, transition:'width 160ms ease' }}>
+          <div style={{ height:39, padding:paletteOpen?'0 8px':'0 5px', display:'flex', alignItems:'center', justifyContent:paletteOpen?'space-between':'center', borderBottom:'1px solid #e2e8f0', position:'sticky', top:0, background:'#f8fafc', zIndex:2 }}>
+            {paletteOpen && <strong style={{ fontSize:9, color:'#64748b', textTransform:'uppercase', letterSpacing:'.08em' }}>Bauteile</strong>}
+            <button onClick={()=>setPaletteOpen(value=>!value)} title={paletteOpen?'Bauteile einklappen':'Bauteile öffnen'}
+              style={{ width:28, height:28, border:'1px solid #e2e8f0', borderRadius:7, background:'white', color:'#475569', cursor:'pointer', fontWeight:800 }}>
+              {paletteOpen?'‹':'›'}
+            </button>
           </div>
-          {PALETTE_GRUPPEN.map(gr=>(
-            <div key={gr.titel}>
-              <div style={{ padding:'8px 10px 2px', fontSize:8, fontWeight:700, color:'#cbd5e1', textTransform:'uppercase', letterSpacing:'0.06em' }}>
-                {gr.titel}
-              </div>
-              {gr.items.map(p=>(
-                <div key={p.type} draggable
-                  onDragStart={e=>{e.dataTransfer.setData('application/reactflow',p.type); e.dataTransfer.effectAllowed='move';}}
-                  style={{ margin:'3px 8px', padding:'5px 8px', background:'white', border:'1px solid #e2e8f0', borderRadius:6, cursor:'grab', fontSize:11, color:'#374151', userSelect:'none' }}>
-                  <div style={{ fontWeight:600 }}>{p.label}</div>
-                  {p.desc&&<div style={{ fontSize:9, color:'#94a3b8', marginTop:1 }}>{p.desc}</div>}
-                </div>
-              ))}
-            </div>
-          ))}
-          <div style={{ padding:'6px 10px 10px', fontSize:9, color:'#cbd5e1', marginTop:4 }}>
-            Auf Canvas ziehen.
-          </div>
+          {paletteOpen && PALETTE_GRUPPEN.map(group=>{
+            const open = paletteGroupsOpen[group.titel] === true;
+            return <div key={group.titel} style={{ borderBottom:'1px solid #e9eef5' }}>
+              <button onClick={()=>setPaletteGroupsOpen(current=>({ ...current, [group.titel]:!open }))}
+                style={{ width:'100%', display:'flex', alignItems:'center', justifyContent:'space-between', padding:'9px 10px', border:0, background:open?'#eef2ff':'transparent', color:open?'#3730a3':'#475569', fontSize:9, fontWeight:800, textTransform:'uppercase', letterSpacing:'.05em', cursor:'pointer', textAlign:'left' }}>
+                {group.titel}<span>{open?'−':'+'}</span>
+              </button>
+              {open && <div style={{ padding:'4px 6px 8px' }}>
+                {group.items.map(item=><div key={item.type} draggable
+                  onDragStart={event=>{ event.dataTransfer.setData('application/reactflow',item.type); event.dataTransfer.effectAllowed='move'; }}
+                  style={{ margin:'4px 2px', padding:'7px 8px', background:'white', border:'1px solid #e2e8f0', borderRadius:7, cursor:'grab', color:'#334155', userSelect:'none', boxShadow:'0 1px 2px rgba(15,23,42,.03)' }}>
+                  <div style={{ fontSize:10, fontWeight:700 }}>{item.label}</div>
+                  {item.desc && <div style={{ fontSize:8.5, color:'#94a3b8', marginTop:2, lineHeight:1.3 }}>{item.desc}</div>}
+                </div>)}
+              </div>}
+            </div>;
+          })}
+          {!paletteOpen && <button onClick={()=>setPaletteOpen(true)} title="Bauteilpalette öffnen"
+            style={{ margin:'10px 6px', width:28, minHeight:96, border:0, borderRadius:8, background:'#eef2ff', color:'#4338ca', fontSize:9, fontWeight:800, writingMode:'vertical-rl', cursor:'pointer' }}>Bauteile</button>}
         </div>
 
         {/* Canvas */}
@@ -2913,7 +3042,7 @@ function EditorInner() {
           >
             <Background color="#e2e8f0" gap={drawingConfig.grid_size * 2}/>
             <Controls/>
-            <MiniMap zoomable pannable nodeStrokeWidth={3}/>
+            {showMiniMap && <MiniMap zoomable pannable nodeStrokeWidth={3}/>}
             {werkzeug === 'line' && lineStartMode === 'handle' && !leitungsEntwurf && (
               <Panel position="top-center">
                 <div style={{ marginTop:8, padding:'7px 12px', borderRadius:18, background:'#eef2ff', border:'1px solid #c7d2fe',

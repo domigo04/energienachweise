@@ -1626,6 +1626,18 @@
   stroke-dasharray: 10 7;
 }
 
+/* Reine Vertikalen haben eine Bounding-Box ohne Breite. Safari kann darauf
+   den horizontal definierten SVG-Verlauf nicht auflösen und blendet dadurch
+   die kompletten VL-/RL-Abzweige der Verbraucher aus. Feste Leitungsfarben
+   halten die drei Heizkreise in allen Browsern durchgehend sichtbar. */
+.landing-system-line--branch.landing-system-line--red {
+  stroke: #f54d5d;
+}
+
+.landing-system-line--branch.landing-system-line--blue {
+  stroke: #4b82f3;
+}
+
 .landing-system-line--sole {
   stroke: #6754e8;
   stroke-width: 2.5;

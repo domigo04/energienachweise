@@ -156,24 +156,13 @@ export default function ProjectDashboard() {
 
       {/* Werkzeuge für dieses Projekt */}
       {!archiviert && (
-        <>
-        <div className="mb-3 flex flex-col gap-3 rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-3 sm:flex-row sm:items-center">
-          <div className="min-w-0 flex-1">
-            <div className="text-sm font-bold text-indigo-950">CAD-Zeichenkerne direkt vergleichen</div>
-            <div className="text-xs text-indigo-800">Beide Versuche laufen getrennt vom bestehenden Editor. Der neue React-Flow-Versuch zeichnet Leitungen auf einer eigenen CAD-Ebene.</div>
-          </div>
-          <div className="grid shrink-0 gap-2 sm:grid-cols-2">
-            <Link to={`/projekte/${id}/schema-reactflow`} className="btn-primary min-h-11 justify-center">React Flow testen</Link>
-            <Link to={`/projekte/${id}/schema-cad`} className="btn-secondary min-h-11 justify-center border-indigo-200 bg-white text-indigo-900">Konva testen</Link>
-          </div>
-        </div>
         <div className="mb-6 grid gap-4 sm:grid-cols-3">
           {TOOLS.map(({ to, icon: Icon, title, text, primary }) => (
             <Link key={to} to={to}
               className={"group flex flex-col rounded-2xl border p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md " +
                 (primary ? "border-transparent bg-gradient-to-br from-brand-600 to-brand-700 text-white" : "card hover:border-brand-200")}>
               <div className={"flex size-10 items-center justify-center rounded-xl " + (primary ? "bg-white/15 text-white" : "bg-brand-50 text-brand-600")}>
-                <Icon className="size-5" />
+                {React.createElement(Icon, { className: "size-5" })}
               </div>
               <div className={"mt-3 text-base font-bold " + (primary ? "text-white" : "text-slate-900")}>{title}</div>
               <p className={"mt-1 flex-1 text-sm " + (primary ? "text-white/80" : "text-slate-500")}>{text}</p>
@@ -183,7 +172,6 @@ export default function ProjectDashboard() {
             </Link>
           ))}
         </div>
-        </>
       )}
 
       {/* Grunddaten */}

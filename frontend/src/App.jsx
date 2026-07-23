@@ -24,10 +24,7 @@ import GrobkostenSchaetzung from "./pages/grobkosten/GrobkostenSchaetzung";
 import BenutzerFreischaltung from "./pages/admin/BenutzerFreischaltung";
 import BaupreisindexAdmin from "./pages/admin/BaupreisindexAdmin";
 
-// Der neue Canvas-Kern ist gross und wird nur geladen, wenn das CAD-Lab
-// tatsächlich geöffnet wird. Bestehende Projektseiten bleiben dadurch schnell.
-const HydraulikCadLab = lazy(() => import("./pages/hc/HydraulikCadLab"));
-const HydraulikReactFlowLab = lazy(() => import("./pages/hc/HydraulikReactFlowLab"));
+// Der produktive Schema-Editor ist gross und wird nur auf seiner Route geladen.
 const HydraulikEditor = lazy(() => import("./pages/hc/HydraulikEditor"));
 
 export default function App() {
@@ -67,8 +64,6 @@ export default function App() {
 
           {/* Schema-Editor: Vollbild-Canvas, ausserhalb der gepolsterten Shell */}
           <Route path="/projekte/:id/schema" element={<ProtectedRoute><Suspense fallback={<div className="flex h-screen items-center justify-center text-sm text-slate-500">Hydraulikschema wird geladen…</div>}><HydraulikEditor /></Suspense></ProtectedRoute>} />
-          <Route path="/projekte/:id/schema-cad" element={<ProtectedRoute><Suspense fallback={<div className="flex h-screen items-center justify-center text-sm text-slate-500">CAD-Zeichenfläche wird geladen…</div>}><HydraulikCadLab /></Suspense></ProtectedRoute>} />
-          <Route path="/projekte/:id/schema-reactflow" element={<ProtectedRoute><Suspense fallback={<div className="flex h-screen items-center justify-center text-sm text-slate-500">React-Flow-CAD wird geladen…</div>}><HydraulikReactFlowLab /></Suspense></ProtectedRoute>} />
 
           {/* Alte Routen umleiten + Fallback */}
           <Route path="/heizungscockpit/*" element={<Navigate to="/start" replace />} />

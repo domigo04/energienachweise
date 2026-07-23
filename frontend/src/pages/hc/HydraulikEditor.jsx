@@ -1,12 +1,18 @@
 import React, { useCallback, useState, useMemo, useRef, useEffect } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
+  AlertTriangle, ArrowLeft, Check, ChevronDown, Download, Eye,
+  Layers3, LayoutTemplate, PanelLeftClose, PanelLeftOpen,
+  PanelRightClose, PanelRightOpen, Settings2, Undo2,
+} from 'lucide-react';
+import {
   ReactFlow, Background, Controls, MiniMap,
   useNodesState, useEdgesState,
   Panel, ConnectionMode, useReactFlow, ReactFlowProvider,
   NodeToolbar, Position, useStore, useUpdateNodeInternals, ViewportPortal,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import './HydraulikEditor.css';
 import { NODE_TYPES, NUMMERIERT, ROTATABLE } from '../../components/hc/nodes/HydraulikNodes';
 import { EDGE_TYPES } from '../../components/hc/edges/FlowEdge';
 import { pairedHandleId, parallelWaypoints, roundedPolylinePath } from '../../components/hc/edges/geometry';
@@ -1201,16 +1207,16 @@ function PvBox({ pv, v, kvs_eff }) {
   );
 }
 
-function ToolbarMenu({ label, badge, children }) {
+function ToolbarMenu({ label, badge, children, icon: Icon, primary = false, align = 'left' }) {
   return (
-    <details style={{ position:'relative' }}>
-      <summary style={{ listStyle:'none', display:'flex', alignItems:'center', gap:5, padding:'5px 9px', border:'1px solid #e2e8f0',
-        borderRadius:7, background:'#fff', color:'#334155', fontSize:10, fontWeight:700, cursor:'pointer', userSelect:'none', whiteSpace:'nowrap' }}>
-        {label} <span style={{ color:'#94a3b8', fontSize:8 }}>▾</span>
-        {badge > 0 && <span style={{ minWidth:16, height:16, borderRadius:8, padding:'0 4px', display:'inline-flex', alignItems:'center', justifyContent:'center', background:'#dc2626', color:'white', fontSize:8 }}>{badge}</span>}
+    <details className={`hc-toolbar-menu${primary ? ' is-primary' : ''}`}>
+      <summary className="hc-toolbar-menu__trigger">
+        {Icon && <Icon size={15} strokeWidth={2} />}
+        <span>{label}</span>
+        {badge > 0 && <span className="hc-toolbar-menu__badge">{badge}</span>}
+        <ChevronDown className="hc-toolbar-menu__chevron" size={13} />
       </summary>
-      <div style={{ position:'absolute', left:0, top:34, minWidth:205, padding:6, borderRadius:10, border:'1px solid #cbd5e1',
-        background:'white', boxShadow:'0 14px 32px rgba(15,23,42,.18)', zIndex:180 }}>
+      <div className={`hc-toolbar-menu__content${align === 'right' ? ' is-right' : ''}`}>
         {children}
       </div>
     </details>
@@ -1251,6 +1257,7 @@ function EditorInner() {
     Verteilung:true,
   }));
   const [showMiniMap, setShowMiniMap] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(true);
   const [shiftPressed, setShiftPressed] = useState(false);
   const [drawingConfig, setDrawingConfig] = useState(DEFAULT_DRAWING_CONFIG);
   const [leitungsEntwurf, setLeitungsEntwurf] = useState(null);
@@ -1517,6 +1524,8 @@ function EditorInner() {
   const edgeSegmentDrag = useRef(null);
   const edgePointFrame = useRef(null);
   const edgeEndpointDrag = useRef(null);
+  const deleteEdgeRef = useRef(null);
+  const deleteNodeRef = useRef(null);
   nodesRef.current = nodes;
   edgesRef.current = edges;
 
@@ -2516,14 +2525,14 @@ function EditorInner() {
         if (ev.key === 'b' || ev.key === 'B') layerWaehlen('neutral');
         if (ev.key === 'd' || ev.key === 'D') { if (selected && ROTATABLE.has(selected.type)) rotateNode(selected.id); }
         if (ev.key === 'Delete' || ev.key === 'Backspace') {
-          if (selected) { snap(); deleteNode(selected.id); }
-          else if (selectedEdgeId) { deleteEdge(selectedEdgeId); }
+          if (selected) { snap(); deleteNodeRef.current?.(selected.id); }
+          else if (selectedEdgeId) { deleteEdgeRef.current?.(selectedEdgeId); }
         }
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [undo, selected, selectedEdgeId, snap, rotateNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, spiegelAchse, drawingConfig]);
+  }, [undo, selected, selectedEdgeId, snap, rotateNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, spiegelAchse, drawingConfig, setNodes]);
 
   // Berechnete Werte (Backend) in die Node-Daten spiegeln — nur für die Anzeige.
   // Verteiler-Rahmen: nur die Balken sind greifbar (dragHandle), die Lücke
@@ -2907,6 +2916,7 @@ function EditorInner() {
     setEndpointMenu(null);
     setSelected(node);
     setSelectedEdgeId(null);
+    setInspectorOpen(true);
   }, [cadKlick]);
   const onNodeDoubleClick = useCallback((_, node) => { if (!leitungsEntwurfRef.current) setAuslegung(node); }, []);
   const onEdgeClick = useCallback((event, edge) => {
@@ -2916,6 +2926,7 @@ function EditorInner() {
     setMarkierteEdgeIds([]);
     setSelectedEdgeId(edge.id);
     setSelected(null);
+    setInspectorOpen(true);
   }, [cadKlick]);
 
   const spiegelKopieErstellen = useCallback((edgeId, axisStart, axisEnd) => {
@@ -3049,45 +3060,67 @@ function EditorInner() {
     setEdges(remaining);
     setSelected(null);
   };
+  deleteEdgeRef.current = deleteEdge;
+  deleteNodeRef.current = deleteNode;
+
+  const saveLabel = !loaded
+    ? 'Wird geladen'
+    : saveState === 'error'
+      ? 'Nicht gespeichert'
+      : saveState === 'saving'
+        ? 'Speichert …'
+        : 'Gespeichert';
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', height:'100vh', fontFamily:'system-ui,sans-serif' }}>
-      {/* Kompakte Topbar: seltene Funktionen liegen in Menüs, Zeichnen und Layer bleiben direkt erreichbar. */}
-      <div style={{ display:'flex', alignItems:'center', gap:7, minHeight:46, padding:'6px 12px', background:'white', borderBottom:'1px solid #e2e8f0', flexShrink:0, position:'relative', zIndex:50, flexWrap:'wrap' }}>
-        <Link to={`/projekte/${projectId}`} style={{ fontSize:11, color:'#2563eb', fontWeight:700, whiteSpace:'nowrap' }}>← {projectName || 'Projekt'}</Link>
-        <input value={schemaName} onChange={e=>setSchemaName(e.target.value)} aria-label="Schemaname"
-          style={{ width:165, fontSize:12, fontWeight:750, border:'1px solid #e2e8f0', borderRadius:7, padding:'5px 8px', color:'#1e293b' }}/>
-        <span title={!loaded?'Wird geladen':saveState==='error'?'Nicht gespeichert':saveState==='saving'?'Speichert':'Gespeichert'}
-          style={{ width:8, height:8, borderRadius:4, background:!loaded?'#94a3b8':saveState==='error'?'#dc2626':saveState==='saving'?'#f59e0b':'#22c55e', flexShrink:0 }}/>
-
-        <ToolbarMenu label="Projekt">
-          <Link onClick={closeToolbarMenu} to={`/projekte/${projectId}/schema-cad`} style={menuActionStyle}>Konva-Ansicht vergleichen</Link>
-          <Link onClick={closeToolbarMenu} to={`/projekte/${projectId}/schema-reactflow`} style={menuActionStyle}>React-Flow-Ansicht vergleichen</Link>
-        </ToolbarMenu>
-        <ToolbarMenu label="Vorlagen">
-          {Object.entries(SCHALTUNGEN).map(([key, schema])=>(
-            <button key={key} onClick={event=>{ loadSchema(key); closeToolbarMenu(event); }} style={menuActionStyle}>{schema.name}</button>
-          ))}
-        </ToolbarMenu>
-        <ToolbarMenu label="Export">
-          {[['schema','Schema als PDF'],['berechnungen','Berechnungen als PDF'],['beides','Schema + Berechnungen']].map(([key,text])=>(
-            <button key={key} disabled={!schemaId} onClick={event=>{ downloadPdf(key); closeToolbarMenu(event); }} style={{ ...menuActionStyle, opacity:schemaId?1:.45 }}>⤓ {text}</button>
-          ))}
-        </ToolbarMenu>
-        <ToolbarMenu label="Ansicht" badge={alleWarnungen.length}>
-          <button onClick={event=>{ setPaletteOpen(value=>!value); closeToolbarMenu(event); }} style={menuActionStyle}>{paletteOpen?'✓ ':''}Bauteilpalette</button>
-          <button onClick={event=>{ setShowMiniMap(value=>!value); closeToolbarMenu(event); }} style={menuActionStyle}>{showMiniMap?'✓ ':''}Übersichtskarte</button>
-          <button onClick={event=>{ setShowLegende(value=>!value); setShowWarnungen(false); closeToolbarMenu(event); }} style={menuActionStyle}>{showLegende?'✓ ':''}Legende</button>
-          <button onClick={event=>{ setShowWarnungen(value=>!value); setShowLegende(false); closeToolbarMenu(event); }} style={{ ...menuActionStyle, color:alleWarnungen.length?'#b91c1c':'#334155' }}>Warnungen ({alleWarnungen.length})</button>
-        </ToolbarMenu>
-
-        <div style={{ width:1, height:26, background:'#e2e8f0', margin:'0 2px' }}/>
-        <div title="Bauteil anklicken = auswählen · Fangpunkt oder freie Fläche anklicken = Leitung starten"
-          style={{ padding:'6px 9px', borderRadius:8, background:leitungsEntwurf?'#4f46e5':'#f1f5f9', color:leitungsEntwurf?'white':'#475569', fontSize:9, fontWeight:800, whiteSpace:'nowrap' }}>
-          {leitungsEntwurf ? '⌁ Leitung wird gezeichnet' : 'CAD direkt · Auswahl oder Leitung'}
+    <div className="hc-editor-shell">
+      <header className="hc-editor-header">
+        <div className="hc-editor-header__identity">
+          <Link to={`/projekte/${projectId}`} className="hc-icon-button hc-back-button" title="Zurück zum Projekt">
+            <ArrowLeft size={18} />
+          </Link>
+          <div className="hc-editor-title">
+            <div className="hc-editor-title__eyebrow">{projectName || 'Projekt'} · Anlagenschema</div>
+            <input value={schemaName} onChange={e=>setSchemaName(e.target.value)} aria-label="Schemaname"
+              className="hc-editor-title__input" />
+          </div>
         </div>
 
-        <ToolbarMenu label="Zeichnen">
+        <div className={`hc-save-state is-${!loaded ? 'loading' : saveState}`} title={saveLabel}>
+          <span className="hc-save-state__dot" />
+          <span>{saveLabel}</span>
+        </div>
+
+        <div className="hc-editor-header__actions">
+          <button onClick={undo} className="hc-icon-button" title="Rückgängig (⌘/Ctrl + Z)">
+            <Undo2 size={17} />
+          </button>
+          <ToolbarMenu label="Exportieren" icon={Download} primary align="right">
+            {[['schema','Schema als PDF'],['berechnungen','Berechnungen als PDF'],['beides','Schema + Berechnungen']].map(([key,text])=>(
+              <button key={key} disabled={!schemaId} onClick={event=>{ downloadPdf(key); closeToolbarMenu(event); }}
+                style={{ ...menuActionStyle, opacity:schemaId?1:.45 }}>
+                <Download size={14} /> {text}
+              </button>
+            ))}
+          </ToolbarMenu>
+        </div>
+      </header>
+
+      <nav className="hc-editor-toolbar" aria-label="Schema-Werkzeuge">
+        <div className={`hc-drawing-state${leitungsEntwurf ? ' is-active' : ''}`}
+          title="Bauteil auswählen oder auf Fangpunkt beziehungsweise freie Fläche klicken">
+          <span className="hc-drawing-state__icon">{leitungsEntwurf ? '⌁' : <Check size={13} />}</span>
+          <span>{leitungsEntwurf ? 'Leitung wird gezeichnet' : 'Direktes Zeichnen aktiv'}</span>
+        </div>
+
+        <ToolbarMenu label="Vorlagen" icon={LayoutTemplate}>
+          {Object.entries(SCHALTUNGEN).map(([key, schema])=>(
+            <button key={key} onClick={event=>{ loadSchema(key); closeToolbarMenu(event); }} style={menuActionStyle}>
+              <LayoutTemplate size={14} /> {schema.name}
+            </button>
+          ))}
+        </ToolbarMenu>
+
+        <ToolbarMenu label="Zeichnen" icon={Settings2}>
           <div style={{ width:270, padding:6 }}>
             <label style={{ display:'grid', gridTemplateColumns:'88px 1fr 42px', alignItems:'center', gap:7, marginBottom:10, fontSize:10, color:'#475569' }}>
               Bogenradius
@@ -3116,12 +3149,41 @@ function EditorInner() {
           </div>
         </ToolbarMenu>
 
-        <div style={{ display:'flex', gap:5, alignItems:'center', marginLeft:'auto', position:'relative' }}>
-          <button onClick={()=>setShowLayers(value=>!value)} style={{ display:'flex', alignItems:'center', gap:6, height:30, padding:'0 9px', borderRadius:7, border:`1px solid ${activeLayer.color}`, background:'white', color:'#334155', cursor:'pointer', fontSize:10, fontWeight:700 }}>
-            <span style={{ width:12, height:12, borderRadius:3, background:activeLayer.color }}/>{activeLayer.label} ▾
+        <ToolbarMenu label="Ansicht" icon={Eye}>
+          <button onClick={event=>{ setPaletteOpen(value=>!value); closeToolbarMenu(event); }} style={menuActionStyle}>
+            {paletteOpen ? <PanelLeftClose size={14} /> : <PanelLeftOpen size={14} />} Bauteilpalette
           </button>
-          {ruecklaufLayerVon(activeLayer) && <button onClick={()=>drawingConfigAktualisieren('auto_return', !drawingConfig.auto_return)} style={{ padding:'4px 7px', borderRadius:7, border:`1px solid ${drawingConfig.auto_return?'#93c5fd':'#cbd5e1'}`, background:drawingConfig.auto_return?'#eff6ff':'#f8fafc', color:drawingConfig.auto_return?'#1d4ed8':'#64748b', fontSize:8, fontWeight:800, cursor:'pointer' }}>Auto-RL {drawingConfig.auto_return?'AN':'AUS'}</button>}
-          {showLayers && <div style={{ position:'absolute', right:0, top:35, width:230, zIndex:190, background:'white', border:'1px solid #cbd5e1', borderRadius:10, boxShadow:'0 12px 28px rgba(15,23,42,.18)', padding:7 }}>
+          <button onClick={event=>{ setInspectorOpen(value=>!value); closeToolbarMenu(event); }} style={menuActionStyle}>
+            {inspectorOpen ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />} Eigenschaften
+          </button>
+          <button onClick={event=>{ setShowMiniMap(value=>!value); closeToolbarMenu(event); }} style={menuActionStyle}>
+            <Eye size={14} /> {showMiniMap?'Übersichtskarte ausblenden':'Übersichtskarte einblenden'}
+          </button>
+          <button onClick={event=>{ setShowLegende(value=>!value); setShowWarnungen(false); closeToolbarMenu(event); }} style={menuActionStyle}>
+            <Layers3 size={14} /> {showLegende?'Legende schliessen':'Legende öffnen'}
+          </button>
+        </ToolbarMenu>
+
+        <button onClick={()=>{ setShowWarnungen(value=>!value); setShowLegende(false); }}
+          className={`hc-warning-button${alleWarnungen.length ? ' has-warnings' : ''}`}>
+          <AlertTriangle size={14} />
+          <span>{alleWarnungen.length ? `${alleWarnungen.length} Warnungen` : 'Keine Warnungen'}</span>
+        </button>
+
+        <div className="hc-editor-toolbar__spacer" />
+
+        <div className="hc-layer-control">
+          <button onClick={()=>setShowLayers(value=>!value)} className="hc-layer-control__trigger">
+            <span className="hc-layer-swatch" style={{ background:activeLayer.color }}/>{activeLayer.label}
+            <ChevronDown size={13} />
+          </button>
+          {ruecklaufLayerVon(activeLayer) && (
+            <button onClick={()=>drawingConfigAktualisieren('auto_return', !drawingConfig.auto_return)}
+              className={`hc-auto-return${drawingConfig.auto_return ? ' is-active' : ''}`}>
+              Auto-RL {drawingConfig.auto_return?'an':'aus'}
+            </button>
+          )}
+          {showLayers && <div className="hc-layer-popover">
             {LEITUNGS_LAYER.map(layer=><div key={layer.id} style={{ display:'grid', gridTemplateColumns:'28px 1fr auto', alignItems:'center', gap:4, borderRadius:7, background:activeLayer.id===layer.id?'#eef2ff':'transparent', padding:3 }}>
               <button title={layerVisibility[layer.id]===false?'Einblenden':'Ausblenden'} onClick={()=>setLayerVisibility(current=>({ ...current, [layer.id]:current[layer.id]===false }))} style={{ border:0, background:'transparent', cursor:'pointer', opacity:layerVisibility[layer.id]===false?.35:1 }}>{layerVisibility[layer.id]===false?'○':'●'}</button>
               <button onClick={()=>{ layerWaehlen(layer.id); setShowLayers(false); }} style={{ display:'flex', alignItems:'center', gap:7, minHeight:27, border:0, background:'transparent', cursor:'pointer', fontSize:10, fontWeight:activeLayer.id===layer.id?800:600, color:'#334155' }}><span style={{ width:22, borderTop:`3px ${layer.dashed?'dashed':'solid'} ${layer.color}` }}/>{layer.label}</button>
@@ -3129,41 +3191,46 @@ function EditorInner() {
             </div>)}
           </div>}
         </div>
-      </div>
+      </nav>
 
-      <div style={{ display:'flex', flex:1, overflow:'hidden' }}>
+      <div className="hc-editor-workspace">
         {/* Einklappbare Bauteilpalette mit Akkordeon-Untermenüs. */}
-        <div style={{ width:paletteOpen?210:42, background:'#f8fafc', borderRight:'1px solid #e2e8f0', overflowY:'auto', overflowX:'hidden', flexShrink:0, transition:'width 160ms ease' }}>
-          <div style={{ height:39, padding:paletteOpen?'0 8px':'0 5px', display:'flex', alignItems:'center', justifyContent:paletteOpen?'space-between':'center', borderBottom:'1px solid #e2e8f0', position:'sticky', top:0, background:'#f8fafc', zIndex:2 }}>
-            {paletteOpen && <strong style={{ fontSize:9, color:'#64748b', textTransform:'uppercase', letterSpacing:'.08em' }}>Bauteile</strong>}
+        <aside className={`hc-palette${paletteOpen ? ' is-open' : ' is-collapsed'}`}>
+          <div className="hc-sidepanel-header">
+            {paletteOpen && <div>
+              <strong>Bauteile</strong>
+              <span>Auf die Zeichenfläche ziehen</span>
+            </div>}
             <button onClick={()=>setPaletteOpen(value=>!value)} title={paletteOpen?'Bauteile einklappen':'Bauteile öffnen'}
-              style={{ width:28, height:28, border:'1px solid #e2e8f0', borderRadius:7, background:'white', color:'#475569', cursor:'pointer', fontWeight:800 }}>
-              {paletteOpen?'‹':'›'}
+              className="hc-sidepanel-toggle">
+              {paletteOpen ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
             </button>
           </div>
           {paletteOpen && PALETTE_GRUPPEN.map(group=>{
             const open = paletteGroupsOpen[group.titel] === true;
-            return <div key={group.titel} style={{ borderBottom:'1px solid #e9eef5' }}>
+            return <div key={group.titel} className="hc-palette-group">
               <button onClick={()=>setPaletteGroupsOpen(current=>({ ...current, [group.titel]:!open }))}
-                style={{ width:'100%', display:'flex', alignItems:'center', justifyContent:'space-between', padding:'9px 10px', border:0, background:open?'#eef2ff':'transparent', color:open?'#3730a3':'#475569', fontSize:9, fontWeight:800, textTransform:'uppercase', letterSpacing:'.05em', cursor:'pointer', textAlign:'left' }}>
-                {group.titel}<span>{open?'−':'+'}</span>
+                className={`hc-palette-group__trigger${open ? ' is-open' : ''}`}>
+                {group.titel}<ChevronDown size={14} />
               </button>
-              {open && <div style={{ padding:'4px 6px 8px' }}>
+              {open && <div className="hc-palette-group__items">
                 {group.items.map(item=><div key={item.type} draggable
                   onDragStart={event=>{ event.dataTransfer.setData('application/reactflow',item.type); event.dataTransfer.effectAllowed='move'; }}
-                  style={{ margin:'4px 2px', padding:'7px 8px', background:'white', border:'1px solid #e2e8f0', borderRadius:7, cursor:'grab', color:'#334155', userSelect:'none', boxShadow:'0 1px 2px rgba(15,23,42,.03)' }}>
-                  <div style={{ fontSize:10, fontWeight:700 }}>{item.label}</div>
-                  {item.desc && <div style={{ fontSize:8.5, color:'#94a3b8', marginTop:2, lineHeight:1.3 }}>{item.desc}</div>}
+                  className="hc-palette-item">
+                  <span className="hc-palette-item__grip">⠿</span>
+                  <span>
+                    <strong>{item.label}</strong>
+                    {item.desc && <small>{item.desc}</small>}
+                  </span>
                 </div>)}
               </div>}
             </div>;
           })}
-          {!paletteOpen && <button onClick={()=>setPaletteOpen(true)} title="Bauteilpalette öffnen"
-            style={{ margin:'10px 6px', width:28, minHeight:96, border:0, borderRadius:8, background:'#eef2ff', color:'#4338ca', fontSize:9, fontWeight:800, writingMode:'vertical-rl', cursor:'pointer' }}>Bauteile</button>}
-        </div>
+          {!paletteOpen && <button onClick={()=>setPaletteOpen(true)} title="Bauteilpalette öffnen" className="hc-collapsed-label">Bauteile</button>}
+        </aside>
 
         {/* Canvas */}
-        <div style={{ flex:1, position:'relative' }} onPointerDownCapture={cadHandlePointerDown}>
+        <main className="hc-canvas-wrap" onPointerDownCapture={cadHandlePointerDown}>
           <ReactFlow
             nodes={displayNodes} edges={displayEdges}
             onNodesChange={onNodesChange}
@@ -3308,19 +3375,27 @@ function EditorInner() {
               )}
             </div>
           )}
-        </div>
+        </main>
 
         {/* Properties */}
-        <div style={{ width:230, background:'#f8fafc', borderLeft:'1px solid #e2e8f0', overflowY:'auto', flexShrink:0, display:'flex', flexDirection:'column' }}>
-          <div style={{ padding:'8px 12px 4px', fontSize:9, fontWeight:700, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.08em', borderBottom:'1px solid #f1f5f9' }}>
-            Eigenschaften
-          </div>
-          {selectedEdge ? (
-            <LeitungPanel edge={selectedEdge} leitungResults={leitungResults} onUpdateEdge={updateEdgeData} onUpdateLayer={updateEdgeLayer} onDelete={deleteEdge} />
-          ) : (
-            <PropertiesPanel node={selectedNode} nodeFlows={nodeFlows} verteilerResults={verteilerResults} gruppeResults={gruppeResults} ventilResults={ventilResults} pumpenResults={pumpenResults} expansionResults={expansionResults} anschlussWarnungen={anschlussWarnungen} anschlussResults={anschlussResults} pwtResults={pwtResults} onUpdate={updateNode} onDelete={deleteNode} onSetAbgaenge={setAbgaenge} navigate={navigate}/>
-          )}
-        </div>
+        {inspectorOpen && (
+          <aside className="hc-inspector">
+            <div className="hc-sidepanel-header">
+              <div>
+                <strong>{selectedEdge ? 'Leitung' : selectedNode ? (selectedNode.data?.label || 'Bauteil') : 'Eigenschaften'}</strong>
+                <span>{selectedEdge || selectedNode ? 'Auswahl bearbeiten' : 'Bauteil oder Leitung auswählen'}</span>
+              </div>
+              <button onClick={()=>setInspectorOpen(false)} title="Eigenschaften einklappen" className="hc-sidepanel-toggle">
+                <PanelRightClose size={16} />
+              </button>
+            </div>
+            {selectedEdge ? (
+              <LeitungPanel edge={selectedEdge} leitungResults={leitungResults} onUpdateEdge={updateEdgeData} onUpdateLayer={updateEdgeLayer} onDelete={deleteEdge} />
+            ) : (
+              <PropertiesPanel node={selectedNode} nodeFlows={nodeFlows} verteilerResults={verteilerResults} gruppeResults={gruppeResults} ventilResults={ventilResults} pumpenResults={pumpenResults} expansionResults={expansionResults} anschlussWarnungen={anschlussWarnungen} anschlussResults={anschlussResults} pwtResults={pwtResults} onUpdate={updateNode} onDelete={deleteNode} onSetAbgaenge={setAbgaenge} navigate={navigate}/>
+            )}
+          </aside>
+        )}
       </div>
 
       {edgeMenu && (

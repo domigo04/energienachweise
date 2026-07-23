@@ -1,5 +1,9 @@
 # Pflichtenheft — Heizungscockpit
 
+> Historischer Stand der ersten Produktphase. Verbindliche aktuelle
+> Produktentscheide stehen in `docs/PRODUCT.md`, die Reihenfolge in
+> `docs/ROADMAP.md`. Dieses Dokument bleibt nur als fachliche Ursprungsskizze.
+
 _Stand: 2026-06-30 · Auftragsklärung abgeschlossen, vor Bauplan_
 
 ## 1. Vision

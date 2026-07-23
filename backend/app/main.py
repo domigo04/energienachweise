@@ -72,8 +72,8 @@ app.include_router(hc_export_router)
 # ---------- DB-Init & Seed ----------
 from app.database import Base, engine, SessionLocal
 from app.models.heizungscockpit import (  # noqa: F401 — Tabellen vor create_all importieren
-    HcProject, HcProjectBaseData, HcGroupTemplate, HcHeatingGroup, HcCalculationResult, HcSchema,
-    BkpEintrag, HcGruppeTyp,
+    HcAuditEvent, HcProject, HcProjectBaseData, HcGroupTemplate, HcHeatingGroup,
+    HcCalculationResult, HcSchema, HcSchemaRevision, BkpEintrag, HcGruppeTyp,
 )
 from app.models.auth import Firma, User, Role  # noqa: F401
 from app.models.kv import RefProjekt, RefKostenzeile, RefProjektGewerk, Kostenschaetzung, BauindexEintrag  # noqa: F401

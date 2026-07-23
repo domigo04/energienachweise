@@ -1,9 +1,9 @@
 import React, { useCallback, useState, useMemo, useRef, useEffect } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  AlertTriangle, ArrowLeft, Check, ChevronDown, Download, Eye,
-  Layers3, LayoutTemplate, PanelLeftClose, PanelLeftOpen,
-  PanelRightClose, PanelRightOpen, Settings2, Undo2,
+  AlertTriangle, ArrowLeft, Check, ChevronDown, Download, Eye, History,
+  Layers3, LayoutTemplate, PanelLeftClose, PanelLeftOpen, RotateCcw,
+  PanelRightClose, PanelRightOpen, Save as SaveIcon, Settings2, Undo2, X,
 } from 'lucide-react';
 import {
   ReactFlow, Background, Controls, MiniMap,
@@ -17,7 +17,15 @@ import { NODE_TYPES, NUMMERIERT, ROTATABLE } from '../../components/hc/nodes/Hyd
 import { EDGE_TYPES } from '../../components/hc/edges/FlowEdge';
 import { pairedHandleId, parallelWaypoints, roundedPolylinePath } from '../../components/hc/edges/geometry';
 import { SCHALTUNGEN } from '../../components/hc/nodes/schaltungen';
-import { getSchemaEditor, createSchema, saveSchemaGraph, hydraulikBerechnen } from '../../api/hcApi';
+import {
+  createSchema,
+  createSchemaRevision,
+  getSchemaEditor,
+  hydraulikBerechnen,
+  listSchemaRevisions,
+  restoreSchemaRevision,
+  saveSchemaGraph,
+} from '../../api/hcApi';
 import { api } from '../../api';
 
 // ── Konstanten ────────────────────────────────────────────────
@@ -79,6 +87,34 @@ const normalisiereDrawingConfig = (config = {}) => ({
   shortcut_line:shortcutTaste(config.shortcut_line, DEFAULT_DRAWING_CONFIG.shortcut_line),
   auto_return:config.auto_return !== false,
 });
+
+function graphFuerEditor(graph = {}) {
+  let nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+  let maxNr = nodes.reduce((max, node) => Math.max(max, parseInt(node.data?.nr) || 0), 0);
+  nodes = nodes.map(node => {
+    if (node.type === 'junction' && !node.data?.cad_anchor) {
+      return {
+        ...node,
+        position:{ x:(node.position?.x || 0) + 6, y:(node.position?.y || 0) + 6 },
+        data:{ ...(node.data || {}), cad_anchor:true },
+      };
+    }
+    return (NUMMERIERT.includes(node.type) && node.data?.nr == null)
+      ? { ...node, data:{ ...node.data, nr:++maxNr } }
+      : node;
+  });
+  const drawingConfig = normalisiereDrawingConfig(graph.drawing_config);
+  const edges = (Array.isArray(graph.edges) ? graph.edges : []).map(edge => ({
+    ...edge,
+    data:{
+      ...(edge.data || {}),
+      cad_polyline:true,
+      polyline_version:1,
+      corner_radius:edge.data?.corner_radius ?? drawingConfig.corner_radius,
+    },
+  }));
+  return { nodes, edges, drawingConfig, layerConfig:graph.layer_config || {} };
+}
 
 const ruecklaufLayerVon = (layer) => {
   if (layer?.role !== 'vl' || !layer.id.endsWith('_vl')) return null;
@@ -1321,6 +1357,16 @@ function EditorInner() {
   const [schemaId, setSchemaId]     = useState(null);
   const [loaded, setLoaded]         = useState(false);
   const [saveState, setSaveState]   = useState('idle'); // idle | saving | saved | error
+  const [revisionenOpen, setRevisionenOpen] = useState(false);
+  const [revisionen, setRevisionen] = useState([]);
+  const [revisionenLoading, setRevisionenLoading] = useState(false);
+  const [revisionDetailId, setRevisionDetailId] = useState(null);
+  const [standDialogOpen, setStandDialogOpen] = useState(false);
+  const [standBezeichnung, setStandBezeichnung] = useState('');
+  const [standNotiz, setStandNotiz] = useState('');
+  const [standSaving, setStandSaving] = useState(false);
+  const [standFehler, setStandFehler] = useState('');
+  const [restoreId, setRestoreId] = useState(null);
   const [auslegung, setAuslegung]   = useState(null);   // Bauteil für Doppelklick-Auslegung
   const [showLegende, setShowLegende] = useState(false);
   const [showWarnungen, setShowWarnungen] = useState(false);
@@ -1401,6 +1447,23 @@ function EditorInner() {
   const pwtResults = hydraulik.pwt_results || EMPTY_OBJECT;
   const alleWarnungen = hydraulik.warnungen || EMPTY_ARRAY;
 
+  const editorGraphAnwenden = useCallback((graph) => {
+    const geladen = graphFuerEditor(graph);
+    setDrawingConfig(geladen.drawingConfig);
+    setNodes(geladen.nodes);
+    setEdges(geladen.edges);
+    const active = LEITUNGS_LAYER.find(layer => layer.id === geladen.layerConfig?.active_layer_id);
+    setActiveLayerId(active?.id || 'heizung_vl');
+    setLayerVisibility({
+      ...DEFAULT_LAYER_VISIBILITY,
+      ...(geladen.layerConfig?.visibility || {}),
+    });
+    setSelected(null);
+    setSelectedEdgeId(null);
+    setMarkierteEdgeIds([]);
+    letzteHydraulikSignatur.current = '';
+  }, [setEdges, setNodes]);
+
   // ── Schema aus Backend laden (oder anlegen, falls noch keins existiert) ──
   // Ref-Guard: pro Projekt nur EINMAL initialisieren. React-StrictMode führt
   // Effekte im Dev-Modus absichtlich doppelt aus — ohne Guard würden dabei
@@ -1416,48 +1479,14 @@ function EditorInner() {
         const s = start.schema || await createSchema(projectId, { name: 'Schema', graph: { nodes: [], edges: [] } });
         setSchemaId(s.id);
         setSchemaName(s.name || 'Schema');
-        // Fehlende Bauteil-Nummern nachtragen (ältere Schemas)
-        let geladen = s.graph?.nodes || [];
-        let maxNr = geladen.reduce((m, x) => Math.max(m, parseInt(x.data?.nr) || 0), 0);
-        geladen = geladen.map(n => {
-          if (n.type === 'junction' && !n.data?.cad_anchor) {
-            // Migration der kurzzeitig sichtbaren 12×12-Junctions: gespeichert
-            // wurde deren linke obere Ecke, die neue CAD-Ebene speichert den
-            // tatsächlichen Leitungsfangpunkt.
-            return {
-              ...n,
-              position:{ x:(n.position?.x || 0) + 6, y:(n.position?.y || 0) + 6 },
-              data:{ ...(n.data || {}), cad_anchor:true },
-            };
-          }
-          return (NUMMERIERT.includes(n.type) && n.data?.nr == null)
-            ? { ...n, data: { ...n.data, nr: ++maxNr } } : n;
-        });
-        const geladeneDrawingConfig = normalisiereDrawingConfig(s.graph?.drawing_config);
-        setDrawingConfig(geladeneDrawingConfig);
-        setNodes(geladen);
-        setEdges((s.graph?.edges || []).map(edge => ({
-          ...edge,
-          data:{
-            ...(edge.data || {}),
-            cad_polyline:true,
-            polyline_version:1,
-            corner_radius:edge.data?.corner_radius ?? geladeneDrawingConfig.corner_radius,
-          },
-        })));
-        const layerConfig = s.graph?.layer_config;
-        if (LEITUNGS_LAYER.some(layer => layer.id === layerConfig?.active_layer_id)) {
-          const active = LEITUNGS_LAYER.find(layer => layer.id === layerConfig.active_layer_id);
-          setActiveLayerId(active.id);
-        }
-        if (layerConfig?.visibility) setLayerVisibility({ ...DEFAULT_LAYER_VISIBILITY, ...layerConfig.visibility });
+        editorGraphAnwenden(s.graph);
       } catch (e) {
         console.error('Schema konnte nicht geladen werden', e);
       } finally {
         setLoaded(true);
       }
     })();
-  }, [projectId, setNodes, setEdges]);
+  }, [editorGraphAnwenden, projectId]);
 
   // ── Autosave (debounced) — das Schema ist die eine Wahrheit ──
   useEffect(() => {
@@ -3120,6 +3149,73 @@ function EditorInner() {
   deleteEdgeRef.current = deleteEdge;
   deleteNodeRef.current = deleteNode;
 
+  const revisionenLaden = async () => {
+    if (!schemaId) return;
+    setRevisionenLoading(true);
+    setStandFehler('');
+    try {
+      setRevisionen(await listSchemaRevisions(schemaId));
+    } catch {
+      setStandFehler('Die gespeicherten Stände konnten nicht geladen werden.');
+    } finally {
+      setRevisionenLoading(false);
+    }
+  };
+
+  const revisionenOeffnen = async () => {
+    setRevisionenOpen(true);
+    await revisionenLaden();
+  };
+
+  const standSpeichern = async (event) => {
+    event?.preventDefault();
+    if (!schemaId || standSaving) return;
+    setStandSaving(true);
+    setStandFehler('');
+    try {
+      const graph = graphFuerSpeicherung(
+        nodes,
+        edges,
+        { active_layer_id:activeLayerId, visibility:layerVisibility },
+        drawingConfig,
+      );
+      const revision = await createSchemaRevision(schemaId, {
+        bezeichnung:standBezeichnung.trim() || null,
+        notiz:standNotiz.trim() || null,
+        schema_name:schemaName,
+        graph,
+      });
+      setRevisionen(items => [revision, ...items.filter(item => item.id !== revision.id)]);
+      setStandBezeichnung('');
+      setStandNotiz('');
+      setStandDialogOpen(false);
+      setSaveState('saved');
+    } catch {
+      setStandFehler('Der Stand konnte nicht gespeichert werden. Bitte nochmals versuchen.');
+    } finally {
+      setStandSaving(false);
+    }
+  };
+
+  const standWiederherstellen = async (revision) => {
+    if (!schemaId || restoreId) return;
+    const label = revision.bezeichnung || `Stand ${revision.version_nr}`;
+    if (!window.confirm(`${label} als aktuellen Arbeitsstand laden? Der jetzige Arbeitsstand bleibt nur erhalten, wenn du ihn vorher als Stand speicherst.`)) return;
+    setRestoreId(revision.id);
+    setStandFehler('');
+    try {
+      const schema = await restoreSchemaRevision(schemaId, revision.id);
+      editorGraphAnwenden(schema.graph);
+      setSchemaName(schema.name || 'Schema');
+      setRevisionenOpen(false);
+      setSaveState('saved');
+    } catch {
+      setStandFehler('Der gewählte Stand konnte nicht wiederhergestellt werden.');
+    } finally {
+      setRestoreId(null);
+    }
+  };
+
   const saveLabel = !loaded
     ? 'Wird geladen'
     : saveState === 'error'
@@ -3150,6 +3246,14 @@ function EditorInner() {
         <div className="hc-editor-header__actions">
           <button onClick={undo} className="hc-icon-button" title="Rückgängig (⌘/Ctrl + Z)">
             <Undo2 size={17} />
+          </button>
+          <button onClick={()=>{ setStandFehler(''); setStandDialogOpen(true); }}
+            disabled={!schemaId} className="hc-stand-save-button" title="Unveränderlichen Schema-Stand speichern">
+            <SaveIcon size={15} /><span>Stand speichern</span>
+          </button>
+          <button onClick={revisionenOeffnen} disabled={!schemaId}
+            className="hc-icon-button" title="Gespeicherte Stände und Änderungen">
+            <History size={17} />
           </button>
           <ToolbarMenu label="Exportieren" icon={Download} primary align="right">
             {[['schema','Schema als PDF'],['berechnungen','Berechnungen als PDF'],['beides','Schema + Berechnungen']].map(([key,text])=>(
@@ -3454,6 +3558,156 @@ function EditorInner() {
           </aside>
         )}
       </div>
+
+      {standDialogOpen && (
+        <div className="hc-revision-overlay" onPointerDown={()=>!standSaving && setStandDialogOpen(false)}>
+          <form className="hc-stand-dialog" onSubmit={standSpeichern} onPointerDown={event=>event.stopPropagation()}>
+            <div className="hc-revision-panel__header">
+              <div>
+                <span>Nachvollziehbarkeit</span>
+                <strong>Schema-Stand speichern</strong>
+              </div>
+              <button type="button" className="hc-icon-button" onClick={()=>setStandDialogOpen(false)} disabled={standSaving}>
+                <X size={17} />
+              </button>
+            </div>
+            <p className="hc-stand-dialog__intro">
+              Geometrie, Eigenschaften und die serverseitig neu berechneten Hydraulikwerte werden gemeinsam eingefroren.
+            </p>
+            <label className="hc-stand-field">
+              <span>Bezeichnung <small>optional</small></span>
+              <input autoFocus maxLength={120} value={standBezeichnung}
+                onChange={event=>setStandBezeichnung(event.target.value)}
+                placeholder={`Zum Beispiel: Vorprojekt ${revisionen.length + 1}`} />
+            </label>
+            <label className="hc-stand-field">
+              <span>Notiz <small>optional</small></span>
+              <textarea maxLength={1000} rows={4} value={standNotiz}
+                onChange={event=>setStandNotiz(event.target.value)}
+                placeholder="Was wurde fachlich geändert oder geprüft?" />
+            </label>
+            {standFehler && <div className="hc-revision-error">{standFehler}</div>}
+            <div className="hc-stand-dialog__facts">
+              <span>{nodes.length} Bauteile</span>
+              <span>{edges.length} Leitungen</span>
+              <span>Berechnung hydraulik-v1</span>
+            </div>
+            <div className="hc-stand-dialog__actions">
+              <button type="button" onClick={()=>setStandDialogOpen(false)} disabled={standSaving}>Abbrechen</button>
+              <button type="submit" className="is-primary" disabled={standSaving || !schemaId}>
+                <SaveIcon size={15} /> {standSaving ? 'Stand wird gespeichert …' : 'Stand verbindlich speichern'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {revisionenOpen && (
+        <div className="hc-revision-overlay is-drawer" onPointerDown={()=>setRevisionenOpen(false)}>
+          <aside className="hc-revision-panel" onPointerDown={event=>event.stopPropagation()}>
+            <div className="hc-revision-panel__header">
+              <div>
+                <span>Schema-Historie</span>
+                <strong>Gespeicherte Stände</strong>
+              </div>
+              <button className="hc-icon-button" onClick={()=>setRevisionenOpen(false)}>
+                <X size={17} />
+              </button>
+            </div>
+            <div className="hc-revision-panel__actions">
+              <button onClick={()=>{ setStandFehler(''); setRevisionenOpen(false); setStandDialogOpen(true); }}>
+                <SaveIcon size={14} /> Neuen Stand speichern
+              </button>
+              <button onClick={revisionenLaden} disabled={revisionenLoading}>
+                <History size={14} /> Aktualisieren
+              </button>
+            </div>
+            {standFehler && <div className="hc-revision-error">{standFehler}</div>}
+            <div className="hc-revision-list">
+              {revisionenLoading && <div className="hc-revision-empty">Stände werden geladen …</div>}
+              {!revisionenLoading && revisionen.length === 0 && (
+                <div className="hc-revision-empty">
+                  <History size={24} />
+                  <strong>Noch kein fester Stand</strong>
+                  <span>Autosave schützt die laufende Arbeit. Ein gespeicherter Stand friert zusätzlich Graph, Berechnung und Bearbeiter ein.</span>
+                </div>
+              )}
+              {!revisionenLoading && revisionen.map(revision => {
+                const summary = revision.diff?.zusammenfassung || {};
+                const changes = [
+                  ['+', summary.bauteile_hinzugefuegt, 'Bauteile'],
+                  ['−', summary.bauteile_entfernt, 'Bauteile'],
+                  ['↔', summary.bauteile_geaendert, 'Bauteile'],
+                  ['+', summary.leitungen_hinzugefuegt, 'Leitungen'],
+                  ['−', summary.leitungen_entfernt, 'Leitungen'],
+                  ['↔', summary.leitungen_geaendert, 'Leitungen'],
+                ].filter(([, count])=>count);
+                return (
+                  <article key={revision.id} className="hc-revision-card">
+                    <div className="hc-revision-card__top">
+                      <div>
+                        <span>Stand {revision.version_nr}</span>
+                        <strong>{revision.bezeichnung || `Schema-Stand ${revision.version_nr}`}</strong>
+                      </div>
+                      <time>{new Intl.DateTimeFormat('de-CH', { dateStyle:'short', timeStyle:'short' }).format(new Date(revision.created_at))}</time>
+                    </div>
+                    <div className="hc-revision-card__meta">
+                      <span>{revision.created_by_name || 'Unbekannter Bearbeiter'}</span>
+                      <span>{revision.node_count} Bauteile</span>
+                      <span>{revision.edge_count} Leitungen</span>
+                    </div>
+                    {revision.notiz && <p>{revision.notiz}</p>}
+                    <div className="hc-revision-card__diff">
+                      {changes.length
+                        ? changes.map(([symbol, count, label], index)=>(
+                          <span key={`${symbol}-${label}-${index}`} className={`is-${symbol==='+'?'added':symbol==='−'?'removed':'changed'}`}>
+                            {symbol}{count} {label}
+                          </span>
+                        ))
+                        : <span>Keine Änderung zum vorherigen Stand</span>}
+                    </div>
+                    <button className="hc-revision-card__details-toggle"
+                      onClick={()=>setRevisionDetailId(current=>current === revision.id ? null : revision.id)}>
+                      {revisionDetailId === revision.id ? 'Änderungsdetails ausblenden' : 'Änderungsdetails anzeigen'}
+                    </button>
+                    {revisionDetailId === revision.id && (
+                      <div className="hc-revision-card__details">
+                        {(revision.diff?.bauteile?.hinzugefuegt || []).map(item=>(
+                          <div key={`add-${item.id}`}><b>Hinzugefügt</b><span>{item.name}</span></div>
+                        ))}
+                        {(revision.diff?.bauteile?.entfernt || []).map(item=>(
+                          <div key={`remove-${item.id}`}><b>Entfernt</b><span>{item.name}</span></div>
+                        ))}
+                        {(revision.diff?.bauteile?.geaendert || []).map(item=>(
+                          <div key={`change-${item.id}`}>
+                            <b>Geändert</b>
+                            <span>{item.name}: {(item.felder || []).map(field=>field === 'position' ? 'Position' : field.replace('data.', '')).join(', ')}</span>
+                          </div>
+                        ))}
+                        {!!revision.diff?.zusammenfassung?.leitungen_hinzugefuegt && (
+                          <div><b>Leitungen</b><span>{revision.diff.zusammenfassung.leitungen_hinzugefuegt} hinzugefügt</span></div>
+                        )}
+                        {!!revision.diff?.zusammenfassung?.leitungen_entfernt && (
+                          <div><b>Leitungen</b><span>{revision.diff.zusammenfassung.leitungen_entfernt} entfernt</span></div>
+                        )}
+                        {!!revision.diff?.zusammenfassung?.leitungen_geaendert && (
+                          <div><b>Leitungen</b><span>{revision.diff.zusammenfassung.leitungen_geaendert} geometrisch oder fachlich geändert</span></div>
+                        )}
+                        {!changes.length && <span>Dieser Stand entspricht dem vorherigen Stand.</span>}
+                      </div>
+                    )}
+                    <button className="hc-revision-card__restore" onClick={()=>standWiederherstellen(revision)}
+                      disabled={restoreId === revision.id}>
+                      <RotateCcw size={14} />
+                      {restoreId === revision.id ? 'Wird geladen …' : 'Als Arbeitsstand wiederherstellen'}
+                    </button>
+                  </article>
+                );
+              })}
+            </div>
+          </aside>
+        </div>
+      )}
 
       {edgeMenu && (
         <div onPointerDown={()=>setEdgeMenu(null)} style={{ position:'fixed', inset:0, zIndex:3600 }}>

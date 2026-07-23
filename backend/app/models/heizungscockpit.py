@@ -1,6 +1,18 @@
 from datetime import datetime
 import enum
-from sqlalchemy import Column, Integer, String, Float, Boolean, Date, DateTime, ForeignKey, Text, Enum as SAEnum
+from sqlalchemy import (
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    Enum as SAEnum,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -201,3 +213,61 @@ class HcSchema(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     project = relationship("HcProject", back_populates="schemas")
+    revisions = relationship(
+        "HcSchemaRevision",
+        back_populates="schema",
+        cascade="all, delete-orphan",
+        order_by="HcSchemaRevision.version_nr",
+    )
+
+
+class HcSchemaRevision(Base):
+    """Unveränderlicher, explizit gespeicherter Stand eines Anlagenschemas."""
+
+    __tablename__ = "hc_schema_revisions"
+    __table_args__ = (
+        UniqueConstraint("schema_id", "version_nr", name="uq_hc_schema_revision_version"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, default=1, nullable=False, index=True)
+    project_id = Column(Integer, nullable=False, index=True)
+    schema_id = Column(Integer, ForeignKey("hc_schemas.id"), nullable=False, index=True)
+    version_nr = Column(Integer, nullable=False)
+    bezeichnung = Column(String, nullable=True)
+    notiz = Column(Text, nullable=True)
+    graph_json = Column(Text, nullable=False)
+    calculation_json = Column(Text, nullable=True)
+    calculation_engine_version = Column(String, nullable=False, default="hydraulik-v1")
+    diff_json = Column(Text, nullable=False, default="{}")
+    node_count = Column(Integer, nullable=False, default=0)
+    edge_count = Column(Integer, nullable=False, default=0)
+    created_by = Column(Integer, nullable=True, index=True)
+    created_by_name = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    schema = relationship("HcSchema", back_populates="revisions")
+
+
+class HcAuditEvent(Base):
+    """Schlankes, firmenweites Änderungsprotokoll.
+
+    Der eigentliche Graph bleibt im Revisions-Snapshot. Das Ereignis enthält
+    nur die verständliche Zusammenfassung, damit Projektverläufe schnell
+    geladen und später nach Benutzer gefiltert werden können.
+    """
+
+    __tablename__ = "hc_audit_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, default=1, nullable=False, index=True)
+    project_id = Column(Integer, nullable=False, index=True)
+    schema_id = Column(Integer, nullable=True, index=True)
+    revision_id = Column(Integer, nullable=True, index=True)
+    entity_type = Column(String, nullable=False, default="schema")
+    entity_id = Column(Integer, nullable=True)
+    action = Column(String, nullable=False)
+    actor_id = Column(Integer, nullable=True, index=True)
+    actor_name = Column(String, nullable=True)
+    details_json = Column(Text, nullable=False, default="{}")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)

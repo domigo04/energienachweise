@@ -58,6 +58,21 @@ export const saveSchema = (schemaId, data) =>
 export const saveSchemaGraph = (schemaId, data) =>
   api.put(`${BASE}/schemas/${schemaId}/graph`, data).then(r => r.data);
 
+export const listSchemaRevisions = (schemaId) =>
+  api.get(`${BASE}/schemas/${schemaId}/revisions`).then(r => r.data);
+
+export const createSchemaRevision = (schemaId, data) =>
+  api.post(`${BASE}/schemas/${schemaId}/revisions`, data).then(r => r.data);
+
+export const getSchemaRevision = (schemaId, revisionId) =>
+  api.get(`${BASE}/schemas/${schemaId}/revisions/${revisionId}`).then(r => r.data);
+
+export const restoreSchemaRevision = (schemaId, revisionId) =>
+  api.post(`${BASE}/schemas/${schemaId}/revisions/${revisionId}/restore`).then(r => r.data);
+
+export const getSchemaAudit = (schemaId) =>
+  api.get(`${BASE}/schemas/${schemaId}/audit`).then(r => r.data);
+
 export const deleteSchema = (schemaId) =>
   api.delete(`${BASE}/schemas/${schemaId}`);
 

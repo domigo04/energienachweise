@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime
 from enum import Enum
@@ -170,3 +170,44 @@ class SchemaOut(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class SchemaRevisionCreate(BaseModel):
+    bezeichnung: Optional[str] = Field(default=None, max_length=120)
+    notiz: Optional[str] = Field(default=None, max_length=1000)
+    schema_name: Optional[str] = Field(default=None, max_length=200)
+    graph: Optional[dict] = None
+    calculation: Optional[dict] = None
+
+
+class SchemaRevisionOut(BaseModel):
+    id: int
+    schema_id: int
+    project_id: int
+    version_nr: int
+    bezeichnung: Optional[str] = None
+    notiz: Optional[str] = None
+    calculation_engine_version: str
+    diff: dict = Field(default_factory=dict)
+    node_count: int
+    edge_count: int
+    created_by: Optional[int] = None
+    created_by_name: Optional[str] = None
+    created_at: datetime
+
+
+class SchemaRevisionDetailOut(SchemaRevisionOut):
+    graph: dict = Field(default_factory=dict)
+    calculation: Optional[dict] = None
+
+
+class AuditEventOut(BaseModel):
+    id: int
+    project_id: int
+    schema_id: Optional[int] = None
+    revision_id: Optional[int] = None
+    action: str
+    actor_id: Optional[int] = None
+    actor_name: Optional[str] = None
+    details: dict = Field(default_factory=dict)
+    created_at: datetime

@@ -241,6 +241,114 @@ export function SpeicherNode({ data, selected: sel }) {
   );
 }
 
+// ── Erdsondenfeld mit dynamischem Soleverteiler ─────────────────────────────
+// Eine Duplexsonde besitzt zwei U-Rohre. Im Schema werden deshalb pro Sonde
+// zwei durchgezogene Vorlauf-Schenkel und zwei gestrichelte Rücklauf-Schenkel
+// dargestellt. Die Sondenlänge ist eine Eigenschaft, aber bewusst kein
+// geometrischer Massstab: Auch 300 m tiefe Sonden bleiben im Schema kompakt.
+const erdsondenAnzahl = (data = {}) =>
+  Math.max(1, Math.min(24, parseInt(data.sonden_anzahl) || 5));
+
+const erdsondenBreite = (data = {}) => 52 + erdsondenAnzahl(data) * 58;
+const ERDSONDEN_HOEHE = 286;
+
+const ErdsondenVentil = ({ x, y }) => (
+  <g fill="white" stroke="#312e81" strokeWidth="1.35" strokeLinejoin="round">
+    <polygon points={`${x - 5},${y - 6} ${x + 5},${y - 6} ${x},${y}`} />
+    <polygon points={`${x - 5},${y + 6} ${x + 5},${y + 6} ${x},${y}`} />
+    <circle cx={x} cy={y} r="1.8" fill="#312e81" />
+  </g>
+);
+
+export function ErdsondenNode({ data, selected: sel }) {
+  const n = erdsondenAnzahl(data);
+  const W = erdsondenBreite(data);
+  const H = ERDSONDEN_HOEHE;
+  const xs = Array.from({ length: n }, (_, i) => 32 + i * 58);
+  const laenge = Number(data.sonden_laenge_m);
+  const laengeText = Number.isFinite(laenge) && laenge > 0
+    ? ` à ${Math.round(laenge).toLocaleString('de-CH')} m`
+    : '';
+  const sole = '#4f46e5';
+  const handle = (top, id, dashed = false) => (
+    <Handle
+      type="source"
+      position={Position.Right}
+      id={id}
+      style={{
+        right: -6, top,
+        width: 12, height: 12, borderRadius: 2,
+        background: dashed ? '#7c3aed' : sole,
+        border: '2px solid white',
+        boxShadow: `0 0 0 1px ${dashed ? '#7c3aed' : sole}`,
+        transform: 'translate(50%, -50%)',
+        zIndex: 10,
+      }}
+    />
+  );
+
+  return (
+    <div style={{
+      width: W, height: H, position: 'relative', cursor: 'grab',
+      border: sel ? '2px solid #3b82f6' : '2px solid transparent',
+      borderRadius: 7, boxSizing: 'content-box',
+    }}>
+      {handle(54, 'sole-vl')}
+      {handle(82, 'sole-rl', true)}
+      <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H}
+        role="img" aria-label={`${n} Duplex-Erdsonden${laengeText}`}>
+        {/* Bezeichnung wie in der CAD-Vorlage. */}
+        <rect x={W / 2 - 82} y="2" width="164" height="24" rx="2"
+          fill="white" stroke={sole} strokeWidth="1.5" />
+        <text x={W / 2} y="18" textAnchor="middle" fontSize="11"
+          fontFamily="Arial, sans-serif" fill="#3730a3">
+          {n} Duplex-Erdsonden{laengeText}
+        </text>
+
+        {/* Verteilergrenze, Vorlaufbalken und Rücklaufsammler. */}
+        <rect x="8" y="34" width={W - 16} height="82" fill="none"
+          stroke="#a855f7" strokeWidth="1.2" strokeDasharray="8 5" />
+        <line x1="20" y1="54" x2={W} y2="54" stroke={sole} strokeWidth="2.5" />
+        <line x1="20" y1="82" x2={W} y2="82" stroke="#7c3aed"
+          strokeWidth="2.2" strokeDasharray="7 4" />
+
+        {xs.map((x, index) => (
+          <g key={index}>
+            {/* Entlüftungs-/Spülmarker über jedem Sondenpaar. */}
+            <path d={`M ${x - 10} 39 l 6 6 m 0 -6 l -6 6 M ${x + 10} 67 l 6 6 m 0 -6 l -6 6`}
+              fill="none" stroke="#312e81" strokeWidth="1.1" strokeLinecap="round" />
+
+            {/* Ein Absperrorgan je Vor- und Rücklaufanschluss. */}
+            <line x1={x - 10} y1="54" x2={x - 10} y2="68" stroke={sole} strokeWidth="1.8" />
+            <ErdsondenVentil x={x - 10} y={74} />
+            <line x1={x - 10} y1="80" x2={x - 10} y2="120" stroke={sole} strokeWidth="1.8" />
+
+            <line x1={x + 10} y1="82" x2={x + 10} y2="92" stroke="#7c3aed"
+              strokeWidth="1.8" strokeDasharray="6 3" />
+            <ErdsondenVentil x={x + 10} y={98} />
+            <line x1={x + 10} y1="104" x2={x + 10} y2="120" stroke="#7c3aed"
+              strokeWidth="1.8" strokeDasharray="6 3" />
+
+            {/* Duplex: zwei parallele U-Rohre mit je VL- und RL-Schenkel. */}
+            <path d={`M ${x - 10} 120 H ${x - 16} V 260`}
+              fill="none" stroke={sole} strokeWidth="1.8" />
+            <path d={`M ${x - 10} 120 H ${x + 2} V 260`}
+              fill="none" stroke={sole} strokeWidth="1.8" />
+            <path d={`M ${x + 10} 120 H ${x - 8} V 260`}
+              fill="none" stroke="#7c3aed" strokeWidth="1.8" strokeDasharray="6 3" />
+            <path d={`M ${x + 10} 120 V 260`}
+              fill="none" stroke="#7c3aed" strokeWidth="1.8" strokeDasharray="6 3" />
+            <path d={`M ${x - 16} 260 q 0 14 4 14 h 0 q 4 0 4 -14`}
+              fill="none" stroke={sole} strokeWidth="1.8" />
+            <path d={`M ${x + 2} 260 q 0 14 4 14 h 0 q 4 0 4 -14`}
+              fill="none" stroke={sole} strokeWidth="1.8" />
+          </g>
+        ))}
+      </svg>
+    </div>
+  );
+}
+
 // ── Verteiler-Rahmen (volles CAD-Layout, Pflichtenheft §10) ──────────
 // VL-Balken OBEN über die ganze Breite, RL-Balken UNTEN — die Gruppen-
 // Stränge hängen dazwischen. Anzahl Abgänge wählbar (data.abgaenge, 2–8).
@@ -587,7 +695,7 @@ export function LabelNode({ data }) {
 // ── Bauteil-Nummern (Pflichtenheft §10: Nummerierung + Legende) ──────
 // Jedes nummerierbare Bauteil bekommt ein rotes Badge (data.nr) oben rechts.
 // eslint-disable-next-line react-refresh/only-export-components
-export const NUMMERIERT = ['gruppe', 'heizkreis', 'pump', 'valve2', 'valve3', 'checkvalve', 'shutoff', 'erzeuger', 'speicher', 'verteiler', 'waermezaehler', 'expansion', 'bww', 'stad', 'sicherheitsventil', 'pwt'];
+export const NUMMERIERT = ['gruppe', 'heizkreis', 'pump', 'valve2', 'valve3', 'checkvalve', 'shutoff', 'erzeuger', 'speicher', 'erdsonden', 'verteiler', 'waermezaehler', 'expansion', 'bww', 'stad', 'sicherheitsventil', 'pwt'];
 
 // eslint-disable-next-line no-unused-vars
 function mitNr(Comp) {
@@ -627,6 +735,7 @@ const BASIS_TYPES = {
   erzeuger:    ErzeugerNode,
   verbraucher: VerbraucherNode,
   speicher:    SpeicherNode,
+  erdsonden:   ErdsondenNode,
   anschluss:   AnschlussNode,
   verteiler:   VerteilerNode,
   waermezaehler: WaermezaehlerNode,

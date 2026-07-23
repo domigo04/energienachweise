@@ -20,6 +20,7 @@ TITEL = {
     "gruppe": "Verbrauchergruppe", "heizkreis": "Heizkreis", "pump": "Pumpe",
     "valve2": "2-Wege Regelventil", "valve3": "3-Wege Mischventil",
     "erzeuger": "Wärmeerzeuger", "verteiler": "Verteiler", "speicher": "Speicher",
+    "erdsonden": "Erdsondenfeld",
     "checkvalve": "Rückschlagventil", "shutoff": "Kugelhahn / Absperrventil",
     "junction": "T-Stück", "verbraucher": "Verbraucher",
     "waermezaehler": "Wärmezähler", "expansion": "Expansionsgefäss",
@@ -105,6 +106,12 @@ def legende_zeilen(nodes: list, results: dict) -> list:
                 werte = f"⚠ {ex['fehler']}"
         elif t == "erzeuger":
             werte = " · ".join(x for x in [d.get("typ"), f"{d.get('leistung_kw')} kW" if d.get("leistung_kw") else None] if x) or "—"
+        elif t == "erdsonden":
+            anzahl = max(1, min(24, int(_f(d.get("sonden_anzahl")) or 5)))
+            laenge = _f(d.get("sonden_laenge_m"))
+            werte = f"{anzahl} Duplex-Erdsonden"
+            if laenge and laenge > 0:
+                werte += f" à {laenge:g} m · {anzahl * laenge:g} m total"
         elif t == "anschluss":
             werte = f"Buchstabe {d.get('buchstabe') or '?'}"
         zeilen.append({"nr": d.get("nr"), "bauteil": TITEL.get(t, t), "bezeichnung": d.get("label") or "", "werte": werte or "—"})
@@ -205,6 +212,13 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
         elif t == "erzeuger":
             eingaben = [("Typ", d.get("typ") or "—", ""), ("Nennleistung", d.get("leistung_kw"), "kW"),
                         ("VL / RL", f"{d.get('vl_temp', '—')} / {d.get('rl_temp', '—')}", "°C")]
+        elif t == "erdsonden":
+            anzahl = max(1, min(24, int(_f(d.get("sonden_anzahl")) or 5)))
+            laenge = _f(d.get("sonden_laenge_m"))
+            eingaben = [("Ausführung", "Duplex (2 U-Rohre)", ""),
+                        ("Anzahl Erdsonden", anzahl, ""),
+                        ("Sondenlänge", laenge, "m")]
+            resultate = [("Gesamtbohrmeter", anzahl * laenge if laenge else None, "m")]
         else:
             continue
         abschnitte.append({"nr": d.get("nr"), "titel": TITEL.get(t, t), "bezeichnung": d.get("label") or "",

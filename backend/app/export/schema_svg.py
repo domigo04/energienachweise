@@ -14,6 +14,8 @@ from typing import Optional
 
 VL_FARBE = "#ef4444"
 RL_FARBE = "#3b82f6"
+SOLE_VL_FARBE = "#4f46e5"
+SOLE_RL_FARBE = "#7c3aed"
 
 # Verteiler-Rahmen (VL-Balken oben, RL-Balken unten, Stränge dazwischen)
 VT_S = 170          # Abstand zwischen den Abgängen
@@ -23,6 +25,10 @@ VT_LUECKE_STD = 560 # Standard-Abstand zwischen den Balken (data.hoehe überschr
 
 # Verbrauchergruppen-Strang
 GR_W, GR_H, GR_CX = 150, 400, 75
+
+# Dynamisches Erdsondenfeld: zwei U-Rohre je Duplexsonde. Die Länge ist eine
+# Beschriftung und verändert die Symbolhöhe nicht.
+EWS_S, EWS_X0, EWS_H = 58, 32, 286
 
 # Grössen der übrigen Bauteile (aus symbols.jsx)
 GROESSEN = {
@@ -75,6 +81,16 @@ def vt_stutzen_x(i: int) -> float:
     return VT_X0 + 85 + (i - 1) * VT_S
 
 
+def ews_anzahl(node) -> int:
+    d = node.get("data") or {}
+    n = _f(d.get("sonden_anzahl"))
+    return max(1, min(24, int(n))) if n else 5
+
+
+def ews_breite(node) -> float:
+    return 52 + ews_anzahl(node) * EWS_S
+
+
 def node_groesse(node):
     if node.get("type") == "junction" and (node.get("data") or {}).get("cad_anchor"):
         return (1, 1)
@@ -82,6 +98,8 @@ def node_groesse(node):
         return (vt_breite(node), vt_hoehe(node))
     if node.get("type") == "gruppe":
         return (GR_W, GR_H)
+    if node.get("type") == "erdsonden":
+        return (ews_breite(node), EWS_H)
     return GROESSEN.get(node.get("type"), (60, 60))
 
 
@@ -123,6 +141,11 @@ def _handle_pos_base(node, handle: Optional[str]):
             return (sx, y + VT_BAR) if m.group(1) == "vl" else (sx, y + vh - VT_BAR)
     if t == "gruppe":
         return (x + GR_CX, y) if handle == "vl" else (x + GR_CX, y + GR_H)
+    if t == "erdsonden":
+        return {
+            "sole-vl": (x + w, y + 54),
+            "sole-rl": (x + w, y + 82),
+        }.get(handle, (x + w, y + h / 2))
     if t == "heizkreis":
         return {"vl": (x, y + 28), "rl": (x + w, y + 28),
                 "top": (x + w / 2, y), "bottom": (x + w / 2, y + h)}.get(handle, (x + w / 2, y + h / 2))
@@ -384,6 +407,92 @@ def zeichne_gruppe(parts, node, results):
     _nr_badge(parts, x + GR_W - 14, y + 64, d.get("nr"))
 
 
+def _erdsonden_ventil(parts, x, y):
+    parts.append(
+        f'<polygon points="{x - 5},{y - 6} {x + 5},{y - 6} {x},{y}" '
+        'fill="white" stroke="#312e81" stroke-width="1.35"/>'
+    )
+    parts.append(
+        f'<polygon points="{x - 5},{y + 6} {x + 5},{y + 6} {x},{y}" '
+        'fill="white" stroke="#312e81" stroke-width="1.35"/>'
+    )
+    parts.append(f'<circle cx="{x}" cy="{y}" r="1.8" fill="#312e81"/>')
+
+
+def zeichne_erdsonden(parts, node):
+    """Dynamischer Soleverteiler mit zwei U-Rohren je Duplexsonde."""
+    d = node.get("data") or {}
+    x = (node.get("position") or {}).get("x", 0)
+    y = (node.get("position") or {}).get("y", 0)
+    n = ews_anzahl(node)
+    w = ews_breite(node)
+    laenge = _f(d.get("sonden_laenge_m"))
+    laenge_text = f" à {laenge:g} m" if laenge and laenge > 0 else ""
+
+    parts.append(
+        f'<rect x="{x + w / 2 - 82}" y="{y + 2}" width="164" height="24" rx="2" '
+        f'fill="white" stroke="{SOLE_VL_FARBE}" stroke-width="1.5"/>'
+    )
+    parts.append(
+        f'<text x="{x + w / 2}" y="{y + 18}" text-anchor="middle" font-size="11" '
+        f'fill="#3730a3">{n} Duplex-Erdsonden{laenge_text}</text>'
+    )
+    parts.append(
+        f'<rect x="{x + 8}" y="{y + 34}" width="{w - 16}" height="82" fill="none" '
+        'stroke="#a855f7" stroke-width="1.2" stroke-dasharray="8,5"/>'
+    )
+    parts.append(
+        f'<line x1="{x + 20}" y1="{y + 54}" x2="{x + w}" y2="{y + 54}" '
+        f'stroke="{SOLE_VL_FARBE}" stroke-width="2.5"/>'
+    )
+    parts.append(
+        f'<line x1="{x + 20}" y1="{y + 82}" x2="{x + w}" y2="{y + 82}" '
+        f'stroke="{SOLE_RL_FARBE}" stroke-width="2.2" stroke-dasharray="7,4"/>'
+    )
+
+    for index in range(n):
+        sx = x + EWS_X0 + index * EWS_S
+        parts.append(
+            f'<path d="M {sx - 10} {y + 39} l 6 6 m 0 -6 l -6 6 '
+            f'M {sx + 10} {y + 67} l 6 6 m 0 -6 l -6 6" fill="none" '
+            'stroke="#312e81" stroke-width="1.1" stroke-linecap="round"/>'
+        )
+        parts.append(
+            f'<line x1="{sx - 10}" y1="{y + 54}" x2="{sx - 10}" y2="{y + 68}" '
+            f'stroke="{SOLE_VL_FARBE}" stroke-width="1.8"/>'
+        )
+        _erdsonden_ventil(parts, sx - 10, y + 74)
+        parts.append(
+            f'<line x1="{sx - 10}" y1="{y + 80}" x2="{sx - 10}" y2="{y + 120}" '
+            f'stroke="{SOLE_VL_FARBE}" stroke-width="1.8"/>'
+        )
+        parts.append(
+            f'<line x1="{sx + 10}" y1="{y + 82}" x2="{sx + 10}" y2="{y + 92}" '
+            f'stroke="{SOLE_RL_FARBE}" stroke-width="1.8" stroke-dasharray="6,3"/>'
+        )
+        _erdsonden_ventil(parts, sx + 10, y + 98)
+        parts.append(
+            f'<line x1="{sx + 10}" y1="{y + 104}" x2="{sx + 10}" y2="{y + 120}" '
+            f'stroke="{SOLE_RL_FARBE}" stroke-width="1.8" stroke-dasharray="6,3"/>'
+        )
+        parts.append(
+            f'<path d="M {sx - 10} {y + 120} H {sx - 16} V {y + 260} '
+            f'M {sx - 10} {y + 120} H {sx + 2} V {y + 260}" fill="none" '
+            f'stroke="{SOLE_VL_FARBE}" stroke-width="1.8"/>'
+        )
+        parts.append(
+            f'<path d="M {sx + 10} {y + 120} H {sx - 8} V {y + 260} '
+            f'M {sx + 10} {y + 120} V {y + 260}" fill="none" '
+            f'stroke="{SOLE_RL_FARBE}" stroke-width="1.8" stroke-dasharray="6,3"/>'
+        )
+        parts.append(
+            f'<path d="M {sx - 16} {y + 260} q 0 14 4 14 h 0 q 4 0 4 -14 '
+            f'M {sx + 2} {y + 260} q 0 14 4 14 h 0 q 4 0 4 -14" fill="none" '
+            f'stroke="{SOLE_VL_FARBE}" stroke-width="1.8"/>'
+        )
+    _nr_badge(parts, x + w, y, d.get("nr"))
+
+
 def zeichne_standard(parts, node, results):
     """Vereinfachte Symbole für die übrigen Bauteile."""
     t = node.get("type")
@@ -395,6 +504,9 @@ def zeichne_standard(parts, node, results):
     label = d.get("label")
     sym_start = len(parts)  # Merker für die optionale Drehung (nur das Symbol)
 
+    if t == "erdsonden":
+        zeichne_erdsonden(parts, node)
+        return
     if t == "heizkreis":
         parts.append(f'<circle cx="{cx}" cy="{cy}" r="{w / 2}" fill="#f0fdf4" stroke="#16a34a" stroke-width="2.5"/>')
         v = (results.get("node_flows") or {}).get(node["id"])

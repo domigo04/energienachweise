@@ -333,6 +333,7 @@ const WAERMEABGABE = [
 const PALETTE_GRUPPEN = [
   { titel: 'Erzeugung & Speicher', items: [
     { type: 'erzeuger',   label: 'Wärmeerzeuger (WE)',  desc: '→ M10 RAVEL' },
+    { type: 'erdsonden',  label: 'Erdsondenfeld',       desc: 'Dynamischer Soleverteiler mit Duplexsonden' },
     { type: 'speicher',   label: 'Speicher',            desc: 'Inhalt wird direkt im Symbol angezeigt' },
     { type: 'bww',        label: 'BWW-Speicher',        desc: 'Brauchwarmwasser (grün) — SIA 385 folgt' },
     { type: 'pwt',        label: 'Plattentauscher (PWT)', desc: 'Wärmetauscher, 2 Kreise' },
@@ -728,6 +729,29 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
     );
   }
 
+  // ── ERDSONDENFELD ──
+  if (node.type === 'erdsonden') {
+    const anzahl = Math.max(1, Math.min(24, parseInt(d.sonden_anzahl) || 5));
+    const laenge = parseFloat(d.sonden_laenge_m);
+    return (
+      <div style={panelSt}>
+        <PT>Erdsondenfeld</PT>
+        {fld('Bezeichnung','label','Erdsondenfeld','','text')}
+        <label style={lbl}>Anzahl Duplexsonden</label>
+        <select style={{...inp,cursor:'pointer'}} value={anzahl}
+          onChange={e=>onUpdate(node.id, 'sonden_anzahl', parseInt(e.target.value))}>
+          {Array.from({ length:24 }, (_, i) => i + 1).map(k=><option key={k} value={k}>{k}</option>)}
+        </select>
+        {fld('Sondenlänge','sonden_laenge_m','z.B. 180','m')}
+        <div style={{ fontSize:9, lineHeight:1.5, color:'#64748b', background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:6, padding:'6px 7px' }}>
+          Das Symbol zeigt pro Sonde zwei U-Rohre. Der Verteiler wächst automatisch mit.
+          {Number.isFinite(laenge) && laenge > 0 && <> Gesamtbohrmeter: <b>{Math.round(anzahl * laenge).toLocaleString('de-CH')} m</b>.</>}
+        </div>
+        <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
+      </div>
+    );
+  }
+
   // ── VERTEILER ──
   if (node.type === 'verteiler') {
     const vr = verteilerResults?.[node.id];
@@ -834,7 +858,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
 const TITLES = {
   gruppe: 'Verbrauchergruppe', heizkreis: 'Heizkreis', valve2: '2-Wege Regelventil',
   valve3: '3-Wege Mischventil', pump: 'Pumpe', erzeuger: 'Wärmeerzeuger',
-  verteiler: 'Verteiler', speicher: 'Speicher',
+  verteiler: 'Verteiler', speicher: 'Speicher', erdsonden: 'Erdsondenfeld',
   waermezaehler: 'Wärmezähler', expansion: 'Expansionsgefäss',
   bww: 'Brauchwarmwasser-Speicher', shutoff: 'Kugelhahn / Absperrventil',
   stad: 'STAD-Strangregulierventil', temperatur: 'Temperaturfühler',
@@ -1134,6 +1158,30 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, onUpdate, onClose, navig
           sub="Der Wert wird direkt im Speicherbehälter dargestellt."/>
         <div style={{ fontSize:11, color:'#64748b' }}>
           Die sichtbaren Fangpunkte bleiben unabhängig vom Inhalt. Eine frei konfigurierbare 3-/4-Punkt-Anbindung folgt als eigener Schritt.
+        </div>
+      </div>
+    );
+  } else if (node.type === 'erdsonden') {
+    const anzahl = Math.max(1, Math.min(24, parseInt(d.sonden_anzahl) || 5));
+    const laenge = parseFloat(d.sonden_laenge_m);
+    body = (
+      <div style={{ display:'grid', gap:10 }}>
+        <div><label style={lbl}>Anzahl Duplexsonden</label>
+          <select style={{...inp,cursor:'pointer'}} value={anzahl}
+            onChange={e=>set('sonden_anzahl', parseInt(e.target.value))}>
+            {Array.from({ length:24 }, (_, i) => i + 1).map(k=><option key={k} value={k}>{k}</option>)}
+          </select></div>
+        <div><label style={lbl}>Sondenlänge [m]</label>
+          <input type="number" min="1" style={inp} value={d.sonden_laenge_m??''}
+            onChange={e=>set('sonden_laenge_m',e.target.value)} placeholder="z.B. 180"/></div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+          <BigVal label="Duplexsonden" value={anzahl} color="#4f46e5" sub="je zwei U-Rohre"/>
+          <BigVal label="Gesamtbohrmeter"
+            value={Number.isFinite(laenge) && laenge > 0 ? Math.round(anzahl * laenge).toLocaleString('de-CH') : null}
+            unit="m" color="#7c3aed" sub="Anzahl × Sondenlänge"/>
+        </div>
+        <div style={{ fontSize:11, color:'#64748b' }}>
+          Rechts liegen die beiden Hauptanschlüsse des Sole-Vor- und -Rücklaufs. Die einzelnen Sondenabgänge werden intern im Verteiler dargestellt.
         </div>
       </div>
     );
@@ -2607,6 +2655,12 @@ function EditorInner() {
           werte = [d.typ, d.leistung_kw ? `${d.leistung_kw} kW` : null].filter(Boolean).join(' · ') || '—';
         } else if (n.type === 'speicher') {
           werte = d.speicher_liter ? `${d.speicher_liter} L` : '—';
+        } else if (n.type === 'erdsonden') {
+          const anzahl = Math.max(1, Math.min(24, parseInt(d.sonden_anzahl) || 5));
+          const laenge = parseFloat(d.sonden_laenge_m);
+          werte = `${anzahl} Duplex-Erdsonden${Number.isFinite(laenge) && laenge > 0
+            ? ` à ${laenge} m · ${Math.round(anzahl * laenge).toLocaleString('de-CH')} m total`
+            : ''}`;
         }
         return { nr: d.nr, bauteil: TITLES[n.type] || n.type, bez: d.label || '', werte };
       });
@@ -2845,6 +2899,7 @@ function EditorInner() {
     const nodePosition = lineHit ? { x:lineHit.x - 20, y:lineHit.y - 20 } : pos;
     setNodes(ns => {
       const extra = raw === 'verteiler' ? { abgaenge: 4 }
+        : raw === 'erdsonden' ? { sonden_anzahl: 5, sonden_laenge_m: 180 }
         : raw === 'gruppe' ? { schaltung: 'einspritz' }
         : raw === 'anschluss' ? { buchstabe: naechsterBuchstabe(ns) }
         : {};
@@ -3009,8 +3064,10 @@ function EditorInner() {
   const selectedEdge  = selectedEdgeId ? edges.find(e => e.id === selectedEdgeId) || null : null;
   const auslegungNode = auslegung ? nodes.find(n => n.id === auslegung.id) || null : null;
 
-  const updateNode = (id, key, val) =>
+  const updateNode = (id, key, val) => {
     setNodes(ns => ns.map(n => n.id === id ? { ...n, data: { ...n.data, [key]: val } } : n));
+    if (key === 'sonden_anzahl') setTimeout(() => updateNodeInternals(id), 0);
+  };
 
   const updateEdgeData = (id, key, val) =>
     setEdges(es => es.map(e => e.id === id ? { ...e, data: { ...e.data, [key]: val } } : e));

@@ -7,7 +7,13 @@ from pypdf import PdfReader
 
 from app.calculations.hydraulik import berechne_schema
 from app.export.pdf import berechnungs_abschnitte, erzeuge_pdf, legende_zeilen
-from app.export.schema_svg import erzeuge_svg, handle_pos, vt_hoehe, vt_stutzen_x
+from app.export.schema_svg import (
+    erzeuge_svg,
+    ews_breite,
+    handle_pos,
+    vt_hoehe,
+    vt_stutzen_x,
+)
 
 VL = "#ef4444"
 RL = "#3b82f6"
@@ -82,6 +88,26 @@ def test_handle_positionen():
     g1 = nodes[2]
     assert handle_pos(g1, "vl") == (330 + 75, 186)
     assert handle_pos(g1, "rl") == (330 + 75, 186 + 400)
+
+
+def test_erdsondenfeld_waechst_mit_duplexsonden_und_exportiert_identisch():
+    node = {
+        "id": "ews",
+        "type": "erdsonden",
+        "position": {"x": 100, "y": 200},
+        "data": {"label": "Sondenfeld", "sonden_anzahl": 5, "sonden_laenge_m": 180, "nr": 9},
+    }
+    assert ews_breite(node) == 52 + 5 * 58
+    assert handle_pos(node, "sole-vl") == (100 + ews_breite(node), 254)
+    assert handle_pos(node, "sole-rl") == (100 + ews_breite(node), 282)
+
+    svg = erzeuge_svg([node], [], {})
+    assert "5 Duplex-Erdsonden à 180 m" in svg
+    assert svg.count('stroke-dasharray="6,3"') == 15  # drei RL-Fragmente je Sonde
+
+    node["data"]["sonden_anzahl"] = 8
+    assert ews_breite(node) == 52 + 8 * 58
+    assert "8 Duplex-Erdsonden" in erzeuge_svg([node], [], {})
 
 
 def test_svg_uebernimmt_cad_stuetzpunkte_und_medien_layer():

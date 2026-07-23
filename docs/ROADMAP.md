@@ -20,6 +20,13 @@ Featuremenge.
 - [ ] `HydraulikEditor.jsx` in Zustand, Geometrie, Werkzeuge, API und UI trennen
 - [ ] gemeinsame Typen und standardisierte Bauteilklassen einführen
 - [ ] wiederholte Node-, Handle- und Eigenschaftslogik vereinheitlichen
+- [x] Anschlusszone für Wärmeerzeuger und Speicher — dichte, neutrale
+      Rand-Handles (`ZoneHandles` in `HydraulikNodes.jsx`), Leitung dockt überall
+      an; VL/RL kommt aus dem Layer/Stroke, nicht aus dem Handle (durch
+      `test_erzeuger_anschlusszone_neutrale_handles_gleiche_physik` abgesichert).
+      Benannte Alt-Handles bleiben für Bestandsschemas erhalten.
+- [x] Textblöcke: freier, verschiebbarer Textblock (Palette «Beschriftung»),
+      Doppelklick editiert inline, Schriftgrösse im Panel
 - [ ] `Ctrl`/`Cmd` für Auswahl erweitern
 - [ ] `Shift` für gezieltes Abwählen
 - [ ] reale Performancefälle messen und mindestens 30 FPS halten
@@ -48,6 +55,14 @@ nicht parallel neu erfunden.
 - [ ] Grunddaten nur einmal pflegen
 - [ ] Projekt-Dashboard zeigt offene Prüfungen und Freigabestände aller Module
 - [ ] Plankopf und Bauteileigenschaftstabellen aus der Revision erzeugen
+  - [x] Plankopf-Name eines neuen Schemas automatisch aus Projekt + Datum
+        vorbelegen (frei überschreibbar)
+  - [x] Legende/Bauteilkästchen im Editor automatisch sichtbar (Wahl gemerkt)
+  - [ ] schwarze Bauteil-Parameterblöcke automatisch unter jedem Bauteil
+        (Vorbild `PS_HEI_SWW-.pdf`): Fabrikat/Typ, Massenstrom, VL/RL, Leistung,
+        Pumpe, Zwangs-Ventil mit DN/KVS/Druckverlust, Wärmezähler. Werte grössten-
+        teils schon in der Legende berechnet. Offen: welche Felder berechnet vs.
+        manuell, Layout, Editor und/oder nur PDF
 - [ ] Projektvorlagen für typische Anlagen
 
 ## P4 – Coldstart der Kostendaten

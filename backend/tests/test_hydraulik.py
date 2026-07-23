@@ -97,6 +97,32 @@ def _graph_3_kreise():
     return nodes, edges
 
 
+def test_erzeuger_anschlusszone_neutrale_handles_gleiche_physik():
+    """Anschlusszone (Frontend 2026-07-20): WP/Speicher bekommen dichte, NEUTRALE
+    Handles (kein vl/rl-Präfix), damit eine Leitung überall andocken kann. Diese
+    Regel darf nur funktionieren, WEIL das Backend VL/RL aus der Strichfarbe/dem
+    Layer bestimmt (`_stroke`), nicht aus der Handle-ID des Erzeugers. Dieser Test
+    nagelt das fest: hängt die WP über neutrale Zone-Handles am Verteiler, muss
+    exakt dasselbe herauskommen wie mit den benannten vl/rl-Handles."""
+    nodes, edges = _graph_3_kreise()
+    # nur die WE-Hauptanschlüsse auf neutrale Zone-Handle-IDs umstellen
+    for e in edges:
+        if e["id"] == "e_vlm":
+            e["sourceHandle"] = "wz-t-44"   # neutral statt "vl"
+        if e["id"] == "e_rlm":
+            e["targetHandle"] = "wz-b-60"   # neutral statt "rl"
+    r = berechne_schema(nodes, edges)
+    referenz = berechne_schema(*_graph_3_kreise())
+    vt = r["verteiler_results"]["vt"]
+    vt_ref = referenz["verteiler_results"]["vt"]
+    assert vt["vl_vt"] == vt_ref["vl_vt"]
+    assert vt["q_total"] == vt_ref["q_total"]
+    assert vt["m_prim_total"] == pytest.approx(vt_ref["m_prim_total"], abs=1e-9)
+    assert vt["rl_misch"] == pytest.approx(vt_ref["rl_misch"], abs=1e-9)
+    assert r["edge_flows"]["e_vlm"] == pytest.approx(referenz["edge_flows"]["e_vlm"], abs=1e-9)
+    assert r["edge_flows"]["e_rlm"] == pytest.approx(referenz["edge_flows"]["e_rlm"], abs=1e-9)
+
+
 def test_schema_3_parallelkreise():
     r = berechne_schema(*_graph_3_kreise())
     vt = r["verteiler_results"]["vt"]

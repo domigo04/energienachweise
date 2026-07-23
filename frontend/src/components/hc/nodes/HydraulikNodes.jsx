@@ -1,4 +1,5 @@
-import { Handle, Position } from '@xyflow/react';
+import { useState } from 'react';
+import { Handle, Position, useReactFlow } from '@xyflow/react';
 import {
   SymPump, SymValve2V, SymValve3, SymCheckValve,
   SymShutoff, SymWE, SymVerbraucher, SymSpeicher, SymBypass,
@@ -22,6 +23,30 @@ const H = (pos, id, style = {}, className = '') => (
     }}
   />
 );
+
+// Anschlusszone (Dominic 2026-07-20): dichte, dezente Handles rund um das
+// Bauteil, damit sich eine Leitung ÜBERALL am Rand anschliessen kann — WP und
+// Speicher können so 2–6+ Anschlüsse an frei gewählten Stellen haben, ohne
+// feste Punkte. IDs sind NEUTRAL (kein vl/rl-Präfix) → jede Leitung dockt an;
+// ob VL oder RL entscheidet der Zeichen-Layer/die Strichfarbe, nicht das Handle
+// (siehe backend/app/calculations/hydraulik.py::_stroke). Die bestehenden
+// benannten Handles (vl/rl/left/right …) bleiben für Altschemas erhalten.
+const ZONE_PCT = [12, 28, 44, 60, 76, 90];
+const zoneDot = {
+  width: 11, height: 11, borderRadius: 2,
+  background: 'rgba(100,116,139,0.16)', border: '1px dashed rgba(100,116,139,0.55)',
+  zIndex: 4,
+};
+function ZoneHandles({ prefix }) {
+  return (
+    <>
+      {ZONE_PCT.map(p => <Handle key={`${prefix}-t-${p}`} type="source" position={Position.Top}    id={`${prefix}-t-${p}`} style={{ ...zoneDot, top: -5, left: `${p}%` }} />)}
+      {ZONE_PCT.map(p => <Handle key={`${prefix}-b-${p}`} type="source" position={Position.Bottom} id={`${prefix}-b-${p}`} style={{ ...zoneDot, bottom: -5, left: `${p}%` }} />)}
+      {ZONE_PCT.map(p => <Handle key={`${prefix}-l-${p}`} type="source" position={Position.Left}   id={`${prefix}-l-${p}`} style={{ ...zoneDot, left: -5, top: `${p}%` }} />)}
+      {ZONE_PCT.map(p => <Handle key={`${prefix}-r-${p}`} type="source" position={Position.Right}  id={`${prefix}-r-${p}`} style={{ ...zoneDot, right: -5, top: `${p}%` }} />)}
+    </>
+  );
+}
 
 const selBorder = (sel) => sel ? '2px solid #3b82f6' : '2px solid transparent';
 const wrap = (sel) => ({
@@ -160,6 +185,7 @@ export function PwtNode({ selected: sel }) {
 export function ErzeugerNode({ data, selected: sel }) {
   return (
     <div style={wrap(sel)}>
+      <ZoneHandles prefix="wz" />
       {H(Position.Top,    'vl',    { top: -6, background: '#ef4444' })}
       {H(Position.Bottom, 'rl',    { bottom: -6, background: '#3b82f6' })}
       {H(Position.Left,   'left',  { left: -6 })}
@@ -229,6 +255,7 @@ export function HeizkreisNode({ data, selected: sel }) {
 export function SpeicherNode({ data, selected: sel }) {
   return (
     <div style={wrap(sel)}>
+      <ZoneHandles prefix="sz" />
       {H(Position.Top,    'top-l',  { top: -6,    left: '30%', background:'#ef4444' })}
       {H(Position.Top,    'top-r',  { top: -6,    left: '70%', background:'#ef4444' })}
       {H(Position.Bottom, 'bot-l',  { bottom: -6, left: '30%', background:'#3b82f6' })}
@@ -681,13 +708,48 @@ export function JunctionNode() {
 }
 
 // ── Text-Label ────────────────────────────────────────────────
-export function LabelNode({ data }) {
+// Freier Textblock (Dominic 2026-07-20): verschiebbar (React-Flow-Node) UND
+// direkt editierbar per Doppelklick. Bearbeitung schreibt über den React-Flow-
+// Store (useReactFlow → derselbe useNodesState-Store des Editors), damit Autosave
+// und Undo den Text ganz normal mitbekommen.
+export function LabelNode({ id, data, selected: sel }) {
+  const { setNodes } = useReactFlow();
+  const [editing, setEditing] = useState(false);
+  const text = data.label ?? 'Text';
+  const fontSize = Number(data.fontSize) || 12;
+  const commit = (val) => {
+    setEditing(false);
+    setNodes(ns => ns.map(n => (n.id === id ? { ...n, data: { ...n.data, label: val } } : n)));
+  };
   return (
-    <div style={{
-      fontSize: 10, color: '#64748b', background: 'transparent',
-      border: 'none', maxWidth: 150, userSelect: 'none', pointerEvents: 'none',
-    }}>
-      {data.label}
+    <div
+      onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
+      style={{
+        fontSize, color: '#1e293b', lineHeight: 1.35, whiteSpace: 'pre-wrap',
+        background: sel ? 'rgba(59,130,246,0.06)' : 'transparent',
+        border: `1px ${sel ? 'solid #3b82f6' : 'dashed rgba(148,163,184,0.5)'}`,
+        borderRadius: 4, padding: '3px 6px', minWidth: 44, maxWidth: 340,
+        cursor: editing ? 'text' : 'grab',
+      }}
+    >
+      {editing ? (
+        <textarea
+          autoFocus
+          className="nodrag nowheel"
+          defaultValue={text}
+          onFocus={(e) => e.target.select()}
+          onBlur={(e) => commit(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setEditing(false);
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) commit(e.target.value);
+          }}
+          style={{
+            font: 'inherit', color: 'inherit', lineHeight: 'inherit',
+            border: 'none', outline: 'none', background: 'transparent',
+            resize: 'both', width: '100%', minWidth: 140, minHeight: fontSize + 6,
+          }}
+        />
+      ) : (text || 'Text')}
     </div>
   );
 }

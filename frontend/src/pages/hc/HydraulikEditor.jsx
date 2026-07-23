@@ -396,10 +396,18 @@ const PALETTE_GRUPPEN = [
   { titel: 'Verbindungen', items: [
     { type: 'anschluss',  label: 'Anschluss-Marker',    desc: 'Ersetzt lange Leitung — Buchstabe koppeln' },
   ]},
+  { titel: 'Beschriftung', items: [
+    { type: 'label',      label: 'Textblock',           desc: 'Freier Text — verschiebbar, Doppelklick zum Bearbeiten' },
+  ]},
 ];
 const STD_PALETTE = PALETTE_GRUPPEN.flatMap(g => g.items);
 
 const newId = () => `n_${Date.now()}_${Math.floor(Math.random() * 9999)}`;
+
+// Automatischer Vorschlag für den Plankopf/Schemanamen eines NEUEN Schemas —
+// Projektname + heutiges Datum. Bleibt im Namensfeld frei überschreibbar.
+const standardSchemaName = (projekt) =>
+  `${projekt || 'Projekt'} — Anlagenschema ${new Date().toLocaleDateString('de-CH')}`;
 
 // Nächste freie Bauteil-Nummer (Nummerierung bleibt stabil, weil sie in
 // node.data.nr gespeichert wird — das Schema ist die Datenbank).
@@ -875,6 +883,25 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
             V' {ar.m != null ? Number(ar.m).toFixed(3) : '—'} m³/h — die Leitung ab hier trägt diesen Fluss.
           </div>
         ) : null; })()}
+        <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
+      </div>
+    );
+  }
+
+  // ── TEXTBLOCK ──
+  if (node.type === 'label') {
+    return (
+      <div style={panelSt}>
+        <PT>Textblock</PT>
+        <div style={{ marginBottom: 7 }}>
+          <label style={lbl}>Text</label>
+          <textarea rows={4} value={d.label ?? ''} onChange={e=>set('label', e.target.value)}
+            style={{ ...inp, resize:'vertical', lineHeight:1.4 }} placeholder="Freier Text …" />
+        </div>
+        {fld('Schriftgrösse','fontSize','12','px')}
+        <div style={{ fontSize:10, color:'#94a3b8', lineHeight:1.5 }}>
+          Direkt auf der Leinwand: Doppelklick zum Bearbeiten, ziehen zum Verschieben.
+        </div>
         <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
     );
@@ -1368,7 +1395,14 @@ function EditorInner() {
   const [standFehler, setStandFehler] = useState('');
   const [restoreId, setRestoreId] = useState(null);
   const [auslegung, setAuslegung]   = useState(null);   // Bauteil für Doppelklick-Auslegung
-  const [showLegende, setShowLegende] = useState(false);
+  // Legende standardmässig sichtbar (Dominic 2026-07-20) — die Bauteil-Kästchen
+  // sollen automatisch da sein. Wer sie schliesst, dem bleibt sie zu (gemerkt).
+  const [showLegende, setShowLegende] = useState(() => {
+    try { return localStorage.getItem('hc_showLegende') !== '0'; } catch { return true; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('hc_showLegende', showLegende ? '1' : '0'); } catch { /* localStorage evtl. blockiert */ }
+  }, [showLegende]);
   const [showWarnungen, setShowWarnungen] = useState(false);
   const [schaltungswahl, setSchaltungswahl] = useState(null); // {nodeId, x, y} — Menü nach Gruppe-Drop
   const leitungsEntwurfRef = useRef(null);
@@ -1476,7 +1510,10 @@ function EditorInner() {
       try {
         const start = await getSchemaEditor(projectId);
         setProjectName(start.project?.name || 'Projekt');
-        const s = start.schema || await createSchema(projectId, { name: 'Schema', graph: { nodes: [], edges: [] } });
+        // Plankopf automatisch vorbelegen: neuer Schemaname = Projektname + Datum
+        // (kontrolliert überschreibbar, CLAUDE.md Regel 7). Bestehende Schemas
+        // behalten ihren gespeicherten Namen.
+        const s = start.schema || await createSchema(projectId, { name: standardSchemaName(start.project?.name), graph: { nodes: [], edges: [] } });
         setSchemaId(s.id);
         setSchemaName(s.name || 'Schema');
         editorGraphAnwenden(s.graph);
@@ -2931,6 +2968,7 @@ function EditorInner() {
         : raw === 'erdsonden' ? { sonden_anzahl: 5, sonden_laenge_m: 180 }
         : raw === 'gruppe' ? { schaltung: 'einspritz' }
         : raw === 'anschluss' ? { buchstabe: naechsterBuchstabe(ns) }
+        : raw === 'label' ? { label: 'Text', fontSize: 12 }
         : {};
       return [...ns, {
         id, type: raw, position: nodePosition,
@@ -3002,7 +3040,10 @@ function EditorInner() {
     setSelectedEdgeId(null);
     setInspectorOpen(true);
   }, [cadKlick]);
-  const onNodeDoubleClick = useCallback((_, node) => { if (!leitungsEntwurfRef.current) setAuslegung(node); }, []);
+  const onNodeDoubleClick = useCallback((_, node) => {
+    if (node.type === 'label') return; // Textblock: Doppelklick editiert inline
+    if (!leitungsEntwurfRef.current) setAuslegung(node);
+  }, []);
   const onEdgeClick = useCallback((event, edge) => {
     if (leitungsEntwurfRef.current) { cadKlick(event); return; }
     setEndpointMenu(null);

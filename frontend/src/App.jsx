@@ -8,24 +8,31 @@ import { AuthProvider } from "./auth/AuthContext";
 import ProtectedRoute from "./auth/ProtectedRoute";
 import AppLayout from "./components/AppLayout";
 
-// Angemeldeter Bereich
-import Home from "./pages/Home";
-import KontoPage from "./pages/KontoPage";
-import ProjectList from "./pages/hc/ProjectList";
-import ProjectDashboard from "./pages/hc/ProjectDashboard";
-import HeizgruppenPage from "./pages/hc/HeizgruppenPage";
-import VentilPage from "./pages/hc/VentilPage";
-import DruckverlustPage from "./pages/hc/DruckverlustPage";
-import RavelPage from "./pages/hc/RavelPage";
-import AuswertungList from "./pages/auswertung/AuswertungList";
-import AuswertungForm from "./pages/auswertung/AuswertungForm";
-import AuswertungAnalyse from "./pages/auswertung/AuswertungAnalyse";
-import GrobkostenSchaetzung from "./pages/grobkosten/GrobkostenSchaetzung";
-import BenutzerFreischaltung from "./pages/admin/BenutzerFreischaltung";
-import BaupreisindexAdmin from "./pages/admin/BaupreisindexAdmin";
-
-// Der produktive Schema-Editor ist gross und wird nur auf seiner Route geladen.
+// Die öffentliche Landingpage lädt keinen internen Projektcode. Jede grössere
+// Arbeitsseite wird erst beim Öffnen als eigenes Paket nachgeladen.
+const Home = lazy(() => import("./pages/Home"));
+const KontoPage = lazy(() => import("./pages/KontoPage"));
+const ProjectList = lazy(() => import("./pages/hc/ProjectList"));
+const ProjectDashboard = lazy(() => import("./pages/hc/ProjectDashboard"));
+const HeizgruppenPage = lazy(() => import("./pages/hc/HeizgruppenPage"));
+const VentilPage = lazy(() => import("./pages/hc/VentilPage"));
+const DruckverlustPage = lazy(() => import("./pages/hc/DruckverlustPage"));
+const RavelPage = lazy(() => import("./pages/hc/RavelPage"));
+const AuswertungList = lazy(() => import("./pages/auswertung/AuswertungList"));
+const AuswertungForm = lazy(() => import("./pages/auswertung/AuswertungForm"));
+const AuswertungAnalyse = lazy(() => import("./pages/auswertung/AuswertungAnalyse"));
+const GrobkostenSchaetzung = lazy(() => import("./pages/grobkosten/GrobkostenSchaetzung"));
+const BenutzerFreischaltung = lazy(() => import("./pages/admin/BenutzerFreischaltung"));
+const BaupreisindexAdmin = lazy(() => import("./pages/admin/BaupreisindexAdmin"));
 const HydraulikEditor = lazy(() => import("./pages/hc/HydraulikEditor"));
+
+function PageLoader({ children }) {
+  return (
+    <Suspense fallback={<div className="flex min-h-64 items-center justify-center text-sm text-slate-500">Bereich wird geladen…</div>}>
+      {children}
+    </Suspense>
+  );
+}
 
 export default function App() {
   return (
@@ -38,28 +45,28 @@ export default function App() {
 
           {/* Angemeldet: App-Shell mit Seiten-Navigation */}
           <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
-            <Route path="/start" element={<Home />} />
-            <Route path="/konto" element={<KontoPage />} />
+            <Route path="/start" element={<PageLoader><Home /></PageLoader>} />
+            <Route path="/konto" element={<PageLoader><KontoPage /></PageLoader>} />
 
-            <Route path="/projekte" element={<ProjectList />} />
-            <Route path="/projekte/:id" element={<ProjectDashboard />} />
-            <Route path="/projekte/:id/heizgruppen" element={<HeizgruppenPage />} />
-            <Route path="/projekte/:id/kostenschaetzung" element={<GrobkostenSchaetzung />} />
+            <Route path="/projekte" element={<PageLoader><ProjectList /></PageLoader>} />
+            <Route path="/projekte/:id" element={<PageLoader><ProjectDashboard /></PageLoader>} />
+            <Route path="/projekte/:id/heizgruppen" element={<PageLoader><HeizgruppenPage /></PageLoader>} />
+            <Route path="/projekte/:id/kostenschaetzung" element={<PageLoader><GrobkostenSchaetzung /></PageLoader>} />
 
-            <Route path="/auswertung" element={<AuswertungList />} />
-            <Route path="/auswertung/neu" element={<AuswertungForm />} />
-            <Route path="/auswertung/analyse" element={<AuswertungAnalyse />} />
-            <Route path="/auswertung/:id" element={<AuswertungForm />} />
+            <Route path="/auswertung" element={<PageLoader><AuswertungList /></PageLoader>} />
+            <Route path="/auswertung/neu" element={<PageLoader><AuswertungForm /></PageLoader>} />
+            <Route path="/auswertung/analyse" element={<PageLoader><AuswertungAnalyse /></PageLoader>} />
+            <Route path="/auswertung/:id" element={<PageLoader><AuswertungForm /></PageLoader>} />
 
             {/* Alte Grobkosten-Standalone-Routen → Schätzung läuft im Projekt */}
             <Route path="/grobkosten/*" element={<Navigate to="/projekte" replace />} />
 
-            <Route path="/rechner/ventil" element={<VentilPage />} />
-            <Route path="/rechner/druckverlust" element={<DruckverlustPage />} />
-            <Route path="/rechner/ravel" element={<RavelPage />} />
+            <Route path="/rechner/ventil" element={<PageLoader><VentilPage /></PageLoader>} />
+            <Route path="/rechner/druckverlust" element={<PageLoader><DruckverlustPage /></PageLoader>} />
+            <Route path="/rechner/ravel" element={<PageLoader><RavelPage /></PageLoader>} />
 
-            <Route path="/admin/benutzer" element={<BenutzerFreischaltung />} />
-            <Route path="/admin/baupreisindex" element={<BaupreisindexAdmin />} />
+            <Route path="/admin/benutzer" element={<PageLoader><BenutzerFreischaltung /></PageLoader>} />
+            <Route path="/admin/baupreisindex" element={<PageLoader><BaupreisindexAdmin /></PageLoader>} />
           </Route>
 
           {/* Schema-Editor: Vollbild-Canvas, ausserhalb der gepolsterten Shell */}

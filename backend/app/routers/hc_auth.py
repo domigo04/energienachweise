@@ -42,6 +42,10 @@ class UserOut(BaseModel):
     email: EmailStr
     name: Optional[str]
     role: Role
+    firma_role: Literal["mitglied", "admin"] = "mitglied"
+    firma_admin_beantragt_at: Optional[datetime] = None
+    firma_admin_bestaetigt_at: Optional[datetime] = None
+    firma_admin_bestaetigt_von: Optional[int] = None
     is_verified: bool
     is_active: bool
     created_at: datetime
@@ -67,6 +71,7 @@ class UserPatch(BaseModel):
     is_verified: Optional[bool] = None
     is_active: Optional[bool] = None
     role: Optional[Role] = None
+    firma_role: Optional[Literal["mitglied", "admin"]] = None
 
 
 class MePatch(BaseModel):
@@ -157,6 +162,24 @@ def update_me(body: MePatch, user: User = Depends(get_current_user), db: Session
     return _user_out(user)
 
 
+@router.post("/firma-admin/anfragen", response_model=UserOut)
+def request_firma_admin(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Firmenmitglied beantragt die Firmenadmin-Rolle.
+
+    Die Rolle wird nicht automatisch vergeben. Nur der Plattformadmin kann sie
+    über die Benutzerverwaltung bestätigen.
+    """
+    if user.role == Role.admin or user.firma_role == "admin":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Du besitzt bereits Adminrechte.")
+    if user.firma and user.firma.name.endswith("(Einzelperson)"):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Ein Einzelkonto benötigt keine Firmenadmin-Rolle.")
+    if user.firma_admin_beantragt_at is None:
+        user.firma_admin_beantragt_at = datetime.utcnow()
+        db.commit()
+        db.refresh(user)
+    return _user_out(user)
+
+
 @router.get("/admin/users", response_model=List[UserOut])
 def list_users(admin: User = Depends(require_admin), db: Session = Depends(get_db)):
     users = db.query(User).order_by(User.created_at.desc()).all()
@@ -172,6 +195,15 @@ def update_user(user_id: int, body: UserPatch, admin: User = Depends(require_adm
         val = getattr(body, field, None)
         if val is not None:
             setattr(user, field, val)
+    if body.firma_role is not None:
+        user.firma_role = body.firma_role
+        if body.firma_role == "admin":
+            user.firma_admin_bestaetigt_at = datetime.utcnow()
+            user.firma_admin_bestaetigt_von = admin.id
+        else:
+            user.firma_admin_beantragt_at = None
+            user.firma_admin_bestaetigt_at = None
+            user.firma_admin_bestaetigt_von = None
     db.commit()
     db.refresh(user)
     return _user_out(user)

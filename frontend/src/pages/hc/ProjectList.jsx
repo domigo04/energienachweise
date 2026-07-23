@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Plus, MapPin, User, CalendarDays, Trash2 } from "lucide-react";
 import { getProjects, createProject, deleteProjectPermanent, deleteAllArchived } from "../../api/hcApi";
+import { useAuth } from "../../auth/AuthContext";
 import { GEBAEUDEKATEGORIEN, KLIMASTATIONEN } from "../../data/sia";
 
 const LEER_FORM = { name: "", standort: "", kunde: "", beschreibung: "", gebaeudekategorie: "", klimastation: "", t_aussen: -8 };
@@ -13,12 +14,14 @@ function StatusBadge({ status }) {
 
 export default function ProjectList() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(LEER_FORM);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const kannEndgueltigLoeschen = user?.role === "admin" || user?.firma_role === "admin";
 
   useEffect(() => {
     loadProjects().finally(() => setLoading(false));
@@ -78,10 +81,10 @@ export default function ProjectList() {
       <div className="mb-8 flex items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Projekte</h1>
-          <p className="mt-1 text-sm text-slate-500">Deine Heizungsplanungen — Schema, Auslegung und Grobkostenschätzung.</p>
+          <p className="mt-1 text-sm text-slate-500">Die Heizungsplanungen deiner Firma — Schema, Auslegung und Grobkostenschätzung.</p>
         </div>
         <div className="flex gap-2">
-          {projects.some((p) => p.status === "archiviert") && (
+          {kannEndgueltigLoeschen && projects.some((p) => p.status === "archiviert") && (
             <button onClick={handleDeleteAllArchived} className="btn-ghost text-slate-400 hover:text-red-500">
               <Trash2 className="size-4" /> Alle archivierten endgültig löschen
             </button>
@@ -181,7 +184,7 @@ export default function ProjectList() {
                 <h3 className="truncate font-semibold text-slate-900 group-hover:text-brand-700">{p.name}</h3>
                 <div className="flex shrink-0 items-center gap-2">
                   <StatusBadge status={p.status} />
-                  {p.status === "archiviert" && (
+                  {kannEndgueltigLoeschen && p.status === "archiviert" && (
                     <button onClick={(e) => handleDeletePermanent(e, p.id)} className="text-slate-300 hover:text-red-500" title="Endgültig löschen">
                       <Trash2 className="size-4" />
                     </button>

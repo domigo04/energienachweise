@@ -4,9 +4,9 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user
+from app.auth import get_current_user, ist_firma_admin
 from app.database import get_db
-from app.models.auth import Role, User
+from app.models.auth import User
 from app.models.heizungscockpit import HcHeatingGroup, HcProject, HcProjectBaseData
 from app.models.kv import Kostenschaetzung
 from app.data.projektfreigaben import kostenschaetzung_freigabe, leere_kostenschaetzung_freigabe
@@ -62,16 +62,13 @@ def _build_detail(project: HcProject) -> ProjectDetailOut:
     )
 
 
-def _owned_query(db: Session, user: User):
-    """Projekte der Firma; Nicht-Admins sehen nur ihre eigenen (Projekte pro User)."""
-    q = db.query(HcProject).filter(HcProject.tenant_id == user.tenant_id)
-    if user.role != Role.admin:
-        q = q.filter(HcProject.erstellt_von == user.id)
-    return q
+def _company_query(db: Session, user: User):
+    """Alle Projekte der eigenen Firma – niemals Projekte anderer Firmen."""
+    return db.query(HcProject).filter(HcProject.tenant_id == user.tenant_id)
 
 
-def _get_owned(db: Session, user: User, project_id: int) -> HcProject:
-    project = _owned_query(db, user).filter(HcProject.id == project_id).first()
+def _get_company_project(db: Session, user: User, project_id: int) -> HcProject:
+    project = _company_query(db, user).filter(HcProject.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Projekt nicht gefunden")
     return project
@@ -79,7 +76,7 @@ def _get_owned(db: Session, user: User, project_id: int) -> HcProject:
 
 @router.get("", response_model=List[ProjectOut])
 def list_projects(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return _owned_query(db, user).order_by(HcProject.created_at.desc()).all()
+    return _company_query(db, user).order_by(HcProject.created_at.desc()).all()
 
 
 @router.post("", response_model=ProjectDetailOut, status_code=201)
@@ -114,13 +111,13 @@ def create_project(body: ProjectCreate, user: User = Depends(get_current_user), 
 
 @router.get("/{project_id}", response_model=ProjectDetailOut)
 def get_project(project_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return _build_detail(_get_owned(db, user, project_id))
+    return _build_detail(_get_company_project(db, user, project_id))
 
 
 @router.get("/{project_id}/freigaben")
 def get_project_freigaben(project_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Leichte Statusübersicht; lädt bewusst weder Ergebnis noch Referenzdetails."""
-    _get_owned(db, user, project_id)
+    _get_company_project(db, user, project_id)
     ks = db.query(Kostenschaetzung).filter(
         Kostenschaetzung.project_id == project_id,
         Kostenschaetzung.tenant_id == user.tenant_id,
@@ -135,7 +132,7 @@ def get_project_freigaben(project_id: int, user: User = Depends(get_current_user
 
 @router.patch("/{project_id}", response_model=ProjectDetailOut)
 def update_project(project_id: int, body: ProjectUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    project = _get_owned(db, user, project_id)
+    project = _get_company_project(db, user, project_id)
 
     for field in ("name", "standort", "kunde", "beschreibung", "status"):
         val = getattr(body, field, None)
@@ -161,7 +158,7 @@ def update_project(project_id: int, body: ProjectUpdate, user: User = Depends(ge
 
 @router.delete("/{project_id}", status_code=204)
 def archive_project(project_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    project = _get_owned(db, user, project_id)
+    project = _get_company_project(db, user, project_id)
     project.status = "archiviert"
     project.updated_at = datetime.utcnow()
     db.commit()
@@ -169,9 +166,10 @@ def archive_project(project_id: int, user: User = Depends(get_current_user), db:
 
 @router.delete("/archiviert/alle")
 def delete_all_archived(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Löscht alle EIGENEN archivierten Projekte endgültig (kein firmenweiter
-    Nuke-Knopf — jeder räumt nur seine eigenen archivierten Projekte weg)."""
-    archivierte = _owned_query(db, user).filter(HcProject.status == "archiviert").all()
+    """Firmenadmin löscht alle archivierten Projekte der eigenen Firma."""
+    if not ist_firma_admin(user):
+        raise HTTPException(status_code=403, detail="Nur Firmenadmins dürfen Projekte endgültig löschen")
+    archivierte = _company_query(db, user).filter(HcProject.status == "archiviert").all()
     ids = [p.id for p in archivierte]
     if ids:
         db.query(Kostenschaetzung).filter(Kostenschaetzung.project_id.in_(ids)).delete(synchronize_session=False)
@@ -187,7 +185,9 @@ def delete_project_permanent(project_id: int, user: User = Depends(get_current_u
     verknüpfte Kostenschätzung wird zuerst gelöscht — dafür gibt es keine
     ORM-Kaskade (Kostenschaetzung.project_id ist ein reiner FK ohne
     relationship auf HcProject)."""
-    project = _get_owned(db, user, project_id)
+    if not ist_firma_admin(user):
+        raise HTTPException(status_code=403, detail="Nur Firmenadmins dürfen Projekte endgültig löschen")
+    project = _get_company_project(db, user, project_id)
     db.query(Kostenschaetzung).filter(Kostenschaetzung.project_id == project_id).delete()
     db.delete(project)
     db.commit()

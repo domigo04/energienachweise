@@ -5,10 +5,10 @@ Featuremenge.
 
 ## P0 – Produktionsgrundlage
 
-- [ ] Projektzugriff konsequent auf firmenweit umstellen
-- [ ] Rollen Plattformadmin, Firmenadmin und Firmenmitglied einführen
-- [ ] Firmenadmin-Antrag und Bestätigung protokollieren
-- [ ] direkte Schema-, Gruppen-, Kosten- und Exportrouten absichern
+- [x] Projektzugriff konsequent auf firmenweit umstellen
+- [x] Rollen Plattformadmin, Firmenadmin und Firmenmitglied einführen
+- [x] Firmenadmin-Antrag und Bestätigung protokollieren
+- [x] direkte Schema-, Gruppen-, Kosten- und Exportrouten auf Firma begrenzen
 - [ ] PostgreSQL-Persistenz auf Railway verifizieren
 - [ ] Alembic-Migrationen wiederherstellen
 - [ ] Startmigrationen und `DROP TABLE` aus der App entfernen

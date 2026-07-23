@@ -102,7 +102,13 @@ def _ensure_columns():
             ("bww_bei_heizung", "BOOLEAN"), ("weiterbetrieb_umbau", "BOOLEAN"), ("etappierung", "BOOLEAN"),
         ],
         "hc_firmen": [("abo_plan", "VARCHAR")],
-        "hc_users": [("admin_pw_seed_fingerprint", "VARCHAR")],
+        "hc_users": [
+            ("admin_pw_seed_fingerprint", "VARCHAR"),
+            ("firma_role", "VARCHAR"),
+            ("firma_admin_beantragt_at", "TIMESTAMP"),
+            ("firma_admin_bestaetigt_at", "TIMESTAMP"),
+            ("firma_admin_bestaetigt_von", "INTEGER"),
+        ],
         "ref_kostenzeilen": [("gewerk", "VARCHAR")],
     }
     is_sqlite = engine.url.get_backend_name().startswith("sqlite")
@@ -130,6 +136,7 @@ def _ensure_columns():
         # ALTER TABLE trägt den SQLAlchemy-Python-Default nicht nach — bestehende
         # Zeilen hätten sonst z.B. abo_plan=NULL statt "kostenlos".
         conn.execute(text("UPDATE hc_firmen SET abo_plan = 'kostenlos' WHERE abo_plan IS NULL"))
+        conn.execute(text("UPDATE hc_users SET firma_role = 'mitglied' WHERE firma_role IS NULL"))
         conn.execute(text("UPDATE ref_kostenzeilen SET gewerk = 'heizung' WHERE gewerk IS NULL"))
         conn.commit()
 

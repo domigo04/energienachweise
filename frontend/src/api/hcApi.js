@@ -76,6 +76,7 @@ export const updateUser = (id, data) => api.patch(`${BASE}/auth/admin/users/${id
 // --- Eigenes Konto ---
 export const getMe = () => api.get(`${BASE}/auth/me`).then(r => r.data);
 export const updateMe = (data) => api.patch(`${BASE}/auth/me`, data).then(r => r.data);
+export const requestFirmaAdmin = () => api.post(`${BASE}/auth/firma-admin/anfragen`).then(r => r.data);
 
 // --- Auswertung (Referenzprojekte, firmenweit) ---
 export const getRefProjekte = () => api.get(`${BASE}/auswertung`).then(r => r.data);

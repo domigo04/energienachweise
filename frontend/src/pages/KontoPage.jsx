@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Building2, CreditCard, User as UserIcon } from "lucide-react";
-import { getMe, updateMe } from "../api/hcApi";
+import { Building2, CreditCard, ShieldCheck, User as UserIcon } from "lucide-react";
+import { getMe, requestFirmaAdmin, updateMe } from "../api/hcApi";
 import { useAuth } from "../auth/AuthContext";
 import PageHeader from "../components/ui/PageHeader";
 
@@ -19,12 +19,32 @@ export default function KontoPage() {
   const [savingPw, setSavingPw] = useState(false);
   const [pwMsg, setPwMsg] = useState("");
   const [pwError, setPwError] = useState("");
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [adminMsg, setAdminMsg] = useState("");
 
   useEffect(() => {
     getMe().then((d) => { setKonto(d); setName(d.name || ""); });
   }, []);
 
   const istEinzelperson = konto?.firma_name?.endsWith("(Einzelperson)");
+  const istPlattformadmin = konto?.role === "admin";
+  const istFirmenadmin = konto?.firma_role === "admin";
+  const adminBeantragt = Boolean(konto?.firma_admin_beantragt_at) && !istFirmenadmin;
+
+  const firmenadminBeantragen = async () => {
+    setAdminLoading(true);
+    setAdminMsg("");
+    try {
+      const updated = await requestFirmaAdmin();
+      setKonto(updated);
+      await refreshUser();
+      setAdminMsg("Antrag gesendet. Der Plattformadmin muss ihn noch bestätigen.");
+    } catch (err) {
+      setAdminMsg(err?.response?.data?.detail || "Antrag konnte nicht gesendet werden.");
+    } finally {
+      setAdminLoading(false);
+    }
+  };
 
   const nameSpeichern = async (e) => {
     e.preventDefault();
@@ -80,8 +100,31 @@ export default function KontoPage() {
         <p className="mt-3 text-xs text-slate-400">
           {istEinzelperson
             ? "Deine Auswertungsdaten sind privat, nur für dich sichtbar."
-            : "Du teilst dir die Auswertungsdaten mit allen Mitgliedern dieser Firma."}
+            : "Projekte und Auswertungsdaten sind für die Mitglieder dieser Firma gemeinsam verfügbar."}
         </p>
+        {!istEinzelperson && (
+          <div className="mt-4 flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                <ShieldCheck className="size-4 text-brand-600" />
+                {istPlattformadmin ? "Plattformadmin" : istFirmenadmin ? "Firmenadmin" : adminBeantragt ? "Firmenadmin beantragt" : "Firmenmitglied"}
+              </div>
+              <p className="mt-1 text-xs text-slate-500">
+                {istFirmenadmin || istPlattformadmin
+                  ? "Du kannst die Projekte dieser Firma verwalten und endgültig löschen."
+                  : adminBeantragt
+                    ? "Dein Antrag wartet auf die Bestätigung des Plattformadmins."
+                    : "Als Firmenadmin kannst du die gemeinsamen Projekte der Firma verwalten."}
+              </p>
+            </div>
+            {!istPlattformadmin && !istFirmenadmin && !adminBeantragt && (
+              <button type="button" onClick={firmenadminBeantragen} disabled={adminLoading} className="btn-secondary shrink-0">
+                {adminLoading ? "Sende…" : "Firmenadmin beantragen"}
+              </button>
+            )}
+          </div>
+        )}
+        {adminMsg && <p className="mt-3 text-xs text-slate-600">{adminMsg}</p>}
       </div>
 
       <div className="card mb-6 p-5">

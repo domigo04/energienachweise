@@ -206,7 +206,7 @@ def test_pdf_verwendet_browser_momentaufnahme_fuer_identische_zeichnung(daten):
     """Der exakte Exportpfad akzeptiert den Screenshot derselben React-Flow-DOM."""
     nodes, edges, results = daten
     png = base64.b64decode(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII="
+        "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFUlEQVR4nGP8////fwYGBgYmBigAAD34BADaOyqcAAAAAElFTkSuQmCC"
     )
     pdf = erzeuge_pdf("P", "S", "schema", nodes, edges, results, schema_png=png)
     reader = PdfReader(io.BytesIO(pdf))

@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
@@ -40,9 +41,14 @@ def _group_to_out(g: HcHeatingGroup) -> HeatingGroupOut:
 
 @router.get("/api/v1/group-templates", response_model=List[GroupTemplateOut])
 def list_templates(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    # Vorlagen sind firmenweit gemeinsam genutzt (keine tenant_id auf HcGroupTemplate) —
-    # trotzdem Login verlangen, damit die Liste nicht öffentlich abrufbar ist.
-    return db.query(HcGroupTemplate).order_by(HcGroupTemplate.name).all()
+    # Systemvorlagen gelten global; firmeneigene Vorlagen dürfen die
+    # Mandantengrenze nicht überschreiten.
+    return (
+        db.query(HcGroupTemplate)
+        .filter(or_(HcGroupTemplate.is_system.is_(True), HcGroupTemplate.tenant_id == user.tenant_id))
+        .order_by(HcGroupTemplate.name)
+        .all()
+    )
 
 
 @router.get("/api/v1/projects/{project_id}/groups", response_model=List[HeatingGroupOut])

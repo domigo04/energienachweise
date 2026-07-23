@@ -41,6 +41,12 @@ class User(Base):
     password_hash = Column(String, nullable=False)
     name = Column(String, nullable=True)
     role = Column(SAEnum(Role), default=Role.user, nullable=False)
+    # Firmenrolle ist bewusst getrennt von `role`: `role=admin` ist der
+    # globale Plattformadmin. `firma_role=admin` verwaltet nur die eigene Firma.
+    firma_role = Column(String, default="mitglied", nullable=False)
+    firma_admin_beantragt_at = Column(DateTime, nullable=True)
+    firma_admin_bestaetigt_at = Column(DateTime, nullable=True)
+    firma_admin_bestaetigt_von = Column(Integer, nullable=True)
     is_verified = Column(Boolean, default=False)  # Admin muss freischalten
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)

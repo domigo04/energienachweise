@@ -56,7 +56,7 @@ class HcProject(Base):
     standort = Column(String, nullable=True)
     kunde = Column(String, nullable=True)
     beschreibung = Column(Text, nullable=True)
-    erstellt_von = Column(Integer, nullable=True, index=True)  # Besitzer (User-ID) — Projekte pro User
+    erstellt_von = Column(Integer, nullable=True, index=True)  # Ersteller für spätere Nachvollziehbarkeit
     status = Column(SAEnum(HcProjectStatus), default=HcProjectStatus.aktiv)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

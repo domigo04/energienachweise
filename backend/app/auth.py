@@ -69,3 +69,14 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
     if user.role != Role.admin:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Nur für Admins")
     return user
+
+
+def ist_firma_admin(user: User) -> bool:
+    """Plattformadmins haben innerhalb ihrer Firma ebenfalls Firmenadminrechte."""
+    return user.role == Role.admin or user.firma_role == "admin"
+
+
+def require_firma_admin(user: User = Depends(get_current_user)) -> User:
+    if not ist_firma_admin(user):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Nur für Firmenadmins")
+    return user

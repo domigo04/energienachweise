@@ -98,8 +98,8 @@ def test_erdsondenfeld_waechst_mit_duplexsonden_und_exportiert_identisch():
         "data": {"label": "Sondenfeld", "sonden_anzahl": 5, "sonden_laenge_m": 180, "nr": 9},
     }
     assert ews_breite(node) == 52 + 5 * 58
-    assert handle_pos(node, "sole-vl") == (100 + ews_breite(node), 254)
-    assert handle_pos(node, "sole-rl") == (100 + ews_breite(node), 282)
+    assert handle_pos(node, "sole-vl") == (100 + ews_breite(node), 255)
+    assert handle_pos(node, "sole-rl") == (100 + ews_breite(node), 285)
     assert handle_pos(node, "sole-vl-top") == (100 + ews_breite(node) * 0.42, 200)
     assert handle_pos(node, "sole-rl-top") == (100 + ews_breite(node) * 0.58, 200)
     assert handle_pos(node, "sole-vl-bottom") == (100 + ews_breite(node) * 0.42, 486)
@@ -107,7 +107,8 @@ def test_erdsondenfeld_waechst_mit_duplexsonden_und_exportiert_identisch():
 
     svg = erzeuge_svg([node], [], {})
     assert "5 Duplex-Erdsonden à 180 m" in svg
-    assert svg.count('stroke-dasharray="6,3"') == 15  # drei RL-Fragmente je Sonde
+    assert "<polygon" not in svg  # keine eingebauten Ventile oder Pumpen
+    assert svg.count('stroke-dasharray="7,4"') == 6  # RL-Sammler + ein U-Rohr je Sonde
 
     node["data"]["sonden_anzahl"] = 8
     assert ews_breite(node) == 52 + 8 * 58

@@ -28,7 +28,7 @@ GR_W, GR_H, GR_CX = 150, 400, 75
 
 # Dynamisches Erdsondenfeld: zwei U-Rohre je Duplexsonde. Die Länge ist eine
 # Beschriftung und verändert die Symbolhöhe nicht.
-EWS_S, EWS_X0, EWS_H = 58, 32, 286
+EWS_S, EWS_X0, EWS_H = 58, 52, 286
 
 # Grössen der übrigen Bauteile (aus symbols.jsx)
 GROESSEN = {
@@ -143,8 +143,8 @@ def _handle_pos_base(node, handle: Optional[str]):
         return (x + GR_CX, y) if handle == "vl" else (x + GR_CX, y + GR_H)
     if t == "erdsonden":
         return {
-            "sole-vl": (x + w, y + 54),
-            "sole-rl": (x + w, y + 82),
+            "sole-vl": (x + w, y + 55),
+            "sole-rl": (x + w, y + 85),
             "sole-vl-top": (x + w * 0.42, y),
             "sole-rl-top": (x + w * 0.58, y),
             "sole-vl-bottom": (x + w * 0.42, y + h),
@@ -411,20 +411,8 @@ def zeichne_gruppe(parts, node, results):
     _nr_badge(parts, x + GR_W - 14, y + 64, d.get("nr"))
 
 
-def _erdsonden_ventil(parts, x, y):
-    parts.append(
-        f'<polygon points="{x - 5},{y - 6} {x + 5},{y - 6} {x},{y}" '
-        'fill="white" stroke="#312e81" stroke-width="1.35"/>'
-    )
-    parts.append(
-        f'<polygon points="{x - 5},{y + 6} {x + 5},{y + 6} {x},{y}" '
-        'fill="white" stroke="#312e81" stroke-width="1.35"/>'
-    )
-    parts.append(f'<circle cx="{x}" cy="{y}" r="1.8" fill="#312e81"/>')
-
-
 def zeichne_erdsonden(parts, node):
-    """Dynamischer Soleverteiler mit zwei U-Rohren je Duplexsonde."""
+    """Schlichter Soleverteiler mit zwei U-Rohren je Duplexsonde."""
     d = node.get("data") or {}
     x = (node.get("position") or {}).get("x", 0)
     y = (node.get("position") or {}).get("y", 0)
@@ -442,57 +430,37 @@ def zeichne_erdsonden(parts, node):
         f'fill="#3730a3">{n} Duplex-Erdsonden{laenge_text}</text>'
     )
     parts.append(
-        f'<rect x="{x + 8}" y="{y + 34}" width="{w - 16}" height="82" fill="none" '
-        'stroke="#a855f7" stroke-width="1.2" stroke-dasharray="8,5"/>'
+        f'<rect x="{x + 8}" y="{y + 34}" width="{w - 16}" height="78" fill="white" '
+        'stroke="#1f2937" stroke-width="1.4"/>'
     )
     parts.append(
-        f'<line x1="{x + 20}" y1="{y + 54}" x2="{x + w}" y2="{y + 54}" '
-        f'stroke="{SOLE_VL_FARBE}" stroke-width="2.5"/>'
+        f'<rect x="{x + 22}" y="{y + 48}" width="{w - 44}" height="14" fill="white" '
+        f'stroke="{SOLE_VL_FARBE}" stroke-width="1.8"/>'
     )
     parts.append(
-        f'<line x1="{x + 20}" y1="{y + 82}" x2="{x + w}" y2="{y + 82}" '
-        f'stroke="{SOLE_RL_FARBE}" stroke-width="2.2" stroke-dasharray="7,4"/>'
+        f'<rect x="{x + 34}" y="{y + 78}" width="{w - 68}" height="14" fill="white" '
+        f'stroke="{SOLE_RL_FARBE}" stroke-width="1.7" stroke-dasharray="7,4"/>'
     )
 
     for index in range(n):
         sx = x + EWS_X0 + index * EWS_S
         parts.append(
-            f'<path d="M {sx - 10} {y + 39} l 6 6 m 0 -6 l -6 6 '
-            f'M {sx + 10} {y + 67} l 6 6 m 0 -6 l -6 6" fill="none" '
+            f'<path d="M {sx - 9} {y + 38} l 6 6 m 0 -6 l -6 6 '
+            f'M {sx + 9} {y + 68} l 6 6 m 0 -6 l -6 6" fill="none" '
             'stroke="#312e81" stroke-width="1.1" stroke-linecap="round"/>'
         )
         parts.append(
-            f'<line x1="{sx - 10}" y1="{y + 54}" x2="{sx - 10}" y2="{y + 68}" '
-            f'stroke="{SOLE_VL_FARBE}" stroke-width="1.8"/>'
-        )
-        _erdsonden_ventil(parts, sx - 10, y + 74)
-        parts.append(
-            f'<line x1="{sx - 10}" y1="{y + 80}" x2="{sx - 10}" y2="{y + 120}" '
-            f'stroke="{SOLE_VL_FARBE}" stroke-width="1.8"/>'
+            f'<path d="M {sx - 9} {y + 62} V {y + 118} H {sx - 17} V {y + 258} '
+            f'Q {sx - 17} {y + 274} {sx - 11} {y + 274} '
+            f'Q {sx - 5} {y + 274} {sx - 5} {y + 258} V {y + 118} H {sx - 9}" '
+            f'fill="none" stroke="{SOLE_VL_FARBE}" stroke-width="1.9" stroke-linejoin="round"/>'
         )
         parts.append(
-            f'<line x1="{sx + 10}" y1="{y + 82}" x2="{sx + 10}" y2="{y + 92}" '
-            f'stroke="{SOLE_RL_FARBE}" stroke-width="1.8" stroke-dasharray="6,3"/>'
-        )
-        _erdsonden_ventil(parts, sx + 10, y + 98)
-        parts.append(
-            f'<line x1="{sx + 10}" y1="{y + 104}" x2="{sx + 10}" y2="{y + 120}" '
-            f'stroke="{SOLE_RL_FARBE}" stroke-width="1.8" stroke-dasharray="6,3"/>'
-        )
-        parts.append(
-            f'<path d="M {sx - 10} {y + 120} H {sx - 16} V {y + 260} '
-            f'M {sx - 10} {y + 120} H {sx + 2} V {y + 260}" fill="none" '
-            f'stroke="{SOLE_VL_FARBE}" stroke-width="1.8"/>'
-        )
-        parts.append(
-            f'<path d="M {sx + 10} {y + 120} H {sx - 8} V {y + 260} '
-            f'M {sx + 10} {y + 120} V {y + 260}" fill="none" '
-            f'stroke="{SOLE_RL_FARBE}" stroke-width="1.8" stroke-dasharray="6,3"/>'
-        )
-        parts.append(
-            f'<path d="M {sx - 16} {y + 260} q 0 14 4 14 h 0 q 4 0 4 -14 '
-            f'M {sx + 2} {y + 260} q 0 14 4 14 h 0 q 4 0 4 -14" fill="none" '
-            f'stroke="{SOLE_VL_FARBE}" stroke-width="1.8"/>'
+            f'<path d="M {sx + 9} {y + 92} V {y + 122} H {sx + 3} V {y + 258} '
+            f'Q {sx + 3} {y + 274} {sx + 9} {y + 274} '
+            f'Q {sx + 15} {y + 274} {sx + 15} {y + 258} V {y + 122} H {sx + 9}" '
+            f'fill="none" stroke="{SOLE_RL_FARBE}" stroke-width="1.9" '
+            'stroke-dasharray="7,4" stroke-linejoin="round"/>'
         )
     _nr_badge(parts, x + w, y, d.get("nr"))
 

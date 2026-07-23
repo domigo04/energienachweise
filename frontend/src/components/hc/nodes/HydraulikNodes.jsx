@@ -229,10 +229,10 @@ export function HeizkreisNode({ data, selected: sel }) {
 export function SpeicherNode({ data, selected: sel }) {
   return (
     <div style={wrap(sel)}>
-      {H(Position.Top,    'top-l',  { top: -6,    left: '30%' })}
-      {H(Position.Top,    'top-r',  { top: -6,    left: '70%' })}
-      {H(Position.Bottom, 'bot-l',  { bottom: -6, left: '30%' })}
-      {H(Position.Bottom, 'bot-r',  { bottom: -6, left: '70%' })}
+      {H(Position.Top,    'top-l',  { top: -6,    left: '30%', background:'#ef4444' })}
+      {H(Position.Top,    'top-r',  { top: -6,    left: '70%', background:'#ef4444' })}
+      {H(Position.Bottom, 'bot-l',  { bottom: -6, left: '30%', background:'#3b82f6' })}
+      {H(Position.Bottom, 'bot-r',  { bottom: -6, left: '70%', background:'#3b82f6' })}
       {H(Position.Left,   'left',   { left: -6 })}
       {H(Position.Right,  'right',  { right: -6 })}
       <SymSpeicher liter={data.speicher_liter} />
@@ -252,19 +252,11 @@ const erdsondenAnzahl = (data = {}) =>
 const erdsondenBreite = (data = {}) => 52 + erdsondenAnzahl(data) * 58;
 const ERDSONDEN_HOEHE = 286;
 
-const ErdsondenVentil = ({ x, y }) => (
-  <g fill="white" stroke="#312e81" strokeWidth="1.35" strokeLinejoin="round">
-    <polygon points={`${x - 5},${y - 6} ${x + 5},${y - 6} ${x},${y}`} />
-    <polygon points={`${x - 5},${y + 6} ${x + 5},${y + 6} ${x},${y}`} />
-    <circle cx={x} cy={y} r="1.8" fill="#312e81" />
-  </g>
-);
-
 export function ErdsondenNode({ data, selected: sel }) {
   const n = erdsondenAnzahl(data);
   const W = erdsondenBreite(data);
   const H = ERDSONDEN_HOEHE;
-  const xs = Array.from({ length: n }, (_, i) => 32 + i * 58);
+  const xs = Array.from({ length: n }, (_, i) => 52 + i * 58);
   const laenge = Number(data.sonden_laenge_m);
   const laengeText = Number.isFinite(laenge) && laenge > 0
     ? ` à ${Math.round(laenge).toLocaleString('de-CH')} m`
@@ -310,8 +302,8 @@ export function ErdsondenNode({ data, selected: sel }) {
       border: sel ? '2px solid #3b82f6' : '2px solid transparent',
       borderRadius: 7, boxSizing: 'content-box',
     }}>
-      {rightHandle(54, 'sole-vl')}
-      {rightHandle(82, 'sole-rl', true)}
+      {rightHandle(55, 'sole-vl')}
+      {rightHandle(85, 'sole-rl', true)}
       {verticalHandle(Position.Top, '42%', 'sole-vl-top')}
       {verticalHandle(Position.Top, '58%', 'sole-rl-top', true)}
       {verticalHandle(Position.Bottom, '42%', 'sole-vl-bottom')}
@@ -326,43 +318,30 @@ export function ErdsondenNode({ data, selected: sel }) {
           {n} Duplex-Erdsonden{laengeText}
         </text>
 
-        {/* Verteilergrenze, Vorlaufbalken und Rücklaufsammler. */}
-        <rect x="8" y="34" width={W - 16} height="82" fill="none"
-          stroke="#a855f7" strokeWidth="1.2" strokeDasharray="8 5" />
-        <line x1="20" y1="54" x2={W} y2="54" stroke={sole} strokeWidth="2.5" />
-        <line x1="20" y1="82" x2={W} y2="82" stroke="#7c3aed"
-          strokeWidth="2.2" strokeDasharray="7 4" />
+        {/* Verteilerkasten mit zwei klaren Sammelbalken wie in der CAD-Vorlage. */}
+        <rect x="8" y="34" width={W - 16} height="78" fill="white"
+          stroke="#1f2937" strokeWidth="1.4" />
+        <rect x="22" y="48" width={W - 44} height="14" fill="white"
+          stroke={sole} strokeWidth="1.8" />
+        <rect x="34" y="78" width={W - 68} height="14" fill="white"
+          stroke="#7c3aed" strokeWidth="1.7" strokeDasharray="7 4" />
 
         {xs.map((x, index) => (
           <g key={index}>
-            {/* Entlüftungs-/Spülmarker über jedem Sondenpaar. */}
-            <path d={`M ${x - 10} 39 l 6 6 m 0 -6 l -6 6 M ${x + 10} 67 l 6 6 m 0 -6 l -6 6`}
+            {/* Schlichte Anschlussmarken; Armaturen gehören nicht ins Bauteilsymbol. */}
+            <path d={`M ${x - 9} 38 l 6 6 m 0 -6 l -6 6 M ${x + 9} 68 l 6 6 m 0 -6 l -6 6`}
               fill="none" stroke="#312e81" strokeWidth="1.1" strokeLinecap="round" />
 
-            {/* Ein Absperrorgan je Vor- und Rücklaufanschluss. */}
-            <line x1={x - 10} y1="54" x2={x - 10} y2="68" stroke={sole} strokeWidth="1.8" />
-            <ErdsondenVentil x={x - 10} y={74} />
-            <line x1={x - 10} y1="80" x2={x - 10} y2="120" stroke={sole} strokeWidth="1.8" />
-
-            <line x1={x + 10} y1="82" x2={x + 10} y2="92" stroke="#7c3aed"
-              strokeWidth="1.8" strokeDasharray="6 3" />
-            <ErdsondenVentil x={x + 10} y={98} />
-            <line x1={x + 10} y1="104" x2={x + 10} y2="120" stroke="#7c3aed"
-              strokeWidth="1.8" strokeDasharray="6 3" />
-
-            {/* Duplex: zwei parallele U-Rohre mit je VL- und RL-Schenkel. */}
-            <path d={`M ${x - 10} 120 H ${x - 16} V 260`}
-              fill="none" stroke={sole} strokeWidth="1.8" />
-            <path d={`M ${x - 10} 120 H ${x + 2} V 260`}
-              fill="none" stroke={sole} strokeWidth="1.8" />
-            <path d={`M ${x + 10} 120 H ${x - 8} V 260`}
-              fill="none" stroke="#7c3aed" strokeWidth="1.8" strokeDasharray="6 3" />
-            <path d={`M ${x + 10} 120 V 260`}
-              fill="none" stroke="#7c3aed" strokeWidth="1.8" strokeDasharray="6 3" />
-            <path d={`M ${x - 16} 260 q 0 14 4 14 h 0 q 4 0 4 -14`}
-              fill="none" stroke={sole} strokeWidth="1.8" />
-            <path d={`M ${x + 2} 260 q 0 14 4 14 h 0 q 4 0 4 -14`}
-              fill="none" stroke={sole} strokeWidth="1.8" />
+            {/* Duplex: ein durchgezogenes und ein gestricheltes U-Rohr je Sonde. */}
+            <path d={`M ${x - 9} 62 V 118 H ${x - 17} V 258
+              Q ${x - 17} 274 ${x - 11} 274
+              Q ${x - 5} 274 ${x - 5} 258 V 118 H ${x - 9}`}
+              fill="none" stroke={sole} strokeWidth="1.9" strokeLinejoin="round" />
+            <path d={`M ${x + 9} 92 V 122 H ${x + 3} V 258
+              Q ${x + 3} 274 ${x + 9} 274
+              Q ${x + 15} 274 ${x + 15} 258 V 122 H ${x + 9}`}
+              fill="none" stroke="#7c3aed" strokeWidth="1.9"
+              strokeDasharray="7 4" strokeLinejoin="round" />
           </g>
         ))}
       </svg>

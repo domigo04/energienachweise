@@ -52,25 +52,69 @@ function PipeLabel({ x, y, dn, flow, tone = "red", width = 108 }) {
   );
 }
 
+const STANDARD_DN = [15, 20, 25, 32, 40, 50, 65, 80, 100];
+
+// Für die Landing-Demo wird bei gleicher zulässiger Geschwindigkeit aus dem
+// Lastverhältnis der benötigte Durchmesser abgeleitet und auf die nächste
+// gebräuchliche Nennweite aufgerundet.
+function dnBeiLast(basisDn, lastFaktor) {
+  const benoetigt = basisDn * Math.sqrt(Math.max(0.2, lastFaktor));
+  return STANDARD_DN.find(dn => dn >= benoetigt) || STANDARD_DN.at(-1);
+}
+
 function AnimatedSchema() {
   const [last, setLast] = useState(100);
   const [auto, setAuto] = useState(true);
+  const lastRef = useRef(100);
 
   useEffect(() => {
     if (!auto || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return undefined;
-    const levels = [100, 76, 54, 88];
+    const levels = [76, 54, 88, 100];
     let index = 0;
-    const timer = window.setInterval(() => {
+    let frame = 0;
+
+    const animateTo = (target) => {
+      const start = lastRef.current;
+      const startedAt = performance.now();
+      const duration = 1250;
+      const tick = (now) => {
+        const progress = Math.min(1, (now - startedAt) / duration);
+        const eased = progress < 0.5
+          ? 4 * progress ** 3
+          : 1 - ((-2 * progress + 2) ** 3) / 2;
+        const value = start + (target - start) * eased;
+        lastRef.current = value;
+        setLast(value);
+        if (progress < 1) frame = window.requestAnimationFrame(tick);
+      };
+      frame = window.requestAnimationFrame(tick);
+    };
+
+    const next = () => {
+      window.cancelAnimationFrame(frame);
+      animateTo(levels[index]);
       index = (index + 1) % levels.length;
-      setLast(levels[index]);
-    }, 3000);
-    return () => window.clearInterval(timer);
+    };
+    const first = window.setTimeout(next, 850);
+    const timer = window.setInterval(next, 3400);
+    return () => {
+      window.clearTimeout(first);
+      window.clearInterval(timer);
+      window.cancelAnimationFrame(frame);
+    };
   }, [auto]);
+
+  const setManualLast = (value) => {
+    setAuto(false);
+    lastRef.current = value;
+    setLast(value);
+  };
 
   const factor = last / 100;
   const leistung = (47 * factor).toFixed(1);
   const volumenstrom = (2.481 * factor).toFixed(3);
   const massenstrom = Math.round(2481 * factor).toLocaleString("de-CH");
+  const hauptDn = dnBeiLast(50, factor);
   const ventilautoritaet = Math.round(42 + (100 - last) * .36);
   const ventilFarbe = ventilautoritaet >= 50 ? "#0f9f77" : ventilautoritaet >= 35 ? "#f59e0b" : "#ef4444";
   const gruppen = [
@@ -83,7 +127,7 @@ function AnimatedSchema() {
     <div className="landing-schema" aria-label="Animiertes Hydraulikschema mit Live-Berechnungen">
       <div className="landing-schema__topbar">
         <span><i /> HYDRAULIKMODELL AKTIV</span>
-        <span>LASTFALL {last} %</span>
+        <span>LASTFALL {Math.round(last)} %</span>
       </div>
       <div className="landing-schema__canvas">
       <svg viewBox="0 0 980 620" role="img" aria-labelledby="schema-title schema-desc">
@@ -140,12 +184,12 @@ function AnimatedSchema() {
         <path className="landing-system-line landing-system-line--red" d="M274 352 V136 H410 V326" />
         <path className="landing-system-line landing-system-line--red" d="M446 326 V250 H526 V95 H930" />
         <path className="landing-system-line landing-system-line--blue" d="M274 478 V548 H410 V480" />
-        <path className="landing-system-line landing-system-line--blue" d="M446 480 H520 V558 H930" />
+        <path className="landing-system-line landing-system-line--blue" d="M446 480 V510 H520 V558 H930" />
         <path className="landing-system-flow landing-system-flow--red" d="M274 352 V136 H410 V326 M446 326 V250 H526 V95 H930" />
-        <path className="landing-system-flow landing-system-flow--blue" d="M274 478 V548 H410 V480 M446 480 H520 V558 H930" />
-        <PipeLabel x={294} y={112} dn="DN50" flow={`${massenstrom} kg/h`} />
-        <PipeLabel x={470} y={158} dn="DN50" flow={`${massenstrom} kg/h`} />
-        <PipeLabel x={286} y={520} dn="DN50" flow={`${massenstrom} kg/h`} tone="blue" />
+        <path className="landing-system-flow landing-system-flow--blue" d="M274 478 V548 H410 V480 M446 480 V510 H520 V558 H930" />
+        <PipeLabel x={294} y={112} dn={`DN${hauptDn}`} flow={`${massenstrom} kg/h`} />
+        <PipeLabel x={470} y={158} dn={`DN${hauptDn}`} flow={`${massenstrom} kg/h`} />
+        <PipeLabel x={286} y={520} dn={`DN${hauptDn}`} flow={`${massenstrom} kg/h`} tone="blue" />
 
         <g className="landing-component landing-component--source" transform="translate(224 352)">
           <rect width="100" height="126" rx="5" fill="url(#landing-card)" />
@@ -177,12 +221,13 @@ function AnimatedSchema() {
 
         {/* Verteilerbalken und drei Gruppen aus der gelieferten Vorlage. */}
         <rect x="560" y="79" width="370" height="32" rx="5" className="landing-manifold landing-manifold--red" />
-        <text x="578" y="100" className="landing-manifold__text">VL 65.0 °C · Σ {leistung} kW · {volumenstrom} m³/h</text>
+        <text x="578" y="100" className="landing-manifold__text">VL 65.0 °C · DN{hauptDn} · Σ {leistung} kW · {volumenstrom} m³/h</text>
         <rect x="560" y="542" width="370" height="32" rx="5" className="landing-manifold landing-manifold--blue" />
         <text x="578" y="563" className="landing-manifold__text">RL 43.7 °C · {volumenstrom} m³/h</text>
 
         {gruppen.map((gruppe, index) => {
           const flow = (gruppe.flow * factor).toFixed(3);
+          const dn = dnBeiLast(gruppe.dn, factor);
           return (
             <g key={gruppe.name} className={`landing-group consumer-${index}`}>
               <path className="landing-system-line landing-system-line--red landing-system-line--branch" d={`M${gruppe.x} 111 V210`} />
@@ -209,7 +254,7 @@ function AnimatedSchema() {
               <PipeLabel
                 x={gruppe.x - 44}
                 y={127}
-                dn={`DN${gruppe.dn}`}
+                dn={`DN${dn}`}
                 flow={`${Math.round(flow * 1000).toLocaleString("de-CH")} kg/h`}
                 width={88}
               />
@@ -241,11 +286,15 @@ function AnimatedSchema() {
       </div>
       <div className="landing-schema__scan" />
       <label className="landing-schema__control">
-        <span>ANLAGENLEISTUNG</span>
-        <input type="range" min="35" max="100" value={last}
+        <span>ANLAGENLAST STEUERN</span>
+        <input type="range" min="35" max="100" step="0.1" value={last}
+          aria-label="Anlagenlast in Prozent"
+          style={{ "--range-progress": `${((last - 35) / 65) * 100}%` }}
           onPointerDown={()=>setAuto(false)}
-          onChange={event=>setLast(Number(event.target.value))} />
-        <strong>{leistung} kW</strong>
+          onKeyDown={()=>setAuto(false)}
+          onChange={event=>setManualLast(Number(event.target.value))} />
+        <strong aria-live="polite">{leistung} kW</strong>
+        <small>{Math.round(last)} %</small>
       </label>
       <div className="landing-schema__status">
         <span><i /> Hydraulik live berechnet</span>
@@ -303,16 +352,15 @@ export default function Landing() {
       <section className="landing-hero">
         <div className="landing-hero__copy">
           <div className="landing-kicker landing-enter landing-enter--one">
-            <span /> Engineering wird intelligent
+            <span /> Das Schema ist das Projekt
           </div>
           <h1 className="landing-enter landing-enter--two">
-            Planen.<br />
-            Rechnen.<br />
-            <span>Beweisen.</span>
+            Das Schema,<br />
+            <span>das mitrechnet.</span>
           </h1>
           <p className="landing-enter landing-enter--three">
-            Eine technische Plattform, in der das Anlagenschema nicht nur gezeichnet wird.
-            Es versteht Zusammenhänge, berechnet Hydraulik und dokumentiert Entscheidungen.
+            Beweg den Regler: Leistung, Volumenströme, Nennweiten und Ventilautorität
+            reagieren direkt im Anlagenschema. Genau so soll Gebäudetechnikplanung funktionieren.
           </p>
           <div className="landing-hero__actions landing-enter landing-enter--four">
             <Link to="/login" className="landing-button landing-button--primary">
@@ -332,6 +380,11 @@ export default function Landing() {
         <div className="landing-hero__visual landing-enter landing-enter--visual">
           <div className="landing-hero__halo" />
           <AnimatedSchema />
+          <div className="landing-hero__schema-points">
+            <div><b>01</b><span><strong>Last verändern</strong><small>Der Regler simuliert den Betriebspunkt.</small></span></div>
+            <div><b>02</b><span><strong>Hydraulik reagiert</strong><small>Volumen- und Massenströme laufen live mit.</small></span></div>
+            <div><b>03</b><span><strong>Bauteile folgen</strong><small>DN und Ventilautorität werden neu bewertet.</small></span></div>
+          </div>
         </div>
 
         <a href="#plattform" className="landing-scroll" aria-label="Weiter zur Plattform">

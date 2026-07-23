@@ -4,6 +4,7 @@ import {
   ArrowRight, Calculator, ChartNoAxesCombined, CircuitBoard,
   Database, FileCheck2, Gauge, Layers3, ShieldCheck,
 } from "lucide-react";
+import siregoLogo from "../png/logo.png";
 import "./Landing.css";
 
 const CAPABILITIES = [
@@ -41,6 +42,16 @@ const TICKER = [
   "TECHNISCHE DOKUMENTATION",
 ];
 
+function PipeLabel({ x, y, dn, flow, tone = "red", width = 108 }) {
+  return (
+    <g className={`landing-line-label landing-line-label--${tone}`} transform={`translate(${x} ${y})`}>
+      <rect width={width} height="36" rx="6" />
+      <text x={width / 2} y="14" textAnchor="middle">{dn}</text>
+      <text x={width / 2} y="28" textAnchor="middle">m&apos; {flow}</text>
+    </g>
+  );
+}
+
 function AnimatedSchema() {
   const [last, setLast] = useState(100);
   const [auto, setAuto] = useState(true);
@@ -74,6 +85,7 @@ function AnimatedSchema() {
         <span><i /> HYDRAULIKMODELL AKTIV</span>
         <span>LASTFALL {last} %</span>
       </div>
+      <div className="landing-schema__canvas">
       <svg viewBox="0 0 980 620" role="img" aria-labelledby="schema-title schema-desc">
         <title id="schema-title">Intelligentes Hydraulikschema</title>
         <desc id="schema-desc">Ein Erdsondenfeld, eine Wärmepumpe, ein Speicher und drei Verbrauchergruppen reagieren auf einen veränderbaren Lastfall.</desc>
@@ -131,6 +143,9 @@ function AnimatedSchema() {
         <path className="landing-system-line landing-system-line--blue" d="M446 480 H520 V558 H930" />
         <path className="landing-system-flow landing-system-flow--red" d="M274 352 V136 H410 V326 M446 326 V250 H526 V95 H930" />
         <path className="landing-system-flow landing-system-flow--blue" d="M274 478 V548 H410 V480 M446 480 H520 V558 H930" />
+        <PipeLabel x={294} y={112} dn="DN50" flow={`${massenstrom} kg/h`} />
+        <PipeLabel x={470} y={158} dn="DN50" flow={`${massenstrom} kg/h`} />
+        <PipeLabel x={286} y={520} dn="DN50" flow={`${massenstrom} kg/h`} tone="blue" />
 
         <g className="landing-component landing-component--source" transform="translate(224 352)">
           <rect width="100" height="126" rx="5" fill="url(#landing-card)" />
@@ -191,7 +206,13 @@ function AnimatedSchema() {
               <g className="landing-shutoff" transform={`translate(${gruppe.x} 425)`}>
                 <polygon points="-8,-9 8,-9 0,0" /><polygon points="-8,9 8,9 0,0" />
               </g>
-              <text x={gruppe.x} y="148" textAnchor="middle" className="landing-pipe-label">DN{gruppe.dn} · {Math.round(flow * 1000).toLocaleString("de-CH")} kg/h</text>
+              <PipeLabel
+                x={gruppe.x - 44}
+                y={127}
+                dn={`DN${gruppe.dn}`}
+                flow={`${Math.round(flow * 1000).toLocaleString("de-CH")} kg/h`}
+                width={88}
+              />
             </g>
           );
         })}
@@ -217,6 +238,7 @@ function AnimatedSchema() {
           <text x="118" y="45" className="landing-data-card__minor">Hub {last} %</text>
         </g>
       </svg>
+      </div>
       <div className="landing-schema__scan" />
       <label className="landing-schema__control">
         <span>ANLAGENLEISTUNG</span>
@@ -267,7 +289,7 @@ export default function Landing() {
 
       <nav className="landing-nav">
         <Link to="/" className="landing-brand" aria-label="SIREGO Heizungscockpit">
-          <span className="landing-brand__mark"><i /><i /><i /></span>
+          <img className="landing-brand__logo" src={siregoLogo} alt="" aria-hidden="true" draggable="false" />
           <span>SIREGO</span>
           <small>ENGINEERING SYSTEMS</small>
         </Link>

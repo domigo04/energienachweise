@@ -270,7 +270,8 @@ export function ErdsondenNode({ data, selected: sel }) {
     ? ` à ${Math.round(laenge).toLocaleString('de-CH')} m`
     : '';
   const sole = '#4f46e5';
-  const handle = (top, id, dashed = false) => (
+  const farbe = (dashed) => dashed ? '#7c3aed' : sole;
+  const rightHandle = (top, id, dashed = false) => (
     <Handle
       type="source"
       position={Position.Right}
@@ -278,10 +279,26 @@ export function ErdsondenNode({ data, selected: sel }) {
       style={{
         right: -6, top,
         width: 12, height: 12, borderRadius: 2,
-        background: dashed ? '#7c3aed' : sole,
+        background: farbe(dashed),
         border: '2px solid white',
-        boxShadow: `0 0 0 1px ${dashed ? '#7c3aed' : sole}`,
+        boxShadow: `0 0 0 1px ${farbe(dashed)}`,
         transform: 'translate(50%, -50%)',
+        zIndex: 10,
+      }}
+    />
+  );
+  const verticalHandle = (position, left, id, dashed = false) => (
+    <Handle
+      type="source"
+      position={position}
+      id={id}
+      style={{
+        [position === Position.Top ? 'top' : 'bottom']: -6,
+        left,
+        width: 12, height: 12, borderRadius: 2,
+        background: farbe(dashed),
+        border: '2px solid white',
+        boxShadow: `0 0 0 1px ${farbe(dashed)}`,
         zIndex: 10,
       }}
     />
@@ -293,8 +310,12 @@ export function ErdsondenNode({ data, selected: sel }) {
       border: sel ? '2px solid #3b82f6' : '2px solid transparent',
       borderRadius: 7, boxSizing: 'content-box',
     }}>
-      {handle(54, 'sole-vl')}
-      {handle(82, 'sole-rl', true)}
+      {rightHandle(54, 'sole-vl')}
+      {rightHandle(82, 'sole-rl', true)}
+      {verticalHandle(Position.Top, '42%', 'sole-vl-top')}
+      {verticalHandle(Position.Top, '58%', 'sole-rl-top', true)}
+      {verticalHandle(Position.Bottom, '42%', 'sole-vl-bottom')}
+      {verticalHandle(Position.Bottom, '58%', 'sole-rl-bottom', true)}
       <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H}
         role="img" aria-label={`${n} Duplex-Erdsonden${laengeText}`}>
         {/* Bezeichnung wie in der CAD-Vorlage. */}

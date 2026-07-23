@@ -100,6 +100,10 @@ def test_erdsondenfeld_waechst_mit_duplexsonden_und_exportiert_identisch():
     assert ews_breite(node) == 52 + 5 * 58
     assert handle_pos(node, "sole-vl") == (100 + ews_breite(node), 254)
     assert handle_pos(node, "sole-rl") == (100 + ews_breite(node), 282)
+    assert handle_pos(node, "sole-vl-top") == (100 + ews_breite(node) * 0.42, 200)
+    assert handle_pos(node, "sole-rl-top") == (100 + ews_breite(node) * 0.58, 200)
+    assert handle_pos(node, "sole-vl-bottom") == (100 + ews_breite(node) * 0.42, 486)
+    assert handle_pos(node, "sole-rl-bottom") == (100 + ews_breite(node) * 0.58, 486)
 
     svg = erzeuge_svg([node], [], {})
     assert "5 Duplex-Erdsonden à 180 m" in svg

@@ -145,6 +145,10 @@ def _handle_pos_base(node, handle: Optional[str]):
         return {
             "sole-vl": (x + w, y + 54),
             "sole-rl": (x + w, y + 82),
+            "sole-vl-top": (x + w * 0.42, y),
+            "sole-rl-top": (x + w * 0.58, y),
+            "sole-vl-bottom": (x + w * 0.42, y + h),
+            "sole-rl-bottom": (x + w * 0.58, y + h),
         }.get(handle, (x + w, y + h / 2))
     if t == "heizkreis":
         return {"vl": (x, y + 28), "rl": (x + w, y + 28),

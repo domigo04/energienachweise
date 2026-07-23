@@ -161,9 +161,9 @@ function AnimatedSchema() {
           {Array.from({ length: 13 }, (_, i) => <line key={`h-${i}`} x1="0" y1={20 + i * 50} x2="980" y2={20 + i * 50} />)}
         </g>
 
-        {/* Erdsondenfeld: fünf Duplexsonden, je zwei U-Rohre. */}
+        {/* Erdsondenfeld. */}
         <g className="landing-ews" transform="translate(18 332)">
-          <text x="75" y="-12" textAnchor="middle">5 DUPLEX · 180 M</text>
+          <text x="75" y="-12" textAnchor="middle">ERDSONDEN</text>
           <rect x="2" y="0" width="146" height="42" rx="5" />
           <line x1="10" y1="13" x2="148" y2="13" className="landing-ews__vl" />
           <line x1="10" y1="31" x2="148" y2="31" className="landing-ews__rl" />
@@ -230,10 +230,10 @@ function AnimatedSchema() {
           const dn = dnBeiLast(gruppe.dn, factor);
           return (
             <g key={gruppe.name} className={`landing-group consumer-${index}`}>
-              <path className="landing-system-line landing-system-line--red landing-system-line--branch" d={`M${gruppe.x} 111 V210`} />
-              <path className="landing-system-line landing-system-line--blue landing-system-line--branch" d={`M${gruppe.x} 455 V542`} />
-              <path className="landing-system-flow landing-system-flow--red" d={`M${gruppe.x} 111 V210`} />
-              <path className="landing-system-flow landing-system-flow--blue" d={`M${gruppe.x} 455 V542`} />
+              <path className="landing-system-line landing-system-line--red landing-system-line--branch" d={`M${gruppe.x} 111 V258`} />
+              <path className="landing-system-line landing-system-line--blue landing-system-line--branch" d={`M${gruppe.x} 400 V542`} />
+              <path className="landing-system-flow landing-system-flow--red" d={`M${gruppe.x} 111 V258`} />
+              <path className="landing-system-flow landing-system-flow--blue" d={`M${gruppe.x} 400 V542`} />
               {gruppe.bypass && <path className="landing-bypass" d={`M${gruppe.x} 220 H${gruppe.x - 46} V438 H${gruppe.x}`} />}
               <g className="landing-shutoff" transform={`translate(${gruppe.x} 178)`}>
                 <polygon points="-8,-9 8,-9 0,0" /><polygon points="-8,9 8,9 0,0" />

@@ -45,6 +45,7 @@ from app.routers.hc_export import router as hc_export_router
 from app.routers.hc_auswertung import router as hc_auswertung_router
 from app.routers.hc_bauindex import router as hc_bauindex_router
 from app.routers.hc_grobkostenschaetzung import router as hc_grobkostenschaetzung_router
+from app.routers.hc_company_admin import router as hc_company_admin_router
 
 from app.auth import get_current_user
 
@@ -65,6 +66,7 @@ app.include_router(hc_bkp_router, dependencies=_auth)
 app.include_router(hc_auswertung_router, dependencies=_auth)
 app.include_router(hc_bauindex_router, dependencies=_auth)
 app.include_router(hc_grobkostenschaetzung_router, dependencies=_auth)
+app.include_router(hc_company_admin_router, dependencies=_auth)
 
 # PDF-Export wird per window.open() geöffnet (kann kein Bearer-Token mitgeben) → offen.
 app.include_router(hc_export_router)
@@ -92,7 +94,7 @@ def _ensure_columns():
     Produktions-Login blockierte."""
     to_add = {
         "hc_project_base_data": [("gebaeudekategorie", "VARCHAR"), ("klimastation", "VARCHAR")],
-        "hc_projects": [("erstellt_von", "INTEGER")],
+        "hc_projects": [("erstellt_von", "INTEGER"), ("verantwortlicher_id", "INTEGER")],
         "ref_projekte": [
             ("anlagenkonfiguration", "VARCHAR"),
             ("installierte_leistung_neu_kw", "FLOAT"), ("flaeche_fbh_m2", "FLOAT"),
@@ -101,13 +103,14 @@ def _ensure_columns():
             ("anzahl_schaltgeraetekombinationen", "INTEGER"), ("laufmeter_rohre_heizung", "FLOAT"),
             ("bww_bei_heizung", "BOOLEAN"), ("weiterbetrieb_umbau", "BOOLEAN"), ("etappierung", "BOOLEAN"),
         ],
-        "hc_firmen": [("abo_plan", "VARCHAR")],
+        "hc_firmen": [("abo_plan", "VARCHAR"), ("is_active", "BOOLEAN")],
         "hc_users": [
             ("admin_pw_seed_fingerprint", "VARCHAR"),
             ("firma_role", "VARCHAR"),
             ("firma_admin_beantragt_at", "TIMESTAMP"),
             ("firma_admin_bestaetigt_at", "TIMESTAMP"),
             ("firma_admin_bestaetigt_von", "INTEGER"),
+            ("last_login_at", "TIMESTAMP"),
         ],
         "ref_kostenzeilen": [("gewerk", "VARCHAR")],
     }
@@ -136,6 +139,7 @@ def _ensure_columns():
         # ALTER TABLE trägt den SQLAlchemy-Python-Default nicht nach — bestehende
         # Zeilen hätten sonst z.B. abo_plan=NULL statt "kostenlos".
         conn.execute(text("UPDATE hc_firmen SET abo_plan = 'kostenlos' WHERE abo_plan IS NULL"))
+        conn.execute(text("UPDATE hc_firmen SET is_active = TRUE WHERE is_active IS NULL"))
         conn.execute(text("UPDATE hc_users SET firma_role = 'mitglied' WHERE firma_role IS NULL"))
         conn.execute(text("UPDATE ref_kostenzeilen SET gewerk = 'heizung' WHERE gewerk IS NULL"))
         conn.commit()
@@ -153,6 +157,10 @@ def _ensure_indexes():
     erstellt_von, jede Heizgruppen-Abfrage auf project_id/tenant_id."""
     idx = [
         ("ix_hc_projects_erstellt_von", "hc_projects", "erstellt_von"),
+        ("ix_hc_projects_tenant_id", "hc_projects", "tenant_id"),
+        ("ix_hc_projects_verantwortlicher_id", "hc_projects", "verantwortlicher_id"),
+        ("ix_hc_users_tenant_id", "hc_users", "tenant_id"),
+        ("ix_hc_audit_events_tenant_created_at", "hc_audit_events", "tenant_id, created_at"),
         ("ix_hc_heating_groups_project_id", "hc_heating_groups", "project_id"),
         ("ix_hc_heating_groups_tenant_id", "hc_heating_groups", "tenant_id"),
     ]

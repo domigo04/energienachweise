@@ -10,6 +10,7 @@ export const createProject = (data) => api.post(`${BASE}/projects`, data).then(r
 export const getProject = (id) => api.get(`${BASE}/projects/${id}`).then(r => r.data);
 
 export const getProjectFreigaben = (id) => api.get(`${BASE}/projects/${id}/freigaben`).then(r => r.data);
+export const getProjectAudit = (id) => api.get(`${BASE}/projects/${id}/protokoll`).then(r => r.data);
 
 export const updateProject = (id, data) => api.patch(`${BASE}/projects/${id}`, data).then(r => r.data);
 
@@ -87,6 +88,17 @@ export const getBkpPositionen = (params) =>
 // --- Auth / Admin ---
 export const getUsers = () => api.get(`${BASE}/auth/admin/users`).then(r => r.data);
 export const updateUser = (id, data) => api.patch(`${BASE}/auth/admin/users/${id}`, data).then(r => r.data);
+export const getAdminOverview = () => api.get(`${BASE}/auth/admin/overview`).then(r => r.data);
+export const updateFirma = (id, data) => api.patch(`${BASE}/auth/admin/firmen/${id}`, data).then(r => r.data);
+
+// --- Firmenverwaltung ---
+export const getFirmaAdminOverview = () => api.get(`${BASE}/firma-admin/overview`).then(r => r.data);
+export const updateFirmaMember = (id, data) =>
+  api.patch(`${BASE}/firma-admin/mitglieder/${id}`, data).then(r => r.data);
+export const updateProjektVerantwortlicher = (projectId, verantwortlicherId) =>
+  api.patch(`${BASE}/firma-admin/projekte/${projectId}/verantwortlicher`, {
+    verantwortlicher_id: verantwortlicherId,
+  }).then(r => r.data);
 
 // --- Eigenes Konto ---
 export const getMe = () => api.get(`${BASE}/auth/me`).then(r => r.data);

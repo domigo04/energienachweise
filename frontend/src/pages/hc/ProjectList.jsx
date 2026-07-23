@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, MapPin, User, CalendarDays, Trash2 } from "lucide-react";
+import { Plus, MapPin, User, UserRoundCheck, CalendarDays, Trash2 } from "lucide-react";
 import { getProjects, createProject, deleteProjectPermanent, deleteAllArchived } from "../../api/hcApi";
 import { useAuth } from "../../auth/AuthContext";
 import { GEBAEUDEKATEGORIEN, KLIMASTATIONEN } from "../../data/sia";
@@ -194,6 +194,7 @@ export default function ProjectList() {
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
                 {p.standort && <span className="inline-flex items-center gap-1"><MapPin className="size-3.5" /> {p.standort}</span>}
                 {p.kunde && <span className="inline-flex items-center gap-1"><User className="size-3.5" /> {p.kunde}</span>}
+                {p.verantwortlicher_name && <span className="inline-flex items-center gap-1"><UserRoundCheck className="size-3.5" /> {p.verantwortlicher_name}</span>}
                 <span className="inline-flex items-center gap-1"><CalendarDays className="size-3.5" /> {new Date(p.created_at).toLocaleDateString("de-CH")}</span>
               </div>
               {p.beschreibung && <p className="mt-2 line-clamp-2 text-sm text-slate-500">{p.beschreibung}</p>}

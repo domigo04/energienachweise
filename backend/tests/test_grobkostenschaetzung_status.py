@@ -10,6 +10,7 @@ from app.models.kv import Kostenschaetzung
 from app.routers.hc_grobkostenschaetzung import (
     SchaetzungStatusPatch,
     _dokumentiere_manuelle_werte,
+    _manuelle_aenderungen,
     _mit_referenzdetails,
     _trenne_referenzdetails,
     update_schaetzung_status,
@@ -32,6 +33,7 @@ class _Db:
         self.ks = ks
         self.project = project
         self.commits = 0
+        self.added = []
 
     def query(self, model):
         return _Query(self.project if model is HcProject else self.ks)
@@ -40,7 +42,7 @@ class _Db:
         self.commits += 1
 
     def add(self, obj):
-        self.added = obj
+        self.added.append(obj)
 
 
 def _ks(unvollstaendig=False):
@@ -71,7 +73,7 @@ def test_vollstaendige_schaetzung_wird_geprueft_freigegeben_und_entsperrt():
     workflow = json.loads(ks.inputs_json)["_workflow"]
     assert workflow["freigegeben_von"] == 7
     assert workflow["version_nr"] == 1
-    assert db.added.version_nr == 1
+    assert any(getattr(item, "version_nr", None) == 1 for item in db.added)
 
     result = update_schaetzung_status(3, SchaetzungStatusPatch(status="entwurf"), user, db)
     assert result == {
@@ -142,3 +144,14 @@ def test_manueller_wert_erhaelt_serverseitigen_audit_trail():
     assert notiz["begruendung"] == "Richtofferte Unternehmer"
     assert notiz["bearbeiter"] == "Dominic"
     assert notiz["geaendert_at"] != "Alt"
+
+
+def test_manuelle_bkp_betraege_werden_mit_alt_und_neuwert_protokolliert():
+    vorher = {"manuelle_betraege": {"netto": {"243.3a": 40000, "244.1": 5000}}}
+    nachher = {"manuelle_betraege": {"netto": {"243.3a": 42000}, "brutto": {"242.1": 90000}}}
+
+    assert _manuelle_aenderungen(vorher, nachher) == [
+        {"variante": "brutto", "bkp_nr": "242.1", "vorher": None, "nachher": 90000},
+        {"variante": "netto", "bkp_nr": "243.3a", "vorher": 40000, "nachher": 42000},
+        {"variante": "netto", "bkp_nr": "244.1", "vorher": 5000, "nachher": None},
+    ]

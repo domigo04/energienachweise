@@ -1,10 +1,20 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
-import { Share2, Calculator, Layers, ArrowRight, ArrowLeft, MapPin, User, Pencil, Archive, BadgeCheck, CircleDashed, LockKeyhole } from "lucide-react";
-import { getProject, getProjectFreigaben, updateProject } from "../../api/hcApi";
+import { Share2, Calculator, Layers, ArrowRight, ArrowLeft, MapPin, User, UserRoundCheck, Pencil, Archive, BadgeCheck, CircleDashed, LockKeyhole, History, ChevronDown } from "lucide-react";
+import { getProject, getProjectAudit, getProjectFreigaben, updateProject } from "../../api/hcApi";
 import { GEBAEUDEKATEGORIEN } from "../../data/sia";
 
 const HEIZUNGSSYSTEM_LABELS = { FBH: "Fussbodenheizung", HK: "Heizkörper", gemischt: "Gemischt" };
+const AUDIT_LABELS = {
+  projekt_erstellt: "Projekt erstellt",
+  projekt_aktualisiert: "Projektstammdaten geändert",
+  projekt_archiviert: "Projekt archiviert",
+  projektverantwortung_geaendert: "Projektverantwortung geändert",
+  schema_stand_gespeichert: "Schema-Stand gespeichert",
+  schema_stand_wiederhergestellt: "Schema-Stand wiederhergestellt",
+  kostenschaetzung_gespeichert: "Kostenschätzung gespeichert",
+  kostenschaetzung_status_geaendert: "Status der Kostenschätzung geändert",
+};
 
 export default function ProjectDashboard() {
   const { id } = useParams();
@@ -16,6 +26,9 @@ export default function ProjectDashboard() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [freigaben, setFreigaben] = useState(null);
+  const [protokoll, setProtokoll] = useState(null);
+  const [protokollOpen, setProtokollOpen] = useState(false);
+  const [protokollLoading, setProtokollLoading] = useState(false);
 
   useEffect(() => {
     Promise.all([getProject(id), getProjectFreigaben(id)])
@@ -44,6 +57,21 @@ export default function ProjectDashboard() {
       navigate("/projekte");
     } catch {
       setError("Archivieren fehlgeschlagen");
+    }
+  };
+
+  const toggleProtokoll = async () => {
+    const nextOpen = !protokollOpen;
+    setProtokollOpen(nextOpen);
+    if (nextOpen && protokoll === null) {
+      setProtokollLoading(true);
+      try {
+        setProtokoll(await getProjectAudit(id));
+      } catch {
+        setError("Änderungsprotokoll konnte nicht geladen werden");
+      } finally {
+        setProtokollLoading(false);
+      }
     }
   };
 
@@ -101,6 +129,7 @@ export default function ProjectDashboard() {
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-600">
                 {project.standort && <span className="inline-flex items-center gap-1"><MapPin className="size-4 text-slate-400" /> {project.standort}</span>}
                 {project.kunde && <span className="inline-flex items-center gap-1"><User className="size-4 text-slate-400" /> {project.kunde}</span>}
+                {project.verantwortlicher_name && <span className="inline-flex items-center gap-1"><UserRoundCheck className="size-4 text-slate-400" /> Verantwortlich: {project.verantwortlicher_name}</span>}
                 {project.beschreibung && <span>{project.beschreibung}</span>}
               </div>
             </div>
@@ -153,6 +182,52 @@ export default function ProjectDashboard() {
           </div>
         </div>
       )}
+
+      {/* Lazy geladen: Das Projekt bleibt schnell, solange das Protokoll nicht gebraucht wird. */}
+      <section className="card mb-6 overflow-hidden">
+        <button
+          type="button"
+          onClick={toggleProtokoll}
+          className="flex min-h-16 w-full items-center gap-3 px-4 py-4 text-left transition hover:bg-slate-50 sm:px-5"
+        >
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600">
+            <History className="size-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="font-semibold text-slate-900">Änderungsprotokoll</div>
+            <div className="text-xs text-slate-500">Bearbeiter, Änderung und genauer Zeitpunkt nachvollziehen.</div>
+          </div>
+          <ChevronDown className={`size-4 text-slate-400 transition ${protokollOpen ? "rotate-180" : ""}`} />
+        </button>
+        {protokollOpen && (
+          <div className="border-t border-slate-100">
+            {protokollLoading && <div className="px-5 py-6 text-sm text-slate-400">Protokoll wird geladen…</div>}
+            {!protokollLoading && (protokoll || []).map((event) => (
+              <article key={event.id} className="grid gap-1 border-b border-slate-100 px-4 py-3.5 last:border-b-0 sm:grid-cols-[1fr_auto] sm:px-5">
+                <div>
+                  <div className="text-sm font-medium text-slate-800">{AUDIT_LABELS[event.action] || event.action}</div>
+                  <div className="mt-0.5 text-xs text-slate-500">{event.actor_name || "System"}</div>
+                  {event.details?.manuelle_aenderungen?.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {event.details.manuelle_aenderungen.map((item) => (
+                        <span key={`${item.variante}-${item.bkp_nr}`} className="badge bg-amber-50 text-amber-800">
+                          BKP {item.bkp_nr}: {item.vorher ?? "–"} → {item.nachher ?? "–"} CHF
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <time className="text-xs tabular-nums text-slate-400">
+                  {new Intl.DateTimeFormat("de-CH", { dateStyle: "medium", timeStyle: "short" }).format(new Date(event.created_at))}
+                </time>
+              </article>
+            ))}
+            {!protokollLoading && protokoll?.length === 0 && (
+              <div className="px-5 py-6 text-sm text-slate-400">Noch keine Änderungen protokolliert.</div>
+            )}
+          </div>
+        )}
+      </section>
 
       {/* Werkzeuge für dieses Projekt */}
       {!archiviert && (

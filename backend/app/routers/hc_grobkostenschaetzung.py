@@ -25,6 +25,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.audit import add_audit_event
 from app.auth import get_current_user
 from app.calculations.grobkostenschaetzung import BKP_GRUPPEN_ALLE, berechne_grobkostenschaetzung
 from app.calculations.kostenschaetzung import netto_aus_brutto
@@ -45,6 +46,27 @@ from app.models.kv import (
 )
 
 router = APIRouter(prefix="/api/v1/grobkostenschaetzung", tags=["Grobkostenschätzung (BKP)"])
+
+
+def _manuelle_aenderungen(vorher: dict, nachher: dict) -> list:
+    """Kompakter, revisionssicherer Diff der manuell gesetzten BKP-Beträge."""
+    result = []
+    old_values = (vorher or {}).get("manuelle_betraege") or {}
+    new_values = (nachher or {}).get("manuelle_betraege") or {}
+    for variante in sorted(set(old_values) | set(new_values)):
+        old_variant = old_values.get(variante) or {}
+        new_variant = new_values.get(variante) or {}
+        for bkp_nr in sorted(set(old_variant) | set(new_variant)):
+            old = old_variant.get(bkp_nr)
+            new = new_variant.get(bkp_nr)
+            if old != new:
+                result.append({
+                    "variante": variante,
+                    "bkp_nr": bkp_nr,
+                    "vorher": old,
+                    "nachher": new,
+                })
+    return result
 
 
 class SchaetzungIn(BaseModel):
@@ -336,6 +358,7 @@ def compute_and_save(project_id: int, body: SchaetzungIn, user: User = Depends(g
         Kostenschaetzung.tenant_id == user.tenant_id,
     ).first()
     bisherige_inputs, workflow, _ = _lade_speicherinhalt(ks) if ks else ({}, {}, {})
+    bisheriger_status = workflow.get("status") or "entwurf"
     if ks and workflow.get("status") in _GESPERRTE_STATUS:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -354,6 +377,21 @@ def compute_and_save(project_id: int, body: SchaetzungIn, user: User = Depends(g
         "variante": workflow.get("variante") or "netto",
     }
     _speichere_inputs(ks, inputs, workflow, details)
+    db.flush()
+    add_audit_event(
+        db,
+        user=user,
+        action="kostenschaetzung_gespeichert",
+        project_id=project.id,
+        entity_type="kostenschaetzung",
+        entity_id=getattr(ks, "id", None),
+        details={
+            "projekt": project.name,
+            "status_vorher": bisheriger_status,
+            "status_nachher": workflow["status"],
+            "manuelle_aenderungen": _manuelle_aenderungen(bisherige_inputs, inputs),
+        },
+    )
     db.commit()
     return {"inputs": inputs, "result": result, "status": workflow["status"], "freigegeben_at": None,
             "version_nr": workflow["version_nr"], "workflow_variante": workflow["variante"]}
@@ -396,6 +434,7 @@ def update_schaetzung_status(project_id: int, body: SchaetzungStatusPatch,
             "Unvollständige Schätzungen können nicht geprüft oder freigegeben werden.",
         )
     inputs, workflow, details = _lade_speicherinhalt(ks)
+    bisheriger_status = workflow.get("status") or _status_fuer_resultat(gespeichertes_resultat, body.variante)
     if body.status == "freigegeben":
         if workflow.get("status") != "fachlich_geprueft" or workflow.get("variante", "netto") != body.variante:
             raise HTTPException(
@@ -425,6 +464,20 @@ def update_schaetzung_status(project_id: int, body: SchaetzungStatusPatch,
             "freigegeben_at": None, "freigegeben_von": None, "variante": body.variante,
         })
     _speichere_inputs(ks, inputs, workflow, details)
+    add_audit_event(
+        db,
+        user=user,
+        action="kostenschaetzung_status_geaendert",
+        project_id=project_id,
+        entity_type="kostenschaetzung",
+        entity_id=getattr(ks, "id", None),
+        details={
+            "vorher": bisheriger_status,
+            "nachher": workflow["status"],
+            "variante": workflow.get("variante") or "netto",
+            "version_nr": workflow.get("version_nr") or 0,
+        },
+    )
     db.commit()
     return {
         "status": workflow["status"], "freigegeben_at": workflow.get("freigegeben_at"),

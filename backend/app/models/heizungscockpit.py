@@ -69,6 +69,7 @@ class HcProject(Base):
     kunde = Column(String, nullable=True)
     beschreibung = Column(Text, nullable=True)
     erstellt_von = Column(Integer, nullable=True, index=True)  # Ersteller für spätere Nachvollziehbarkeit
+    verantwortlicher_id = Column(Integer, ForeignKey("hc_users.id"), nullable=True, index=True)
     status = Column(SAEnum(HcProjectStatus), default=HcProjectStatus.aktiv)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -84,6 +85,13 @@ class HcProject(Base):
         cascade="all, delete-orphan",
         order_by="HcSchema.created_at"
     )
+    verantwortlicher = relationship("User", foreign_keys=[verantwortlicher_id])
+
+    @property
+    def verantwortlicher_name(self):
+        if not self.verantwortlicher:
+            return None
+        return self.verantwortlicher.name or self.verantwortlicher.email
 
 
 class HcProjectBaseData(Base):

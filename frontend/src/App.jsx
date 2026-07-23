@@ -23,6 +23,7 @@ const AuswertungForm = lazy(() => import("./pages/auswertung/AuswertungForm"));
 const AuswertungAnalyse = lazy(() => import("./pages/auswertung/AuswertungAnalyse"));
 const GrobkostenSchaetzung = lazy(() => import("./pages/grobkosten/GrobkostenSchaetzung"));
 const BenutzerFreischaltung = lazy(() => import("./pages/admin/BenutzerFreischaltung"));
+const Firmenverwaltung = lazy(() => import("./pages/admin/Firmenverwaltung"));
 const BaupreisindexAdmin = lazy(() => import("./pages/admin/BaupreisindexAdmin"));
 const HydraulikEditor = lazy(() => import("./pages/hc/HydraulikEditor"));
 
@@ -67,6 +68,7 @@ export default function App() {
 
             <Route path="/admin/benutzer" element={<PageLoader><BenutzerFreischaltung /></PageLoader>} />
             <Route path="/admin/baupreisindex" element={<PageLoader><BaupreisindexAdmin /></PageLoader>} />
+            <Route path="/firma/verwaltung" element={<PageLoader><Firmenverwaltung /></PageLoader>} />
           </Route>
 
           {/* Schema-Editor: Vollbild-Canvas, ausserhalb der gepolsterten Shell */}

@@ -5,8 +5,8 @@ Profil (ansehen + ändern), Admin-Benutzerverwaltung. Alle Endpunkte unter
 Registrierung trennt Firma vs. Einzelperson (tenant_id): eine Einzelperson
 bekommt eine eigene, private Firma (niemand sonst sieht ihre Auswertungsdaten);
 bei "Firma" wird nach Name gesucht — existiert sie, tritt man bei, sonst wird
-sie neu angelegt. Freischaltung bleibt bei einem einzigen globalen Admin
-(Dominic) — eigene Firmen-Admins sind ein späterer Ausbauschritt.
+sie neu angelegt. Plattformadmins verwalten Mandanten; Firmenadmins verwalten
+Mitglieder und Projekte ausschliesslich innerhalb der eigenen Firma.
 """
 from datetime import datetime
 from typing import List, Literal, Optional
@@ -14,12 +14,14 @@ from typing import List, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
+from app.audit import add_audit_event
 from app.auth import create_access_token, get_current_user, hash_password, require_admin, verify_password
 from app.database import get_db
 from app.models.auth import Firma, Role, User
 from app.models.grobkostenschaetzung import Korrekturfaktor
+from app.models.heizungscockpit import HcProject
 
 router = APIRouter(prefix="/api/v1/auth", tags=["Auth"])
 
@@ -49,7 +51,9 @@ class UserOut(BaseModel):
     is_verified: bool
     is_active: bool
     created_at: datetime
+    last_login_at: Optional[datetime] = None
     firma_name: Optional[str] = None
+    firma_active: bool = True
     abo_plan: Optional[str] = None
     model_config = {"from_attributes": True}
 
@@ -58,6 +62,7 @@ def _user_out(user: User) -> UserOut:
     out = UserOut.model_validate(user)
     out.firma_name = user.firma.name if user.firma else None
     out.abo_plan = user.firma.abo_plan if user.firma else None
+    out.firma_active = user.firma.is_active if user.firma else True
     return out
 
 
@@ -78,6 +83,12 @@ class MePatch(BaseModel):
     name: Optional[str] = None
     aktuelles_passwort: Optional[str] = None
     neues_passwort: Optional[str] = None
+
+
+class AdminFirmaPatch(BaseModel):
+    name: Optional[str] = None
+    is_active: Optional[bool] = None
+    abo_plan: Optional[str] = None
 
 
 def _seed_korrekturfaktoren(db: Session, tenant_id: int):
@@ -138,8 +149,12 @@ def login(body: LoginIn, db: Session = Depends(get_db)):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "E-Mail oder Passwort falsch.")
     if not user.is_active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Konto ist deaktiviert.")
+    if user.role != Role.admin and user.firma and not user.firma.is_active:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Die Firma ist deaktiviert. Bitte den Support kontaktieren.")
     if not user.is_verified:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Konto noch nicht freigeschaltet — bitte auf die Freischaltung warten.")
+    user.last_login_at = datetime.utcnow()
+    db.commit()
     token = create_access_token(user.id)
     return TokenOut(access_token=token, user=_user_out(user))
 
@@ -151,12 +166,25 @@ def me(user: User = Depends(get_current_user)):
 
 @router.patch("/me", response_model=UserOut)
 def update_me(body: MePatch, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    changed = {}
     if body.name is not None:
+        if body.name != user.name:
+            changed["name"] = {"vorher": user.name, "nachher": body.name}
         user.name = body.name
     if body.neues_passwort:
         if not body.aktuelles_passwort or not verify_password(body.aktuelles_passwort, user.password_hash):
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Aktuelles Passwort ist falsch.")
         user.password_hash = hash_password(body.neues_passwort)
+        changed["passwort"] = {"geaendert": True}
+    if changed:
+        add_audit_event(
+            db,
+            user=user,
+            action="eigenes_profil_aktualisiert",
+            entity_type="benutzer",
+            entity_id=user.id,
+            details={"aenderungen": changed},
+        )
     db.commit()
     db.refresh(user)
     return _user_out(user)
@@ -175,6 +203,14 @@ def request_firma_admin(user: User = Depends(get_current_user), db: Session = De
         raise HTTPException(status.HTTP_409_CONFLICT, "Ein Einzelkonto benötigt keine Firmenadmin-Rolle.")
     if user.firma_admin_beantragt_at is None:
         user.firma_admin_beantragt_at = datetime.utcnow()
+        add_audit_event(
+            db,
+            user=user,
+            action="firmenadmin_beantragt",
+            entity_type="benutzer",
+            entity_id=user.id,
+            details={"benutzer": user.name or user.email},
+        )
         db.commit()
         db.refresh(user)
     return _user_out(user)
@@ -182,8 +218,102 @@ def request_firma_admin(user: User = Depends(get_current_user), db: Session = De
 
 @router.get("/admin/users", response_model=List[UserOut])
 def list_users(admin: User = Depends(require_admin), db: Session = Depends(get_db)):
-    users = db.query(User).order_by(User.created_at.desc()).all()
+    users = db.query(User).options(joinedload(User.firma)).order_by(User.created_at.desc()).all()
     return [_user_out(u) for u in users]
+
+
+@router.get("/admin/overview")
+def admin_overview(admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """Schlanke Betreiberübersicht ohne Laden von Projekt- oder Ergebnis-JSON."""
+    firmen = db.query(Firma).order_by(Firma.created_at.desc()).all()
+    user_counts = dict(
+        db.query(User.tenant_id, func.count(User.id))
+        .group_by(User.tenant_id)
+        .all()
+    )
+    active_counts = dict(
+        db.query(User.tenant_id, func.count(User.id))
+        .filter(User.is_active.is_(True), User.is_verified.is_(True))
+        .group_by(User.tenant_id)
+        .all()
+    )
+    pending_counts = dict(
+        db.query(User.tenant_id, func.count(User.id))
+        .filter(User.is_verified.is_(False))
+        .group_by(User.tenant_id)
+        .all()
+    )
+    company_admin_counts = dict(
+        db.query(User.tenant_id, func.count(User.id))
+        .filter(User.firma_role == "admin")
+        .group_by(User.tenant_id)
+        .all()
+    )
+    project_counts = dict(
+        db.query(HcProject.tenant_id, func.count(HcProject.id))
+        .group_by(HcProject.tenant_id)
+        .all()
+    )
+    companies = [{
+        "id": firma.id,
+        "name": firma.name,
+        "is_active": firma.is_active,
+        "abo_plan": firma.abo_plan,
+        "created_at": firma.created_at,
+        "user_count": user_counts.get(firma.id, 0),
+        "active_user_count": active_counts.get(firma.id, 0),
+        "pending_user_count": pending_counts.get(firma.id, 0),
+        "firma_admin_count": company_admin_counts.get(firma.id, 0),
+        "project_count": project_counts.get(firma.id, 0),
+    } for firma in firmen]
+    return {
+        "kennzahlen": {
+            "firmen": len(companies),
+            "aktive_firmen": sum(1 for item in companies if item["is_active"]),
+            "benutzer": sum(user_counts.values()),
+            "offene_registrierungen": sum(pending_counts.values()),
+            "offene_firmenadmin_antraege": db.query(User).filter(
+                User.firma_admin_beantragt_at.is_not(None),
+                User.firma_role != "admin",
+            ).count(),
+            "projekte": sum(project_counts.values()),
+        },
+        "firmen": companies,
+    }
+
+
+@router.patch("/admin/firmen/{firma_id}")
+def update_firma(
+    firma_id: int,
+    body: AdminFirmaPatch,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    firma = db.query(Firma).filter(Firma.id == firma_id).first()
+    if not firma:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Firma nicht gefunden")
+    before = {"name": firma.name, "is_active": firma.is_active, "abo_plan": firma.abo_plan}
+    if body.name is not None:
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Firmenname darf nicht leer sein")
+        firma.name = name
+    if body.is_active is not None:
+        firma.is_active = body.is_active
+    if body.abo_plan is not None:
+        firma.abo_plan = body.abo_plan.strip() or "kostenlos"
+    after = {"name": firma.name, "is_active": firma.is_active, "abo_plan": firma.abo_plan}
+    add_audit_event(
+        db,
+        user=admin,
+        action="firma_aktualisiert",
+        entity_type="firma",
+        entity_id=firma.id,
+        tenant_id=firma.id,
+        details={"vorher": before, "nachher": after},
+    )
+    db.commit()
+    return after | {"id": firma.id}
 
 
 @router.patch("/admin/users/{user_id}", response_model=UserOut)
@@ -191,6 +321,12 @@ def update_user(user_id: int, body: UserPatch, admin: User = Depends(require_adm
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Benutzer nicht gefunden")
+    before = {
+        "is_verified": user.is_verified,
+        "is_active": user.is_active,
+        "role": user.role.value,
+        "firma_role": user.firma_role,
+    }
     for field in ("is_verified", "is_active", "role"):
         val = getattr(body, field, None)
         if val is not None:
@@ -204,6 +340,21 @@ def update_user(user_id: int, body: UserPatch, admin: User = Depends(require_adm
             user.firma_admin_beantragt_at = None
             user.firma_admin_bestaetigt_at = None
             user.firma_admin_bestaetigt_von = None
+    after = {
+        "is_verified": user.is_verified,
+        "is_active": user.is_active,
+        "role": user.role.value,
+        "firma_role": user.firma_role,
+    }
+    add_audit_event(
+        db,
+        user=admin,
+        action="plattformadmin_benutzer_aktualisiert",
+        entity_type="benutzer",
+        entity_id=user.id,
+        tenant_id=user.tenant_id,
+        details={"benutzer_id": user.id, "benutzer": user.name or user.email, "vorher": before, "nachher": after},
+    )
     db.commit()
     db.refresh(user)
     return _user_out(user)

@@ -118,6 +118,8 @@ class ProjectOut(BaseModel):
     standort: Optional[str]
     kunde: Optional[str]
     beschreibung: Optional[str]
+    verantwortlicher_id: Optional[int] = None
+    verantwortlicher_name: Optional[str] = None
     status: ProjectStatus
     created_at: datetime
     updated_at: datetime

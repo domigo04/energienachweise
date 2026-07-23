@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { Building2, CreditCard, ShieldCheck, User as UserIcon } from "lucide-react";
 import { getMe, requestFirmaAdmin, updateMe } from "../api/hcApi";
 import { useAuth } from "../auth/AuthContext";
@@ -125,6 +126,11 @@ export default function KontoPage() {
           </div>
         )}
         {adminMsg && <p className="mt-3 text-xs text-slate-600">{adminMsg}</p>}
+        {(istFirmenadmin || istPlattformadmin) && (
+          <Link to="/firma/verwaltung" className="btn-secondary mt-4 w-full justify-center sm:w-auto">
+            <Building2 className="size-4" /> Firmenverwaltung öffnen
+          </Link>
+        )}
       </div>
 
       <div className="card mb-6 p-5">

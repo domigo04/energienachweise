@@ -62,6 +62,8 @@ def get_current_user(
         raise cred_exc
     if not user.is_verified:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Konto noch nicht freigeschaltet")
+    if user.role != Role.admin and user.firma and not user.firma.is_active:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Die Firma ist deaktiviert")
     return user
 
 

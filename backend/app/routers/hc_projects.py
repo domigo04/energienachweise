@@ -1,13 +1,15 @@
 from datetime import datetime
+import json
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
+from app.audit import add_audit_event
 from app.auth import get_current_user, ist_firma_admin
 from app.database import get_db
 from app.models.auth import User
-from app.models.heizungscockpit import HcHeatingGroup, HcProject, HcProjectBaseData
+from app.models.heizungscockpit import HcAuditEvent, HcHeatingGroup, HcProject, HcProjectBaseData
 from app.models.kv import Kostenschaetzung
 from app.data.projektfreigaben import kostenschaetzung_freigabe, leere_kostenschaetzung_freigabe
 from app.schemas.hc_schemas import (
@@ -50,6 +52,8 @@ def _build_detail(project: HcProject) -> ProjectDetailOut:
         standort=project.standort,
         kunde=project.kunde,
         beschreibung=project.beschreibung,
+        verantwortlicher_id=project.verantwortlicher_id,
+        verantwortlicher_name=project.verantwortlicher_name,
         status=project.status,
         base_data=project.base_data,
         created_at=project.created_at,
@@ -76,7 +80,12 @@ def _get_company_project(db: Session, user: User, project_id: int) -> HcProject:
 
 @router.get("", response_model=List[ProjectOut])
 def list_projects(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return _company_query(db, user).order_by(HcProject.created_at.desc()).all()
+    return (
+        _company_query(db, user)
+        .options(joinedload(HcProject.verantwortlicher))
+        .order_by(HcProject.created_at.desc())
+        .all()
+    )
 
 
 @router.post("", response_model=ProjectDetailOut, status_code=201)
@@ -84,6 +93,7 @@ def create_project(body: ProjectCreate, user: User = Depends(get_current_user), 
     project = HcProject(
         tenant_id=user.tenant_id,
         erstellt_von=user.id,
+        verantwortlicher_id=user.id,
         name=body.name,
         standort=body.standort,
         kunde=body.kunde,
@@ -104,6 +114,15 @@ def create_project(body: ProjectCreate, user: User = Depends(get_current_user), 
         klimastation=bd_in.klimastation if bd_in else None,
     )
     db.add(bd)
+    add_audit_event(
+        db,
+        user=user,
+        action="projekt_erstellt",
+        project_id=project.id,
+        entity_type="projekt",
+        entity_id=project.id,
+        details={"projekt": project.name},
+    )
     db.commit()
     db.refresh(project)
     return _build_detail(project)
@@ -130,13 +149,59 @@ def get_project_freigaben(project_id: int, user: User = Depends(get_current_user
     }
 
 
+@router.get("/{project_id}/protokoll")
+def get_project_audit(
+    project_id: int,
+    limit: int = 100,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Projektaktivitäten werden bewusst erst beim Öffnen des Protokolls geladen."""
+    _get_company_project(db, user, project_id)
+    rows = (
+        db.query(HcAuditEvent)
+        .filter(
+            HcAuditEvent.project_id == project_id,
+            HcAuditEvent.tenant_id == user.tenant_id,
+        )
+        .order_by(HcAuditEvent.created_at.desc(), HcAuditEvent.id.desc())
+        .limit(max(1, min(limit, 250)))
+        .all()
+    )
+    result = []
+    for row in rows:
+        try:
+            details = json.loads(row.details_json or "{}")
+        except (TypeError, ValueError):
+            details = {}
+        result.append({
+            "id": row.id,
+            "entity_type": row.entity_type,
+            "entity_id": row.entity_id,
+            "action": row.action,
+            "actor_id": row.actor_id,
+            "actor_name": row.actor_name,
+            "details": details if isinstance(details, dict) else {},
+            "created_at": row.created_at,
+        })
+    return result
+
+
 @router.patch("/{project_id}", response_model=ProjectDetailOut)
 def update_project(project_id: int, body: ProjectUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     project = _get_company_project(db, user, project_id)
 
+    before = {}
+    after = {}
     for field in ("name", "standort", "kunde", "beschreibung", "status"):
         val = getattr(body, field, None)
         if val is not None:
+            old = getattr(project, field)
+            old_value = old.value if hasattr(old, "value") else old
+            new_value = val.value if hasattr(val, "value") else val
+            if old_value != new_value:
+                before[field] = old_value
+                after[field] = new_value
             setattr(project, field, val)
     project.updated_at = datetime.utcnow()
 
@@ -148,9 +213,25 @@ def update_project(project_id: int, body: ProjectUpdate, user: User = Depends(ge
         for field in ("t_aussen", "t_innen", "heizungssystem", "warmwasser_bedarf_kw", "gebaeudekategorie", "klimastation"):
             val = getattr(body.base_data, field, None)
             if val is not None:
+                old = getattr(project.base_data, field)
+                old_value = old.value if hasattr(old, "value") else old
+                new_value = val.value if hasattr(val, "value") else val
+                if old_value != new_value:
+                    before[f"base_data.{field}"] = old_value
+                    after[f"base_data.{field}"] = new_value
                 setattr(project.base_data, field, val)
         project.base_data.updated_at = datetime.utcnow()
 
+    if after:
+        add_audit_event(
+            db,
+            user=user,
+            action="projekt_aktualisiert",
+            project_id=project.id,
+            entity_type="projekt",
+            entity_id=project.id,
+            details={"projekt": project.name, "vorher": before, "nachher": after},
+        )
     db.commit()
     db.refresh(project)
     return _build_detail(project)
@@ -159,8 +240,18 @@ def update_project(project_id: int, body: ProjectUpdate, user: User = Depends(ge
 @router.delete("/{project_id}", status_code=204)
 def archive_project(project_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     project = _get_company_project(db, user, project_id)
+    before = project.status.value if hasattr(project.status, "value") else str(project.status)
     project.status = "archiviert"
     project.updated_at = datetime.utcnow()
+    add_audit_event(
+        db,
+        user=user,
+        action="projekt_archiviert",
+        project_id=project.id,
+        entity_type="projekt",
+        entity_id=project.id,
+        details={"projekt": project.name, "vorher": before, "nachher": "archiviert"},
+    )
     db.commit()
 
 
@@ -173,6 +264,13 @@ def delete_all_archived(user: User = Depends(get_current_user), db: Session = De
     ids = [p.id for p in archivierte]
     if ids:
         db.query(Kostenschaetzung).filter(Kostenschaetzung.project_id.in_(ids)).delete(synchronize_session=False)
+        add_audit_event(
+            db,
+            user=user,
+            action="archivierte_projekte_geloescht",
+            entity_type="projekt",
+            details={"anzahl": len(ids), "projekte": [{"id": p.id, "name": p.name} for p in archivierte]},
+        )
         for p in archivierte:
             db.delete(p)
         db.commit()
@@ -188,6 +286,15 @@ def delete_project_permanent(project_id: int, user: User = Depends(get_current_u
     if not ist_firma_admin(user):
         raise HTTPException(status_code=403, detail="Nur Firmenadmins dürfen Projekte endgültig löschen")
     project = _get_company_project(db, user, project_id)
+    add_audit_event(
+        db,
+        user=user,
+        action="projekt_endgueltig_geloescht",
+        project_id=project.id,
+        entity_type="projekt",
+        entity_id=project.id,
+        details={"projekt": project.name},
+    )
     db.query(Kostenschaetzung).filter(Kostenschaetzung.project_id == project_id).delete()
     db.delete(project)
     db.commit()

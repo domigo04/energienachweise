@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { Home, FolderKanban, BarChart3, Users, TrendingUp, LogOut, Menu, X } from "lucide-react";
+import { Home, FolderKanban, BarChart3, Building2, ShieldCheck, TrendingUp, LogOut, Menu, X } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import logo from "../png/logo.png";
 
@@ -70,8 +70,11 @@ function SidebarContent({ user, onLogout, onNavigate }) {
           <div className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Verwaltung</div>
           {/* Baupreisindex für ALLE Nutzer: jede Firma pflegt ihre eigenen Indexwerte */}
           <NavItem to="/admin/baupreisindex" label="Baupreisindex" icon={TrendingUp} onNavigate={onNavigate} />
+          {(user?.role === "admin" || user?.firma_role === "admin") && (
+            <NavItem to="/firma/verwaltung" label="Meine Firma" icon={Building2} onNavigate={onNavigate} />
+          )}
           {user?.role === "admin" && (
-            <NavItem to="/admin/benutzer" label="Benutzer" icon={Users} onNavigate={onNavigate} />
+            <NavItem to="/admin/benutzer" label="Plattform" icon={ShieldCheck} onNavigate={onNavigate} />
           )}
         </div>
       </nav>

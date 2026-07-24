@@ -6,6 +6,41 @@ import {
 } from "lucide-react";
 import { getProject, getProjectAudit, getProjectStatus, updateProject } from "../../api/hcApi";
 import ProjectModuleNode from "../../components/hc/ProjectModuleNode";
+import { GEBAEUDEKATEGORIEN } from "../../data/sia";
+
+const HEIZUNGSSYSTEME = [
+  { value: "gemischt", label: "Gemischt" },
+  { value: "FBH", label: "Fussbodenheizung" },
+  { value: "HK", label: "Heizkörper" },
+];
+
+// Formularzustand aus dem Projekt ableiten — inkl. der zentralen Grunddaten
+// (Quelle A), damit EBF & Co. jederzeit wieder bearbeitbar sind (§9).
+function formFromProject(p) {
+  const bd = p.base_data || {};
+  return {
+    name: p.name || "", standort: p.standort || "", kunde: p.kunde || "", beschreibung: p.beschreibung || "",
+    base_data: {
+      gebaeudekategorie: bd.gebaeudekategorie || "",
+      ebf_m2: bd.ebf_m2 ?? "",
+      anzahl_nutzungseinheiten: bd.anzahl_nutzungseinheiten ?? "",
+      projektart: bd.projektart || "",
+      region: bd.region || "",
+      zertifizierung: bd.zertifizierung || "",
+      heizungssystem: bd.heizungssystem || "gemischt",
+      t_aussen: bd.t_aussen ?? -8.0,
+      t_innen: bd.t_innen ?? 20.0,
+      warmwasser_bedarf_kw: bd.warmwasser_bedarf_kw ?? "",
+      klimastation: bd.klimastation || "",
+    },
+  };
+}
+
+const numOrNull = (v) => (v === "" || v == null ? null : Number(v));
+
+// Einzelnes base_data-Feld im Formular setzen, ohne die übrigen zu verlieren.
+const setBd = (setForm, key, value) =>
+  setForm((f) => ({ ...f, base_data: { ...f.base_data, [key]: value } }));
 
 const AUDIT_LABELS = {
   projekt_erstellt: "Projekt erstellt",
@@ -59,17 +94,37 @@ export default function ProjectDashboard() {
     Promise.all([getProject(id), getProjectStatus(id)])
       .then(([p, s]) => {
         setProject(p); setStatus(s);
-        setForm({ name: p.name, standort: p.standort || "", kunde: p.kunde || "", beschreibung: p.beschreibung || "" });
+        setForm(formFromProject(p));
       })
       .catch(() => setError("Projekt konnte nicht geladen werden"))
       .finally(() => setLoading(false));
   }, [id]);
 
+  const openEdit = () => { setForm(formFromProject(project)); setEditing(true); };
+
   const handleSave = async () => {
     setSaving(true);
     try {
-      const updated = await updateProject(id, form);
+      const bd = form.base_data || {};
+      const payload = {
+        name: form.name, standort: form.standort, kunde: form.kunde, beschreibung: form.beschreibung,
+        base_data: {
+          t_aussen: numOrNull(bd.t_aussen) ?? -8.0,
+          t_innen: numOrNull(bd.t_innen) ?? 20.0,
+          heizungssystem: bd.heizungssystem || "gemischt",
+          warmwasser_bedarf_kw: numOrNull(bd.warmwasser_bedarf_kw),
+          klimastation: bd.klimastation || null,
+          gebaeudekategorie: bd.gebaeudekategorie || null,
+          ebf_m2: numOrNull(bd.ebf_m2),
+          anzahl_nutzungseinheiten: numOrNull(bd.anzahl_nutzungseinheiten),
+          projektart: bd.projektart || null,
+          region: bd.region || null,
+          zertifizierung: bd.zertifizierung || null,
+        },
+      };
+      const updated = await updateProject(id, payload);
       setProject(updated);
+      setForm(formFromProject(updated));
       setEditing(false);
       getProjectStatus(id).then(setStatus).catch(() => {});
     } catch {
@@ -120,7 +175,7 @@ export default function ProjectDashboard() {
       metric: project.standort || project.kunde || "—",
       secondaryMetric: m.project_data ? `${m.project_data.known}/${m.project_data.total} Grunddaten` : null,
       warnings: m.project_data?.warnings || 0,
-      onClick: () => setEditing(true),
+      onClick: openEdit,
     },
     schema: {
       title: "Anlagenschema", icon: Share2, status: m.schema?.status,
@@ -164,13 +219,55 @@ export default function ProjectDashboard() {
       {/* §11 — Projekt-Kopf mit Fortschritt */}
       <div className="card mb-6 p-6">
         {editing ? (
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div><label className="label">Projektname *</label><input className="input" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} /></div>
-              <div><label className="label">Standort</label><input className="input" value={form.standort} onChange={(e) => setForm((f) => ({ ...f, standort: e.target.value }))} /></div>
-              <div><label className="label">Kunde</label><input className="input" value={form.kunde} onChange={(e) => setForm((f) => ({ ...f, kunde: e.target.value }))} /></div>
-              <div><label className="label">Beschreibung</label><input className="input" value={form.beschreibung} onChange={(e) => setForm((f) => ({ ...f, beschreibung: e.target.value }))} /></div>
+          <div className="space-y-5">
+            <div>
+              <h2 className="mb-3 text-sm font-bold text-slate-800">Projektinformationen</h2>
+              <p className="-mt-2 mb-3 text-xs text-slate-500">Zentrale Projektdaten — einmal hier gepflegt, überall gelesen (Kostenschätzung, Mengen).</p>
             </div>
+
+            {/* Allgemein */}
+            <div>
+              <div className="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-400">Allgemein</div>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div><label className="label">Projektname *</label><input className="input" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} /></div>
+                <div><label className="label">Kunde</label><input className="input" value={form.kunde} onChange={(e) => setForm((f) => ({ ...f, kunde: e.target.value }))} /></div>
+                <div><label className="label">Standort</label><input className="input" value={form.standort} onChange={(e) => setForm((f) => ({ ...f, standort: e.target.value }))} /></div>
+                <div><label className="label">Beschreibung</label><input className="input" value={form.beschreibung} onChange={(e) => setForm((f) => ({ ...f, beschreibung: e.target.value }))} /></div>
+              </div>
+            </div>
+
+            {/* Gebäude — die kostenrelevanten Grunddaten (EBF & Co.) */}
+            <div>
+              <div className="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-400">Gebäude</div>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <div><label className="label">Nutzung</label>
+                  <select className="input" value={form.base_data.gebaeudekategorie} onChange={(e) => setBd(setForm, "gebaeudekategorie", e.target.value)}>
+                    <option value="">— wählen —</option>
+                    {GEBAEUDEKATEGORIEN.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
+                  </select></div>
+                <div><label className="label">EBF [m²]</label><input type="number" className="input" value={form.base_data.ebf_m2} onChange={(e) => setBd(setForm, "ebf_m2", e.target.value)} placeholder="z.B. 1420" /></div>
+                <div><label className="label">Nutzungseinheiten</label><input type="number" className="input" value={form.base_data.anzahl_nutzungseinheiten} onChange={(e) => setBd(setForm, "anzahl_nutzungseinheiten", e.target.value)} placeholder="z.B. 10" /></div>
+                <div><label className="label">Projektart</label><input className="input" value={form.base_data.projektart} onChange={(e) => setBd(setForm, "projektart", e.target.value)} placeholder="Neubau / Sanierung / Umbau" /></div>
+                <div><label className="label">Region</label><input className="input" value={form.base_data.region} onChange={(e) => setBd(setForm, "region", e.target.value)} placeholder="z.B. Zürich" /></div>
+                <div><label className="label">Zertifizierung</label><input className="input" value={form.base_data.zertifizierung} onChange={(e) => setBd(setForm, "zertifizierung", e.target.value)} placeholder="z.B. Minergie" /></div>
+              </div>
+            </div>
+
+            {/* Auslegung */}
+            <div>
+              <div className="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-400">Auslegung</div>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <div><label className="label">Heizungssystem</label>
+                  <select className="input" value={form.base_data.heizungssystem} onChange={(e) => setBd(setForm, "heizungssystem", e.target.value)}>
+                    {HEIZUNGSSYSTEME.map((h) => <option key={h.value} value={h.value}>{h.label}</option>)}
+                  </select></div>
+                <div><label className="label">Auslegungstemperatur [°C]</label><input type="number" className="input" value={form.base_data.t_aussen} onChange={(e) => setBd(setForm, "t_aussen", e.target.value)} /></div>
+                <div><label className="label">Raumtemperatur [°C]</label><input type="number" className="input" value={form.base_data.t_innen} onChange={(e) => setBd(setForm, "t_innen", e.target.value)} /></div>
+                <div><label className="label">BWW-Bedarf [kW]</label><input type="number" className="input" value={form.base_data.warmwasser_bedarf_kw} onChange={(e) => setBd(setForm, "warmwasser_bedarf_kw", e.target.value)} placeholder="optional" /></div>
+                <div><label className="label">Klimastation</label><input className="input" value={form.base_data.klimastation} onChange={(e) => setBd(setForm, "klimastation", e.target.value)} placeholder="optional" /></div>
+              </div>
+            </div>
+
             <div className="flex gap-2">
               <button onClick={handleSave} disabled={saving} className="btn-primary">{saving ? "Speichere…" : "Speichern"}</button>
               <button onClick={() => setEditing(false)} className="btn-secondary">Abbrechen</button>
@@ -199,7 +296,7 @@ export default function ProjectDashboard() {
                 </div>
               )}
               <div className="flex gap-2">
-                <button onClick={() => setEditing(true)} className="btn-secondary min-h-11"><Pencil className="size-4" /> Bearbeiten</button>
+                <button onClick={openEdit} className="btn-secondary min-h-11"><Pencil className="size-4" /> Bearbeiten</button>
                 {!archiviert && (
                   <button onClick={handleArchive} aria-label="Projekt archivieren" className="btn-ghost min-h-11 min-w-11 text-slate-400 hover:text-red-500"><Archive className="size-4" /></button>
                 )}

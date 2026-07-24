@@ -136,7 +136,7 @@ def mengen_aus_schema(graph_json) -> dict:
     hat_speichervolumen = False
     generator_power_summe = 0.0
     hat_generator_power = False
-    generator_type: Optional[str] = None  # erster erkannter strukturierter Typ
+    generator_types: list[str] = []  # alle erkannten Typen, für Merge nach der Schleife
 
     for n in nodes:
         t = n.get("type")
@@ -145,8 +145,8 @@ def mengen_aus_schema(graph_json) -> dict:
         if t == "erzeuger":
             anzahl_erzeuger += 1
             g = _generator_type_von_node(d)
-            if g is not None and generator_type is None:
-                generator_type = g
+            if g is not None:
+                generator_types.append(g)
             p = _num(d.get("generator_power_kw"))
             if p is None:
                 p = _num(d.get("leistung_kw"))
@@ -154,10 +154,12 @@ def mengen_aus_schema(graph_json) -> dict:
                 generator_power_summe += p
                 hat_generator_power = True
         elif t == "erdsonden":
-            anzahl_erdsonden += 1
-            # §6: strukturierte Felder bevorzugt, sonst die bisherigen deutschen.
+            # §11: die tatsächliche Sondenzahl summieren, NICHT die Felder zählen
+            # (4 Sonden dürfen nicht als 1 erscheinen). Ohne Angabe zählt ein Feld
+            # als mindestens eine Sonde.
             anzahl = _num(d.get("probe_count")) or _num(d.get("sonden_anzahl"))
             tiefe = _num(d.get("probe_depth_m")) or _num(d.get("sonden_laenge_m"))
+            anzahl_erdsonden += int(anzahl) if (anzahl and anzahl > 0) else 1
             if anzahl is not None and tiefe is not None and anzahl > 0 and tiefe > 0:
                 bohrmeter_summe += anzahl * tiefe
                 hat_bohrmeter = True
@@ -226,6 +228,18 @@ def mengen_aus_schema(graph_json) -> dict:
         mengen["bohrmeter"] = round(bohrmeter_summe, 3)
     if hat_speichervolumen:
         mengen["speichervolumen_l"] = round(speichervolumen_summe, 3)
+    # §11: mehrere Erzeuger zu einem Typ verdichten. Gleicher Typ bleibt erhalten
+    # (2× EWS-WP → ews_wp), verschiedene Familien werden hybrid (EWS-WP + Gas).
+    generator_type = _merge_generator_types(generator_types)
     if generator_type is not None:
         mengen["generator_type"] = generator_type
     return mengen
+
+
+def _merge_generator_types(types: list[str]) -> Optional[str]:
+    distinct = set(types)
+    if not distinct:
+        return None
+    if len(distinct) == 1:
+        return next(iter(distinct))
+    return "hybrid"

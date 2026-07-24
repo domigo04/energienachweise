@@ -30,6 +30,7 @@ STATUS_UNBEKANNT = "unbekannt"                    # nirgends vorhanden
 
 # Kombinationsregeln
 COMBINE_OVERRIDE = "override"                     # Vorrang: override > extern > projekt > schema
+COMBINE_SCHEMA_FIRST = "schema_first"            # echte Schemawerte: override > schema > extern (§11)
 COMBINE_SUM = "sum_schema_external"              # Schema + Ergänzung addieren (z. B. Wärmezähler)
 
 
@@ -56,25 +57,37 @@ PARAMETER: list[ParamDef] = [
     ParamDef("projektart", "Projektart", "grunddaten", "text", project_field="projektart"),
     ParamDef("region", "Region", "grunddaten", "text", project_field="region"),
     ParamDef("zertifizierung", "Zertifizierung", "grunddaten", "text", project_field="zertifizierung"),
-    # Wärmeerzeugung (Quelle B + Ergänzung)
-    ParamDef("generator_type", "Erzeugertyp", "erzeugung", "text", schema_key="generator_type"),
+    # Wärmeerzeugung (Quelle B + Ergänzung). Echte Schemawerte: Schema schlägt
+    # eine externe Ergänzung, nur der Override gewinnt (COMBINE_SCHEMA_FIRST, §11).
+    ParamDef("generator_type", "Erzeugertyp", "erzeugung", "text", schema_key="generator_type",
+             combine=COMBINE_SCHEMA_FIRST),
     ParamDef("generator_power_kw", "Erzeugerleistung", "erzeugung", "zahl", "kW",
-             schema_key="generator_power_kw"),
-    ParamDef("leistung_kw", "Verbraucherleistung", "erzeugung", "zahl", "kW", schema_key="leistung_kw"),
-    ParamDef("anzahl_erzeuger", "Wärmeerzeuger", "erzeugung", "ganzzahl", schema_key="anzahl_erzeuger"),
-    ParamDef("anzahl_erdsonden", "Erdsonden", "erzeugung", "ganzzahl", schema_key="anzahl_erdsonden"),
+             schema_key="generator_power_kw", combine=COMBINE_SCHEMA_FIRST),
+    ParamDef("leistung_kw", "Verbraucherleistung", "erzeugung", "zahl", "kW", schema_key="leistung_kw",
+             combine=COMBINE_SCHEMA_FIRST),
+    ParamDef("anzahl_erzeuger", "Wärmeerzeuger", "erzeugung", "ganzzahl", schema_key="anzahl_erzeuger",
+             combine=COMBINE_SCHEMA_FIRST),
+    ParamDef("anzahl_erdsonden", "Erdsonden", "erzeugung", "ganzzahl", schema_key="anzahl_erdsonden",
+             combine=COMBINE_SCHEMA_FIRST),
     # §6/§7: Bohrmeter und Speichervolumen leitet das Schema jetzt live ab
-    # (anzahl×länge bzw. summierte Einzelinhalte); Ergänzung bleibt möglich.
-    ParamDef("bohrmeter", "Bohrmeter", "erzeugung", "zahl", "m", schema_key="bohrmeter"),
-    ParamDef("anzahl_speicher", "Speicher", "erzeugung", "ganzzahl", schema_key="anzahl_speicher"),
+    # (anzahl×länge bzw. summierte Einzelinhalte); Ergänzung bleibt Fallback.
+    ParamDef("bohrmeter", "Bohrmeter", "erzeugung", "zahl", "m", schema_key="bohrmeter",
+             combine=COMBINE_SCHEMA_FIRST),
+    ParamDef("anzahl_speicher", "Speicher", "erzeugung", "ganzzahl", schema_key="anzahl_speicher",
+             combine=COMBINE_SCHEMA_FIRST),
     ParamDef("speichervolumen_l", "Speichervolumen", "erzeugung", "zahl", "l",
-             schema_key="speichervolumen_l"),
+             schema_key="speichervolumen_l", combine=COMBINE_SCHEMA_FIRST),
     # Wärmeverteilung (Quelle B + Ergänzung)
-    ParamDef("anzahl_heizgruppen", "Heizgruppen", "verteilung", "ganzzahl", schema_key="anzahl_heizgruppen"),
-    ParamDef("anzahl_verteiler", "Verteiler", "verteilung", "ganzzahl", schema_key="anzahl_verteiler"),
-    ParamDef("anzahl_pumpen", "Pumpen", "verteilung", "ganzzahl", schema_key="anzahl_pumpen"),
-    ParamDef("anzahl_ventile_2weg", "2-Weg-Ventile", "verteilung", "ganzzahl", schema_key="anzahl_ventile_2weg"),
-    ParamDef("anzahl_ventile_3weg", "3-Weg-Ventile", "verteilung", "ganzzahl", schema_key="anzahl_ventile_3weg"),
+    ParamDef("anzahl_heizgruppen", "Heizgruppen", "verteilung", "ganzzahl", schema_key="anzahl_heizgruppen",
+             combine=COMBINE_SCHEMA_FIRST),
+    ParamDef("anzahl_verteiler", "Verteiler", "verteilung", "ganzzahl", schema_key="anzahl_verteiler",
+             combine=COMBINE_SCHEMA_FIRST),
+    ParamDef("anzahl_pumpen", "Pumpen", "verteilung", "ganzzahl", schema_key="anzahl_pumpen",
+             combine=COMBINE_SCHEMA_FIRST),
+    ParamDef("anzahl_ventile_2weg", "2-Weg-Ventile", "verteilung", "ganzzahl", schema_key="anzahl_ventile_2weg",
+             combine=COMBINE_SCHEMA_FIRST),
+    ParamDef("anzahl_ventile_3weg", "3-Weg-Ventile", "verteilung", "ganzzahl", schema_key="anzahl_ventile_3weg",
+             combine=COMBINE_SCHEMA_FIRST),
     ParamDef("rohrmeter", "Rohrmeter", "verteilung", "zahl", "m"),                # nur Ergänzung
     # Wärmemessung (Quelle B + Ergänzung, additiv — der §3-Sonderfall)
     ParamDef("anzahl_waermezaehler", "Wärmezähler", "messung", "ganzzahl",
@@ -109,6 +122,20 @@ def _kombiniere(pd: ParamDef, schema_value, project_value, external_value, manua
         if schema_value is not None and external_value is not None:
             return sum(teile), "schema+extern"
         return (schema_value, "schema") if schema_value is not None else (external_value, "extern")
+    if pd.combine == COMBINE_SCHEMA_FIRST:
+        # §11: Für echte Schemawerte (Bohrmeter, Speichervolumen, Zählungen …)
+        # gewinnt der bewusste Override, dann das Schema, erst dann eine externe
+        # Ergänzung als Fallback. So übersteuert eine manuelle Ergänzung nicht
+        # stillschweigend, was das Schema tatsächlich weiss.
+        for kandidat, quelle in (
+            (manual_override, "manuell"),
+            (schema_value, "schema"),
+            (external_value, "extern"),
+            (project_value, "projekt"),
+        ):
+            if kandidat is not None:
+                return kandidat, quelle
+        return None, None
     # COMBINE_OVERRIDE — Vorrang
     for kandidat, quelle in (
         (manual_override, "manuell"),

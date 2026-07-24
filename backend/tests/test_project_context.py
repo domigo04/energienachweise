@@ -296,6 +296,59 @@ def test_generator_type_freitext_nur_fallback():
     assert "generator_type" not in mengen_aus_schema({"nodes": [_n("e", "erzeuger", {"typ": "???"})]})
 
 
+def test_erdsonden_zaehlt_tatsaechliche_sonden():
+    """§11: Ein Feld mit 4 Sonden zählt als 4, nicht als 1."""
+    graph = {"nodes": [_n("es1", "erdsonden", {"sonden_anzahl": 4, "sonden_laenge_m": 180})]}
+    assert mengen_aus_schema(graph)["anzahl_erdsonden"] == 4
+    # Mehrere Felder werden summiert.
+    graph2 = {"nodes": [
+        _n("es1", "erdsonden", {"sonden_anzahl": 4, "sonden_laenge_m": 180}),
+        _n("es2", "erdsonden", {"sonden_anzahl": 2, "sonden_laenge_m": 150}),
+    ]}
+    assert mengen_aus_schema(graph2)["anzahl_erdsonden"] == 6
+    # Feld ohne Sondenangabe zählt als mindestens eine Sonde (nicht 0).
+    assert mengen_aus_schema({"nodes": [_n("es", "erdsonden", {})]})["anzahl_erdsonden"] == 1
+
+
+def test_generator_type_merge_mehrere_erzeuger():
+    """§11: gleicher Typ bleibt, verschiedene Familien werden hybrid."""
+    zwei_ews = {"nodes": [
+        _n("e1", "erzeuger", {"generator_type": "ews_wp"}),
+        _n("e2", "erzeuger", {"generator_type": "ews_wp"}),
+    ]}
+    assert mengen_aus_schema(zwei_ews)["generator_type"] == "ews_wp"
+    ews_plus_gas = {"nodes": [
+        _n("e1", "erzeuger", {"generator_type": "ews_wp"}),
+        _n("e2", "erzeuger", {"generator_type": "gas"}),
+    ]}
+    assert mengen_aus_schema(ews_plus_gas)["generator_type"] == "hybrid"
+
+
+def test_schemawert_override_prioritaet():
+    """§11: Bei echten Schemawerten gilt manual_override → schema → extern."""
+    graph = {"nodes": [_n("es1", "erdsonden", {"sonden_anzahl": 4, "sonden_laenge_m": 180})]}  # schema 720 m
+    # Schema schlägt eine externe Ergänzung (Schema ist die primäre Quelle).
+    ext_row = [SimpleNamespace(param_key="bohrmeter", external_value="600",
+                              manual_override=None, confidence=None, quelle_notiz=None,
+                              updated_by_name=None)]
+    ctx = build_context(base_data=None, graph_json=graph, parameter_rows=ext_row)
+    bohr = _param(ctx, "bohrmeter")
+    assert bohr["effective_value"] == 720.0
+    assert bohr["source"] == "schema"
+    # Override gewinnt immer.
+    ovr_row = [SimpleNamespace(param_key="bohrmeter", external_value="600",
+                              manual_override="800", confidence=None, quelle_notiz="Bohrprotokoll",
+                              updated_by_name="Dominic")]
+    ctx2 = build_context(base_data=None, graph_json=graph, parameter_rows=ovr_row)
+    bohr2 = _param(ctx2, "bohrmeter")
+    assert bohr2["effective_value"] == 800.0
+    assert bohr2["source"] == "manuell"
+    # Ohne Schemawert dient die externe Ergänzung als Fallback.
+    ctx3 = build_context(base_data=None, graph_json={"nodes": []}, parameter_rows=ext_row)
+    assert _param(ctx3, "bohrmeter")["effective_value"] == 600.0
+    assert _param(ctx3, "bohrmeter")["source"] == "extern"
+
+
 def test_generator_type_landet_im_context():
     graph = {"nodes": [_n("e1", "erzeuger", {"generator_type": "ews_wp", "leistung_kw": "82"})]}
     ctx = build_context(base_data=None, graph_json=graph, parameter_rows=[])
@@ -410,6 +463,7 @@ def test_golden_project_kompletter_context():
 
     assert eff["generator_type"] == "ews_wp"
     assert eff["generator_power_kw"] == 82.0
+    assert eff["anzahl_erdsonden"] == 4          # §11: Sonden summiert, nicht Felder gezählt
     assert eff["bohrmeter"] == 720.0             # 4 × 180 m
     assert eff["speichervolumen_l"] == 1500.0
     assert eff["anzahl_speicher"] == 2

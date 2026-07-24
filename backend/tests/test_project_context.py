@@ -106,20 +106,20 @@ def test_zaehlt_eigenstaendige_bauteile():
 
 
 def test_gruppen_default_pumpe_und_ventiltyp():
-    """Gruppe ohne explizite Flags: hat Pumpe + 3-Weg-Ventil (Einspritz-Default).
-    Drosselgruppe: keine Pumpe, 2-Weg-Ventil."""
+    """Ventiltyp je Schaltung (Vorgabe Dominic): Einspritz + Drossel → 2-Weg,
+    nur Beimisch → 3-Weg. Drosselgruppe hat zudem keine Pumpe."""
     graph = {"nodes": [
-        _n("g1", "gruppe", {"q_kw": "20"}),                      # Default einspritz
-        _n("g2", "gruppe", {"q_kw": "10", "schaltung": "drossel"}),
-        _n("g3", "gruppe", {"q_kw": "5", "hat_pumpe": False}),   # Pumpe abgewählt
+        _n("g1", "gruppe", {"q_kw": "20"}),                      # Default einspritz → 2-Weg
+        _n("g2", "gruppe", {"q_kw": "10", "schaltung": "drossel"}),  # Drossel → 2-Weg, keine Pumpe
+        _n("g3", "gruppe", {"q_kw": "5", "hat_pumpe": False, "schaltung": "beimisch"}),  # Beimisch → 3-Weg
     ]}
     m = mengen_aus_schema(graph)
     assert m["anzahl_heizgruppen"] == 3
     # g1 Pumpe + g2 keine (drossel) + g3 keine (abgewählt) = 1
     assert m["anzahl_pumpen"] == 1
-    # g1 einspritz→3-Weg, g3 einspritz→3-Weg = 2 ; g2 drossel→2-Weg = 1
-    assert m["anzahl_ventile_3weg"] == 2
-    assert m["anzahl_ventile_2weg"] == 1
+    # g1 einspritz→2-Weg, g2 drossel→2-Weg = 2 ; g3 beimisch→3-Weg = 1
+    assert m["anzahl_ventile_2weg"] == 2
+    assert m["anzahl_ventile_3weg"] == 1
     assert m["leistung_kw"] == 35.0           # 20 + 10 + 5
 
 

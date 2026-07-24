@@ -14,7 +14,8 @@ Zählregeln (verankert in den echten Graph-Daten und der Hydraulik-Semantik):
 
 - Pumpe in der Gruppe: `schaltung != 'drossel'` und `hat_pumpe is not False`
   (identisch zu hydraulik.py::_strang_ausruestung, PHYSIK §6).
-- Ventiltyp der Gruppe: Einspritz/Beimisch → 3-Weg, Drossel → 2-Weg.
+- Ventiltyp der Gruppe (Vorgabe Dominic): Beimischschaltung → 3-Weg-Ventil;
+  Einspritz- und Drosselschaltung → 2-Weg-Ventil.
 - Wärmezähler in der Gruppe: nur bei ausdrücklichem `hat_wz is True`
   (kein stiller Default — nicht jede Gruppe wird gemessen, §3).
 - Bohrmeter (§6): pro Erdsondenfeld anzahl × länge, über alle Felder summiert.
@@ -193,10 +194,12 @@ def mengen_aus_schema(graph_json) -> dict:
             if _hat_pumpe(d):
                 anzahl_pumpen += 1
             if _hat_ventil(d):
-                if _schaltung(d) == "drossel":
-                    anzahl_ventile_2weg += 1
-                else:
+                # Nur die Beimischschaltung braucht ein 3-Weg-Ventil; Einspritz-
+                # und Drosselschaltung arbeiten mit einem 2-Weg-Ventil.
+                if _schaltung(d) == "beimisch":
                     anzahl_ventile_3weg += 1
+                else:
+                    anzahl_ventile_2weg += 1
             if d.get("hat_wz") is True:
                 anzahl_waermezaehler += 1
 

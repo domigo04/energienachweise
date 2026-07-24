@@ -2929,7 +2929,14 @@ function EditorInner() {
     snap();
     const vonQuelle = cs.handleType !== 'target';
     const hit = naechsteLeitung(p, activeLayer.id, 22 / Math.max(getZoom(), 0.2));
-    const junctionPoint = hit ? { x:hit.x, y:hit.y } : p;
+
+    // Grundsatz: eine hydraulische Leitung entsteht nur durch eine BEWUSSTE
+    // Aktion. Ein im Leeren losgelassener Handle-Zug (bei vielen Anschlüssen
+    // schnell versehentlich ausgelöst) darf keine zufällige Leitung erzeugen.
+    // Nur das Ablegen direkt auf einer bestehenden Leitung bildet bewusst ein
+    // T-Stück; zum freien Zeichnen dienen die Leitungswerkzeuge (p/l).
+    if (!hit) return;
+    const junctionPoint = { x:hit.x, y:hit.y };
 
     let branch = {
       id:newId(),
@@ -2963,11 +2970,6 @@ function EditorInner() {
       ...(returnPair?.createdNodes || []),
     ]);
     const pairedEdges = returnPair ? [returnPair.returnEdge] : [];
-
-    if (!hit) {
-      setEdges(items => [...items, branch, ...pairedEdges]);
-      return;
-    }
 
     // Bewusstes Ablegen des Leitungsendes auf einer Leitung erzeugt ein echtes
     // T-Stück. Die bestehende Leitung wird topologisch in zwei Teile geteilt;

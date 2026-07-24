@@ -46,6 +46,7 @@ from app.routers.hc_auswertung import router as hc_auswertung_router
 from app.routers.hc_bauindex import router as hc_bauindex_router
 from app.routers.hc_grobkostenschaetzung import router as hc_grobkostenschaetzung_router
 from app.routers.hc_company_admin import router as hc_company_admin_router
+from app.routers.hc_lv_import import router as hc_lv_import_router
 
 from app.auth import get_current_user
 
@@ -67,6 +68,7 @@ app.include_router(hc_auswertung_router, dependencies=_auth)
 app.include_router(hc_bauindex_router, dependencies=_auth)
 app.include_router(hc_grobkostenschaetzung_router, dependencies=_auth)
 app.include_router(hc_company_admin_router, dependencies=_auth)
+app.include_router(hc_lv_import_router, dependencies=_auth)
 
 # PDF-Export wird per window.open() geöffnet (kann kein Bearer-Token mitgeben) → offen.
 app.include_router(hc_export_router)
@@ -80,6 +82,7 @@ from app.models.heizungscockpit import (  # noqa: F401 — Tabellen vor create_a
 from app.models.auth import Firma, User, Role  # noqa: F401
 from app.models.kv import RefProjekt, RefKostenzeile, RefProjektGewerk, Kostenschaetzung, BauindexEintrag  # noqa: F401
 from app.models.grobkostenschaetzung import Korrekturfaktor  # noqa: F401
+from app.models.lv_import import LvImport, LvImportFeature, LvImportCost  # noqa: F401
 from app.auth import hash_password
 
 

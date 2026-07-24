@@ -1,7 +1,7 @@
-import React, { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import {
-  Share2, Calculator, Waves, ListChecks, FileText, ClipboardList,
+  Share2, Calculator, Waves, ListChecks, FileText, ClipboardList, Workflow,
   ArrowLeft, MapPin, User, UserRoundCheck, Pencil, Archive, History, ChevronDown,
 } from "lucide-react";
 import { getProject, getProjectAudit, getProjectStatus, updateProject } from "../../api/hcApi";
@@ -18,27 +18,6 @@ const AUDIT_LABELS = {
   kostenschaetzung_gespeichert: "Kostenschätzung gespeichert",
   kostenschaetzung_status_geaendert: "Status der Kostenschätzung geändert",
 };
-
-// §14 — echte Datenabhängigkeiten zwischen den Modulen. Das UI erklärt die
-// Architektur, ohne dass man Text lesen muss.
-const CONNECTIONS = [
-  ["project_data", "cost_estimate"],
-  ["schema", "hydraulics"],
-  ["schema", "quantities"],
-  ["quantities", "cost_estimate"],
-  ["hydraulics", "documentation"],
-  ["cost_estimate", "documentation"],
-];
-
-function relatedKeys(key) {
-  if (!key) return null;
-  const set = new Set([key]);
-  for (const [a, b] of CONNECTIONS) {
-    if (a === key) set.add(b);
-    if (b === key) set.add(a);
-  }
-  return set;
-}
 
 export default function ProjectDashboard() {
   const { id } = useParams();
@@ -180,7 +159,7 @@ export default function ProjectDashboard() {
       </div>
 
       {/* §10/§15 — Project Universe: feste intelligente Anordnung, CSS-Grid + SVG */}
-      <ProjectUniverse nodes={nodes} hovered={hovered} setHovered={setHovered} />
+      <ProjectUniverse nodes={nodes} hovered={hovered} setHovered={setHovered} completion={completion} />
 
       {/* §40 — Activity, bewusst dezent */}
       <section className="card mt-6 overflow-hidden">
@@ -220,89 +199,110 @@ export default function ProjectDashboard() {
 // §10-15 — die Modulfläche mit gemessenen SVG-Verbindungen hinter den Cards.
 // Kein React Flow: feste Anordnung im CSS-Grid, Linien werden aus den echten
 // Kartenpositionen berechnet und bei Grössenänderung neu vermessen (§15).
-function ProjectUniverse({ nodes, hovered, setHovered }) {
-  const containerRef = useRef(null);
-  const refs = useRef({});
-  const [paths, setPaths] = useState([]);
+// Statuspunkt-Farben (§13) für die Umlaufbahn.
+const STATUS_DOT = {
+  not_started: "#cbd5e1", in_progress: "#3b82f6", incomplete: "#f59e0b",
+  complete: "#22c55e", warning: "#f97316", error: "#ef4444",
+  stale: "#f97316", released: "#8b5cf6",
+};
 
-  const setNodeRef = (key) => (el) => { refs.current[key] = el; };
+// Reihenfolge im Uhrzeigersinn ab oben = Datenfluss, aber als GESCHLOSSENER
+// Kreis um das zentrale Projektmodell (Single Source of Truth). So hängt alles
+// zusammen statt in einem linearen Flussdiagramm.
+const ORBIT = [
+  { key: "project_data", subtitle: "EBF · Nutzung · Einheiten" },
+  { key: "schema", subtitle: "Geometrie + Verbindungen" },
+  { key: "hydraulics", subtitle: "Auslegung + Plausibilität" },
+  { key: "quantities", subtitle: "Mengen + Herkunft" },
+  { key: "cost_estimate", subtitle: "Referenzen + Bandbreite" },
+  { key: "documentation", subtitle: "Plan + Nachweise" },
+];
 
-  const measure = useCallback(() => {
-    const container = containerRef.current;
-    if (!container) return;
-    const base = container.getBoundingClientRect();
-    const next = [];
-    for (const [from, to] of CONNECTIONS) {
-      const a = refs.current[from]?.getBoundingClientRect();
-      const b = refs.current[to]?.getBoundingClientRect();
-      if (!a || !b) continue;
-      const x1 = a.left - base.left + a.width / 2;
-      const y1 = a.top - base.top + a.height;
-      const x2 = b.left - base.left + b.width / 2;
-      const y2 = b.top - base.top;
-      const my = (y1 + y2) / 2;
-      next.push({ from, to, d: `M ${x1} ${y1} C ${x1} ${my}, ${x2} ${my}, ${x2} ${y2}` });
-    }
-    setPaths(next);
-  }, []);
+function ProjectUniverse({ nodes, hovered, setHovered, completion }) {
+  const R = 34; // Radius der Modulkarten (% der quadratischen Fläche)
+  const punkt = (i, radius) => {
+    const angle = (-90 + i * (360 / ORBIT.length)) * (Math.PI / 180);
+    return { x: 50 + radius * Math.cos(angle), y: 50 + radius * Math.sin(angle) };
+  };
 
-  useLayoutEffect(() => {
-    measure();
-    const ro = new ResizeObserver(measure);
-    if (containerRef.current) ro.observe(containerRef.current);
-    window.addEventListener("resize", measure);
-    return () => { ro.disconnect(); window.removeEventListener("resize", measure); };
-  }, [measure, nodes]);
-
-  const related = relatedKeys(hovered);
-  const nodeDimmed = (key) => (related ? !related.has(key) : false);
-
-  const cell = (key, extra = "") => {
-    const n = nodes[key];
-    return (
-      <div className={extra}>
-        <ProjectModuleNode
-          ref={setNodeRef(key)}
-          {...n}
-          dimmed={nodeDimmed(key)}
-          active={hovered === key}
-          onMouseEnter={() => setHovered(key)}
-          onMouseLeave={() => setHovered(null)}
-        />
+  const OrbitCard = ({ m }) => {
+    const n = nodes[m.key];
+    const dimmed = hovered && hovered !== m.key;
+    const dot = STATUS_DOT[n?.status] || STATUS_DOT.not_started;
+    const inner = (
+      <div
+        className="w-40 rounded-xl border bg-white px-3 py-2.5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-md"
+        style={{ opacity: dimmed ? 0.45 : 1, borderColor: hovered === m.key ? "#a5b4fc" : "#e2e8f0" }}
+      >
+        <div className="flex items-center justify-between gap-1">
+          <span className="text-[11px] font-bold uppercase tracking-wide text-slate-700">{n?.title}</span>
+          <span className="size-2 shrink-0 rounded-full" style={{ background: dot }} />
+        </div>
+        <div className="mt-0.5 text-[10px] text-slate-400">{m.subtitle}</div>
+        {n?.metric != null && <div className="mt-1 truncate text-xs font-semibold text-slate-800">{n.metric}</div>}
       </div>
     );
+    if (n?.to) return <Link to={n.to} className="block">{inner}</Link>;
+    if (n?.onClick) return <button type="button" onClick={n.onClick} className="block w-full">{inner}</button>;
+    return inner;
   };
 
   return (
-    <div ref={containerRef} className="relative">
-      {/* Verbindungslinien hinter den Cards (§14) */}
-      <svg className="pointer-events-none absolute inset-0 z-0 hidden h-full w-full sm:block" aria-hidden="true">
-        {paths.map((p) => {
-          const highlight = hovered && (p.from === hovered || p.to === hovered);
-          const faded = hovered && !highlight;
+    <>
+      {/* Mobil: schlichte Liste (das Orbit-Layout braucht Fläche) */}
+      <div className="grid grid-cols-1 gap-3 sm:hidden">
+        {ORBIT.map((m) => (
+          <ProjectModuleNode key={m.key} {...nodes[m.key]} />
+        ))}
+      </div>
+
+      {/* Desktop: orbitales Projektuniversum */}
+      <div className="relative mx-auto hidden aspect-square w-full max-w-2xl sm:block">
+        <svg viewBox="0 0 100 100" className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true">
+          {/* Umlaufbahnen */}
+          <circle cx="50" cy="50" r="15" fill="none" stroke="#c7d2fe" strokeWidth="0.2" strokeDasharray="1 1.4" />
+          <circle cx="50" cy="50" r="26" fill="none" stroke="#e2e8f0" strokeWidth="0.25" />
+          <circle cx="50" cy="50" r="36" fill="none" stroke="#e2e8f0" strokeWidth="0.25" />
+          {/* Verbindungslinien vom Zentrum zu jedem Modul */}
+          {ORBIT.map((m, i) => {
+            const p = punkt(i, R - 8);
+            const hl = hovered === m.key;
+            return (
+              <line key={m.key} x1="50" y1="50" x2={p.x} y2={p.y}
+                stroke={hl ? "#6366f1" : "#dbe2ea"} strokeWidth={hl ? 0.5 : 0.3}
+                strokeOpacity={hovered && !hl ? 0.3 : 1} className="transition-all" />
+            );
+          })}
+          {/* Statuspunkte auf der mittleren Bahn */}
+          {ORBIT.map((m, i) => {
+            const p = punkt(i, R - 8);
+            return (
+              <circle key={m.key} cx={p.x} cy={p.y} r={hovered === m.key ? 1.3 : 1}
+                fill={STATUS_DOT[nodes[m.key]?.status] || STATUS_DOT.not_started} className="transition-all" />
+            );
+          })}
+        </svg>
+
+        {/* Zentrales Projektmodell */}
+        <div className="absolute left-1/2 top-1/2 flex aspect-square w-[30%] -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-full border border-slate-100 bg-white text-center shadow-[0_18px_50px_-12px_rgba(79,70,229,0.28)]">
+          <Workflow className="size-6 text-brand-600" />
+          <div className="mt-1 text-[9px] font-bold uppercase tracking-[0.18em] text-slate-400">Projektmodell</div>
+          <div className="text-2xl font-bold leading-none text-slate-900">{completion}<span className="text-sm text-slate-400">%</span></div>
+          <div className="mt-0.5 text-[9px] text-slate-400">Single Source of Truth</div>
+        </div>
+
+        {/* Modulkarten auf der Umlaufbahn */}
+        {ORBIT.map((m, i) => {
+          const p = punkt(i, R);
           return (
-            <path key={`${p.from}-${p.to}`} d={p.d} fill="none"
-              stroke={highlight ? "#6366f1" : "#cbd5e1"}
-              strokeWidth={highlight ? 2 : 1.5}
-              strokeOpacity={faded ? 0.3 : 1}
-              className="transition-all" />
+            <div key={m.key} className="absolute -translate-x-1/2 -translate-y-1/2"
+              style={{ left: `${p.x}%`, top: `${p.y}%` }}
+              onMouseEnter={() => setHovered(m.key)} onMouseLeave={() => setHovered(null)}>
+              <OrbitCard m={m} />
+            </div>
           );
         })}
-      </svg>
-
-      {/* Aufgeräumte, deterministische Anordnung: eine zentrale Spine mit einer
-          symmetrischen Verzweigung (Hydraulik/Mengen). Die SVG-Linien vermessen
-          die echten Kartenpositionen und folgen automatisch (§10/§11). */}
-      <div className="relative z-10 mx-auto flex max-w-md flex-col items-stretch gap-6 sm:gap-9">
-        {cell("project_data", "mx-auto w-full max-w-xs")}
-        {cell("schema", "mx-auto w-full max-w-xs")}
-        <div className="grid grid-cols-2 gap-4 sm:gap-6">
-          {cell("hydraulics")}
-          {cell("quantities")}
-        </div>
-        {cell("cost_estimate", "mx-auto w-full max-w-xs")}
-        {cell("documentation", "mx-auto w-full max-w-xs")}
       </div>
-    </div>
+    </>
   );
 }

@@ -18,9 +18,10 @@ export function roundedPolylinePath(points, radius = 8) {
       ? (inDx * outDx + inDy * outDy) / (inLength * outLength)
       : 1;
 
-    // Gerade Segmente, Doppelpunkt-Klicks und 180°-Wenden benötigen keinen
-    // Bogen. Bei kurzen Segmenten wird der Radius automatisch verkleinert.
-    if (!r || !inLength || !outLength || Math.abs(directionDot) > 0.999) {
+    // Nur echte ~90°-Ecken werden leicht abgerundet (|directionDot| ≈ 0). Gerade
+    // Segmente (dot ≈ 1), flache Winkel und 45°-Knicke bleiben scharfe L-Kanten,
+    // damit eine gerade Leitung ausschliesslich M … L … enthält.
+    if (!r || !inLength || !outLength || Math.abs(directionDot) > 0.25) {
       path += ` L ${corner.x} ${corner.y}`;
       continue;
     }
@@ -37,6 +38,53 @@ export function roundedPolylinePath(points, radius = 8) {
   }
   const end = points.at(-1);
   return `${path} L ${end.x} ${end.y}`;
+}
+
+// Kollineare und doppelte Punkte einer Route entfernen (reine Geometrie).
+export function vereinfachteRoute(points) {
+  const unique = (points || []).filter((point, index, all) => point
+    && (!index || Math.hypot(point.x - all[index - 1].x, point.y - all[index - 1].y) > 0.5));
+  return unique.filter((point, index, all) => {
+    if (!index || index === all.length - 1) return true;
+    const before = all[index - 1];
+    const after = all[index + 1];
+    const cross = (point.x - before.x) * (after.y - point.y)
+      - (point.y - before.y) * (after.x - point.x);
+    return Math.abs(cross) > 0.5;
+  });
+}
+
+// CAD-Grundsatz: die vom Nutzer gezeichnete Geometrie hat Vorrang. Keine
+// künstlichen Lead-Segmente, keine Richtungsänderung nur wegen der Handle-Seite.
+//
+//   1. Ohne Waypoints und auf gemeinsamer X-/Y-Achse → exakt [start, end].
+//   2. Mit Waypoints → ausschliesslich diese; Start/Ende sind die aktuellen
+//      Handle-Koordinaten (kein sourceLead/targetLead).
+//   3. Ohne Waypoints, versetzt → genau EIN 90°-Knick (Richtung aus der Handle-
+//      Seite, aber ohne Herauslaufen aus dem Bauteil).
+//
+// `start`/`end` sind die aktuellen Handle-Positionen. Rückgabe: volle Route
+// inkl. Endpunkten. Kollineares wird zusammengefasst (gerade bleibt gerade).
+export function adaptivePolyline(start, end, storedPoints = [], sourceSide = null, targetSide = null) {
+  if (!start || !end) return [];
+  const raw = (storedPoints || []).filter(point => Number.isFinite(point?.x) && Number.isFinite(point?.y));
+
+  // (2) Waypoints haben Vorrang — nur sie verwenden, Enden an die Handles.
+  if (raw.length) return vereinfachteRoute([{ ...start }, ...raw, { ...end }]);
+
+  const sameX = Math.abs(end.x - start.x) < 0.5;
+  const sameY = Math.abs(end.y - start.y) < 0.5;
+  // (1) Auf gemeinsamer Achse → exakt gerade, unabhängig von der Handle-Richtung.
+  if (sameX || sameY) return [{ ...start }, { ...end }];
+
+  // (3) Genau ein 90°-Knick. Welche Achse zuerst, ergibt sich aus der Handle-Seite
+  // (waagrechte Seite → erst horizontal), sonst aus der grösseren Distanz.
+  const erstHorizontal =
+    sourceSide === 'left' || sourceSide === 'right' ? true
+      : sourceSide === 'top' || sourceSide === 'bottom' ? false
+        : Math.abs(end.x - start.x) >= Math.abs(end.y - start.y);
+  const elbow = erstHorizontal ? { x: end.x, y: start.y } : { x: start.x, y: end.y };
+  return vereinfachteRoute([{ ...start }, elbow, { ...end }]);
 }
 
 export function pairedHandleId(nodeType, handleId) {

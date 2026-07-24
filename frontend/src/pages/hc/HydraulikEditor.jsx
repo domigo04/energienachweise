@@ -15,7 +15,7 @@ import '@xyflow/react/dist/style.css';
 import './HydraulikEditor.css';
 import { NODE_TYPES, NUMMERIERT, ROTATABLE } from '../../components/hc/nodes/HydraulikNodes';
 import { EDGE_TYPES } from '../../components/hc/edges/FlowEdge';
-import { pairedHandleId, parallelWaypoints, roundedPolylinePath, splitRouteAtPoint, reconnectThroughNode } from '../../components/hc/edges/geometry';
+import { pairedHandleId, parallelWaypoints, roundedPolylinePath, splitRouteAtPoint, reconnectThroughNode, adaptivePolyline } from '../../components/hc/edges/geometry';
 import { SCHALTUNGEN } from '../../components/hc/nodes/schaltungen';
 import {
   createSchema,
@@ -193,90 +193,12 @@ function orthogonalerSegmentfang(origin, point, grid = CAD_GRID) {
     : { x:origin.x, y:raster.y };
 }
 
-const richtungsVektor = (side) => ({
-  left:{ x:-1, y:0 }, right:{ x:1, y:0 },
-  top:{ x:0, y:-1 }, bottom:{ x:0, y:1 },
-}[side] || null);
-
 function erlaubterLeitungswinkel(a, b) {
   const dx = Math.abs(b.x - a.x);
   const dy = Math.abs(b.y - a.y);
   return dx < 0.5 || dy < 0.5 || Math.abs(dx - dy) < 0.5;
 }
 
-function vereinfachteRoute(points) {
-  const unique = points.filter((point, index, all) => point
-    && (!index || Math.hypot(point.x - all[index - 1].x, point.y - all[index - 1].y) > 0.5));
-  return unique.filter((point, index, all) => {
-    if (!index || index === all.length - 1) return true;
-    const before = all[index - 1];
-    const after = all[index + 1];
-    const cross = (point.x - before.x) * (after.y - point.y)
-      - (point.y - before.y) * (after.x - point.x);
-    return Math.abs(cross) > 0.5;
-  });
-}
-
-// Gespeicherte Eckpunkte sind geometrische Hinweise. Die beiden Punkte an den
-// Bauteilen werden bei jeder Darstellung aus den aktuellen Handle-Koordinaten
-// neu projiziert. Verschieben oder Vergrössern eines Bauteils hält dadurch den
-// ersten und letzten Abschnitt rechtwinklig, ohne die restliche Route zu verlieren.
-function adaptivePolyline(start, end, storedPoints = [], sourceSide = null, targetSide = null) {
-  if (!start || !end) return [];
-  const raw = (storedPoints || []).filter(point => Number.isFinite(point?.x) && Number.isFinite(point?.y));
-  const sourceVector = richtungsVektor(sourceSide);
-  const targetVector = richtungsVektor(targetSide);
-  const distance = Math.hypot(end.x - start.x, end.y - start.y);
-  const lead = Math.max(24, Math.min(60, distance / 4 || 24));
-
-  let hints;
-  if (!raw.length) {
-    const sourceLead = sourceVector
-      ? { x:start.x + sourceVector.x * lead, y:start.y + sourceVector.y * lead }
-      : { ...start };
-    const targetLead = targetVector
-      ? { x:end.x + targetVector.x * lead, y:end.y + targetVector.y * lead }
-      : { ...end };
-    hints = [sourceLead, { x:targetLead.x, y:sourceLead.y }, targetLead];
-  } else {
-    const first = raw[0];
-    const last = raw.at(-1);
-    const sourceLead = sourceSide === 'left' || sourceSide === 'right'
-      ? { x:first.x, y:start.y }
-      : sourceSide === 'top' || sourceSide === 'bottom'
-        ? { x:start.x, y:first.y }
-        : { ...first };
-    const targetLead = targetSide === 'left' || targetSide === 'right'
-      ? { x:last.x, y:end.y }
-      : targetSide === 'top' || targetSide === 'bottom'
-        ? { x:end.x, y:last.y }
-        : { ...last };
-    hints = raw.length === 1
-      ? [sourceLead, targetLead]
-      : [sourceLead, ...raw.slice(1, -1), targetLead];
-  }
-
-  const route = [{ ...start }];
-  [...hints, { ...end }].forEach(point => {
-    const previous = route.at(-1);
-    if (Math.hypot(point.x - previous.x, point.y - previous.y) < 0.5) return;
-    if (!erlaubterLeitungswinkel(previous, point)) {
-      const before = route.at(-2);
-      const previousWasHorizontal = before && Math.abs(previous.y - before.y) < 0.5;
-      const previousWasVertical = before && Math.abs(previous.x - before.x) < 0.5;
-      const elbow = previousWasVertical
-        ? { x:previous.x, y:point.y }
-        : previousWasHorizontal
-          ? { x:point.x, y:previous.y }
-          : Math.abs(point.x - previous.x) >= Math.abs(point.y - previous.y)
-            ? { x:point.x, y:previous.y }
-            : { x:previous.x, y:point.y };
-      if (Math.hypot(elbow.x - previous.x, elbow.y - previous.y) > 0.5) route.push(elbow);
-    }
-    route.push(point);
-  });
-  return vereinfachteRoute(route);
-}
 
 function guidesAmPunkt(guides, point) {
   return (guides || []).flatMap(guide => {

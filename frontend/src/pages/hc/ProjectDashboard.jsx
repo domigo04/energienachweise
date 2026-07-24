@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
-import { Share2, Calculator, Layers, ArrowRight, ArrowLeft, MapPin, User, UserRoundCheck, Pencil, Archive, BadgeCheck, CircleDashed, LockKeyhole, History, ChevronDown } from "lucide-react";
+import { Share2, Calculator, Layers, ListChecks, ArrowRight, ArrowLeft, MapPin, User, UserRoundCheck, Pencil, Archive, BadgeCheck, CircleDashed, LockKeyhole, History, ChevronDown } from "lucide-react";
 import { getProject, getProjectAudit, getProjectFreigaben, updateProject } from "../../api/hcApi";
 import { GEBAEUDEKATEGORIEN } from "../../data/sia";
 
@@ -89,6 +89,7 @@ export default function ProjectDashboard() {
 
   const TOOLS = [
     { to: `/projekte/${id}/schema`, icon: Share2, title: "Anlagenschema", text: "Schema zeichnen — Berechnungen leben in den Bauteilen.", primary: true },
+    { to: `/projekte/${id}/mengen`, icon: ListChecks, title: "Projektmengen", text: "Alle technischen Mengen mit Herkunft — die Brücke zur Kostenschätzung." },
     { to: `/projekte/${id}/kostenschaetzung`, icon: Calculator, title: "Grobkostenschätzung", text: "Ähnlichkeitsgewichtete Schätzung aus Referenzprojekten." },
     { to: `/projekte/${id}/heizgruppen`, icon: Layers, title: "Heizgruppen", text: "Heizgruppen-Generator mit Volumenstrom." },
   ];

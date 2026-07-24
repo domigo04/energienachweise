@@ -290,14 +290,18 @@ function ProjectUniverse({ nodes, hovered, setHovered }) {
         })}
       </svg>
 
-      {/* Feste intelligente Anordnung (§11) */}
-      <div className="relative z-10 grid grid-cols-1 gap-y-6 sm:grid-cols-2 sm:gap-x-24 sm:gap-y-10">
-        {cell("project_data", "sm:col-span-2 sm:mx-auto sm:w-64")}
-        {cell("schema", "sm:col-span-2 sm:mx-auto sm:w-64")}
-        {cell("hydraulics", "sm:justify-self-end sm:w-64")}
-        {cell("quantities", "sm:justify-self-start sm:w-64")}
-        {cell("cost_estimate", "sm:col-span-2 sm:mx-auto sm:w-64")}
-        {cell("documentation", "sm:col-span-2 sm:mx-auto sm:w-64")}
+      {/* Aufgeräumte, deterministische Anordnung: eine zentrale Spine mit einer
+          symmetrischen Verzweigung (Hydraulik/Mengen). Die SVG-Linien vermessen
+          die echten Kartenpositionen und folgen automatisch (§10/§11). */}
+      <div className="relative z-10 mx-auto flex max-w-md flex-col items-stretch gap-6 sm:gap-9">
+        {cell("project_data", "mx-auto w-full max-w-xs")}
+        {cell("schema", "mx-auto w-full max-w-xs")}
+        <div className="grid grid-cols-2 gap-4 sm:gap-6">
+          {cell("hydraulics")}
+          {cell("quantities")}
+        </div>
+        {cell("cost_estimate", "mx-auto w-full max-w-xs")}
+        {cell("documentation", "mx-auto w-full max-w-xs")}
       </div>
     </div>
   );

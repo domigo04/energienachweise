@@ -3584,6 +3584,10 @@ function EditorInner() {
             panOnDrag
             multiSelectionKeyCode="Shift"
             defaultEdgeOptions={{ type:'flow', style:{ strokeWidth:2.5 } }}
+            // Weiter reinzoomen können, damit das Schema gross und detailliert
+            // dargestellt werden kann; für grosse Anlagen auch weiter raus.
+            minZoom={0.2}
+            maxZoom={4}
             fitView
             className={leitungsEntwurf ? 'cursor-crosshair hc-hydraulik-flow' : 'hc-hydraulik-flow'}
           >

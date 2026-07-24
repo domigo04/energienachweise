@@ -1112,3 +1112,21 @@
     width: 100vw;
   }
 }
+
+/* Anschlusszone (Speicher/WP): eine ruhige Zone statt vieler Punkte.
+   Dezent sichtbar, auf Hover/aktivem Node deutlicher. pointer-events: none,
+   damit der Rahmen selbst nichts fängt — nur die (unsichtbaren) Handles docken. */
+.hc-zone-frame {
+  position: absolute;
+  inset: -6px;
+  border-radius: 8px;
+  border: 1.5px dashed rgba(100, 116, 139, 0.28);
+  pointer-events: none;
+  z-index: 3;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.react-flow__node:hover .hc-zone-frame,
+.react-flow__node.selected .hc-zone-frame {
+  border-color: rgba(79, 70, 229, 0.55);
+  background: rgba(79, 70, 229, 0.05);
+}

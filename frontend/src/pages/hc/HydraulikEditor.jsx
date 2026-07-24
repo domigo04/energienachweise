@@ -316,8 +316,26 @@ function objektAusrichtung(point, snapPoints, tolerance = 10, grid = CAD_GRID) {
   return { point:snapped, guides, xMatch:xMatch?.snapPoint, yMatch:yMatch?.snapPoint };
 }
 
+// Seiten im Uhrzeigersinn — eine 90°-Drehung (CSS rotate, im Uhrzeigersinn)
+// verschiebt jede Seite um einen Schritt weiter: rechts→unten→links→oben.
+const SEITEN_UHRZEIGER = ['top', 'right', 'bottom', 'left'];
+
+function rotiereSeite(seite, rotation) {
+  if (!seite || !rotation) return seite;
+  const index = SEITEN_UHRZEIGER.indexOf(seite);
+  if (index < 0) return seite;
+  const schritte = ((Math.round(rotation / 90) % 4) + 4) % 4;
+  return SEITEN_UHRZEIGER[(index + schritte) % 4];
+}
+
 function anschlussSeite(handle, internal) {
-  if (handle?.position) return String(handle.position).toLowerCase();
+  const rotation = internal?.data?.rotation || 0;
+  // Die deklarierte Position (Handle-Prop) dreht NICHT mit der CSS-Rotation mit
+  // — daher hier um die Bauteil-Drehung korrigieren, sonst zeigt die Anfahrt
+  // nach dem Drehen in die falsche Richtung (komischer Fangpunkt).
+  if (handle?.position) return rotiereSeite(String(handle.position).toLowerCase(), rotation);
+  // Geometrische Herleitung: die gemessenen Bounds spiegeln die Drehung bereits
+  // (getBoundingClientRect), daher keine zusätzliche Korrektur.
   const width = internal?.measured?.width || 0;
   const height = internal?.measured?.height || 0;
   const centerX = (handle?.x || 0) + (handle?.width || 0) / 2;
@@ -1656,7 +1674,10 @@ function EditorInner() {
     setNodes(ns => ns.map(x => (x.id === id && ROTATABLE.has(x.type))
       ? { ...x, data: { ...x.data, rotation: (((x.data?.rotation || 0) + 90) % 360) } }
       : x));
-    setTimeout(() => updateNodeInternals(id), 0);
+    // Nach dem Neuzeichnen der Drehung erneut vermessen — zwei Frames, damit die
+    // Handle-Bounds zuverlässig NACH dem Layout stimmen (sonst bleibt der
+    // Fangpunkt teilweise auf der alten Position stehen).
+    requestAnimationFrame(() => requestAnimationFrame(() => updateNodeInternals(id)));
   }, [setNodes, snap, updateNodeInternals]);
 
   const connectStart = useRef(null);

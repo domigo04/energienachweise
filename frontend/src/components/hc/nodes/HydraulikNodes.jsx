@@ -31,15 +31,22 @@ const H = (pos, id, style = {}, className = '') => (
 // ob VL oder RL entscheidet der Zeichen-Layer/die Strichfarbe, nicht das Handle
 // (siehe backend/app/calculations/hydraulik.py::_stroke). Die bestehenden
 // benannten Handles (vl/rl/left/right …) bleiben für Altschemas erhalten.
+// Anschlusszone als EINE ruhige Zone statt vieler Punkte (Dominic-Feedback):
+// ein dezenter gestrichelter Rahmen zeigt „hier kann überall angeschlossen
+// werden"; auf Hover wird er deutlich. Die eigentlichen Anschlusspunkte bleiben
+// funktional erhalten (Leitung dockt an frei gewählten Stellen an), sind aber
+// unsichtbar — so wirkt das Bauteil aufgeräumt und lädt nicht zum versehentlichen
+// Ziehen von Leitungen ein. IDs bleiben NEUTRAL (VL/RL kommt aus dem Layer).
 const ZONE_PCT = [12, 28, 44, 60, 76, 90];
 const zoneDot = {
-  width: 11, height: 11, borderRadius: 2,
-  background: 'rgba(100,116,139,0.16)', border: '1px dashed rgba(100,116,139,0.55)',
+  width: 12, height: 12, borderRadius: 2,
+  background: 'transparent', border: 'none', opacity: 0,
   zIndex: 4,
 };
 function ZoneHandles({ prefix }) {
   return (
     <>
+      <div className="hc-zone-frame" aria-hidden="true" />
       {ZONE_PCT.map(p => <Handle key={`${prefix}-t-${p}`} type="source" position={Position.Top}    id={`${prefix}-t-${p}`} style={{ ...zoneDot, top: -5, left: `${p}%` }} />)}
       {ZONE_PCT.map(p => <Handle key={`${prefix}-b-${p}`} type="source" position={Position.Bottom} id={`${prefix}-b-${p}`} style={{ ...zoneDot, bottom: -5, left: `${p}%` }} />)}
       {ZONE_PCT.map(p => <Handle key={`${prefix}-l-${p}`} type="source" position={Position.Left}   id={`${prefix}-l-${p}`} style={{ ...zoneDot, left: -5, top: `${p}%` }} />)}

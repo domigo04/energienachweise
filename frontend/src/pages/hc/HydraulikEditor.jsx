@@ -66,7 +66,9 @@ const DEFAULT_DRAWING_CONFIG = {
   grid_size:CAD_GRID,
   shortcut_polyline:'p',
   shortcut_line:'l',
-  auto_return:true,
+  // Auto-Rücklauf standardmässig AUS: eine hydraulische Leitung entsteht nur
+  // durch eine bewusste Nutzeraktion. Bleibt als optionale Funktion einschaltbar.
+  auto_return:false,
 };
 
 const rasterPunkt = (point, grid = CAD_GRID) => ({
@@ -102,7 +104,11 @@ const normalisiereDrawingConfig = (config = {}) => ({
   grid_size:[5, 10, 20].includes(Number(config.grid_size)) ? Number(config.grid_size) : DEFAULT_DRAWING_CONFIG.grid_size,
   shortcut_polyline:shortcutTaste(config.shortcut_polyline, DEFAULT_DRAWING_CONFIG.shortcut_polyline),
   shortcut_line:shortcutTaste(config.shortcut_line, DEFAULT_DRAWING_CONFIG.shortcut_line),
-  auto_return:config.auto_return !== false,
+  // Nur AN, wenn ein Schema Auto-RL ausdrücklich aktiviert hat. Fehlt der Wert
+  // (neues Schema oder Altbestand ohne Flag), gilt der neue Default AUS. Die
+  // bereits gezeichneten Leitungen bleiben unverändert — nur künftiges Zeichnen
+  // erzeugt keinen automatischen Rücklauf mehr.
+  auto_return:config.auto_return === true,
 });
 
 function graphFuerEditor(graph = {}) {

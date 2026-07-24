@@ -388,6 +388,8 @@ const PALETTE_GRUPPEN = [
   ]},
   { titel: 'Beschriftung', items: [
     { type: 'label',      label: 'Textblock',           desc: 'Freier Text — verschiebbar, Doppelklick zum Bearbeiten' },
+    { type: 'concrete_area',  label: 'Betonfläche',     desc: 'Kreuzschraffur, skalierbar — reine Zeichnung' },
+    { type: 'interface_line', label: 'Systemgrenze',    desc: 'Schwarze Linie, solid/gestrichelt, mit Text' },
   ]},
 ];
 const STD_PALETTE = PALETTE_GRUPPEN.flatMap(g => g.items);
@@ -3046,9 +3048,16 @@ function EditorInner() {
         : raw === 'gruppe' ? { schaltung: 'einspritz' }
         : raw === 'anschluss' ? { buchstabe: naechsterBuchstabe(ns) }
         : raw === 'label' ? { label: 'Text', fontSize: 12 }
+        : raw === 'concrete_area' ? { label: '' }
+        : raw === 'interface_line' ? { label: 'SYSTEMGRENZE', dashed: false }
+        : {};
+      // Skalierbare Annotationen brauchen eine Startgrösse; die Betonfläche liegt
+      // hinter den Bauteilen (niedriger zIndex).
+      const annoStyle = raw === 'concrete_area' ? { style: { width: 220, height: 130 }, zIndex: -1 }
+        : raw === 'interface_line' ? { style: { width: 200, height: 24 } }
         : {};
       return [...ns, {
-        id, type: raw, position: nodePosition,
+        id, type: raw, position: nodePosition, ...annoStyle,
         data: { label: p?.label || raw, ...extra,
           ...(inlineRotation ? { rotation: inlineRotation } : {}),
           ...(NUMMERIERT.includes(raw) ? { nr: naechsteNr(ns) } : {}) },

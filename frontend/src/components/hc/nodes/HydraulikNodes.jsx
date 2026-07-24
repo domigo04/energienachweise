@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Handle, Position, useReactFlow } from '@xyflow/react';
+import { Handle, Position, useReactFlow, NodeResizer } from '@xyflow/react';
 import {
   SymPump, SymValve2V, SymValve3, SymCheckValve,
   SymShutoff, SymWE, SymVerbraucher, SymSpeicher, SymBypass,
@@ -761,6 +761,66 @@ export function LabelNode({ id, data, selected: sel }) {
   );
 }
 
+// ── Reine Zeichnungs-Annotationen (ohne hydraulische Bedeutung) ─────────────
+// Werden NICHT im ProjectContext gezählt (schema_mengen kennt diese Typen nicht).
+
+// Betonfläche: frei skalierbares Rechteck mit Kreuzschraffur, transparente
+// Grundfläche, liegt hinter den Bauteilen. Nur Darstellung.
+export function ConcreteAreaNode({ selected: sel }) {
+  return (
+    <div style={{ width: '100%', height: '100%', position: 'relative', boxSizing: 'border-box',
+      border: `1px ${sel ? 'solid #3b82f6' : 'dashed #94a3b8'}` }}>
+      <NodeResizer isVisible={sel} minWidth={40} minHeight={40} color="#3b82f6" />
+      <svg width="100%" height="100%" style={{ display: 'block' }}>
+        <defs>
+          <pattern id="hc-crosshatch" width="8" height="8" patternUnits="userSpaceOnUse">
+            <path d="M0 0 L8 8 M8 0 L0 8" stroke="#94a3b8" strokeWidth="0.6" opacity="0.55" />
+          </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#hc-crosshatch)" />
+      </svg>
+    </div>
+  );
+}
+
+// Systemgrenze / Schnittstelle: frei platzierbare schwarze Linie, solide oder
+// gestrichelt, mit optionalem Text. Strikt getrennt von hydraulischen Leitungen.
+export function InterfaceLineNode({ id, data, selected: sel }) {
+  const { setNodes } = useReactFlow();
+  const [editing, setEditing] = useState(false);
+  const dashed = Boolean(data.dashed);
+  const text = data.label ?? '';
+  const setData = (patch) => setNodes(ns => ns.map(n => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)));
+  return (
+    <div style={{ width: '100%', height: '100%', minWidth: 60, position: 'relative',
+      display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+      <NodeResizer isVisible={sel} minWidth={60} minHeight={16} color="#0f172a" />
+      {(text || editing) && (
+        <div onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
+          style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+            color: '#0f172a', textAlign: 'center', marginBottom: 3, cursor: 'text' }}>
+          {editing ? (
+            <input autoFocus className="nodrag nowheel" defaultValue={text}
+              onBlur={(e) => { setEditing(false); setData({ label: e.target.value }); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') { setEditing(false); setData({ label: e.target.value }); } if (e.key === 'Escape') setEditing(false); }}
+              style={{ font: 'inherit', textAlign: 'center', border: 'none', outline: 'none', background: 'transparent', width: '100%' }} />
+          ) : text}
+        </div>
+      )}
+      <div onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
+        style={{ borderTop: `2px ${dashed ? 'dashed' : 'solid'} #0f172a`, width: '100%', cursor: 'grab' }} />
+      {sel && (
+        <button type="button" className="nodrag"
+          onClick={(e) => { e.stopPropagation(); setData({ dashed: !dashed }); }}
+          style={{ position: 'absolute', top: -22, right: 0, fontSize: 9, fontWeight: 700,
+            border: '1px solid #cbd5e1', borderRadius: 4, background: 'white', padding: '1px 5px', cursor: 'pointer', color: '#334155' }}>
+          {dashed ? 'gestrichelt' : 'solid'}
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ── Bauteil-Nummern (Pflichtenheft §10: Nummerierung + Legende) ──────
 // Jedes nummerierbare Bauteil bekommt ein rotes Badge (data.nr) oben rechts.
 // eslint-disable-next-line react-refresh/only-export-components
@@ -811,6 +871,8 @@ const BASIS_TYPES = {
   expansion:   ExpansionNode,
   bww:         BwwNode,
   label:       LabelNode,
+  concrete_area:  ConcreteAreaNode,
+  interface_line: InterfaceLineNode,
 };
 
 // ── Drehung um 90° (data.rotation) ───────────────────────────────────────────

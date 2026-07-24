@@ -825,9 +825,12 @@ export const ROTATABLE = new Set([
 function mitRotation(Comp) {
   function MitRotation(props) {
     const rot = props.data?.rotation || 0;
-    if (!rot) return <Comp {...props} />;
+    const mirrored = Boolean(props.data?.mirrored);
+    if (!rot && !mirrored) return <Comp {...props} />;
+    // Reihenfolge rotate() scaleX(-1): erst spiegeln, dann drehen — passend zur
+    // Seiten-Korrektur in anschlussSeite (spiegelSeite vor rotiereSeite).
     return (
-      <div style={{ transform: `rotate(${rot}deg)`, transformOrigin: 'center center', display: 'inline-block' }}>
+      <div style={{ transform: `rotate(${rot}deg) scaleX(${mirrored ? -1 : 1})`, transformOrigin: 'center center', display: 'inline-block' }}>
         <Comp {...props} />
       </div>
     );

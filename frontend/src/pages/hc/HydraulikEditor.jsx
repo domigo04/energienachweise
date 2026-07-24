@@ -66,6 +66,11 @@ const DEFAULT_DRAWING_CONFIG = {
   grid_size:CAD_GRID,
   shortcut_polyline:'p',
   shortcut_line:'l',
+  // Bauteil-Befehle auf frei belegbaren Tasten (Feedback Dominic). Verschieben
+  // läuft über die Pfeiltasten (Shift = grosser Schritt) und ist nicht belegbar.
+  shortcut_rotate:'d',
+  shortcut_mirror:'s',
+  shortcut_align:'a',
   // Auto-Rücklauf standardmässig AUS: eine hydraulische Leitung entsteht nur
   // durch eine bewusste Nutzeraktion. Bleibt als optionale Funktion einschaltbar.
   auto_return:false,
@@ -104,6 +109,9 @@ const normalisiereDrawingConfig = (config = {}) => ({
   grid_size:[5, 10, 20].includes(Number(config.grid_size)) ? Number(config.grid_size) : DEFAULT_DRAWING_CONFIG.grid_size,
   shortcut_polyline:shortcutTaste(config.shortcut_polyline, DEFAULT_DRAWING_CONFIG.shortcut_polyline),
   shortcut_line:shortcutTaste(config.shortcut_line, DEFAULT_DRAWING_CONFIG.shortcut_line),
+  shortcut_rotate:shortcutTaste(config.shortcut_rotate, DEFAULT_DRAWING_CONFIG.shortcut_rotate),
+  shortcut_mirror:shortcutTaste(config.shortcut_mirror, DEFAULT_DRAWING_CONFIG.shortcut_mirror),
+  shortcut_align:shortcutTaste(config.shortcut_align, DEFAULT_DRAWING_CONFIG.shortcut_align),
   // Nur AN, wenn ein Schema Auto-RL ausdrücklich aktiviert hat. Fehlt der Wert
   // (neues Schema oder Altbestand ohne Flag), gilt der neue Default AUS. Die
   // bereits gezeichneten Leitungen bleiben unverändert — nur künftiges Zeichnen
@@ -328,12 +336,25 @@ function rotiereSeite(seite, rotation) {
   return SEITEN_UHRZEIGER[(index + schritte) % 4];
 }
 
+// Horizontale Spiegelung (scaleX(-1)) vertauscht links/rechts; oben/unten bleibt.
+function spiegelSeite(seite) {
+  if (seite === 'left') return 'right';
+  if (seite === 'right') return 'left';
+  return seite;
+}
+
 function anschlussSeite(handle, internal) {
   const rotation = internal?.data?.rotation || 0;
-  // Die deklarierte Position (Handle-Prop) dreht NICHT mit der CSS-Rotation mit
-  // — daher hier um die Bauteil-Drehung korrigieren, sonst zeigt die Anfahrt
-  // nach dem Drehen in die falsche Richtung (komischer Fangpunkt).
-  if (handle?.position) return rotiereSeite(String(handle.position).toLowerCase(), rotation);
+  const mirrored = Boolean(internal?.data?.mirrored);
+  // Die deklarierte Position (Handle-Prop) dreht/spiegelt NICHT mit der CSS-
+  // Transformation mit — daher hier um Spiegelung (zuerst) und Drehung (danach)
+  // korrigieren, sonst zeigt die Anfahrt in die falsche Richtung (komischer
+  // Fangpunkt). Reihenfolge entspricht `transform: rotate() scaleX(-1)`.
+  if (handle?.position) {
+    let seite = String(handle.position).toLowerCase();
+    if (mirrored) seite = spiegelSeite(seite);
+    return rotiereSeite(seite, rotation);
+  }
   // Geometrische Herleitung: die gemessenen Bounds spiegeln die Drehung bereits
   // (getBoundingClientRect), daher keine zusätzliche Korrektur.
   const width = internal?.measured?.width || 0;
@@ -1680,6 +1701,32 @@ function EditorInner() {
     requestAnimationFrame(() => requestAnimationFrame(() => updateNodeInternals(id)));
   }, [setNodes, snap, updateNodeInternals]);
 
+  // Bauteil horizontal spiegeln (Feedback Dominic). Wie beim Drehen müssen die
+  // Handle-Bounds nach der Transformation neu vermessen werden.
+  const mirrorNode = useCallback((id) => {
+    snap();
+    setNodes(ns => ns.map(x => (x.id === id && ROTATABLE.has(x.type))
+      ? { ...x, data: { ...x.data, mirrored: !x.data?.mirrored } }
+      : x));
+    requestAnimationFrame(() => requestAnimationFrame(() => updateNodeInternals(id)));
+  }, [setNodes, snap, updateNodeInternals]);
+
+  // Bauteil auf das Raster ausrichten (an Ebene ausrichten).
+  const alignNode = useCallback((id) => {
+    snap();
+    setNodes(ns => ns.map(x => x.id === id
+      ? { ...x, position: rasterPunkt(x.position || { x:0, y:0 }, drawingConfig.grid_size) }
+      : x));
+  }, [setNodes, snap, drawingConfig.grid_size]);
+
+  // Bauteil per Pfeiltaste verschieben (Shift = grosser Schritt).
+  const nudgeNode = useCallback((id, dx, dy) => {
+    snap();
+    setNodes(ns => ns.map(x => x.id === id
+      ? { ...x, position: { x:(x.position?.x || 0) + dx, y:(x.position?.y || 0) + dy } }
+      : x));
+  }, [setNodes, snap]);
+
   const connectStart = useRef(null);
   const clipboard = useRef(null);
   const nodesRef = useRef([]);
@@ -2684,7 +2731,20 @@ function EditorInner() {
         if (ev.key === 'v' || ev.key === 'V') layerWaehlen('heizung_vl');
         if (ev.key === 'r' || ev.key === 'R') layerWaehlen('heizung_rl');
         if (ev.key === 'b' || ev.key === 'B') layerWaehlen('neutral');
-        if (ev.key === 'd' || ev.key === 'D') { if (selected && ROTATABLE.has(selected.type)) rotateNode(selected.id); }
+        // Frei belegbare Bauteil-Befehle (Drehen / Spiegeln / Ausrichten).
+        if (selected) {
+          if (key === drawingConfig.shortcut_rotate && ROTATABLE.has(selected.type)) { ev.preventDefault(); rotateNode(selected.id); }
+          else if (key === drawingConfig.shortcut_mirror && ROTATABLE.has(selected.type)) { ev.preventDefault(); mirrorNode(selected.id); }
+          else if (key === drawingConfig.shortcut_align) { ev.preventDefault(); alignNode(selected.id); }
+        }
+        // Verschieben per Pfeiltaste (Shift = grosser Schritt).
+        if (selected && ev.key.startsWith('Arrow')) {
+          ev.preventDefault();
+          const schritt = (ev.shiftKey ? 5 : 1) * drawingConfig.grid_size;
+          const dx = ev.key === 'ArrowLeft' ? -schritt : ev.key === 'ArrowRight' ? schritt : 0;
+          const dy = ev.key === 'ArrowUp' ? -schritt : ev.key === 'ArrowDown' ? schritt : 0;
+          if (dx || dy) nudgeNode(selected.id, dx, dy);
+        }
         if (ev.key === 'Delete' || ev.key === 'Backspace') {
           if (selected) { snap(); deleteNodeRef.current?.(selected.id); }
           else if (selectedEdgeId) { deleteEdgeRef.current?.(selectedEdgeId); }
@@ -2693,7 +2753,7 @@ function EditorInner() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [undo, selected, selectedEdgeId, snap, rotateNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, spiegelAchse, drawingConfig, setNodes]);
+  }, [undo, selected, selectedEdgeId, snap, rotateNode, mirrorNode, alignNode, nudgeNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, spiegelAchse, drawingConfig, setNodes]);
 
   // Berechnete Werte (Backend) in die Node-Daten spiegeln — nur für die Anzeige.
   // Verteiler-Rahmen: nur die Balken sind greifbar (dragHandle), die Lücke
@@ -3388,7 +3448,21 @@ function EditorInner() {
               <input type="checkbox" checked={drawingConfig.auto_return} onChange={event=>drawingConfigAktualisieren('auto_return', event.target.checked)}/> Auto-Rücklauf bei passenden VL/RL-Anschlüssen
             </label>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 38px', gap:6, alignItems:'center', paddingTop:8, borderTop:'1px solid #f1f5f9', fontSize:10, color:'#475569' }}>
-              <label htmlFor="shortcut-line">Leitung starten</label><input id="shortcut-line" maxLength="1" value={drawingConfig.shortcut_line} onFocus={event=>event.currentTarget.select()} onChange={event=>drawingConfigAktualisieren('shortcut_line', event.target.value)} style={{ textAlign:'center', textTransform:'uppercase', border:'1px solid #cbd5e1', borderRadius:5, padding:4, fontWeight:800 }}/>
+              {[
+                ['shortcut_line', 'Leitung starten'],
+                ['shortcut_polyline', 'Polylinie starten'],
+                ['shortcut_rotate', 'Bauteil drehen'],
+                ['shortcut_mirror', 'Bauteil spiegeln'],
+                ['shortcut_align', 'Am Raster ausrichten'],
+              ].map(([feld, label]) => (
+                <React.Fragment key={feld}>
+                  <label htmlFor={feld}>{label}</label>
+                  <input id={feld} maxLength="1" value={drawingConfig[feld]} onFocus={event=>event.currentTarget.select()}
+                    onChange={event=>drawingConfigAktualisieren(feld, event.target.value)}
+                    style={{ textAlign:'center', textTransform:'uppercase', border:'1px solid #cbd5e1', borderRadius:5, padding:4, fontWeight:800 }}/>
+                </React.Fragment>
+              ))}
+              <div style={{ gridColumn:'1 / -1', color:'#94a3b8', fontSize:9, marginTop:2 }}>Verschieben: Pfeiltasten (Shift = grosser Schritt)</div>
             </div>
             <button onClick={event=>{
               setDrawingConfig(DEFAULT_DRAWING_CONFIG);

@@ -1,14 +1,17 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
-import { Share2, Calculator, Layers, ListChecks, ArrowRight, ArrowLeft, MapPin, User, UserRoundCheck, Pencil, Archive, BadgeCheck, CircleDashed, LockKeyhole, History, ChevronDown } from "lucide-react";
-import { getProject, getProjectAudit, getProjectFreigaben, updateProject } from "../../api/hcApi";
-import { GEBAEUDEKATEGORIEN } from "../../data/sia";
+import {
+  Share2, Calculator, Waves, ListChecks, FileText, ClipboardList,
+  ArrowLeft, MapPin, User, UserRoundCheck, Pencil, Archive, History, ChevronDown,
+} from "lucide-react";
+import { getProject, getProjectAudit, getProjectStatus, updateProject } from "../../api/hcApi";
+import ProjectModuleNode from "../../components/hc/ProjectModuleNode";
 
-const HEIZUNGSSYSTEM_LABELS = { FBH: "Fussbodenheizung", HK: "Heizkörper", gemischt: "Gemischt" };
 const AUDIT_LABELS = {
   projekt_erstellt: "Projekt erstellt",
   projekt_aktualisiert: "Projektstammdaten geändert",
   projekt_archiviert: "Projekt archiviert",
+  parameter_ergaenzt: "Projektmenge ergänzt",
   projektverantwortung_geaendert: "Projektverantwortung geändert",
   schema_stand_gespeichert: "Schema-Stand gespeichert",
   schema_stand_wiederhergestellt: "Schema-Stand wiederhergestellt",
@@ -16,23 +19,48 @@ const AUDIT_LABELS = {
   kostenschaetzung_status_geaendert: "Status der Kostenschätzung geändert",
 };
 
+// §14 — echte Datenabhängigkeiten zwischen den Modulen. Das UI erklärt die
+// Architektur, ohne dass man Text lesen muss.
+const CONNECTIONS = [
+  ["project_data", "cost_estimate"],
+  ["schema", "hydraulics"],
+  ["schema", "quantities"],
+  ["quantities", "cost_estimate"],
+  ["hydraulics", "documentation"],
+  ["cost_estimate", "documentation"],
+];
+
+function relatedKeys(key) {
+  if (!key) return null;
+  const set = new Set([key]);
+  for (const [a, b] of CONNECTIONS) {
+    if (a === key) set.add(b);
+    if (b === key) set.add(a);
+  }
+  return set;
+}
+
 export default function ProjectDashboard() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [project, setProject] = useState(null);
+  const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [freigaben, setFreigaben] = useState(null);
   const [protokoll, setProtokoll] = useState(null);
   const [protokollOpen, setProtokollOpen] = useState(false);
   const [protokollLoading, setProtokollLoading] = useState(false);
+  const [hovered, setHovered] = useState(null);
 
   useEffect(() => {
-    Promise.all([getProject(id), getProjectFreigaben(id)])
-      .then(([p, f]) => { setProject(p); setFreigaben(f); setForm({ name: p.name, standort: p.standort || "", kunde: p.kunde || "", beschreibung: p.beschreibung || "" }); })
+    Promise.all([getProject(id), getProjectStatus(id)])
+      .then(([p, s]) => {
+        setProject(p); setStatus(s);
+        setForm({ name: p.name, standort: p.standort || "", kunde: p.kunde || "", beschreibung: p.beschreibung || "" });
+      })
       .catch(() => setError("Projekt konnte nicht geladen werden"))
       .finally(() => setLoading(false));
   }, [id]);
@@ -43,6 +71,7 @@ export default function ProjectDashboard() {
       const updated = await updateProject(id, form);
       setProject(updated);
       setEditing(false);
+      getProjectStatus(id).then(setStatus).catch(() => {});
     } catch {
       setError("Speichern fehlgeschlagen");
     } finally {
@@ -65,13 +94,9 @@ export default function ProjectDashboard() {
     setProtokollOpen(nextOpen);
     if (nextOpen && protokoll === null) {
       setProtokollLoading(true);
-      try {
-        setProtokoll(await getProjectAudit(id));
-      } catch {
-        setError("Änderungsprotokoll konnte nicht geladen werden");
-      } finally {
-        setProtokollLoading(false);
-      }
+      try { setProtokoll(await getProjectAudit(id)); }
+      catch { setError("Änderungsprotokoll konnte nicht geladen werden"); }
+      finally { setProtokollLoading(false); }
     }
   };
 
@@ -83,27 +108,60 @@ export default function ProjectDashboard() {
     </div>
   );
 
-  const bd = project.base_data;
-  const hasGroups = project.heating_groups?.length > 0;
   const archiviert = project.status === "archiviert";
+  const m = status?.modules || {};
+  const completion = status?.completion ?? 0;
 
-  const TOOLS = [
-    { to: `/projekte/${id}/schema`, icon: Share2, title: "Anlagenschema", text: "Schema zeichnen — Berechnungen leben in den Bauteilen.", primary: true },
-    { to: `/projekte/${id}/mengen`, icon: ListChecks, title: "Projektmengen", text: "Alle technischen Mengen mit Herkunft — die Brücke zur Kostenschätzung." },
-    { to: `/projekte/${id}/kostenschaetzung`, icon: Calculator, title: "Grobkostenschätzung", text: "Ähnlichkeitsgewichtete Schätzung aus Referenzprojekten." },
-    { to: `/projekte/${id}/heizgruppen`, icon: Layers, title: "Heizgruppen", text: "Heizgruppen-Generator mit Volumenstrom." },
-  ];
+  // §12 — Modul-Nodes aus dem Backend-Status ableiten. Metriken bleiben klein
+  // und technisch (§39). Reihenfolge folgt dem Datenfluss von oben nach unten.
+  const nodes = {
+    project_data: {
+      title: "Projektinfos", icon: ClipboardList, status: m.project_data?.status,
+      metric: project.standort || project.kunde || "—",
+      secondaryMetric: m.project_data ? `${m.project_data.known}/${m.project_data.total} Grunddaten` : null,
+      warnings: m.project_data?.warnings || 0,
+      onClick: () => setEditing(true),
+    },
+    schema: {
+      title: "Anlagenschema", icon: Share2, status: m.schema?.status,
+      metric: m.schema?.revision ? `Version ${m.schema.revision}` : "Kein Stand",
+      secondaryMetric: m.schema ? `${m.schema.node_count} Bauteile · ${m.schema.edge_count} Leitungen` : null,
+      warnings: m.schema?.warnings || 0,
+      to: `/projekte/${id}/schema`,
+    },
+    hydraulics: {
+      title: "Hydraulik", icon: Waves, status: m.hydraulics?.status,
+      metric: m.hydraulics?.status === "complete" ? "berechnet" : m.hydraulics?.status === "warning" ? "prüfen" : "—",
+      to: `/projekte/${id}/schema`,
+    },
+    quantities: {
+      title: "Projektmengen", icon: ListChecks, status: m.quantities?.status,
+      metric: m.quantities ? `${m.quantities.known}/${m.quantities.total} bekannt` : "—",
+      secondaryMetric: m.quantities?.warnings ? `${m.quantities.warnings} offen` : null,
+      warnings: m.quantities?.warnings || 0,
+      to: `/projekte/${id}/mengen`,
+    },
+    cost_estimate: {
+      title: "Kostenschätzung", icon: Calculator, status: m.cost_estimate?.status,
+      metric: m.cost_estimate?.version ? `Version ${m.cost_estimate.version}` : "Noch keine",
+      isStale: m.cost_estimate?.stale,
+      to: `/projekte/${id}/kostenschaetzung`,
+    },
+    documentation: {
+      title: "Dokumentation", icon: FileText, status: m.documentation?.status,
+      metric: "geplant",
+    },
+  };
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-5 sm:py-8 lg:px-8">
-      {/* Zurück zur Projektübersicht */}
       <Link to="/projekte" className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 transition hover:text-brand-600">
         <ArrowLeft className="size-4" /> Projekte
       </Link>
 
       {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
-      {/* Projekt-Kopf */}
+      {/* §11 — Projekt-Kopf mit Fortschritt */}
       <div className="card mb-6 p-6">
         {editing ? (
           <div className="space-y-4">
@@ -130,73 +188,43 @@ export default function ProjectDashboard() {
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-600">
                 {project.standort && <span className="inline-flex items-center gap-1"><MapPin className="size-4 text-slate-400" /> {project.standort}</span>}
                 {project.kunde && <span className="inline-flex items-center gap-1"><User className="size-4 text-slate-400" /> {project.kunde}</span>}
-                {project.verantwortlicher_name && <span className="inline-flex items-center gap-1"><UserRoundCheck className="size-4 text-slate-400" /> Verantwortlich: {project.verantwortlicher_name}</span>}
-                {project.beschreibung && <span>{project.beschreibung}</span>}
+                {project.verantwortlicher_name && <span className="inline-flex items-center gap-1"><UserRoundCheck className="size-4 text-slate-400" /> {project.verantwortlicher_name}</span>}
               </div>
             </div>
-            <div className="flex shrink-0 gap-2">
-              <button onClick={() => setEditing(true)} className="btn-secondary min-h-11 flex-1 justify-center sm:flex-none"><Pencil className="size-4" /> Bearbeiten</button>
-              {!archiviert && (
-                <button onClick={handleArchive} aria-label="Projekt archivieren" className="btn-ghost min-h-11 min-w-11 text-slate-400 hover:text-red-500"><Archive className="size-4" /></button>
+            <div className="flex shrink-0 items-center gap-4">
+              {status && (
+                <div className="text-right">
+                  <div className="text-2xl font-bold tabular-nums text-slate-900">{completion}<span className="text-base text-slate-400"> %</span></div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Projektstatus</div>
+                </div>
               )}
+              <div className="flex gap-2">
+                <button onClick={() => setEditing(true)} className="btn-secondary min-h-11"><Pencil className="size-4" /> Bearbeiten</button>
+                {!archiviert && (
+                  <button onClick={handleArchive} aria-label="Projekt archivieren" className="btn-ghost min-h-11 min-w-11 text-slate-400 hover:text-red-500"><Archive className="size-4" /></button>
+                )}
+              </div>
             </div>
+          </div>
+        )}
+        {status && !editing && (
+          <div className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+            <div className="h-full rounded-full bg-brand-500 transition-all" style={{ width: `${completion}%` }} />
           </div>
         )}
       </div>
 
-      {/* Zentraler Freigabestand des Projekts */}
-      {freigaben && (
-        <div className="card mb-6 overflow-hidden">
-          <div className="flex flex-col items-start gap-3 border-b border-slate-100 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-            <div>
-              <h2 className="text-sm font-bold text-slate-800">Freigaben im Projekt</h2>
-              <p className="mt-0.5 text-xs text-slate-500">Verbindliche Stände und gespeicherte Snapshots auf einen Blick.</p>
-            </div>
-            <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
-              {freigaben.anzahl_freigegeben} / {freigaben.anzahl_module} freigegeben
-            </div>
-          </div>
-          <div className="divide-y divide-slate-100">
-            {freigaben.freigaben.map((item) => (
-              <Link key={item.key} to={`/projekte/${id}/kostenschaetzung`}
-                className="group grid min-h-20 grid-cols-[auto_1fr_auto] items-center gap-3 px-4 py-4 transition hover:bg-slate-50 sm:flex sm:gap-4 sm:px-5">
-                <div className={`flex size-11 shrink-0 items-center justify-center rounded-2xl ${item.freigegeben ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"}`}>
-                  {item.freigegeben ? <BadgeCheck className="size-5" /> : <CircleDashed className="size-5" />}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-bold text-slate-900">{item.titel}</span>
-                    <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${item.freigegeben ? "bg-green-100 text-green-700" : item.status === "fachlich_geprueft" ? "bg-blue-100 text-blue-700" : item.status === "unvollstaendig" ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-600"}`}>
-                      {item.status_label}
-                    </span>
-                  </div>
-                  <div className="mt-1 text-xs text-slate-500">
-                    {item.freigegeben
-                      ? `${item.variante === "brutto" ? "Brutto" : "Netto"} · Snapshot Version ${item.version_nr}${item.freigegeben_at ? ` · ${new Date(item.freigegeben_at).toLocaleString("de-CH")}` : ""}`
-                      : item.status === "nicht_begonnen" ? "Noch keine Schätzung gespeichert" : "Noch kein verbindlicher Snapshot"}
-                  </div>
-                </div>
-                {item.freigegeben && <LockKeyhole className="hidden size-4 text-green-600 sm:block" />}
-                <ArrowRight className="size-4 text-slate-400 transition group-hover:translate-x-0.5 group-hover:text-brand-600" />
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* §10/§15 — Project Universe: feste intelligente Anordnung, CSS-Grid + SVG */}
+      <ProjectUniverse nodes={nodes} hovered={hovered} setHovered={setHovered} />
 
-      {/* Lazy geladen: Das Projekt bleibt schnell, solange das Protokoll nicht gebraucht wird. */}
-      <section className="card mb-6 overflow-hidden">
-        <button
-          type="button"
-          onClick={toggleProtokoll}
-          className="flex min-h-16 w-full items-center gap-3 px-4 py-4 text-left transition hover:bg-slate-50 sm:px-5"
-        >
-          <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600">
-            <History className="size-5" />
-          </div>
+      {/* §40 — Activity, bewusst dezenter als früher */}
+      <section className="card mt-6 overflow-hidden">
+        <button type="button" onClick={toggleProtokoll}
+          className="flex min-h-16 w-full items-center gap-3 px-4 py-4 text-left transition hover:bg-slate-50 sm:px-5">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600"><History className="size-5" /></div>
           <div className="min-w-0 flex-1">
-            <div className="font-semibold text-slate-900">Änderungsprotokoll</div>
-            <div className="text-xs text-slate-500">Bearbeiter, Änderung und genauer Zeitpunkt nachvollziehen.</div>
+            <div className="font-semibold text-slate-900">Activity</div>
+            <div className="text-xs text-slate-500">Bearbeiter, Änderung und genauer Zeitpunkt.</div>
           </div>
           <ChevronDown className={`size-4 text-slate-400 transition ${protokollOpen ? "rotate-180" : ""}`} />
         </button>
@@ -208,15 +236,6 @@ export default function ProjectDashboard() {
                 <div>
                   <div className="text-sm font-medium text-slate-800">{AUDIT_LABELS[event.action] || event.action}</div>
                   <div className="mt-0.5 text-xs text-slate-500">{event.actor_name || "System"}</div>
-                  {event.details?.manuelle_aenderungen?.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {event.details.manuelle_aenderungen.map((item) => (
-                        <span key={`${item.variante}-${item.bkp_nr}`} className="badge bg-amber-50 text-amber-800">
-                          BKP {item.bkp_nr}: {item.vorher ?? "–"} → {item.nachher ?? "–"} CHF
-                        </span>
-                      ))}
-                    </div>
-                  )}
                 </div>
                 <time className="text-xs tabular-nums text-slate-400">
                   {new Intl.DateTimeFormat("de-CH", { dateStyle: "medium", timeStyle: "short" }).format(new Date(event.created_at))}
@@ -229,70 +248,92 @@ export default function ProjectDashboard() {
           </div>
         )}
       </section>
+    </div>
+  );
+}
 
-      {/* Werkzeuge für dieses Projekt */}
-      {!archiviert && (
-        <div className="mb-6 grid gap-4 sm:grid-cols-3">
-          {TOOLS.map(({ to, icon: Icon, title, text, primary }) => (
-            <Link key={to} to={to}
-              className={"group flex flex-col rounded-2xl border p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md " +
-                (primary ? "border-transparent bg-gradient-to-br from-brand-600 to-brand-700 text-white" : "card hover:border-brand-200")}>
-              <div className={"flex size-10 items-center justify-center rounded-xl " + (primary ? "bg-white/15 text-white" : "bg-brand-50 text-brand-600")}>
-                {React.createElement(Icon, { className: "size-5" })}
-              </div>
-              <div className={"mt-3 text-base font-bold " + (primary ? "text-white" : "text-slate-900")}>{title}</div>
-              <p className={"mt-1 flex-1 text-sm " + (primary ? "text-white/80" : "text-slate-500")}>{text}</p>
-              <span className={"mt-3 inline-flex items-center gap-1 text-sm font-semibold " + (primary ? "text-white" : "text-brand-600")}>
-                Öffnen <ArrowRight className="size-4 transition group-hover:translate-x-0.5" />
-              </span>
-            </Link>
-          ))}
-        </div>
-      )}
+// §10-15 — die Modulfläche mit gemessenen SVG-Verbindungen hinter den Cards.
+// Kein React Flow: feste Anordnung im CSS-Grid, Linien werden aus den echten
+// Kartenpositionen berechnet und bei Grössenänderung neu vermessen (§15).
+function ProjectUniverse({ nodes, hovered, setHovered }) {
+  const containerRef = useRef(null);
+  const refs = useRef({});
+  const [paths, setPaths] = useState([]);
 
-      {/* Grunddaten */}
-      {bd && (
-        <div className="card mb-6 p-5">
-          <h2 className="mb-3 text-sm font-semibold text-slate-700">Projektgrundlagen</h2>
-          <div className="grid grid-cols-2 gap-4 text-sm md:grid-cols-4">
-            <div><div className="text-xs text-slate-400">Auslegungstemperatur</div><div className="font-medium text-slate-900">{bd.t_aussen} °C</div></div>
-            <div><div className="text-xs text-slate-400">Raumtemperatur</div><div className="font-medium text-slate-900">{bd.t_innen} °C</div></div>
-            <div><div className="text-xs text-slate-400">Heizungssystem</div><div className="font-medium text-slate-900">{HEIZUNGSSYSTEM_LABELS[bd.heizungssystem] || bd.heizungssystem}</div></div>
-            {bd.warmwasser_bedarf_kw != null && <div><div className="text-xs text-slate-400">BWW-Bedarf</div><div className="font-medium text-slate-900">{bd.warmwasser_bedarf_kw} kW</div></div>}
-            {bd.gebaeudekategorie && <div><div className="text-xs text-slate-400">Gebäudekategorie</div><div className="font-medium text-slate-900">{GEBAEUDEKATEGORIEN.find((k) => k.value === bd.gebaeudekategorie)?.label || bd.gebaeudekategorie}</div></div>}
-            {bd.klimastation && <div><div className="text-xs text-slate-400">Klimastation</div><div className="font-medium text-slate-900">{bd.klimastation}</div></div>}
-            {bd.ebf_m2 != null && <div><div className="text-xs text-slate-400">EBF</div><div className="font-medium text-slate-900">{bd.ebf_m2} m²</div></div>}
-            {bd.anzahl_nutzungseinheiten != null && <div><div className="text-xs text-slate-400">Nutzungseinheiten</div><div className="font-medium text-slate-900">{bd.anzahl_nutzungseinheiten}</div></div>}
-            {bd.projektart && <div><div className="text-xs text-slate-400">Projektart</div><div className="font-medium text-slate-900">{bd.projektart}</div></div>}
-            {bd.region && <div><div className="text-xs text-slate-400">Region</div><div className="font-medium text-slate-900">{bd.region}</div></div>}
-            {bd.zertifizierung && <div><div className="text-xs text-slate-400">Zertifizierung</div><div className="font-medium text-slate-900">{bd.zertifizierung}</div></div>}
-          </div>
-        </div>
-      )}
+  const setNodeRef = (key) => (el) => { refs.current[key] = el; };
 
-      {/* Heizgruppen-Übersicht */}
-      {hasGroups && (
-        <div className="card p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-slate-700">Heizgruppen — Übersicht</h2>
-            <Link to={`/projekte/${id}/heizgruppen`} className="text-xs font-semibold text-brand-600 hover:underline">Alle bearbeiten →</Link>
-          </div>
-          <div className="grid grid-cols-3 gap-4 text-sm">
-            <div className="rounded-xl bg-slate-50 p-3 text-center">
-              <div className="text-lg font-bold text-slate-900">{project.summe_leistung_kw?.toFixed(1)} kW</div>
-              <div className="text-xs text-slate-500">Gesamtleistung</div>
-            </div>
-            <div className="rounded-xl bg-slate-50 p-3 text-center">
-              <div className="text-lg font-bold text-slate-900">{project.summe_volumenstrom_m3h?.toFixed(3)} m³/h</div>
-              <div className="text-xs text-slate-500">Gesamtvolumenstrom</div>
-            </div>
-            <div className="rounded-xl bg-slate-50 p-3 text-center">
-              <div className="text-lg font-bold text-slate-900">{project.rl_gemischt != null ? `${project.rl_gemischt.toFixed(1)} °C` : "—"}</div>
-              <div className="text-xs text-slate-500">Gem. Rücklauf</div>
-            </div>
-          </div>
-        </div>
-      )}
+  const measure = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const base = container.getBoundingClientRect();
+    const next = [];
+    for (const [from, to] of CONNECTIONS) {
+      const a = refs.current[from]?.getBoundingClientRect();
+      const b = refs.current[to]?.getBoundingClientRect();
+      if (!a || !b) continue;
+      const x1 = a.left - base.left + a.width / 2;
+      const y1 = a.top - base.top + a.height;
+      const x2 = b.left - base.left + b.width / 2;
+      const y2 = b.top - base.top;
+      const my = (y1 + y2) / 2;
+      next.push({ from, to, d: `M ${x1} ${y1} C ${x1} ${my}, ${x2} ${my}, ${x2} ${y2}` });
+    }
+    setPaths(next);
+  }, []);
+
+  useLayoutEffect(() => {
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (containerRef.current) ro.observe(containerRef.current);
+    window.addEventListener("resize", measure);
+    return () => { ro.disconnect(); window.removeEventListener("resize", measure); };
+  }, [measure, nodes]);
+
+  const related = relatedKeys(hovered);
+  const nodeDimmed = (key) => (related ? !related.has(key) : false);
+
+  const cell = (key, extra = "") => {
+    const n = nodes[key];
+    return (
+      <div className={extra}>
+        <ProjectModuleNode
+          ref={setNodeRef(key)}
+          {...n}
+          dimmed={nodeDimmed(key)}
+          active={hovered === key}
+          onMouseEnter={() => setHovered(key)}
+          onMouseLeave={() => setHovered(null)}
+        />
+      </div>
+    );
+  };
+
+  return (
+    <div ref={containerRef} className="relative">
+      {/* Verbindungslinien hinter den Cards (§14) */}
+      <svg className="pointer-events-none absolute inset-0 z-0 hidden h-full w-full sm:block" aria-hidden="true">
+        {paths.map((p) => {
+          const highlight = hovered && (p.from === hovered || p.to === hovered);
+          const faded = hovered && !highlight;
+          return (
+            <path key={`${p.from}-${p.to}`} d={p.d} fill="none"
+              stroke={highlight ? "#6366f1" : "#cbd5e1"}
+              strokeWidth={highlight ? 2 : 1.5}
+              strokeOpacity={faded ? 0.3 : 1}
+              className="transition-all" />
+          );
+        })}
+      </svg>
+
+      {/* Feste intelligente Anordnung (§11) */}
+      <div className="relative z-10 grid grid-cols-1 gap-y-6 sm:grid-cols-2 sm:gap-x-24 sm:gap-y-10">
+        {cell("project_data", "sm:col-span-2 sm:mx-auto sm:w-64")}
+        {cell("schema", "sm:col-span-2 sm:mx-auto sm:w-64")}
+        {cell("hydraulics", "sm:justify-self-end sm:w-64")}
+        {cell("quantities", "sm:justify-self-start sm:w-64")}
+        {cell("cost_estimate", "sm:col-span-2 sm:mx-auto sm:w-64")}
+        {cell("documentation", "sm:col-span-2 sm:mx-auto sm:w-64")}
+      </div>
     </div>
   );
 }

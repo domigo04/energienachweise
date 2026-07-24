@@ -56,9 +56,12 @@ nicht parallel neu erfunden.
 - [x] ProjectContext vervollständigt: Erzeugertyp, Erzeuger- vs.
       Verbraucherleistung, Bohrmeter (Sonden × Länge) und Speichervolumen
       live aus dem Schema (Golden-Project-Test §49)
+- [x] Projektmengen-Ansicht im Frontend (`/projekte/:id/mengen`, §37)
+- [x] Project Universe: Railway-artiges Dashboard mit ProjectModuleNode,
+      SVG-Verbindungen und Backend-Statusdienst (`GET /projects/{id}/status`, §16)
 - [ ] separate Heizgruppen mit Schema-Verbrauchergruppen verbinden
-- [ ] Projektinformations- und Projektmengen-Ansicht im Frontend
-- [ ] Projekt-Dashboard zeigt offene Prüfungen und Freigabestände aller Module
+- [ ] eigene Projektinformations-Seite (aktuell im Dashboard-Kopf editierbar)
+- [ ] Projektdetail-Drawer „Problem beheben" (§41)
 - [ ] Plankopf und Bauteileigenschaftstabellen aus der Revision erzeugen
   - [x] Plankopf-Name eines neuen Schemas automatisch aus Projekt + Datum
         vorbelegen (frei überschreibbar)

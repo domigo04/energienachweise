@@ -16,6 +16,8 @@ export const updateProject = (id, data) => api.patch(`${BASE}/projects/${id}`, d
 
 // ProjectContext (§24): eine Projektwahrheit — Grunddaten + Schema + Ergänzungen
 export const getProjectContext = (id) => api.get(`${BASE}/projects/${id}/context`).then(r => r.data);
+// Project Universe (§16): Gesamtfortschritt + Modulstatus fürs Dashboard
+export const getProjectStatus = (id) => api.get(`${BASE}/projects/${id}/status`).then(r => r.data);
 export const setProjectParameter = (id, key, data) =>
   api.put(`${BASE}/projects/${id}/parameters/${key}`, data).then(r => r.data);
 

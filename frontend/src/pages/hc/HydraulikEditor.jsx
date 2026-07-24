@@ -47,6 +47,12 @@ const GENERATOR_TYPES = [
   { value:'sonstige',   label:'Sonstige' },
 ];
 
+// Bauteile, die beim Ablegen auf eine Leitung diese sauber trennen und mit ihren
+// beiden Achsenanschlüssen (top/bottom) dazwischenliegen (§3/§4). Nur Typen mit
+// einer klaren zweiseitigen Flussachse — der Temperaturfühler (Abgriff) und das
+// 3-Weg-Ventil (Verzweigung) gehören bewusst NICHT dazu.
+const INLINE_SPLIT_TYPES = new Set(['pump', 'valve2', 'stad', 'shutoff', 'checkvalve', 'waermezaehler']);
+
 const LEITUNGS_LAYER = [
   { id:'heizung_vl', label:'Heizung VL', kurz:'H VL', color:'#ef4444', role:'vl', dashed:false },
   { id:'heizung_rl', label:'Heizung RL', kurz:'H RL', color:'#3b82f6', role:'rl', dashed:true },
@@ -2158,6 +2164,19 @@ function EditorInner() {
       return;
     }
 
+    // Selbst-Anschluss verhindern: Start und Ende am selben Bauteil. Bei der
+    // grossflächigen Anschlusszone sonst leicht versehentlich ausgelöst.
+    if (draft.startEndpoint?.nodeId && snapHit?.type === 'port'
+        && snapHit.nodeId === draft.startEndpoint.nodeId) {
+      leitungsEntwurfRef.current = null;
+      setLeitungsEntwurf(null);
+      setLeitungsSnap(null);
+      setLeitungsCursor(null);
+      leitungsCursorRef.current = null;
+      setLeitungsGuides([]);
+      return;
+    }
+
     const createdNodes = [];
     const sourceAnchorId = draft.startEndpoint ? null : newId();
     const targetAnchorId = snapHit?.type === 'port' ? null : newId();
@@ -2964,6 +2983,9 @@ function EditorInner() {
   };
 
   const onConnect = useCallback((params) => {
+    // Ein Bauteil darf sich nicht mit sich selbst verbinden (bei den vielen
+    // Zonen-Anschlüssen sonst schnell versehentlich ausgelöst).
+    if (params.source === params.target) return;
     snap();
     const startPoint = handlePosition(params.source, params.sourceHandle);
     const endPoint = handlePosition(params.target, params.targetHandle);
@@ -3070,8 +3092,32 @@ function EditorInner() {
     const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
     const p = STD_PALETTE.find(p => p.type === raw);
     const id = newId();
-    const lineHit = raw === 'pump' ? naechsteSichtbareLeitung(pos, 30 / Math.max(getZoom(), 0.2)) : null;
+    const lineHit = INLINE_SPLIT_TYPES.has(raw) ? naechsteSichtbareLeitung(pos, 30 / Math.max(getZoom(), 0.2)) : null;
     const nodePosition = lineHit ? { x:lineHit.x - 20, y:lineHit.y - 20 } : pos;
+
+    // Ausrichtung des Bauteils an der Leitung (§5): die Flussachse (top/bottom)
+    // soll mit der Leitung fluchten. Waagrechte Leitung → Bauteil 90° drehen.
+    let inlineRotation = 0;
+    let entryHandle = 'top';    // verbindet mit host.source (Vorstück)
+    let exitHandle = 'bottom';  // verbindet mit host.target (Reststück)
+    if (lineHit) {
+      const a = lineHit.route[lineHit.segmentIndex];
+      const b = lineHit.route[lineHit.segmentIndex + 1];
+      const horizontal = Math.abs(b.x - a.x) >= Math.abs(b.y - a.y);
+      const forward = horizontal ? b.x >= a.x : b.y >= a.y;
+      inlineRotation = horizontal ? 90 : 0;
+      // Bauteil hat immer die realen Achsenanschlüsse top/bottom; welcher zum
+      // Vor- bzw. Reststück zeigt, ergibt sich aus Richtung und Drehung.
+      if (!horizontal) {
+        entryHandle = forward ? 'top' : 'bottom';
+        exitHandle = forward ? 'bottom' : 'top';
+      } else {
+        // 90°: top liegt visuell rechts, bottom links.
+        entryHandle = forward ? 'bottom' : 'top';
+        exitHandle = forward ? 'top' : 'bottom';
+      }
+    }
+
     setNodes(ns => {
       const extra = raw === 'verteiler' ? { abgaenge: 4 }
         : raw === 'erdsonden' ? { sonden_anzahl: 5, sonden_laenge_m: 180 }
@@ -3081,17 +3127,13 @@ function EditorInner() {
         : {};
       return [...ns, {
         id, type: raw, position: nodePosition,
-        data: { label: p?.label || raw, ...extra, ...(NUMMERIERT.includes(raw) ? { nr: naechsteNr(ns) } : {}) },
+        data: { label: p?.label || raw, ...extra,
+          ...(inlineRotation ? { rotation: inlineRotation } : {}),
+          ...(NUMMERIERT.includes(raw) ? { nr: naechsteNr(ns) } : {}) },
       }];
     });
     if (lineHit) {
       const host = lineHit.edge;
-      const a = lineHit.route[lineHit.segmentIndex];
-      const b = lineHit.route[lineHit.segmentIndex + 1];
-      const horizontal = Math.abs(b.x - a.x) >= Math.abs(b.y - a.y);
-      const forward = horizontal ? b.x >= a.x : b.y >= a.y;
-      const entryHandle = horizontal ? (forward ? 'left' : 'right') : (forward ? 'top' : 'bottom');
-      const exitHandle = horizontal ? (forward ? 'right' : 'left') : (forward ? 'bottom' : 'top');
       const beforePoints = lineHit.route.slice(1, lineHit.segmentIndex + 1);
       const afterPoints = lineHit.route.slice(lineHit.segmentIndex + 1, -1);
       const beforeRoute = [lineHit.route[0], ...beforePoints, { x:lineHit.x, y:lineHit.y }];

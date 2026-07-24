@@ -15,7 +15,7 @@ import '@xyflow/react/dist/style.css';
 import './HydraulikEditor.css';
 import { NODE_TYPES, NUMMERIERT, ROTATABLE } from '../../components/hc/nodes/HydraulikNodes';
 import { EDGE_TYPES } from '../../components/hc/edges/FlowEdge';
-import { pairedHandleId, parallelWaypoints, roundedPolylinePath } from '../../components/hc/edges/geometry';
+import { pairedHandleId, parallelWaypoints, roundedPolylinePath, splitRouteAtPoint } from '../../components/hc/edges/geometry';
 import { SCHALTUNGEN } from '../../components/hc/nodes/schaltungen';
 import {
   createSchema,
@@ -1881,13 +1881,10 @@ function EditorInner() {
   const leitungTeilen = useCallback((hit, junctionId, layerId) => {
     const host = hit.edge;
     const junctionPoint = { x:hit.x, y:hit.y };
-    const before = hit.route.slice(1, hit.segmentIndex + 1);
-    const after = hit.route.slice(hit.segmentIndex + 1, -1);
-    const firstRoute = [hit.route[0], ...before, junctionPoint];
-    const secondRoute = [junctionPoint, ...after, hit.route.at(-1)];
-    const totalGeometry = streckenLaenge(firstRoute) + streckenLaenge(secondRoute);
+    // Geteilte, getestete Kernlogik (§3/§13): erhält bestehende Waypoints und
+    // teilt die Länge proportional. Identisches Verhalten wie bisher.
+    const { before, after, firstShare } = splitRouteAtPoint(hit.route, hit.segmentIndex, junctionPoint);
     const oldLength = Number.parseFloat(host.data?.laenge_m);
-    const firstShare = totalGeometry ? streckenLaenge(firstRoute) / totalGeometry : 0.5;
     const splitData = (points, share) => ({
       ...(host.data || {}), layer_id:layerId, cad_polyline:true, polyline_version:1, points,
       ...(Number.isFinite(oldLength) ? { laenge_m:Number((oldLength * share).toFixed(2)) } : {}),

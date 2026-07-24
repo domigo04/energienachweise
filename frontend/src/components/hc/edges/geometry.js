@@ -56,6 +56,56 @@ export function pairedHandleId(nodeType, handleId) {
   return null;
 }
 
+// Gesamtlänge einer Route (Punktfolge inkl. Endpunkte).
+export function streckenLaenge(points) {
+  return points.slice(1).reduce(
+    (sum, point, index) => sum + Math.hypot(point.x - points[index].x, point.y - points[index].y),
+    0,
+  );
+}
+
+// Projektion eines Punktes auf ein Segment a→b (t geklemmt auf [0,1]).
+export function projektionAufSegment(point, a, b) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lengthSquared = dx * dx + dy * dy;
+  if (!lengthSquared) return null;
+  const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSquared));
+  const x = a.x + t * dx;
+  const y = a.y + t * dy;
+  return { x, y, t, distance: Math.hypot(point.x - x, point.y - y) };
+}
+
+// Eine Route an einem Punkt auf `segmentIndex` teilen — der geometrische Kern
+// des Inline-Einsetzens (§3) und des CAD-Junction-Splits. Liefert die
+// Zwischen-Stützpunkte beider Teilstücke (ohne Endpunkte) und den Längenanteil
+// des ersten Stücks, damit z. B. `laenge_m` proportional aufgeteilt werden kann.
+// Bestehende Waypoints bleiben erhalten, nichts wird neu berechnet.
+export function splitRouteAtPoint(route, segmentIndex, point) {
+  const before = route.slice(1, segmentIndex + 1);
+  const after = route.slice(segmentIndex + 1, -1);
+  const firstRoute = [route[0], ...before, point];
+  const secondRoute = [point, ...after, route.at(-1)];
+  const total = streckenLaenge(firstRoute) + streckenLaenge(secondRoute);
+  const firstShare = total ? streckenLaenge(firstRoute) / total : 0.5;
+  return { before, after, firstShare };
+}
+
+// Zwei Routen, die sich einen Knoten teilen (A endet im Knoten, B beginnt dort),
+// beim Löschen eines Inline-Bauteils wieder zu EINER Route verbinden (§6). Der
+// Knotenpunkt wird zu einem gewöhnlichen Stützpunkt. Nur bei eindeutiger
+// Topologie (genau zwei Nachbarn) aufrufen — hier wird nichts geraten.
+export function mergeReconnectWaypoints(routeA, routeB) {
+  const knoten = routeA.at(-1);
+  return [...routeA.slice(1, -1), knoten, ...routeB.slice(1, -1)];
+}
+
+// Ausrichtung eines Segments für die automatische Bauteil-Orientierung (§5):
+// überwiegt die horizontale Ausdehnung → 'horizontal', sonst 'vertikal'.
+export function segmentAusrichtung(a, b) {
+  return Math.abs(b.x - a.x) >= Math.abs(b.y - a.y) ? 'horizontal' : 'vertikal';
+}
+
 export function parallelWaypoints(points, start, end, pairStart, pairEnd) {
   if (!points?.length) return [];
   const route = [start, ...points, end];

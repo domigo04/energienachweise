@@ -15,7 +15,7 @@ import '@xyflow/react/dist/style.css';
 import './HydraulikEditor.css';
 import { NODE_TYPES, NUMMERIERT, ROTATABLE } from '../../components/hc/nodes/HydraulikNodes';
 import { EDGE_TYPES } from '../../components/hc/edges/FlowEdge';
-import { pairedHandleId, parallelWaypoints, roundedPolylinePath, splitRouteAtPoint } from '../../components/hc/edges/geometry';
+import { pairedHandleId, parallelWaypoints, roundedPolylinePath, splitRouteAtPoint, reconnectThroughNode } from '../../components/hc/edges/geometry';
 import { SCHALTUNGEN } from '../../components/hc/nodes/schaltungen';
 import {
   createSchema,
@@ -3332,10 +3332,45 @@ function EditorInner() {
 
   const deleteNode = (id) => {
     snap();
+    const incident = edgesRef.current.filter(edge => edge.source === id || edge.target === id);
+
+    // §6 — Inline-Reconnect: genau ZWEI hydraulische Nachbarn auf demselben Layer
+    // → die beiden Leitungen wieder zu EINER verschmelzen (A ─ P ─ B → A ─── B),
+    // der Bauteilort bleibt als Stützpunkt erhalten. Nur bei eindeutiger Topologie;
+    // bei Abzweigungen oder gemischten Layern wird nichts geraten (dann Standard-
+    // Löschen aller inzidenten Leitungen).
+    let mergedEdge = null;
+    if (incident.length === 2) {
+      const [e1, e2] = incident;
+      const gleicherLayer = e1.data?.layer_id && e1.data.layer_id === e2.data?.layer_id;
+      const beideFlow = e1.type === 'flow' && e2.type === 'flow';
+      const keinePaarung = !e1.data?.auto_paired && !e2.data?.auto_paired;
+      if (gleicherLayer && beideFlow && keinePaarung) {
+        const rc = reconnectThroughNode(e1, e2, id, routePunkte);
+        if (rc) {
+          const len1 = Number.parseFloat(e1.data?.laenge_m);
+          const len2 = Number.parseFloat(e2.data?.laenge_m);
+          const laenge = Number.isFinite(len1) && Number.isFinite(len2)
+            ? { laenge_m:Number((len1 + len2).toFixed(2)) } : {};
+          const data = { ...(e1.data || {}), cad_polyline:true, points:rc.points, ...laenge };
+          delete data.paired_edge_id;
+          delete data.auto_paired;
+          delete data.auto_pair_open;
+          mergedEdge = {
+            ...e1, id:newId(), selected:false,
+            source:rc.source, sourceHandle:rc.sourceHandle,
+            target:rc.target, targetHandle:rc.targetHandle,
+            data,
+          };
+        }
+      }
+    }
+
     const remaining = edgesRef.current.filter(edge => edge.source !== id && edge.target !== id);
-    const usedNodes = new Set(remaining.flatMap(edge => [edge.source, edge.target]));
+    const withMerged = mergedEdge ? [...remaining, mergedEdge] : remaining;
+    const usedNodes = new Set(withMerged.flatMap(edge => [edge.source, edge.target]));
     setNodes(ns => ns.filter(node => node.id !== id && (node.type !== 'junction' || usedNodes.has(node.id))));
-    setEdges(remaining);
+    setEdges(withMerged);
     setSelected(null);
   };
   deleteEdgeRef.current = deleteEdge;

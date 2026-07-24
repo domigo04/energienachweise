@@ -4,6 +4,7 @@ import {
   projektionAufSegment,
   splitRouteAtPoint,
   mergeReconnectWaypoints,
+  reconnectThroughNode,
   segmentAusrichtung,
 } from "./geometry";
 
@@ -77,6 +78,43 @@ describe("mergeReconnectWaypoints", () => {
     expect(mergeReconnectWaypoints(routeA, routeB)).toEqual([
       { x: 20, y: 0 }, { x: 50, y: 0 }, { x: 70, y: 0 },
     ]);
+  });
+});
+
+describe("reconnectThroughNode", () => {
+  // A → P und P → B, P wird gelöscht → A ─── B mit P als Stützpunkt (§6).
+  const routes = {
+    e1: [{ x: 0, y: 0 }, { x: 50, y: 0 }],   // A → P(50,0)
+    e2: [{ x: 50, y: 0 }, { x: 100, y: 0 }], // P → B
+  };
+  const routeOf = (e) => routes[e._k];
+
+  it("führt zwei Durchgangsleitungen wieder zusammen", () => {
+    const e1 = { _k: "e1", source: "A", sourceHandle: "top", target: "P", targetHandle: "bottom" };
+    const e2 = { _k: "e2", source: "P", sourceHandle: "top", target: "B", targetHandle: "bottom" };
+    const rc = reconnectThroughNode(e1, e2, "P", routeOf);
+    expect(rc.source).toBe("A");
+    expect(rc.sourceHandle).toBe("top");
+    expect(rc.target).toBe("B");
+    expect(rc.targetHandle).toBe("bottom");
+    expect(rc.points).toEqual([{ x: 50, y: 0 }]); // Bauteilort bleibt Stützpunkt
+  });
+
+  it("funktioniert auch bei umgekehrter Kantenrichtung", () => {
+    // e2 zeigt B → P statt P → B
+    const routes2 = { e1: routes.e1, e2: [{ x: 100, y: 0 }, { x: 50, y: 0 }] };
+    const e1 = { _k: "e1", source: "A", sourceHandle: "top", target: "P", targetHandle: "bottom" };
+    const e2 = { _k: "e2", source: "B", sourceHandle: "bottom", target: "P", targetHandle: "top" };
+    const rc = reconnectThroughNode(e1, e2, "P", (e) => routes2[e._k]);
+    expect(rc.source).toBe("A");
+    expect(rc.target).toBe("B");
+    expect(rc.points).toEqual([{ x: 50, y: 0 }]);
+  });
+
+  it("verweigert die Zusammenführung bei gleichem Aussenknoten (keine eindeutige Topologie)", () => {
+    const e1 = { _k: "e1", source: "A", sourceHandle: "top", target: "P", targetHandle: "bottom" };
+    const e2 = { _k: "e2", source: "P", sourceHandle: "top", target: "A", targetHandle: "x" };
+    expect(reconnectThroughNode(e1, e2, "P", routeOf)).toBeNull();
   });
 });
 

@@ -100,6 +100,29 @@ export function mergeReconnectWaypoints(routeA, routeB) {
   return [...routeA.slice(1, -1), knoten, ...routeB.slice(1, -1)];
 }
 
+// Zwei Leitungen, die ein Inline-Bauteil verbinden, beim Löschen zu EINER
+// zusammenführen (§6). `routeOf(edge)` liefert die volle Route [start..end].
+// Beide Kanten berühren `nodeId`; die Routen werden so orientiert, dass die
+// erste beim Knoten endet und die zweite dort beginnt — unabhängig von der
+// gespeicherten Kantenrichtung. Gibt null zurück, wenn keine eindeutige
+// Durchgangs-Topologie vorliegt (z. B. beide äusseren Enden gleich).
+export function reconnectThroughNode(e1, e2, nodeId, routeOf) {
+  const routeIn = e1.target === nodeId ? routeOf(e1) : [...routeOf(e1)].reverse();
+  const routeOut = e2.source === nodeId ? routeOf(e2) : [...routeOf(e2)].reverse();
+  const outer1 = e1.target === nodeId
+    ? { node: e1.source, handle: e1.sourceHandle }
+    : { node: e1.target, handle: e1.targetHandle };
+  const outer2 = e2.source === nodeId
+    ? { node: e2.target, handle: e2.targetHandle }
+    : { node: e2.source, handle: e2.sourceHandle };
+  if (!routeIn?.length || !routeOut?.length || outer1.node === outer2.node) return null;
+  return {
+    source: outer1.node, sourceHandle: outer1.handle,
+    target: outer2.node, targetHandle: outer2.handle,
+    points: mergeReconnectWaypoints(routeIn, routeOut),
+  };
+}
+
 // Ausrichtung eines Segments für die automatische Bauteil-Orientierung (§5):
 // überwiegt die horizontale Ausdehnung → 'horizontal', sonst 'vertikal'.
 export function segmentAusrichtung(a, b) {

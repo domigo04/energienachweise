@@ -17,6 +17,15 @@ Zählregeln (verankert in den echten Graph-Daten und der Hydraulik-Semantik):
 - Ventiltyp der Gruppe: Einspritz/Beimisch → 3-Weg, Drossel → 2-Weg.
 - Wärmezähler in der Gruppe: nur bei ausdrücklichem `hat_wz is True`
   (kein stiller Default — nicht jede Gruppe wird gemessen, §3).
+- Bohrmeter (§6): pro Erdsondenfeld anzahl × länge, über alle Felder summiert.
+- Speichervolumen (§7): Einzelinhalte aller Speicher/BWW summiert.
+- Erzeugerleistung (§5): installierte Leistung aller Wärmeerzeuger — bewusst
+  getrennt von der aus den Verbrauchergruppen summierten Verbraucherleistung.
+- Erzeugertyp (§4): strukturierter `generator_type` am Erzeuger-Node ist die
+  Primärquelle; der frühere Freitext `typ` wird nur schwach normalisiert.
+
+Neue strukturierte Feldnamen werden bevorzugt, die bisherigen (deutsch) bleiben
+als Fallback lesbar, damit Bestandsschemas unverändert weiter zählen (§8, DoD).
 """
 from __future__ import annotations
 
@@ -27,6 +36,28 @@ from typing import Optional
 # Verbrauchergruppen = Heizgruppen im Schema
 _VERBRAUCHER = ("gruppe", "heizkreis")
 
+# Erlaubte strukturierte Erzeugertypen (§4). Reihenfolge = keine Bedeutung.
+GENERATOR_TYPES = (
+    "ews_wp", "lwwp", "wasser_wp", "fernwaerme", "gas",
+    "oel", "holz", "co2_wp", "elektro", "hybrid", "sonstige",
+)
+
+# Schwache Normalisierung des früheren Freitexts `typ` → strukturierter Typ.
+# Nur Fallback: sobald ein Node `generator_type` trägt, gilt ausschliesslich der.
+_GENERATOR_TYPE_HINTS = (
+    ("ews_wp", ("erdsonde", "ews", "sole", "sole/wasser", "sole-wasser")),
+    ("lwwp", ("luft/wasser", "luft-wasser", "lwwp", "luftwärme", "aussenluft")),
+    ("wasser_wp", ("wasser/wasser", "wasser-wasser", "grundwasser")),
+    ("co2_wp", ("co2", "co₂")),
+    ("fernwaerme", ("fernwärme", "fernwaerme", "fw", "nahwärme")),
+    ("gas", ("gas", "brennwert")),
+    ("oel", ("öl", "oel", "heizöl")),
+    ("holz", ("holz", "pellet", "schnitzel", "stückholz")),
+    ("elektro", ("elektro", "elektrisch", "heizstab")),
+    ("hybrid", ("hybrid",)),
+    ("wasser_wp", ("wärmepumpe", "wp")),  # generische WP zuletzt → Sole/Wasser unklar
+)
+
 
 def _num(x) -> Optional[float]:
     """Robuste Zahl-Umwandlung — Graph-Werte sind teils Strings ('20')."""
@@ -36,6 +67,23 @@ def _num(x) -> Optional[float]:
         return float(str(x).replace(",", "."))
     except (TypeError, ValueError):
         return None
+
+
+def _generator_type_von_node(d: dict) -> Optional[str]:
+    """Strukturierten Erzeugertyp bestimmen: `generator_type` gewinnt, sonst
+    schwache Freitext-Normalisierung. Unbekannt → None (nicht raten, §3)."""
+    strukturiert = d.get("generator_type")
+    if strukturiert:
+        s = str(strukturiert).strip().lower()
+        if s in GENERATOR_TYPES:
+            return s
+    freitext = str(d.get("typ") or "").strip().lower()
+    if not freitext:
+        return None
+    for ziel, hinweise in _GENERATOR_TYPE_HINTS:
+        if any(h in freitext for h in hinweise):
+            return ziel
+    return None
 
 
 def _schaltung(d: dict) -> str:
@@ -82,16 +130,44 @@ def mengen_aus_schema(graph_json) -> dict:
     leistung_summe = 0.0
     hat_leistung = False
 
+    bohrmeter_summe = 0.0
+    hat_bohrmeter = False
+    speichervolumen_summe = 0.0
+    hat_speichervolumen = False
+    generator_power_summe = 0.0
+    hat_generator_power = False
+    generator_type: Optional[str] = None  # erster erkannter strukturierter Typ
+
     for n in nodes:
         t = n.get("type")
         d = n.get("data") or {}
 
         if t == "erzeuger":
             anzahl_erzeuger += 1
+            g = _generator_type_von_node(d)
+            if g is not None and generator_type is None:
+                generator_type = g
+            p = _num(d.get("generator_power_kw"))
+            if p is None:
+                p = _num(d.get("leistung_kw"))
+            if p is not None:
+                generator_power_summe += p
+                hat_generator_power = True
         elif t == "erdsonden":
             anzahl_erdsonden += 1
+            # §6: strukturierte Felder bevorzugt, sonst die bisherigen deutschen.
+            anzahl = _num(d.get("probe_count")) or _num(d.get("sonden_anzahl"))
+            tiefe = _num(d.get("probe_depth_m")) or _num(d.get("sonden_laenge_m"))
+            if anzahl is not None and tiefe is not None and anzahl > 0 and tiefe > 0:
+                bohrmeter_summe += anzahl * tiefe
+                hat_bohrmeter = True
         elif t in ("speicher", "bww"):
             anzahl_speicher += 1
+            # §7: strukturiertes Volumen bevorzugt, sonst der bisherige Freitext.
+            v = _num(d.get("storage_volume_l")) or _num(d.get("speicher_liter")) or _num(d.get("speicher_l"))
+            if v is not None and v > 0:
+                speichervolumen_summe += v
+                hat_speichervolumen = True
         elif t == "verteiler":
             anzahl_verteiler += 1
         elif t == "pump":
@@ -134,7 +210,22 @@ def mengen_aus_schema(graph_json) -> dict:
         "anzahl_waermezaehler": anzahl_waermezaehler,
     }
     # Leistung nur, wenn mindestens eine Gruppe eine Leistung trägt — sonst ist
-    # sie unbekannt, nicht 0.
+    # sie unbekannt, nicht 0. `leistung_kw` = Verbraucherleistung (Bestandsname),
+    # zusätzlich unter dem sprechenden `consumer_power_kw` geführt (§5).
     if hat_leistung:
-        mengen["leistung_kw"] = round(leistung_summe, 3)
+        wert = round(leistung_summe, 3)
+        mengen["leistung_kw"] = wert
+        mengen["consumer_power_kw"] = wert
+    # §5: installierte Erzeugerleistung getrennt halten — nicht mit der
+    # Verbraucherleistung vermischen.
+    if hat_generator_power:
+        mengen["generator_power_kw"] = round(generator_power_summe, 3)
+    # §6/§7: nur zurückgeben, wenn das Schema die Grösse wirklich kennt (sonst
+    # bleibt sie im ProjectContext unbekannt und wird ergänzt, nie geraten).
+    if hat_bohrmeter:
+        mengen["bohrmeter"] = round(bohrmeter_summe, 3)
+    if hat_speichervolumen:
+        mengen["speichervolumen_l"] = round(speichervolumen_summe, 3)
+    if generator_type is not None:
+        mengen["generator_type"] = generator_type
     return mengen

@@ -277,3 +277,145 @@ def test_vorbelegung_uebersetzt_bekannte_werte():
     assert vb["leistung_kw"] == 72.0
     # Bohrmeter unbekannt → NICHT in der Vorbelegung (blockiert nicht, §25)
     assert "bohrmeter" not in vb
+
+
+# ── §4 — strukturierter Erzeugertyp aus dem Schema ──────────────────────────
+
+def test_generator_type_strukturiert_gewinnt():
+    """Strukturierter generator_type ist die Primärquelle (§4)."""
+    graph = {"nodes": [_n("e1", "erzeuger", {"generator_type": "ews_wp", "typ": "irgendwas"})]}
+    m = mengen_aus_schema(graph)
+    assert m["generator_type"] == "ews_wp"
+
+
+def test_generator_type_freitext_nur_fallback():
+    """Ohne strukturierten Typ wird der frühere Freitext schwach normalisiert."""
+    assert mengen_aus_schema({"nodes": [_n("e", "erzeuger", {"typ": "Sole/Wasser-Wärmepumpe"})]})["generator_type"] == "ews_wp"
+    assert mengen_aus_schema({"nodes": [_n("e", "erzeuger", {"typ": "Fernwärme"})]})["generator_type"] == "fernwaerme"
+    # Unbekannter Freitext → gar kein Typ (nicht raten, §3)
+    assert "generator_type" not in mengen_aus_schema({"nodes": [_n("e", "erzeuger", {"typ": "???"})]})
+
+
+def test_generator_type_landet_im_context():
+    graph = {"nodes": [_n("e1", "erzeuger", {"generator_type": "ews_wp", "leistung_kw": "82"})]}
+    ctx = build_context(base_data=None, graph_json=graph, parameter_rows=[])
+    gt = _param(ctx, "generator_type")
+    assert gt["effective_value"] == "ews_wp"
+    assert gt["source"] == "schema"
+    assert gt["status"] == STATUS_ERKANNT
+
+
+# ── §5 — Erzeuger- und Verbraucherleistung trennen ──────────────────────────
+
+def test_erzeuger_und_verbraucherleistung_getrennt():
+    """WP = 82 kW installiert, Verbrauchergruppen = 70 kW — nicht vermischen."""
+    graph = {"nodes": [
+        _n("e1", "erzeuger", {"leistung_kw": "82"}),
+        _n("g1", "gruppe", {"q_kw": "40"}),
+        _n("g2", "gruppe", {"q_kw": "30"}),
+    ]}
+    m = mengen_aus_schema(graph)
+    assert m["generator_power_kw"] == 82.0
+    assert m["consumer_power_kw"] == 70.0
+    assert m["leistung_kw"] == 70.0        # Bestandsname = Verbraucherleistung
+    ctx = build_context(base_data=None, graph_json=graph, parameter_rows=[])
+    assert _param(ctx, "generator_power_kw")["effective_value"] == 82.0
+    assert _param(ctx, "leistung_kw")["effective_value"] == 70.0
+
+
+# ── §6 — Erdsonden → Bohrmeter live aus dem Schema ──────────────────────────
+
+def test_bohrmeter_aus_erdsonden_abgeleitet():
+    """4 Sonden × 180 m → 720 Bohrmeter, direkt aus dem Schema (§6)."""
+    graph = {"nodes": [_n("es1", "erdsonden", {"sonden_anzahl": 4, "sonden_laenge_m": "180"})]}
+    assert mengen_aus_schema(graph)["bohrmeter"] == 720.0
+    ctx = build_context(base_data=None, graph_json=graph, parameter_rows=[])
+    bohr = _param(ctx, "bohrmeter")
+    assert bohr["schema_value"] == 720.0
+    assert bohr["effective_value"] == 720.0
+    assert bohr["source"] == "schema"
+
+
+def test_bohrmeter_strukturierte_felder_bevorzugt():
+    graph = {"nodes": [_n("es1", "erdsonden", {"probe_count": 5, "probe_depth_m": 200,
+                                               "sonden_anzahl": 4, "sonden_laenge_m": 180})]}
+    assert mengen_aus_schema(graph)["bohrmeter"] == 1000.0
+
+
+def test_bohrmeter_mehrere_felder_summiert():
+    graph = {"nodes": [
+        _n("es1", "erdsonden", {"sonden_anzahl": 4, "sonden_laenge_m": 180}),
+        _n("es2", "erdsonden", {"sonden_anzahl": 2, "sonden_laenge_m": 150}),
+    ]}
+    assert mengen_aus_schema(graph)["bohrmeter"] == 720.0 + 300.0
+
+
+def test_bohrmeter_unvollstaendig_bleibt_unbekannt():
+    """Nur Anzahl ohne Länge → kein geratenes 0, Grösse bleibt unbekannt (§25)."""
+    graph = {"nodes": [_n("es1", "erdsonden", {"sonden_anzahl": 4})]}
+    assert "bohrmeter" not in mengen_aus_schema(graph)
+
+
+# ── §7 — Speichervolumen live aus dem Schema ────────────────────────────────
+
+def test_speichervolumen_summiert():
+    """2 × 750 l → 1'500 l total (§7)."""
+    graph = {"nodes": [
+        _n("sp1", "speicher", {"speicher_liter": "750"}),
+        _n("sp2", "speicher", {"speicher_liter": "750"}),
+    ]}
+    m = mengen_aus_schema(graph)
+    assert m["anzahl_speicher"] == 2
+    assert m["speichervolumen_l"] == 1500.0
+    ctx = build_context(base_data=None, graph_json=graph, parameter_rows=[])
+    assert _param(ctx, "speichervolumen_l")["effective_value"] == 1500.0
+
+
+def test_speichervolumen_strukturiert_bevorzugt():
+    graph = {"nodes": [_n("sp1", "speicher", {"storage_volume_l": 1000, "speicher_liter": 750})]}
+    assert mengen_aus_schema(graph)["speichervolumen_l"] == 1000.0
+
+
+def test_speicher_ohne_volumen_bleibt_unbekannt():
+    graph = {"nodes": [_n("sp1", "speicher", {})]}
+    m = mengen_aus_schema(graph)
+    assert m["anzahl_speicher"] == 1
+    assert "speichervolumen_l" not in m       # Anzahl bekannt, Volumen unbekannt
+
+
+# ── §49 — vollständiges Golden Project (darf nie unbemerkt brechen) ──────────
+
+def test_golden_project_kompletter_context():
+    """MFH mit EWS-WP: der komplette erwartete ProjectContext aus §49."""
+    graph = {"nodes": [
+        _n("e1", "erzeuger", {"generator_type": "ews_wp", "leistung_kw": "82"}),
+        _n("es1", "erdsonden", {"sonden_anzahl": 4, "sonden_laenge_m": 180}),
+        _n("sp1", "speicher", {"speicher_liter": 750}),
+        _n("sp2", "speicher", {"speicher_liter": 750}),
+        _n("p1", "pump"), _n("p2", "pump"), _n("p3", "pump"), _n("p4", "pump"),
+        _n("v2a", "valve2"), _n("v2b", "valve2"), _n("v2c", "valve2"),
+        _n("v2d", "valve2"), _n("v2e", "valve2"), _n("v2f", "valve2"),
+        _n("v3a", "valve3"), _n("v3b", "valve3"),
+        _n("wz1", "waermezaehler"), _n("wz2", "waermezaehler"), _n("wz3", "waermezaehler"),
+    ]}
+    base = SimpleNamespace(ebf_m2=1420.0, anzahl_nutzungseinheiten=10,
+                           gebaeudekategorie="MFH", projektart="Neubau",
+                           region="Zürich", zertifizierung=None)
+    # 10 zusätzliche Wohnungswärmezähler ausserhalb des Schemas (§8)
+    rows = [SimpleNamespace(param_key="anzahl_waermezaehler", external_value="10",
+                            manual_override=None, confidence="mittel",
+                            quelle_notiz="Gebäude", updated_by_name="Dominic")]
+    ctx = build_context(base, graph, rows)
+    eff = effective_map(ctx)
+
+    assert eff["generator_type"] == "ews_wp"
+    assert eff["generator_power_kw"] == 82.0
+    assert eff["bohrmeter"] == 720.0             # 4 × 180 m
+    assert eff["speichervolumen_l"] == 1500.0
+    assert eff["anzahl_speicher"] == 2
+    assert eff["anzahl_pumpen"] == 4
+    assert eff["anzahl_ventile_2weg"] == 6
+    assert eff["anzahl_ventile_3weg"] == 2
+    assert eff["anzahl_waermezaehler"] == 13     # 3 Schema + 10 ergänzt
+    assert eff["ebf_m2"] == 1420.0
+    assert eff["anzahl_nutzungseinheiten"] == 10

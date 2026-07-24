@@ -57,12 +57,18 @@ PARAMETER: list[ParamDef] = [
     ParamDef("region", "Region", "grunddaten", "text", project_field="region"),
     ParamDef("zertifizierung", "Zertifizierung", "grunddaten", "text", project_field="zertifizierung"),
     # Wärmeerzeugung (Quelle B + Ergänzung)
-    ParamDef("leistung_kw", "Heizleistung", "erzeugung", "zahl", "kW", schema_key="leistung_kw"),
+    ParamDef("generator_type", "Erzeugertyp", "erzeugung", "text", schema_key="generator_type"),
+    ParamDef("generator_power_kw", "Erzeugerleistung", "erzeugung", "zahl", "kW",
+             schema_key="generator_power_kw"),
+    ParamDef("leistung_kw", "Verbraucherleistung", "erzeugung", "zahl", "kW", schema_key="leistung_kw"),
     ParamDef("anzahl_erzeuger", "Wärmeerzeuger", "erzeugung", "ganzzahl", schema_key="anzahl_erzeuger"),
     ParamDef("anzahl_erdsonden", "Erdsonden", "erzeugung", "ganzzahl", schema_key="anzahl_erdsonden"),
-    ParamDef("bohrmeter", "Bohrmeter", "erzeugung", "zahl", "m"),                 # nur Ergänzung
+    # §6/§7: Bohrmeter und Speichervolumen leitet das Schema jetzt live ab
+    # (anzahl×länge bzw. summierte Einzelinhalte); Ergänzung bleibt möglich.
+    ParamDef("bohrmeter", "Bohrmeter", "erzeugung", "zahl", "m", schema_key="bohrmeter"),
     ParamDef("anzahl_speicher", "Speicher", "erzeugung", "ganzzahl", schema_key="anzahl_speicher"),
-    ParamDef("speichervolumen_l", "Speichervolumen", "erzeugung", "zahl", "l"),   # nur Ergänzung
+    ParamDef("speichervolumen_l", "Speichervolumen", "erzeugung", "zahl", "l",
+             schema_key="speichervolumen_l"),
     # Wärmeverteilung (Quelle B + Ergänzung)
     ParamDef("anzahl_heizgruppen", "Heizgruppen", "verteilung", "ganzzahl", schema_key="anzahl_heizgruppen"),
     ParamDef("anzahl_verteiler", "Verteiler", "verteilung", "ganzzahl", schema_key="anzahl_verteiler"),

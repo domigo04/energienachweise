@@ -51,8 +51,13 @@ nicht parallel neu erfunden.
 
 ## P3 – Eine fachliche Projektwahrheit
 
+- [x] Projekt als One Source of Truth verankert (Doku + ProjectContext-Hub)
+- [x] Grunddaten zentral in `HcProjectBaseData`, Kostenschätzung liest sie
+- [x] ProjectContext vervollständigt: Erzeugertyp, Erzeuger- vs.
+      Verbraucherleistung, Bohrmeter (Sonden × Länge) und Speichervolumen
+      live aus dem Schema (Golden-Project-Test §49)
 - [ ] separate Heizgruppen mit Schema-Verbrauchergruppen verbinden
-- [ ] Grunddaten nur einmal pflegen
+- [ ] Projektinformations- und Projektmengen-Ansicht im Frontend
 - [ ] Projekt-Dashboard zeigt offene Prüfungen und Freigabestände aller Module
 - [ ] Plankopf und Bauteileigenschaftstabellen aus der Revision erzeugen
   - [x] Plankopf-Name eines neuen Schemas automatisch aus Projekt + Datum

@@ -30,6 +30,23 @@ import { api } from '../../api';
 
 // ── Konstanten ────────────────────────────────────────────────
 const KVS_REIHE = [0.1, 0.16, 0.25, 0.4, 0.63, 1.0, 1.6, 2.5, 4.0, 6.3, 10, 16, 25, 40, 63];
+// Strukturierter Erzeugertyp (§4). Wert = ProjectContext-Schlüssel, Label = UI.
+// Der frühere Freitext `typ` bleibt als Beschriftung erhalten; dieser Wert ist
+// die maschinenlesbare Primärquelle für Mengen und Kostenschätzung.
+const GENERATOR_TYPES = [
+  { value:'ews_wp',     label:'Sole/Wasser-WP (Erdsonden)' },
+  { value:'lwwp',       label:'Luft/Wasser-WP' },
+  { value:'wasser_wp',  label:'Wasser/Wasser-WP' },
+  { value:'co2_wp',     label:'CO₂-Wärmepumpe' },
+  { value:'fernwaerme', label:'Fernwärme' },
+  { value:'gas',        label:'Gas' },
+  { value:'oel',        label:'Öl' },
+  { value:'holz',       label:'Holz' },
+  { value:'elektro',    label:'Elektro' },
+  { value:'hybrid',     label:'Hybrid' },
+  { value:'sonstige',   label:'Sonstige' },
+];
+
 const LEITUNGS_LAYER = [
   { id:'heizung_vl', label:'Heizung VL', kurz:'H VL', color:'#ef4444', role:'vl', dashed:false },
   { id:'heizung_rl', label:'Heizung RL', kurz:'H RL', color:'#3b82f6', role:'rl', dashed:true },
@@ -1203,7 +1220,13 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, onUpdate, onClose, navig
   } else if (node.type === 'erzeuger') {
     body = (
       <div style={{ display:'grid', gap:10 }}>
-        <div><label style={lbl}>Typ</label><input style={inp} value={d.typ??''} onChange={e=>set('typ',e.target.value)} placeholder="z.B. Wärmepumpe"/></div>
+        <div><label style={lbl}>Erzeugertyp</label>
+          <select style={{...inp,cursor:'pointer'}} value={d.generator_type??''}
+            onChange={e=>set('generator_type', e.target.value || null)}>
+            <option value="">— wählen —</option>
+            {GENERATOR_TYPES.map(g=><option key={g.value} value={g.value}>{g.label}</option>)}
+          </select></div>
+        <div><label style={lbl}>Bezeichnung (frei)</label><input style={inp} value={d.typ??''} onChange={e=>set('typ',e.target.value)} placeholder="z.B. Fabrikat/Typ"/></div>
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
           <div><label style={lbl}>Leistung [kW]</label><input type="number" style={inp} value={d.leistung_kw??''} onChange={e=>set('leistung_kw',e.target.value)}/></div>
           <div><label style={lbl}>VL [°C]</label><input type="number" style={inp} value={d.vl_temp??''} onChange={e=>set('vl_temp',e.target.value)}/></div>

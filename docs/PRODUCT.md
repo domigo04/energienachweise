@@ -6,9 +6,32 @@ Das Heizungscockpit soll einen realen Heizungsplanungsablauf schneller und
 nachvollziehbarer machen als die Kombination aus CAD, Excel und einzelnen
 Dokumenten.
 
-Der Kern ist nicht ein allgemeines CAD. Der Kern ist ein fachlich intelligentes
-Hydraulikschema, aus dem Berechnungen, Prüfungen, Bauteildaten, Kosten und
-Exporte entstehen.
+Der Kern ist nicht ein allgemeines CAD. Das Projekt ist die eine fachliche
+Wahrheit; das fachlich intelligente Hydraulikschema ist seine wichtigste
+technische Datenquelle. Aus dem Projekt entstehen zusammenhängend:
+
+    Projekt
+    → technische Planung (Schema)
+    → ProjectContext (Mengen und Herkunft)
+    → Berechnungen
+    → Kosten
+    → Dokumentation
+
+Diese Module sind keine unabhängigen Dateninseln. Eine Information wird nur
+einmal gepflegt (z. B. EBF), und jedes weitere Modul liest sie.
+
+## Historischer Datenkreislauf
+
+Damit Kostenschätzungen von echten Projekten lernen, schliesst sich ein Kreis:
+
+    Unternehmer-LV / Submission
+    → geprüftes Referenzprojekt
+    → normalisierte technische Kostentreiber
+    → neue Kostenschätzung
+
+Kostentreiber (Erzeugertyp, Erzeugerleistung, Bohrmeter, Speichervolumen,
+Pumpen, Ventile, Wärmezähler, Rohrmeter …) werden für aktuelle wie historische
+Projekte gleich strukturiert erfasst und bleiben mit ihrer Herkunft sichtbar.
 
 ## Zielgruppe
 

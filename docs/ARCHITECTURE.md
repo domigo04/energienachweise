@@ -2,9 +2,36 @@
 
 ## Grundsatz
 
-Das Schema ist die fachliche Quelle eines Projekts. Bauteile und Leitungen
-tragen Eingaben und Beziehungen. Das Backend berechnet daraus Resultate.
-Frontend-Demos oder Exporte dürfen keine abweichende Formel besitzen.
+Das Projekt ist die fachliche One Source of Truth. Projektgrunddaten,
+Anlagenschema, externe Mengen, Berechnungen und Kosten sind miteinander
+verbundene Sichten desselben Projekts. Das Schema ist die primäre technische
+Quelle für Anlagenstruktur und daraus ableitbare Mengen. Werte, die nicht aus
+dem Schema hervorgehen können, werden zentral als Projektinformationen oder
+nachvollziehbare Ergänzungen geführt.
+
+Eine Information wird möglichst nur einmal gepflegt: EBF, Erzeugertyp,
+Bohrmeter usw. existieren an genau einer Stelle, und alle Module lesen den
+effektiven Wert über den `ProjectContext` (`backend/app/project_context.py`),
+statt ihn erneut abzufragen oder zu kopieren.
+
+Bauteile und Leitungen tragen Eingaben und Beziehungen. Das Backend berechnet
+daraus Resultate. Frontend-Demos oder Exporte dürfen keine abweichende Formel
+besitzen.
+
+## ProjectContext — der Datenhub
+
+Je Parameter werden vier Quellen zu einem effektiven Wert zusammengeführt
+(nie eine zweite persistente Kopie der Schemamengen):
+
+- `schema_value` — live aus dem Anlagenschema (`schema_mengen.py`)
+- `project_value` — zentrale Grunddaten in `HcProjectBaseData`
+- `external_value` — Gebäude-/externe Ergänzung in `HcProjectParameter`
+- `manual_override` — ausdrückliche Übersteuerung durch den Planer (gewinnt)
+
+Daraus entstehen `effective_value`, `source`, `confidence` und `status`. Das
+Schema leitet ausdrücklich auch strukturierte Grössen ab: Erzeugertyp,
+Erzeugerleistung (getrennt von der Verbraucherleistung), Bohrmeter
+(Sondenanzahl × Länge) und Speichervolumen (summierte Einzelinhalte).
 
 ## Aktueller Stack
 

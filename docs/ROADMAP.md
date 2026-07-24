@@ -61,8 +61,11 @@ nicht parallel neu erfunden.
 - [x] Projektmengen-Seite (`/projekte/:id/mengen`): kompletter ProjectContext
       mit Herkunft (Schema/Projekt/Ergänzung/manuell), Ergänzungen (zusätzliche
       Wärmezähler, Rohrmeter) und Overrides; Audit läuft weiter (§20/§37)
+- [x] Projekt-Dashboard als Railway-Universum: ProjectModuleNode, gemessene
+      SVG-Verbindungen, Backend-Statusdienst (`GET /projects/{id}/status`),
+      Modulstatus, Fortschritt, Stale-Erkennung der Kostenschätzung (§10-16)
 - [ ] separate Heizgruppen mit Schema-Verbrauchergruppen verbinden
-- [ ] Projekt-Dashboard zum Railway-Universum umbauen (Verbindungen, Status)
+- [ ] Projektdetail-Drawer „Problem beheben" (§41)
 - [ ] Plankopf und Bauteileigenschaftstabellen aus der Revision erzeugen
   - [x] Plankopf-Name eines neuen Schemas automatisch aus Projekt + Datum
         vorbelegen (frei überschreibbar)

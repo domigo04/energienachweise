@@ -28,6 +28,7 @@ from app.schemas.hc_schemas import (
 )
 from app.calculations.heizgruppen import berechne_rl_gemischt, pruefe_plausibilitaet
 from app.project_context import PARAMETER_BY_KEY, context_fuer_projekt
+from app.project_status import status_fuer_projekt
 
 router = APIRouter(prefix="/api/v1/projects", tags=["Heizungscockpit – Projekte"])
 
@@ -153,6 +154,14 @@ def get_project_context(project_id: int, user: User = Depends(get_current_user),
     Lesemodell — hier wird nichts gespeichert."""
     project = _get_company_project(db, user, project_id)
     return context_fuer_projekt(db, project, user.tenant_id)
+
+
+@router.get("/{project_id}/status")
+def get_project_status(project_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Projektstatus fürs Project Universe (§16): Fortschritt + Modulstatus.
+    Reines Lesemodell — das Frontend rendert nur, es rechnet nichts zusammen."""
+    project = _get_company_project(db, user, project_id)
+    return status_fuer_projekt(db, project, user.tenant_id)
 
 
 @router.put("/{project_id}/parameters/{param_key}")

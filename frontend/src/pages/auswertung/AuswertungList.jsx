@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Plus, ChartColumnBig, CheckSquare, Download, Sparkles, Trash2, Upload, X } from "lucide-react";
+import { Plus, ChartColumnBig, CheckSquare, Download, Sparkles, Trash2, Upload, FileUp, X } from "lucide-react";
 import {
   deleteRefsBulk, exportRefsCsv, getRefProjekte, gkBeispieldatenLaden,
   gkBeispieldatenLoeschen, importRefsCsv,
@@ -140,6 +140,7 @@ export default function AuswertungList() {
             </button>
             <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={handleImportFile} />
             <button onClick={handleExport} className="btn-secondary"><Download className="size-4" /> CSV exportieren</button>
+            <Link to="/auswertung/import" className="btn-secondary"><FileUp className="size-4" /> LV importieren</Link>
             <Link to="/auswertung/analyse" className="btn-secondary"><ChartColumnBig className="size-4" /> Analyse</Link>
             <Link to="/auswertung/neu" className="btn-primary"><Plus className="size-4" /> Neu</Link>
           </>

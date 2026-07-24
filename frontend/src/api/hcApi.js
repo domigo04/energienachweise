@@ -150,6 +150,22 @@ export const gkPatchFaktor = (id, data) => api.patch(`${BASE}/grobkostenschaetzu
 export const gkBeispieldatenLaden = () => api.post(`${BASE}/grobkostenschaetzung/beispieldaten`).then(r => r.data);
 export const gkBeispieldatenLoeschen = () => api.delete(`${BASE}/grobkostenschaetzung/beispieldaten`).then(r => r.data);
 
+// --- LV-/Submission-Import (Unternehmer-LV → Referenzprojekt) ---
+export const uploadLvImport = (file, projectId) => {
+  const fd = new FormData();
+  fd.append("file", file);
+  if (projectId != null) fd.append("project_id", projectId);
+  // Content-Type explizit entfernen, damit der multipart-Boundary automatisch gesetzt wird.
+  return api.post(`${BASE}/lv-imports`, fd, { headers: { "Content-Type": null } }).then(r => r.data);
+};
+export const listLvImports = () => api.get(`${BASE}/lv-imports`).then(r => r.data);
+export const getLvImport = (id) => api.get(`${BASE}/lv-imports/${id}`).then(r => r.data);
+export const updateLvFeature = (id, featureId, data) =>
+  api.patch(`${BASE}/lv-imports/${id}/features/${featureId}`, data).then(r => r.data);
+export const updateLvCost = (id, costId, data) =>
+  api.patch(`${BASE}/lv-imports/${id}/costs/${costId}`, data).then(r => r.data);
+export const approveLvImport = (id) => api.post(`${BASE}/lv-imports/${id}/approve`).then(r => r.data);
+
 // --- Auswertung: Mehrfach-Löschen ---
 export const deleteRefsBulk = (ids) => api.post(`${BASE}/auswertung/loeschen`, { ids }).then(r => r.data);
 

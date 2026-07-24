@@ -23,6 +23,7 @@ const RavelPage = lazy(() => import("./pages/hc/RavelPage"));
 const AuswertungList = lazy(() => import("./pages/auswertung/AuswertungList"));
 const AuswertungForm = lazy(() => import("./pages/auswertung/AuswertungForm"));
 const AuswertungAnalyse = lazy(() => import("./pages/auswertung/AuswertungAnalyse"));
+const LvImportPage = lazy(() => import("./pages/auswertung/LvImportPage"));
 const GrobkostenSchaetzung = lazy(() => import("./pages/grobkosten/GrobkostenSchaetzung"));
 const BenutzerFreischaltung = lazy(() => import("./pages/admin/BenutzerFreischaltung"));
 const Firmenverwaltung = lazy(() => import("./pages/admin/Firmenverwaltung"));
@@ -61,6 +62,8 @@ export default function App() {
             <Route path="/auswertung" element={<PageLoader><AuswertungList /></PageLoader>} />
             <Route path="/auswertung/neu" element={<PageLoader><AuswertungForm /></PageLoader>} />
             <Route path="/auswertung/analyse" element={<PageLoader><AuswertungAnalyse /></PageLoader>} />
+            <Route path="/auswertung/import" element={<PageLoader><LvImportPage /></PageLoader>} />
+            <Route path="/auswertung/import/:id" element={<PageLoader><LvImportPage /></PageLoader>} />
             <Route path="/auswertung/:id" element={<PageLoader><AuswertungForm /></PageLoader>} />
 
             {/* Alte Grobkosten-Standalone-Routen → Schätzung läuft im Projekt */}

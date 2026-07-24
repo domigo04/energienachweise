@@ -14,6 +14,8 @@ const Home = lazy(() => import("./pages/Home"));
 const KontoPage = lazy(() => import("./pages/KontoPage"));
 const ProjectList = lazy(() => import("./pages/hc/ProjectList"));
 const ProjectDashboard = lazy(() => import("./pages/hc/ProjectDashboard"));
+const ProjektInfoPage = lazy(() => import("./pages/hc/ProjektInfoPage"));
+const ProjektMengenPage = lazy(() => import("./pages/hc/ProjektMengenPage"));
 const HeizgruppenPage = lazy(() => import("./pages/hc/HeizgruppenPage"));
 const VentilPage = lazy(() => import("./pages/hc/VentilPage"));
 const DruckverlustPage = lazy(() => import("./pages/hc/DruckverlustPage"));
@@ -51,6 +53,8 @@ export default function App() {
 
             <Route path="/projekte" element={<PageLoader><ProjectList /></PageLoader>} />
             <Route path="/projekte/:id" element={<PageLoader><ProjectDashboard /></PageLoader>} />
+            <Route path="/projekte/:id/info" element={<PageLoader><ProjektInfoPage /></PageLoader>} />
+            <Route path="/projekte/:id/mengen" element={<PageLoader><ProjektMengenPage /></PageLoader>} />
             <Route path="/projekte/:id/heizgruppen" element={<PageLoader><HeizgruppenPage /></PageLoader>} />
             <Route path="/projekte/:id/kostenschaetzung" element={<PageLoader><GrobkostenSchaetzung /></PageLoader>} />
 

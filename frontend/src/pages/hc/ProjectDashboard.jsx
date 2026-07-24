@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
-import { Share2, Calculator, Layers, ArrowRight, ArrowLeft, MapPin, User, UserRoundCheck, Pencil, Archive, BadgeCheck, CircleDashed, LockKeyhole, History, ChevronDown } from "lucide-react";
+import { Share2, Calculator, Layers, ClipboardList, ListChecks, ArrowRight, ArrowLeft, MapPin, User, UserRoundCheck, Pencil, Archive, BadgeCheck, CircleDashed, LockKeyhole, History, ChevronDown } from "lucide-react";
 import { getProject, getProjectAudit, getProjectFreigaben, updateProject } from "../../api/hcApi";
 import { GEBAEUDEKATEGORIEN } from "../../data/sia";
 
@@ -89,6 +89,8 @@ export default function ProjectDashboard() {
 
   const TOOLS = [
     { to: `/projekte/${id}/schema`, icon: Share2, title: "Anlagenschema", text: "Schema zeichnen — Berechnungen leben in den Bauteilen.", primary: true },
+    { to: `/projekte/${id}/info`, icon: ClipboardList, title: "Projektinformationen", text: "EBF, Nutzung, Einheiten, Projektart, Region — zentral gepflegt." },
+    { to: `/projekte/${id}/mengen`, icon: ListChecks, title: "Projektmengen", text: "Alle technischen Mengen mit Herkunft — die Brücke zur Kostenschätzung." },
     { to: `/projekte/${id}/kostenschaetzung`, icon: Calculator, title: "Grobkostenschätzung", text: "Ähnlichkeitsgewichtete Schätzung aus Referenzprojekten." },
     { to: `/projekte/${id}/heizgruppen`, icon: Layers, title: "Heizgruppen", text: "Heizgruppen-Generator mit Volumenstrom." },
   ];
@@ -252,7 +254,10 @@ export default function ProjectDashboard() {
       {/* Grunddaten */}
       {bd && (
         <div className="card mb-6 p-5">
-          <h2 className="mb-3 text-sm font-semibold text-slate-700">Projektgrundlagen</h2>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-slate-700">Projektgrundlagen</h2>
+            <Link to={`/projekte/${id}/info`} className="text-xs font-semibold text-brand-600 hover:underline">Bearbeiten →</Link>
+          </div>
           <div className="grid grid-cols-2 gap-4 text-sm md:grid-cols-4">
             <div><div className="text-xs text-slate-400">Auslegungstemperatur</div><div className="font-medium text-slate-900">{bd.t_aussen} °C</div></div>
             <div><div className="text-xs text-slate-400">Raumtemperatur</div><div className="font-medium text-slate-900">{bd.t_innen} °C</div></div>

@@ -56,9 +56,13 @@ nicht parallel neu erfunden.
 - [x] ProjectContext vervollständigt: Erzeugertyp, Erzeuger- vs.
       Verbraucherleistung, Bohrmeter (Sonden × Länge) und Speichervolumen
       live aus dem Schema (Golden-Project-Test §49)
+- [x] Projektinformations-Seite (`/projekte/:id/info`): EBF, Nutzung, Einheiten,
+      Projektart, Region, Zertifizierung zentral bearbeiten (§9)
+- [x] Projektmengen-Seite (`/projekte/:id/mengen`): kompletter ProjectContext
+      mit Herkunft (Schema/Projekt/Ergänzung/manuell), Ergänzungen (zusätzliche
+      Wärmezähler, Rohrmeter) und Overrides; Audit läuft weiter (§20/§37)
 - [ ] separate Heizgruppen mit Schema-Verbrauchergruppen verbinden
-- [ ] Projektinformations- und Projektmengen-Ansicht im Frontend
-- [ ] Projekt-Dashboard zeigt offene Prüfungen und Freigabestände aller Module
+- [ ] Projekt-Dashboard zum Railway-Universum umbauen (Verbindungen, Status)
 - [ ] Plankopf und Bauteileigenschaftstabellen aus der Revision erzeugen
   - [x] Plankopf-Name eines neuen Schemas automatisch aus Projekt + Datum
         vorbelegen (frei überschreibbar)

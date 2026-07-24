@@ -260,6 +260,11 @@ export default function ProjectDashboard() {
             {bd.warmwasser_bedarf_kw != null && <div><div className="text-xs text-slate-400">BWW-Bedarf</div><div className="font-medium text-slate-900">{bd.warmwasser_bedarf_kw} kW</div></div>}
             {bd.gebaeudekategorie && <div><div className="text-xs text-slate-400">Gebäudekategorie</div><div className="font-medium text-slate-900">{GEBAEUDEKATEGORIEN.find((k) => k.value === bd.gebaeudekategorie)?.label || bd.gebaeudekategorie}</div></div>}
             {bd.klimastation && <div><div className="text-xs text-slate-400">Klimastation</div><div className="font-medium text-slate-900">{bd.klimastation}</div></div>}
+            {bd.ebf_m2 != null && <div><div className="text-xs text-slate-400">EBF</div><div className="font-medium text-slate-900">{bd.ebf_m2} m²</div></div>}
+            {bd.anzahl_nutzungseinheiten != null && <div><div className="text-xs text-slate-400">Nutzungseinheiten</div><div className="font-medium text-slate-900">{bd.anzahl_nutzungseinheiten}</div></div>}
+            {bd.projektart && <div><div className="text-xs text-slate-400">Projektart</div><div className="font-medium text-slate-900">{bd.projektart}</div></div>}
+            {bd.region && <div><div className="text-xs text-slate-400">Region</div><div className="font-medium text-slate-900">{bd.region}</div></div>}
+            {bd.zertifizierung && <div><div className="text-xs text-slate-400">Zertifizierung</div><div className="font-medium text-slate-900">{bd.zertifizierung}</div></div>}
           </div>
         </div>
       )}

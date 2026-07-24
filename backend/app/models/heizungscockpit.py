@@ -106,6 +106,15 @@ class HcProjectBaseData(Base):
     gebaeudekategorie = Column(String, nullable=True)
     klimastation = Column(String, nullable=True)
     warmwasser_bedarf_kw = Column(Float, nullable=True)
+    # Zentrale Projektgrunddaten (Quelle A / project_value). Bisher wurden diese
+    # nur ins Kostenformular getippt und nirgends behalten — dadurch entstand eine
+    # zweite Wahrheit. Sie leben jetzt genau hier und werden von der
+    # Kostenschätzung über den ProjectContext gelesen statt neu abgefragt.
+    ebf_m2 = Column(Float, nullable=True)
+    anzahl_nutzungseinheiten = Column(Integer, nullable=True)
+    projektart = Column(String, nullable=True)       # Neubau, Sanierung, …
+    region = Column(String, nullable=True)           # kostenrelevante Region (Baupreisindex)
+    zertifizierung = Column(String, nullable=True)    # Minergie o. Ä. (Ähnlichkeit)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -255,6 +264,39 @@ class HcSchemaRevision(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     schema = relationship("HcSchema", back_populates="revisions")
+
+
+class HcProjectParameter(Base):
+    """Herkunft eines Projektparameters (§6) — nur die Werte, die WEDER aus den
+    Grunddaten NOCH aus dem Schema stammen: Ergänzungen aus dem Gebäude
+    (external_value, z. B. 10 zusätzliche Wärmezähler) und eine ausdrückliche
+    Übersteuerung durch den Planer (manual_override).
+
+    Bewusst NICHT gespeichert: schema_value (wird live aus dem Graphen abgeleitet)
+    und project_value (lebt in HcProjectBaseData). Sie hier zu kopieren würde eine
+    zweite Wahrheit erzeugen (§33). Der effektive Wert entsteht erst beim Lesen im
+    ProjectContext aus allen vier Quellen.
+
+    Werte sind als Text abgelegt; die Parameter-Registry kennt den Zieltyp und
+    wandelt beim Lesen um (Zahl/Ganzzahl/Text)."""
+
+    __tablename__ = "hc_project_parameters"
+    __table_args__ = (
+        UniqueConstraint("project_id", "param_key", name="uq_hc_project_parameter"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, default=1, nullable=False, index=True)
+    project_id = Column(Integer, ForeignKey("hc_projects.id"), nullable=False, index=True)
+    param_key = Column(String, nullable=False, index=True)
+    external_value = Column(String, nullable=True)     # Ergänzung / externe Menge (Quelle C)
+    manual_override = Column(String, nullable=True)     # ausdrückliche Übersteuerung (gewinnt)
+    quelle_notiz = Column(String, nullable=True)        # z. B. "Grundrissauszug", "BIM", "manuell"
+    confidence = Column(String, nullable=True)          # "hoch" | "mittel" | "tief"
+    notiz = Column(Text, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_by = Column(Integer, nullable=True, index=True)
+    updated_by_name = Column(String, nullable=True)
 
 
 class HcAuditEvent(Base):

@@ -12,6 +12,7 @@ import {
 import {
   bauindexAutomatischAktualisieren, getBauindex, getProject,
   gkPositionHerkunft, gkProjektExportExcel, gkProjektExportPdf, gkProjektGet, gkProjektSave, gkProjektStatus,
+  gkVorbelegung,
 } from "../../api/hcApi";
 import CheckboxGruppe from "../../components/kv/CheckboxGruppe";
 import InfoTip from "../../components/ui/InfoTip";
@@ -150,6 +151,8 @@ export default function GrobkostenSchaetzung() {
   const [versionNr, setVersionNr] = useState(0);
   const [workflowVariante, setWorkflowVariante] = useState("netto");
   const [aufgabenFilter, setAufgabenFilter] = useState("alle");
+  // §7: welche Felder wurden aus dem Projekt (Grunddaten/Schema) übernommen
+  const [vorbelegtFelder, setVorbelegtFelder] = useState([]);
   const timer = useRef(null);
   const autoRechnenUeberspringen = useRef(false);
 
@@ -175,6 +178,21 @@ export default function GrobkostenSchaetzung() {
           neu.bww_bei_heizung = !!inputs.bww_bei_heizung;
           return neu;
         });
+      } else {
+        // Neue Schätzung: Werte aus dem Projekt übernehmen statt neu abfragen (§2/§7).
+        // Bestehende gespeicherte Schätzungen werden NICHT überschrieben.
+        gkVorbelegung(id).then(({ vorbelegung }) => {
+          const felder = Object.keys(vorbelegung || {});
+          if (felder.length === 0) return;
+          setForm((f) => {
+            const neu = { ...f };
+            for (const [k, v] of Object.entries(vorbelegung)) {
+              if (v !== null && v !== undefined) neu[k] = typeof v === "number" ? String(v) : v;
+            }
+            return neu;
+          });
+          setVorbelegtFelder(felder);
+        }).catch(() => {});
       }
       if (r) setResult(r);
     }).catch(() => {});
@@ -404,6 +422,12 @@ export default function GrobkostenSchaetzung() {
             steht — auf dem Handy normal im Fluss, sonst würde sie das Ergebnis überdecken) */}
         <fieldset disabled={istGesperrt} className={`card lg:sticky lg:top-4 p-5 ${istGesperrt ? "bg-slate-50/70" : ""}`}>
           <h2 className="mb-4 text-sm font-bold text-slate-800">Eckdaten</h2>
+          {vorbelegtFelder.length > 0 && (
+            <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
+              Aus dem Projekt übernommen ({vorbelegtFelder.length} {vorbelegtFelder.length === 1 ? "Wert" : "Werte"}) –
+              Grunddaten und Schema-Mengen. Du kannst sie hier für die Schätzung überschreiben; die Projektwerte bleiben unverändert.
+            </div>
+          )}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Feld label="EBF [m²]">
               <input className="input" type="number" min="1" value={form.ebf_m2} onChange={(e) => set("ebf_m2", e.target.value)} placeholder="z.B. 1100" />

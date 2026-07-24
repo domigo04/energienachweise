@@ -9,7 +9,13 @@ from app.audit import add_audit_event
 from app.auth import get_current_user, ist_firma_admin
 from app.database import get_db
 from app.models.auth import User
-from app.models.heizungscockpit import HcAuditEvent, HcHeatingGroup, HcProject, HcProjectBaseData
+from app.models.heizungscockpit import (
+    HcAuditEvent,
+    HcHeatingGroup,
+    HcProject,
+    HcProjectBaseData,
+    HcProjectParameter,
+)
 from app.models.kv import Kostenschaetzung
 from app.data.projektfreigaben import kostenschaetzung_freigabe, leere_kostenschaetzung_freigabe
 from app.schemas.hc_schemas import (
@@ -17,9 +23,11 @@ from app.schemas.hc_schemas import (
     ProjectCreate,
     ProjectDetailOut,
     ProjectOut,
+    ProjectParameterUpdate,
     ProjectUpdate,
 )
 from app.calculations.heizgruppen import berechne_rl_gemischt, pruefe_plausibilitaet
+from app.project_context import PARAMETER_BY_KEY, context_fuer_projekt
 
 router = APIRouter(prefix="/api/v1/projects", tags=["Heizungscockpit – Projekte"])
 
@@ -112,6 +120,11 @@ def create_project(body: ProjectCreate, user: User = Depends(get_current_user), 
         warmwasser_bedarf_kw=bd_in.warmwasser_bedarf_kw if bd_in else None,
         gebaeudekategorie=bd_in.gebaeudekategorie if bd_in else None,
         klimastation=bd_in.klimastation if bd_in else None,
+        ebf_m2=bd_in.ebf_m2 if bd_in else None,
+        anzahl_nutzungseinheiten=bd_in.anzahl_nutzungseinheiten if bd_in else None,
+        projektart=bd_in.projektart if bd_in else None,
+        region=bd_in.region if bd_in else None,
+        zertifizierung=bd_in.zertifizierung if bd_in else None,
     )
     db.add(bd)
     add_audit_event(
@@ -131,6 +144,77 @@ def create_project(body: ProjectCreate, user: User = Depends(get_current_user), 
 @router.get("/{project_id}", response_model=ProjectDetailOut)
 def get_project(project_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return _build_detail(_get_company_project(db, user, project_id))
+
+
+@router.get("/{project_id}/context")
+def get_project_context(project_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Die eine Projektwahrheit (§24): Grunddaten + Schema-Mengen + Ergänzungen
+    je Parameter zu effektivem Wert + Herkunft + Status zusammengeführt. Reines
+    Lesemodell — hier wird nichts gespeichert."""
+    project = _get_company_project(db, user, project_id)
+    return context_fuer_projekt(db, project, user.tenant_id)
+
+
+@router.put("/{project_id}/parameters/{param_key}")
+def set_project_parameter(
+    project_id: int,
+    param_key: str,
+    body: ProjectParameterUpdate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Ergänzung (external_value) oder Übersteuerung (manual_override) eines
+    Parameters setzen — Quelle C / §6. Herkunft (wer, wann) wird protokolliert."""
+    if param_key not in PARAMETER_BY_KEY:
+        raise HTTPException(status_code=422, detail=f"Unbekannter Parameter: {param_key}")
+    project = _get_company_project(db, user, project_id)
+
+    row = (
+        db.query(HcProjectParameter)
+        .filter(
+            HcProjectParameter.project_id == project_id,
+            HcProjectParameter.tenant_id == user.tenant_id,
+            HcProjectParameter.param_key == param_key,
+        )
+        .first()
+    )
+    if not row:
+        row = HcProjectParameter(
+            tenant_id=user.tenant_id, project_id=project_id, param_key=param_key
+        )
+        db.add(row)
+
+    before = {
+        "external_value": row.external_value,
+        "manual_override": row.manual_override,
+    }
+    row.external_value = body.external_value
+    row.manual_override = body.manual_override
+    row.quelle_notiz = body.quelle_notiz
+    row.confidence = body.confidence
+    row.notiz = body.notiz
+    row.updated_at = datetime.utcnow()
+    row.updated_by = user.id
+    row.updated_by_name = user.name or user.email
+
+    add_audit_event(
+        db,
+        user=user,
+        action="parameter_ergaenzt",
+        project_id=project.id,
+        entity_type="parameter",
+        entity_id=None,
+        details={
+            "parameter": param_key,
+            "vorher": before,
+            "nachher": {
+                "external_value": row.external_value,
+                "manual_override": row.manual_override,
+            },
+        },
+    )
+    db.commit()
+    return context_fuer_projekt(db, project, user.tenant_id)
 
 
 @router.get("/{project_id}/freigaben")
@@ -210,7 +294,11 @@ def update_project(project_id: int, body: ProjectUpdate, user: User = Depends(ge
             bd = HcProjectBaseData(tenant_id=user.tenant_id, project_id=project.id)
             db.add(bd)
             db.flush()
-        for field in ("t_aussen", "t_innen", "heizungssystem", "warmwasser_bedarf_kw", "gebaeudekategorie", "klimastation"):
+        for field in (
+            "t_aussen", "t_innen", "heizungssystem", "warmwasser_bedarf_kw",
+            "gebaeudekategorie", "klimastation",
+            "ebf_m2", "anzahl_nutzungseinheiten", "projektart", "region", "zertifizierung",
+        ):
             val = getattr(body.base_data, field, None)
             if val is not None:
                 old = getattr(project.base_data, field)

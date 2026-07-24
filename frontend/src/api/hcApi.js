@@ -14,6 +14,11 @@ export const getProjectAudit = (id) => api.get(`${BASE}/projects/${id}/protokoll
 
 export const updateProject = (id, data) => api.patch(`${BASE}/projects/${id}`, data).then(r => r.data);
 
+// ProjectContext (§24): eine Projektwahrheit — Grunddaten + Schema + Ergänzungen
+export const getProjectContext = (id) => api.get(`${BASE}/projects/${id}/context`).then(r => r.data);
+export const setProjectParameter = (id, key, data) =>
+  api.put(`${BASE}/projects/${id}/parameters/${key}`, data).then(r => r.data);
+
 export const archiveProject = (id) => api.delete(`${BASE}/projects/${id}`);
 export const deleteProjectPermanent = (id) => api.delete(`${BASE}/projects/${id}/endgueltig`);
 export const deleteAllArchived = () => api.delete(`${BASE}/projects/archiviert/alle`).then(r => r.data);
@@ -127,6 +132,8 @@ export const importRefsCsv = (file) => {
 // --- Grobkostenschätzung (BKP) — läuft IM Projekt, rechnet auf der Auswertung ---
 export const gkSchaetzen = (data) => api.post(`${BASE}/grobkostenschaetzung/schaetzen`, data).then(r => r.data);
 export const gkProjektGet = (projectId) => api.get(`${BASE}/grobkostenschaetzung/projekt/${projectId}`).then(r => r.data);
+// §7 „Projekt für Kostenschätzung prüfen": Vorbelegung + Herkunft aus dem Projekt
+export const gkVorbelegung = (projectId) => api.get(`${BASE}/grobkostenschaetzung/projekt/${projectId}/vorbelegung`).then(r => r.data);
 export const gkProjektSave = (projectId, data) => api.put(`${BASE}/grobkostenschaetzung/projekt/${projectId}`, data).then(r => r.data);
 export const gkProjektStatus = (projectId, status, variante) =>
   api.patch(`${BASE}/grobkostenschaetzung/projekt/${projectId}/status`, { status, variante }).then(r => r.data);

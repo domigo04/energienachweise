@@ -5,7 +5,13 @@ import { getProjects, createProject, deleteProjectPermanent, deleteAllArchived }
 import { useAuth } from "../../auth/AuthContext";
 import { GEBAEUDEKATEGORIEN, KLIMASTATIONEN } from "../../data/sia";
 
-const LEER_FORM = { name: "", standort: "", kunde: "", beschreibung: "", gebaeudekategorie: "", klimastation: "", t_aussen: -8 };
+const LEER_FORM = {
+  name: "", standort: "", kunde: "", beschreibung: "",
+  gebaeudekategorie: "", klimastation: "", t_aussen: -8,
+  ebf_m2: "", anzahl_nutzungseinheiten: "", projektart: "", region: "", zertifizierung: "",
+};
+
+const PROJEKTARTEN = ["Neubau", "Sanierung", "Erweiterung", "Ersatz Wärmeerzeuger"];
 
 function StatusBadge({ status }) {
   if (status === "archiviert") return <span className="badge bg-slate-100 text-slate-500">Archiviert</span>;
@@ -66,6 +72,11 @@ export default function ProjectList() {
           t_innen: 20,
           gebaeudekategorie: form.gebaeudekategorie || null,
           klimastation: form.klimastation || null,
+          ebf_m2: form.ebf_m2 === "" ? null : Number(form.ebf_m2),
+          anzahl_nutzungseinheiten: form.anzahl_nutzungseinheiten === "" ? null : Number(form.anzahl_nutzungseinheiten),
+          projektart: form.projektart || null,
+          region: form.region || null,
+          zertifizierung: form.zertifizierung || null,
         },
       });
       navigate(`/projekte/${project.id}`);
@@ -151,6 +162,36 @@ export default function ProjectList() {
                 <input type="number" className="input" value={form.t_aussen}
                   onChange={(e) => setForm((f) => ({ ...f, t_aussen: e.target.value }))} />
                 <p className="mt-1 text-xs text-slate-400">aus SIA 2028, überschreibbar</p>
+              </div>
+              <div>
+                <label className="label">Energiebezugsfläche EBF [m²]</label>
+                <input type="number" className="input" placeholder="z.B. 1420" value={form.ebf_m2}
+                  onChange={(e) => setForm((f) => ({ ...f, ebf_m2: e.target.value }))} />
+                <p className="mt-1 text-xs text-slate-400">wird von der Kostenschätzung übernommen</p>
+              </div>
+              <div>
+                <label className="label">Nutzungseinheiten (Wohnungen)</label>
+                <input type="number" className="input" placeholder="z.B. 10" value={form.anzahl_nutzungseinheiten}
+                  onChange={(e) => setForm((f) => ({ ...f, anzahl_nutzungseinheiten: e.target.value }))} />
+              </div>
+              <div>
+                <label className="label">Projektart</label>
+                <select className="input" value={form.projektart}
+                  onChange={(e) => setForm((f) => ({ ...f, projektart: e.target.value }))}>
+                  <option value="">— bitte wählen —</option>
+                  {PROJEKTARTEN.map((a) => <option key={a} value={a}>{a}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="label">Region</label>
+                <input className="input" placeholder="z.B. Zürich" value={form.region}
+                  onChange={(e) => setForm((f) => ({ ...f, region: e.target.value }))} />
+                <p className="mt-1 text-xs text-slate-400">für den Baupreisindex</p>
+              </div>
+              <div>
+                <label className="label">Zertifizierung</label>
+                <input className="input" placeholder="z.B. Minergie" value={form.zertifizierung}
+                  onChange={(e) => setForm((f) => ({ ...f, zertifizierung: e.target.value }))} />
               </div>
             </div>
             <div className="flex gap-2 pt-1">

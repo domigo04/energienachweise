@@ -40,6 +40,7 @@ from app.export.grobkostenschaetzung import (
 from app.models.auth import User
 from app.models.grobkostenschaetzung import Korrekturfaktor
 from app.models.heizungscockpit import HcProject
+from app.project_context import context_fuer_projekt, vorbelegung_aus_context
 from app.models.kv import (
     BauindexEintrag, Kostenschaetzung, KostenschaetzungVersion,
     RefKostenzeile, RefProjekt, RefProjektGewerk,
@@ -318,6 +319,23 @@ def _berechne(body: SchaetzungIn, user: User, db: Session) -> tuple:
 def schaetzen(body: SchaetzungIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     _, result = _berechne(body, user, db)
     return result
+
+
+@router.get("/projekt/{project_id}/vorbelegung")
+def get_vorbelegung(project_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """§7 „Projekt für Kostenschätzung prüfen": sammelt automatisch alles, was
+    Projekt und Schema schon wissen, statt es erneut abzufragen. Liefert die
+    Feld-Vorbelegung (SchaetzungIn) UND den vollen Context mit Herkunft/Status,
+    damit die Prüfmaske Quelle und offene Ergänzungen anzeigen kann."""
+    project = (
+        db.query(HcProject)
+        .filter(HcProject.id == project_id, HcProject.tenant_id == user.tenant_id)
+        .first()
+    )
+    if not project:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Projekt nicht gefunden")
+    context = context_fuer_projekt(db, project, user.tenant_id)
+    return {"vorbelegung": vorbelegung_aus_context(context), "context": context}
 
 
 @router.get("/projekt/{project_id}")

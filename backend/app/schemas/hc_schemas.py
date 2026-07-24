@@ -39,6 +39,12 @@ class ProjectBaseDataIn(BaseModel):
     warmwasser_bedarf_kw: Optional[float] = None
     gebaeudekategorie: Optional[str] = None
     klimastation: Optional[str] = None
+    # Zentrale Projektgrunddaten (Quelle A) — einmal hier gepflegt
+    ebf_m2: Optional[float] = None
+    anzahl_nutzungseinheiten: Optional[int] = None
+    projektart: Optional[str] = None
+    region: Optional[str] = None
+    zertifizierung: Optional[str] = None
 
 
 class ProjectCreate(BaseModel):
@@ -65,8 +71,23 @@ class ProjectBaseDataOut(BaseModel):
     warmwasser_bedarf_kw: Optional[float]
     gebaeudekategorie: Optional[str] = None
     klimastation: Optional[str] = None
+    ebf_m2: Optional[float] = None
+    anzahl_nutzungseinheiten: Optional[int] = None
+    projektart: Optional[str] = None
+    region: Optional[str] = None
+    zertifizierung: Optional[str] = None
 
     model_config = {"from_attributes": True}
+
+
+class ProjectParameterUpdate(BaseModel):
+    """Ergänzung / Übersteuerung eines Projektparameters (Quelle C / §6).
+    Werte werden als Text abgelegt; None löscht die jeweilige Angabe wieder."""
+    external_value: Optional[str] = None
+    manual_override: Optional[str] = None
+    quelle_notiz: Optional[str] = None
+    confidence: Optional[str] = None
+    notiz: Optional[str] = None
 
 
 class HeatingGroupCreate(BaseModel):

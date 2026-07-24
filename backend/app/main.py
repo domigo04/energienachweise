@@ -93,7 +93,11 @@ def _ensure_columns():
     (_seed_admin) mit einer stillen SQL-Exception abbrechen liess und so den
     Produktions-Login blockierte."""
     to_add = {
-        "hc_project_base_data": [("gebaeudekategorie", "VARCHAR"), ("klimastation", "VARCHAR")],
+        "hc_project_base_data": [
+            ("gebaeudekategorie", "VARCHAR"), ("klimastation", "VARCHAR"),
+            ("ebf_m2", "FLOAT"), ("anzahl_nutzungseinheiten", "INTEGER"),
+            ("projektart", "VARCHAR"), ("region", "VARCHAR"), ("zertifizierung", "VARCHAR"),
+        ],
         "hc_projects": [("erstellt_von", "INTEGER"), ("verantwortlicher_id", "INTEGER")],
         "ref_projekte": [
             ("anlagenkonfiguration", "VARCHAR"),

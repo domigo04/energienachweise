@@ -37,6 +37,31 @@ from typing import Optional
 # Verbrauchergruppen = Heizgruppen im Schema
 _VERBRAUCHER = ("gruppe", "heizkreis")
 
+# Wärmeabgabe-Typ einer Verbrauchergruppe → Kostenvokabular (§ Feedback Dominic:
+# der Gruppentyp soll direkt das Wärmeabgabesystem der Kostenschätzung speisen).
+# BWW ist Brauchwarmwasser, kein Raum-Abgabesystem → bewusst nicht abgebildet.
+_WAERMEABGABE_NORM = {
+    "fussbodenheizung (fbh)": "FBH",
+    "fbh": "FBH",
+    "heizkörper modern (hk)": "Heizkörper",
+    "heizkörper alt (hk)": "Heizkörper",
+    "heizkörper": "Heizkörper",
+    "hk": "Heizkörper",
+    "lufterhitzer": "Lufterhitzer",
+    "tabs": "TABS",
+    "wandheizung": "Wandheizung",
+    "konvektoren": "Konvektoren",
+}
+
+
+def _abgabe_von(d: dict) -> Optional[str]:
+    """Wärmeabgabesystem einer Gruppe/eines Heizkreises normalisiert (Gruppe: typ,
+    Heizkreis: system). Unbekannt/leer → None (nicht raten)."""
+    roh = d.get("typ") or d.get("system")
+    if not roh:
+        return None
+    return _WAERMEABGABE_NORM.get(str(roh).strip().lower())
+
 # Erlaubte strukturierte Erzeugertypen (§4). Reihenfolge = keine Bedeutung.
 GENERATOR_TYPES = (
     "ews_wp", "lwwp", "wasser_wp", "fernwaerme", "gas",
@@ -138,6 +163,7 @@ def mengen_aus_schema(graph_json) -> dict:
     generator_power_summe = 0.0
     hat_generator_power = False
     generator_types: list[str] = []  # alle erkannten Typen, für Merge nach der Schleife
+    waermeabgabe: set[str] = set()   # Abgabesysteme der Verbrauchergruppen
 
     for n in nodes:
         t = n.get("type")
@@ -188,6 +214,9 @@ def mengen_aus_schema(graph_json) -> dict:
             if q is not None:
                 leistung_summe += q
                 hat_leistung = True
+            abgabe = _abgabe_von(d)
+            if abgabe:
+                waermeabgabe.add(abgabe)
 
         # In der Gruppe integrierte Armaturen (CAD-Strang)
         if t == "gruppe":
@@ -236,6 +265,9 @@ def mengen_aus_schema(graph_json) -> dict:
     generator_type = _merge_generator_types(generator_types)
     if generator_type is not None:
         mengen["generator_type"] = generator_type
+    # Wärmeabgabesysteme (Liste) — der Gruppentyp speist direkt die Kostenschätzung.
+    if waermeabgabe:
+        mengen["waermeabgabe"] = sorted(waermeabgabe)
     return mengen
 
 

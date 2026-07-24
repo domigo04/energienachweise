@@ -279,6 +279,31 @@ def test_vorbelegung_uebersetzt_bekannte_werte():
     assert "bohrmeter" not in vb
 
 
+# ── Wärmeabgabesystem aus dem Schema in die Kostenschätzung übernehmen ───────
+
+def test_waermeabgabe_aus_gruppentyp():
+    """Der Gruppentyp speist direkt das Wärmeabgabesystem (Feedback Dominic)."""
+    graph = {"nodes": [
+        _n("g1", "gruppe", {"q_kw": "20", "typ": "Fussbodenheizung (FBH)"}),
+        _n("g2", "gruppe", {"q_kw": "10", "typ": "Heizkörper modern (HK)"}),
+        _n("hk1", "heizkreis", {"q_kw": "5", "system": "TABS"}),
+    ]}
+    m = mengen_aus_schema(graph)
+    assert m["waermeabgabe"] == ["FBH", "Heizkörper", "TABS"]
+    ctx = build_context(base_data=None, graph_json=graph, parameter_rows=[])
+    assert ctx["waermeabgabe"] == ["FBH", "Heizkörper", "TABS"]
+    vb = vorbelegung_aus_context(ctx)
+    assert vb["waermeabgabe"] == ["FBH", "Heizkörper", "TABS"]
+
+
+def test_waermeabgabe_ohne_typ_bleibt_leer():
+    """Ohne Gruppentyp wird nichts geraten; Vorbelegung enthält kein Abgabesystem."""
+    ctx = build_context(base_data=None, graph_json={"nodes": [_n("g1", "gruppe", {"q_kw": "20"})]},
+                        parameter_rows=[])
+    assert ctx["waermeabgabe"] == []
+    assert "waermeabgabe" not in vorbelegung_aus_context(ctx)
+
+
 # ── §4 — strukturierter Erzeugertyp aus dem Schema ──────────────────────────
 
 def test_generator_type_strukturiert_gewinnt():

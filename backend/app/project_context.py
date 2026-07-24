@@ -212,6 +212,9 @@ def build_context(base_data, graph_json, parameter_rows=None) -> dict:
 
     return {
         "parameter": parameter,
+        # Wärmeabgabesysteme aus den Verbrauchergruppen (Liste, kein Skalar) —
+        # speist direkt das Wärmeabgabesystem der Kostenschätzung (One Source of Truth).
+        "waermeabgabe": schema_mengen.get("waermeabgabe", []),
         "zusammenfassung": {
             "anzahl_parameter": len(parameter),
             "bekannt": status_zaehler[STATUS_BEKANNT],
@@ -275,4 +278,10 @@ def vorbelegung_aus_context(context: dict) -> dict:
     """Bekannte Projektwerte in die Feldnamen der Kostenschätzung übersetzen.
     Nur gesetzte Werte werden zurückgegeben — Unbekanntes bleibt offen (§25)."""
     eff = effective_map(context)
-    return {feld: eff[key] for feld, key in _VORBELEGUNG_MAP.items() if eff.get(key) is not None}
+    vb = {feld: eff[key] for feld, key in _VORBELEGUNG_MAP.items() if eff.get(key) is not None}
+    # Wärmeabgabesystem direkt aus den Schema-Verbrauchergruppen übernehmen, damit
+    # es nicht erneut ausgewählt werden muss (Feedback Dominic).
+    abgabe = context.get("waermeabgabe") or []
+    if abgabe:
+        vb["waermeabgabe"] = abgabe
+    return vb

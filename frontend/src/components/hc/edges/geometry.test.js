@@ -6,6 +6,8 @@ import {
   mergeReconnectWaypoints,
   reconnectThroughNode,
   segmentAusrichtung,
+  segmentAchse,
+  mitgezogeneWaypoints,
   adaptivePolyline,
   roundedPolylinePath,
 } from "./geometry";
@@ -202,5 +204,61 @@ describe("segmentAusrichtung", () => {
   it("erkennt horizontale und vertikale Segmente", () => {
     expect(segmentAusrichtung({ x: 0, y: 0 }, { x: 10, y: 1 })).toBe("horizontal");
     expect(segmentAusrichtung({ x: 0, y: 0 }, { x: 1, y: 10 })).toBe("vertikal");
+  });
+});
+
+describe("segmentAchse", () => {
+  it("liefert 'h' für waagrecht, 'v' für senkrecht", () => {
+    expect(segmentAchse({ x: 0, y: 0 }, { x: 10, y: 0 })).toBe("h");
+    expect(segmentAchse({ x: 0, y: 0 }, { x: 0, y: 10 })).toBe("v");
+  });
+  it("liefert null für ein bewusst diagonales (45°) Segment — wird nicht mitgezogen", () => {
+    expect(segmentAchse({ x: 0, y: 0 }, { x: 10, y: 10 })).toBeNull();
+  });
+  it("liefert null für deckungsgleiche Punkte", () => {
+    expect(segmentAchse({ x: 5, y: 5 }, { x: 5, y: 5 })).toBeNull();
+  });
+});
+
+describe("mitgezogeneWaypoints — orthogonales Mitziehen (§ Editor #1)", () => {
+  // L-Route: start(0,0) → p0(0,100) [senkrecht] → end(80,100) [waagrecht].
+  // Wird das Start-Bauteil nach rechts auf x=40 verschoben, muss das senkrechte
+  // Endsegment senkrecht bleiben: p0.x folgt dem neuen Start.
+  it("zieht den senkrechten Endstützpunkt mit dem verschobenen Startbauteil mit", () => {
+    const wp = [{ x: 0, y: 100 }];
+    const out = mitgezogeneWaypoints(wp, {
+      start: { x: 40, y: 0 }, end: { x: 80, y: 100 }, startAchse: "v", endAchse: "h",
+    });
+    // p0.x an neuen Start gekoppelt, p0.y unverändert; End-Stützpunkt = derselbe p0,
+    // waagrecht → p0.y an end.y (100, unverändert).
+    expect(out[0]).toEqual({ x: 40, y: 100 });
+  });
+
+  it("hält ein waagrechtes Endsegment waagrecht (y folgt), lässt x unangetastet", () => {
+    const wp = [{ x: 60, y: 20 }, { x: 60, y: 200 }];
+    const out = mitgezogeneWaypoints(wp, {
+      start: { x: 0, y: 40 }, end: { x: 0, y: 0 }, startAchse: "h", endAchse: null,
+    });
+    expect(out[0]).toEqual({ x: 60, y: 40 }); // erstes Segment waagrecht → y folgt Start
+    expect(out[1]).toEqual({ x: 60, y: 200 }); // Ende nicht mitgezogen (Achse null)
+  });
+
+  it("lässt bewusst diagonale Endsegmente (Achse null) unverändert", () => {
+    const wp = [{ x: 30, y: 30 }];
+    const out = mitgezogeneWaypoints(wp, {
+      start: { x: 5, y: 0 }, end: { x: 90, y: 90 }, startAchse: null, endAchse: null,
+    });
+    expect(out[0]).toEqual({ x: 30, y: 30 });
+  });
+
+  it("gibt eine Kopie zurück (keine Mutation der Eingabe)", () => {
+    const wp = [{ x: 0, y: 100 }];
+    const out = mitgezogeneWaypoints(wp, { start: { x: 40, y: 0 }, end: { x: 80, y: 100 }, startAchse: "v" });
+    expect(wp[0]).toEqual({ x: 0, y: 100 });
+    expect(out[0]).not.toBe(wp[0]);
+  });
+
+  it("ist ein No-Op ohne Stützpunkte", () => {
+    expect(mitgezogeneWaypoints([], { start: { x: 1, y: 1 }, end: { x: 2, y: 2 }, startAchse: "h" })).toEqual([]);
   });
 });

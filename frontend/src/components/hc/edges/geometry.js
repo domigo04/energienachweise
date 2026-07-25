@@ -87,6 +87,41 @@ export function adaptivePolyline(start, end, storedPoints = [], sourceSide = nul
   return vereinfachteRoute([{ ...start }, elbow, { ...end }]);
 }
 
+// Achse eines Segments: 'h' (waagrecht), 'v' (senkrecht) oder null (deckungs-
+// gleich oder bewusst diagonal/45°). Anders als segmentAusrichtung wird ein
+// Schrägsegment NICHT auf eine Achse gezwungen — so bleibt gewollte 45°-Geometrie
+// beim Mitziehen unangetastet.
+export function segmentAchse(a, b, toleranz = 0.5) {
+  if (!a || !b) return null;
+  const dx = Math.abs(b.x - a.x);
+  const dy = Math.abs(b.y - a.y);
+  if (dx < toleranz && dy < toleranz) return null;
+  if (dy < toleranz) return 'h';
+  if (dx < toleranz) return 'v';
+  return null;
+}
+
+// Orthogonales Mitziehen (§ Editor #1): wird ein Bauteil verschoben, folgt der
+// Leitungsendpunkt bereits dem Anschluss. Damit das Endsegment nicht diagonal
+// abknickt, wird der endpunktnahe Stützpunkt entlang der VOR dem Verschieben
+// gemessenen Achse nachgeführt — waagrechtes Endsegment bleibt waagrecht,
+// senkrechtes bleibt senkrecht. `startAchse`/`endAchse` = 'h' | 'v' | null; bei
+// null (freies/diagonales Segment) wird der Stützpunkt nicht angefasst.
+export function mitgezogeneWaypoints(waypoints, { start, end, startAchse = null, endAchse = null } = {}) {
+  const punkte = (waypoints || []).map(point => ({ ...point }));
+  if (!punkte.length) return punkte;
+  if (start && startAchse) {
+    if (startAchse === 'h') punkte[0].y = start.y;
+    else if (startAchse === 'v') punkte[0].x = start.x;
+  }
+  if (end && endAchse) {
+    const last = punkte.length - 1;
+    if (endAchse === 'h') punkte[last].y = end.y;
+    else if (endAchse === 'v') punkte[last].x = end.x;
+  }
+  return punkte;
+}
+
 export function pairedHandleId(nodeType, handleId) {
   if (!handleId) return null;
   if (handleId === 'vl') return 'rl';

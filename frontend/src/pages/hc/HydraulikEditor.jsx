@@ -2,11 +2,11 @@ import React, { useCallback, useState, useMemo, useRef, useEffect } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   AlertTriangle, ArrowLeft, Check, ChevronDown, Download, Eye, History,
-  Layers3, LayoutTemplate, PanelLeftClose, PanelLeftOpen, RotateCcw,
-  PanelRightClose, PanelRightOpen, Save as SaveIcon, Settings2, Undo2, X,
+  Image as ImageIcon, Layers3, LayoutTemplate, Lock, Unlock, PanelLeftClose, PanelLeftOpen, RotateCcw,
+  PanelRightClose, PanelRightOpen, Save as SaveIcon, Settings2, Trash2, Undo2, X,
 } from 'lucide-react';
 import {
-  ReactFlow, Background, Controls, MiniMap,
+  ReactFlow, Background, BackgroundVariant, Controls, MiniMap,
   useNodesState, useEdgesState,
   Panel, ConnectionMode, useReactFlow, ReactFlowProvider,
   NodeToolbar, Position, useStore, useUpdateNodeInternals, ViewportPortal,
@@ -15,19 +15,24 @@ import '@xyflow/react/dist/style.css';
 import './HydraulikEditor.css';
 import { NODE_TYPES, NUMMERIERT, ROTATABLE } from '../../components/hc/nodes/HydraulikNodes';
 import { EDGE_TYPES } from '../../components/hc/edges/FlowEdge';
-import { pairedHandleId, parallelWaypoints, roundedPolylinePath, splitRouteAtPoint, reconnectThroughNode, adaptivePolyline } from '../../components/hc/edges/geometry';
+import { pairedHandleId, parallelWaypoints, roundedPolylinePath, splitRouteAtPoint, reconnectThroughNode, adaptivePolyline, segmentAchse, mitgezogeneWaypoints } from '../../components/hc/edges/geometry';
 import { createHydraulicEdge, canStartHydraulicLine } from './schema/edgeFactory';
 import { SCHALTUNGEN } from '../../components/hc/nodes/schaltungen';
 import {
   createSchema,
   createSchemaRevision,
+  deleteSchemaUnderlay,
   getSchemaEditor,
+  getSchemaUnderlay,
   hydraulikBerechnen,
   listSchemaRevisions,
+  patchSchemaUnderlay,
   restoreSchemaRevision,
   saveSchemaGraph,
+  setSchemaUnderlay,
 } from '../../api/hcApi';
 import { api } from '../../api';
+import { dateiZuUnderlay } from './schema/underlay';
 
 // ── Konstanten ────────────────────────────────────────────────
 const KVS_REIHE = [0.1, 0.16, 0.25, 0.4, 0.63, 1.0, 1.6, 2.5, 4.0, 6.3, 10, 16, 25, 40, 63];
@@ -1386,6 +1391,14 @@ function EditorInner() {
   // werden können. Esc/Rechtsklick beenden ihn bewusst.
   const [dauerLeitung, setDauerLeitung] = useState(false);
   const dauerLeitungRef = useRef(false);
+  // Underlay: Hintergrund-Plan zum Nachzeichnen (§ Editor #5). Firmenweit im
+  // Projekt gespeichert, aber getrennt vom Autosave des Graphen geladen.
+  const [underlay, setUnderlay] = useState(null);
+  const [underlayBusy, setUnderlayBusy] = useState(false);
+  const [showUnderlayPanel, setShowUnderlayPanel] = useState(false);
+  const underlayInputRef = useRef(null);
+  const underlayPatchTimer = useRef(null);
+  const underlayDrag = useRef(null);
   const [leitungsCursor, setLeitungsCursor] = useState(null);
   const [leitungsSnap, setLeitungsSnap] = useState(null);
   const [leitungsGuides, setLeitungsGuides] = useState([]);
@@ -1533,6 +1546,8 @@ function EditorInner() {
         setSchemaId(s.id);
         setSchemaName(s.name || 'Schema');
         editorGraphAnwenden(s.graph);
+        // Underlay getrennt laden (grosses Bild-Blob nicht Teil des Graphen).
+        getSchemaUnderlay(s.id).then(u => setUnderlay(u || null)).catch(() => {});
       } catch (e) {
         console.error('Schema konnte nicht geladen werden', e);
       } finally {
@@ -1561,6 +1576,69 @@ function EditorInner() {
     }, 800);
     return () => clearTimeout(t);
   }, [nodes, edges, schemaName, loaded, schemaId, activeLayerId, layerVisibility, drawingConfig]);
+
+  // ── Underlay: Hintergrund-Plan (§ Editor #5) ──
+  const underlayHochladen = useCallback(async (file) => {
+    if (!file || !schemaId) return;
+    setUnderlayBusy(true);
+    try {
+      const basis = await dateiZuUnderlay(file);           // {mime,data,name,w,h}
+      const gespeichert = await setSchemaUnderlay(schemaId, {
+        ...basis, x:0, y:0, scale:1, opacity:0.6, locked:false,
+      });
+      setUnderlay(gespeichert);
+      setShowUnderlayPanel(true);
+    } catch (e) {
+      console.error('Underlay konnte nicht geladen werden', e);
+      window.alert('Plan konnte nicht geladen werden. Unterstützt werden PDF, PNG und JPG (max. ~9 MB).');
+    } finally {
+      setUnderlayBusy(false);
+    }
+  }, [schemaId]);
+
+  // Lage/Deckkraft/Sperre ändern: lokal sofort, Persistenz gebündelt (PATCH ohne
+  // das Bild erneut zu senden). So bleibt das Ziehen flüssig.
+  const underlayTransform = useCallback((patch) => {
+    setUnderlay(current => {
+      if (!current) return current;
+      const next = { ...current, ...patch };
+      if (schemaId) {
+        clearTimeout(underlayPatchTimer.current);
+        const nurLage = { x:next.x, y:next.y, scale:next.scale, opacity:next.opacity, locked:next.locked };
+        underlayPatchTimer.current = setTimeout(() => {
+          patchSchemaUnderlay(schemaId, nurLage).catch(() => {});
+        }, 400);
+      }
+      return next;
+    });
+  }, [schemaId]);
+
+  const underlayEntfernen = useCallback(async () => {
+    if (!schemaId) return;
+    clearTimeout(underlayPatchTimer.current);
+    await deleteSchemaUnderlay(schemaId).catch(() => {});
+    setUnderlay(null);
+    setShowUnderlayPanel(false);
+  }, [schemaId]);
+
+  const underlayDragStart = useCallback((event) => {
+    if (!underlay || underlay.locked) return;
+    event.stopPropagation();
+    const start = screenToFlowPosition({ x:event.clientX, y:event.clientY });
+    underlayDrag.current = { dx:start.x - underlay.x, dy:start.y - underlay.y };
+    const move = (ev) => {
+      if (!underlayDrag.current) return;
+      const p = screenToFlowPosition({ x:ev.clientX, y:ev.clientY });
+      underlayTransform({ x:p.x - underlayDrag.current.dx, y:p.y - underlayDrag.current.dy });
+    };
+    const up = () => {
+      underlayDrag.current = null;
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }, [underlay, screenToFlowPosition, underlayTransform]);
 
   // Undo-History
   const snapshots = useRef([]);
@@ -1631,6 +1709,7 @@ function EditorInner() {
       .hc-pdf-capture .react-flow__controls,
       .hc-pdf-capture .react-flow__minimap,
       .hc-pdf-capture .react-flow__panel,
+      .hc-pdf-capture .hc-underlay,
       .hc-pdf-capture .react-flow__attribution { display:none !important; }
     `;
     if (!document.getElementById('hc-flow-anim')) document.head.appendChild(s);
@@ -1751,6 +1830,52 @@ function EditorInner() {
     const targetSide = targetNode?.type === 'junction' ? null : handleAusrichtung(edge.target, edge.targetHandle);
     return adaptivePolyline(start, end, edge.data?.points || [], sourceSide, targetSide);
   }, [handleAusrichtung, handlePosition]);
+
+  // Orthogonales Mitziehen (§ Editor #1). Der Leitungsendpunkt folgt dem Anschluss
+  // bereits live (nodeGeometryVersion); damit das endpunktnahe Segment nicht
+  // diagonal abknickt, merken wir uns beim Anfassen dessen Achse und führen den
+  // Stützpunkt beim Loslassen orthogonal nach. Bewusst diagonale (45°) Segmente
+  // bleiben unangetastet. Nur Leitungen MIT Stützpunkten sind betroffen — ohne
+  // Stützpunkt wird der Knick ohnehin bei jedem Frame frisch orthogonal berechnet.
+  const nodeDragAchsen = useRef({});
+  const onNodeDragStart = useCallback((_event, node, dragNodes) => {
+    snap();
+    const bewegte = new Set((dragNodes?.length ? dragNodes : [node]).map(n => n.id));
+    const achsen = {};
+    edgesRef.current.forEach(edge => {
+      const wp = edge.data?.points;
+      if (!Array.isArray(wp) || !wp.length) return;
+      const sourceBewegt = bewegte.has(edge.source);
+      const targetBewegt = bewegte.has(edge.target);
+      if (!sourceBewegt && !targetBewegt) return;
+      const eintrag = {};
+      if (sourceBewegt) {
+        const start = handlePosition(edge.source, edge.sourceHandle);
+        if (start) eintrag.startAchse = segmentAchse(start, wp[0]);
+      }
+      if (targetBewegt) {
+        const end = handlePosition(edge.target, edge.targetHandle);
+        if (end) eintrag.endAchse = segmentAchse(wp[wp.length - 1], end);
+      }
+      if (eintrag.startAchse || eintrag.endAchse) achsen[edge.id] = eintrag;
+    });
+    nodeDragAchsen.current = achsen;
+  }, [snap, handlePosition]);
+
+  const onNodeDragStop = useCallback(() => {
+    const achsen = nodeDragAchsen.current;
+    nodeDragAchsen.current = {};
+    if (!Object.keys(achsen).length) return;
+    setEdges(items => items.map(edge => {
+      const a = achsen[edge.id];
+      const wp = edge.data?.points;
+      if (!a || !Array.isArray(wp) || !wp.length) return edge;
+      const start = a.startAchse ? handlePosition(edge.source, edge.sourceHandle) : null;
+      const end = a.endAchse ? handlePosition(edge.target, edge.targetHandle) : null;
+      const neu = mitgezogeneWaypoints(wp, { start, end, startAchse: a.startAchse, endAchse: a.endAchse });
+      return { ...edge, data:{ ...(edge.data || {}), cad_polyline:true, points:neu } };
+    }));
+  }, [handlePosition, setEdges]);
 
   // Eine einzige, pro Graphänderung neu aufgebaute Fangpunktliste hält den
   // Pointer-Move-Pfad leichtgewichtig. Darin liegen alle Bauteilanschlüsse und
@@ -3453,6 +3578,9 @@ function EditorInner() {
           <button onClick={event=>{ setShowLegende(value=>!value); setShowWarnungen(false); closeToolbarMenu(event); }} style={menuActionStyle}>
             <Layers3 size={14} /> {showLegende?'Legende schliessen':'Legende öffnen'}
           </button>
+          <button onClick={event=>{ setShowUnderlayPanel(value=>!value); closeToolbarMenu(event); }} style={menuActionStyle}>
+            <ImageIcon size={14} /> {showUnderlayPanel ? 'Plan-Underlay schliessen' : 'Plan-Underlay …'}
+          </button>
         </ToolbarMenu>
 
         <button onClick={()=>{ setShowWarnungen(value=>!value); setShowLegende(false); }}
@@ -3544,7 +3672,8 @@ function EditorInner() {
             onDrop={onDrop}
             onDragOver={onDragOver}
             onNodeClick={onNodeClick}
-            onNodeDragStart={snap}
+            onNodeDragStart={onNodeDragStart}
+            onNodeDragStop={onNodeDragStop}
             onNodeDoubleClick={onNodeDoubleClick}
             onEdgeClick={onEdgeClick}
             onPaneClick={onPaneClick}
@@ -3571,7 +3700,30 @@ function EditorInner() {
             fitView
             className={(zeichenModus || leitungsEntwurf) ? 'cursor-crosshair hc-hydraulik-flow' : 'hc-hydraulik-flow'}
           >
-            <Background color="#e2e8f0" gap={drawingConfig.grid_size * 2}/>
+            {/* CAD-Optik (§ Editor #4): Millimeterpapier — feine Minor-Punkte am
+                Raster (bleiben beim Rauszoomen ruhig) plus kräftigere Major-Linien
+                alle 5 Rastereinheiten für die Orientierung. */}
+            <Background id="hc-minor" variant={BackgroundVariant.Dots} gap={drawingConfig.grid_size}
+              size={1} color="#cbd5e1"/>
+            <Background id="hc-major" variant={BackgroundVariant.Lines} gap={drawingConfig.grid_size * 5}
+              color="#dbe3ec" lineWidth={1}/>
+            {/* Underlay (§ Editor #5): unter Bauteilen/Leitungen, über dem Raster.
+                Interaktiv (ziehbar) nur wenn entsperrt und nicht im Zeichenmodus —
+                sonst rein visuell, damit es das Zeichnen nie blockiert. */}
+            {underlay && (
+              <ViewportPortal>
+                <img src={underlay.data} alt="" draggable={false} className="hc-underlay"
+                  onPointerDown={underlayDragStart}
+                  style={{
+                    position:'absolute', left:underlay.x, top:underlay.y,
+                    width:underlay.w * underlay.scale, height:underlay.h * underlay.scale,
+                    opacity:underlay.opacity, zIndex:-1, userSelect:'none',
+                    pointerEvents:(!underlay.locked && !zeichenModus && !leitungsEntwurf) ? 'auto' : 'none',
+                    cursor:(!underlay.locked && !zeichenModus && !leitungsEntwurf) ? 'move' : 'default',
+                    outline:(!underlay.locked && !zeichenModus && !leitungsEntwurf) ? '1px dashed #6366f1' : 'none',
+                  }} />
+              </ViewportPortal>
+            )}
             <Controls/>
             {showMiniMap && <MiniMap zoomable pannable nodeStrokeWidth={3}/>}
             {leitungsEntwurf && (
@@ -3634,6 +3786,57 @@ function EditorInner() {
               </Panel>
             )}
           </ReactFlow>
+
+          {/* Underlay-Bedienfeld (§ Editor #5) */}
+          <input ref={underlayInputRef} type="file" accept="application/pdf,image/*" style={{ display:'none' }}
+            onChange={event=>{ const f = event.target.files?.[0]; event.target.value = ''; if (f) underlayHochladen(f); }} />
+          {showUnderlayPanel && (
+            <div style={{ position:'absolute', top:12, left:12, width:250, background:'white', border:'1px solid #e2e8f0', borderRadius:10, boxShadow:'0 10px 28px rgba(15,23,42,0.16)', zIndex:25, padding:'10px 12px 12px' }}>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8 }}>
+                <strong style={{ fontSize:11, color:'#1e293b', display:'flex', alignItems:'center', gap:6 }}>
+                  <ImageIcon size={14} /> Plan-Underlay
+                </strong>
+                <button onClick={()=>setShowUnderlayPanel(false)} title="Schliessen" style={{ border:0, background:'transparent', cursor:'pointer', color:'#94a3b8' }}><X size={15} /></button>
+              </div>
+              {underlayBusy ? (
+                <div style={{ fontSize:11, color:'#4f46e5', padding:'8px 0' }}>Plan wird verarbeitet …</div>
+              ) : !underlay ? (
+                <>
+                  <button onClick={()=>underlayInputRef.current?.click()} style={{ width:'100%', padding:8, background:'#4f46e5', color:'white', border:0, borderRadius:7, fontSize:11, fontWeight:700, cursor:'pointer' }}>
+                    Plan oder Bild laden
+                  </button>
+                  <div style={{ fontSize:9.5, color:'#94a3b8', marginTop:7, lineHeight:1.4 }}>
+                    PDF (erste Seite), PNG oder JPG. Firmenweit im Projekt gespeichert — dient nur als Vorlage zum Nachzeichnen und fliesst nicht in die Berechnung ein.
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize:10, color:'#475569', marginBottom:8, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }} title={underlay.name || ''}>{underlay.name || 'Plan'}</div>
+                  <label style={{ display:'grid', gridTemplateColumns:'62px 1fr 34px', alignItems:'center', gap:6, marginBottom:8, fontSize:10, color:'#475569' }}>
+                    Deckkraft
+                    <input type="range" min="5" max="100" step="1" value={Math.round(underlay.opacity * 100)}
+                      onChange={event=>underlayTransform({ opacity:Math.max(0.05, Number(event.target.value) / 100) })} />
+                    <span style={{ textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{Math.round(underlay.opacity * 100)}%</span>
+                  </label>
+                  <label style={{ display:'grid', gridTemplateColumns:'62px 1fr 34px', alignItems:'center', gap:6, marginBottom:10, fontSize:10, color:'#475569' }}>
+                    Grösse
+                    <input type="range" min="10" max="300" step="1" value={Math.round(underlay.scale * 100)}
+                      onChange={event=>underlayTransform({ scale:Math.max(0.02, Number(event.target.value) / 100) })} />
+                    <span style={{ textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{Math.round(underlay.scale * 100)}%</span>
+                  </label>
+                  <button onClick={()=>underlayTransform({ locked:!underlay.locked })}
+                    style={{ width:'100%', display:'flex', alignItems:'center', justifyContent:'center', gap:6, padding:7, borderRadius:7, fontSize:10, fontWeight:700, cursor:'pointer',
+                      border:`1px solid ${underlay.locked ? '#cbd5e1' : '#a5b4fc'}`, background:underlay.locked ? 'white' : '#eef2ff', color:underlay.locked ? '#475569' : '#4338ca' }}>
+                    {underlay.locked ? <><Lock size={13} /> Gesperrt — zum Positionieren tippen</> : <><Unlock size={13} /> Positionieren (in Zeichnung ziehen)</>}
+                  </button>
+                  <div style={{ display:'flex', gap:6, marginTop:8 }}>
+                    <button onClick={()=>underlayInputRef.current?.click()} style={{ flex:1, padding:6, border:'1px solid #e2e8f0', borderRadius:6, background:'white', fontSize:10, cursor:'pointer', color:'#475569' }}>Ersetzen</button>
+                    <button onClick={underlayEntfernen} style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', gap:5, padding:6, border:'1px solid #fca5a5', borderRadius:6, background:'#fef2f2', fontSize:10, cursor:'pointer', color:'#dc2626' }}><Trash2 size={12} /> Entfernen</button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
 
           {/* Legende (Pflichtenheft §10) — dieselben Zeilen landen im PDF */}
           {showLegende && (

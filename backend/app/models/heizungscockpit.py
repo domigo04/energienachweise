@@ -226,6 +226,11 @@ class HcSchema(Base):
     project_id = Column(Integer, ForeignKey("hc_projects.id"), index=True)
     name = Column(String, nullable=False, default="Schema")
     graph_json = Column(Text, nullable=False, default="{}")  # {nodes:[...], edges:[...]}
+    # Hintergrund-Plan zum Nachzeichnen (§ Editor #5). Bewusst SEPARAT vom
+    # häufig autospeichernden graph_json, damit das grosse Bild-Blob nicht bei
+    # jedem Zeichnen mitgeschrieben wird: {mime, data(dataURL), name, w, h,
+    # x, y, scale, opacity, locked}. NULL = kein Underlay (Altbestand lädt normal).
+    underlay_json = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

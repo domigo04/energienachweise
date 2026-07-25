@@ -12,14 +12,22 @@ FEATURE_DEFS = {
     "generator_count": {"typ": "int", "einheit": None, "label": "Wärmeerzeuger"},
     "generator_power_kw": {"typ": "float", "einheit": "kW", "label": "Erzeugerleistung"},
     "borehole_count": {"typ": "int", "einheit": None, "label": "Erdsonden"},
+    "borehole_length_each_m": {"typ": "float", "einheit": "m", "label": "Länge je Sonde"},
     "borehole_total_m": {"typ": "float", "einheit": "m", "label": "Bohrmeter"},
     "buffer_count": {"typ": "int", "einheit": None, "label": "Pufferspeicher"},
     "storage_volume_l": {"typ": "float", "einheit": "l", "label": "Speichervolumen"},
     "pump_count": {"typ": "int", "einheit": None, "label": "Pumpen"},
     "valve_2way_count": {"typ": "int", "einheit": None, "label": "2-Weg-Ventile"},
     "valve_3way_count": {"typ": "int", "einheit": None, "label": "3-Weg-Ventile"},
+    "balancing_valve_count": {"typ": "int", "einheit": None, "label": "Abgleichventile (STAD)"},
+    "radiator_count": {"typ": "int", "einheit": None, "label": "Heizkörper"},
     "heat_meter_count": {"typ": "int", "einheit": None, "label": "Wärmezähler"},
-    "pipe_length_m": {"typ": "float", "einheit": "m", "label": "Rohrmeter"},
+    # Rohrmeter getrennt nach Seite (Punkt 11): Quelle = Primärkreis/Erdsonden-
+    # sammler, Verteilung = Heizungsverteilung. pipe_length_m ist die Summe und
+    # bleibt der Kostentreiber für die bestehende Ähnlichkeit.
+    "pipe_length_source_m": {"typ": "float", "einheit": "m", "label": "Rohrmeter Quelle"},
+    "pipe_length_distribution_m": {"typ": "float", "einheit": "m", "label": "Rohrmeter Verteilung"},
+    "pipe_length_m": {"typ": "float", "einheit": "m", "label": "Rohrmeter total"},
 }
 
 FEATURE_KEYS = list(FEATURE_DEFS.keys())

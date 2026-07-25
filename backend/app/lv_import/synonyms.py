@@ -19,6 +19,18 @@ FEATURE_TERMS: dict[str, list[str]] = {
     "valve_3way": [
         "3-weg-ventil", "3-wege-ventil", "3-wegeventil", "dreiwegeventil",
         "mischventil", "umschaltventil", "motorventil 3w", "regelventil 3-weg",
+        "umschaltkugelhahn", "3-weg-mischventil",
+    ],
+    # STAD / Abgleich- bzw. Strangregulierventile (Punkt 10, Roadmap P0 #3).
+    "balancing_valve": [
+        "strangregulierventil", "strangregulierventile", "abgleichventil",
+        "abgleichventile", "stad", "stap", "strangabgleichventil",
+        "einregulierventil", "drosselventil",
+    ],
+    # Heizkörper (Roadmap P0 #3).
+    "radiator": [
+        "heizkörper", "heizkoerper", "radiator", "radiatoren", "flachheizkörper",
+        "flachheizkoerper", "röhrenradiator", "handtuchradiator", "badheizkörper",
     ],
     "heat_meter": [
         "wärmezähler", "waermezaehler", "wärmemengenzähler", "waermemengenzaehler",
@@ -26,7 +38,8 @@ FEATURE_TERMS: dict[str, list[str]] = {
     ],
     "buffer": [
         "pufferspeicher", "puffer", "technikspeicher", "heizungspufferspeicher",
-        "kombispeicher",
+        "kombispeicher", "technischer speicher", "heizungsspeicher",
+        "energiespeicher", "enerval",
     ],
     "borehole": [
         "erdsonde", "erdsonden", "duplexsonde", "duplexsonden", "erdwärmesonde",
@@ -40,6 +53,60 @@ FEATURE_TERMS: dict[str, list[str]] = {
         "rohr", "rohrleitung", "verrohrung", "heizungsleitung", "stahlrohr",
         "kupferrohr", "verbundrohr", "pressfitting-rohr",
     ],
+}
+
+# ── Rohrmeter (Punkt 11) ───────────────────────────────────────────────────
+# Nur echte Heizungs-/Verteilrohre zählen als Rohrmeter.
+PIPE_INCLUDE_TERMS: tuple[str, ...] = (
+    "geschweisste gasrohre", "geschweisste siederohre", "gasrohre", "siederohre",
+    "stahlrohr", "stahlrohre", "c-stahlrohr", "c-stahlrohre", "pressrohr",
+    "pressrohre", "pressfitting-rohr", "kupferrohr", "kupferrohre",
+    "edelstahlrohr", "edelstahlrohre", "kunststoffrohre verteilung",
+    "rohrleitung", "rohrleitungen", "verrohrung", "heizungsleitung",
+)
+# Flächenheizungsrohre gehören NICHT in die Verteilrohrmeter — sie werden über
+# die Fläche kalkuliert und würden die Rohrmeter massiv verfälschen.
+PIPE_EXCLUDE_TERMS: tuple[str, ...] = (
+    "bodenheizungsrohr", "bodenheizungsrohre", "fbh-rohr", "fbh-rohre",
+    "flächenheizungsschlange", "flächenheizungsschlangen",
+    "flaechenheizungsschlange", "flaechenheizungsschlangen",
+    "heizkreisschlaufe", "heizkreisschlaufen", "bodenheizungsverteiler",
+    "fussbodenheizungsrohr", "fussbodenheizungsrohre",
+)
+# Abschnittstitel, unter denen Rohrmeter nicht als Verteilrohre zählen.
+PIPE_EXCLUDE_SECTION_TERMS: tuple[str, ...] = (
+    "flächenheizung", "flaechenheizung", "bodenheizung", "fussbodenheizung",
+    "fussbodenheizungen", "wandheizung", "tabs",
+)
+# Quellenseite (Primärkreis/Erdsondensammler) vs. Verteilung.
+PIPE_SOURCE_TERMS: tuple[str, ...] = (
+    "primärkreis", "primaerkreis", "erdsondensammler", "sondensammler",
+    "sole", "quellenkreis", "erdsonde", "erdsonden",
+)
+
+# ── Speicherarten (Punkt 9) ────────────────────────────────────────────────
+# Nur technisch relevante Heizungsspeicher sind Kostentreiber. Ein Wassererwärmer
+# bzw. BWW-Speicher darf nicht automatisch als Pufferspeicher gezählt werden.
+TECHNICAL_BUFFER = "technical_buffer"
+BWW_STORAGE = "bww_storage"
+COMBINED_STORAGE = "combined_storage"
+UNKNOWN_STORAGE = "unknown_storage"
+
+STORAGE_TERMS: dict[str, tuple[str, ...]] = {
+    TECHNICAL_BUFFER: (
+        "pufferspeicher", "technikspeicher", "technischer speicher",
+        "heizungspufferspeicher", "heizungsspeicher", "energiespeicher",
+        "enerval", "puffer",
+    ),
+    BWW_STORAGE: (
+        "wassererwärmer", "wassererwaermer", "bww-speicher", "bww speicher",
+        "brauchwarmwasserspeicher", "warmwasserspeicher", "boiler",
+        "trinkwasserspeicher", "bws",
+    ),
+    COMBINED_STORAGE: (
+        "kombispeicher", "kombinationsspeicher", "hygienespeicher",
+        "frischwasserspeicher",
+    ),
 }
 
 # Freitext → strukturierter Erzeugertyp (generator_type, gleiche Codes wie

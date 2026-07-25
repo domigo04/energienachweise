@@ -44,6 +44,8 @@ def _feature_out(f: LvImportFeature) -> dict:
         "confirmed_value": f.confirmed_value, "confirmed": f.confirmed,
         "confidence": f.confidence,
         "source_page": f.source_page, "source_text": f.source_text,
+        # Punkt 12/22: kompakter Auszug + Rechenweg abgeleiteter Werte.
+        "source_excerpt": f.source_excerpt, "derived_from": f.derived_from,
         "effective_value": f.confirmed_value if f.confirmed_value not in (None, "") else f.value,
     }
 
@@ -115,13 +117,14 @@ async def upload_lv(
     imp.is_searchable = pipeline.is_searchable
     imp.extract_method = pipeline.extraction_method
     try:
-        features = extract_features(pipeline.technik_pages)
+        features = extract_features(pipeline.technik_pages, pipeline.technik_word_pages)
         costs = extract_costs(pipeline.lv_pages)
         # ALLE kanonischen Features anlegen (auch nicht erkannte) → der Nutzer
         # sieht die vollständige Checkliste und kann fehlende Werte ergänzen.
         for key in FEATURE_KEYS:
             f = features.get(key)
             val = f.get("value") if f else None
+            bbox = (f or {}).get("source_bbox")
             db.add(LvImportFeature(
                 lv_import_id=imp.id, key=key,
                 value=None if val is None else str(val),
@@ -129,6 +132,9 @@ async def upload_lv(
                 confidence=f.get("confidence") if f else None,
                 source_page=f.get("source_page") if f else None,
                 source_text=f.get("source_text") if f else None,
+                source_excerpt=f.get("source_excerpt") if f else None,
+                source_bbox=",".join(str(round(v, 1)) for v in bbox) if bbox else None,
+                derived_from=f.get("derived_from") if f else None,
             ))
         for c in costs:
             db.add(LvImportCost(

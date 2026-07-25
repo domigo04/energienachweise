@@ -122,6 +122,10 @@ def _ensure_columns():
         ],
         "ref_kostenzeilen": [("gewerk", "VARCHAR")],
         "lv_imports": [("extract_method", "VARCHAR")],
+        "lv_import_features": [
+            ("source_excerpt", "TEXT"), ("source_bbox", "VARCHAR"),
+            ("derived_from", "VARCHAR"),
+        ],
     }
     is_sqlite = engine.url.get_backend_name().startswith("sqlite")
     # Einmalige Dev-Migration (2026-07-14): die kurzlebige parallele

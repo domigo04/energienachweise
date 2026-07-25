@@ -64,7 +64,13 @@ class LvImportFeature(Base):
     unit = Column(String, nullable=True)
     confidence = Column(String, nullable=True)     # high | medium | low
     source_page = Column(Integer, nullable=True)
-    source_text = Column(Text, nullable=True)
+    source_text = Column(Text, nullable=True)       # EINE kompakte Fundstellenzeile
+    # Punkt 12: wenige relevante Zeilen statt ganzer Seitenblöcke, plus optional
+    # die Position im PDF. Der Rechenweg abgeleiteter Werte (z.B. „6 × 150 m")
+    # bleibt als derived_from sichtbar.
+    source_excerpt = Column(Text, nullable=True)
+    source_bbox = Column(String, nullable=True)
+    derived_from = Column(String, nullable=True)
     confirmed_value = Column(String, nullable=True) # vom Nutzer bestätigt/korrigiert
     confirmed = Column(Boolean, nullable=False, default=False)
 

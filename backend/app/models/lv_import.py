@@ -33,6 +33,12 @@ class LvImport(Base):
     is_searchable = Column(Boolean, nullable=False, default=True)  # born-digital vs. Bild-PDF
     status = Column(String, nullable=False, default=LvImportStatus.uploaded.value)
     ref_projekt_id = Column(Integer, nullable=True)            # gesetzt nach Freigabe
+    # Projektgrunddaten (im Review ergänzbar) → fliessen bei Freigabe ins RefProjekt.
+    ebf_m2 = Column(Float, nullable=True)
+    anzahl_einheiten = Column(Integer, nullable=True)
+    gebaeudetyp = Column(String, nullable=True)
+    projektart = Column(String, nullable=True)
+    region = Column(String, nullable=True)
     created_by = Column(Integer, nullable=True, index=True)
     created_by_name = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
@@ -72,5 +78,8 @@ class LvImportCost(Base):
     confidence = Column(String, nullable=True)
     source_page = Column(Integer, nullable=True)
     source_text = Column(Text, nullable=True)
+    positionen = Column(Integer, nullable=False, default=1)   # aggregierte Einzelpositionen
+    confirmed = Column(Boolean, nullable=False, default=False)
+    manual = Column(Boolean, nullable=False, default=False)   # manuell hinzugefügt
 
     lv_import = relationship("LvImport", back_populates="costs")

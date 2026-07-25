@@ -40,9 +40,18 @@ class LvImport(Base):
     # Projektgrunddaten (im Review ergänzbar) → fliessen bei Freigabe ins RefProjekt.
     ebf_m2 = Column(Float, nullable=True)
     anzahl_einheiten = Column(Integer, nullable=True)
-    gebaeudetyp = Column(String, nullable=True)
-    projektart = Column(String, nullable=True)
+    # Punkt 20 — kategoriale Werte tragen kanonische Codes aus app.fachwerte,
+    # keine Freitexte. Freitext wäre für die Ähnlichkeit unbrauchbar.
+    gebaeudetyp = Column(String, nullable=True)      # building_uses-Code
+    projektart = Column(String, nullable=True)       # project_types-Code
+    zertifizierung = Column(String, nullable=True)   # certifications-Code
     region = Column(String, nullable=True)
+    # Punkt 19 — aus dem Deckblatt erkannte Projektangaben.
+    projekt_name = Column(String, nullable=True)
+    projekt_nummer = Column(String, nullable=True)
+    ort = Column(String, nullable=True)
+    unternehmer = Column(String, nullable=True)
+    offert_datum = Column(String, nullable=True)
     created_by = Column(Integer, nullable=True, index=True)
     created_by_name = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

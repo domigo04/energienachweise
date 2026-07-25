@@ -21,6 +21,8 @@ from app.lv_import.pipeline import LvPipeline
 from app.lv_import.feature_extract import extract_features
 from app.lv_import.cost_extract import extract_costs
 from app.lv_import.cost_summary import parse_cost_summary, to_cost_rows, has_cost_summary
+from app.lv_import.project_extract import extract_project_data
+from app import fachwerte
 from app.lv_import.feature_keys import FEATURE_DEFS, FEATURE_KEYS, FEATURE_TO_CONTEXT
 
 router = APIRouter(prefix="/api/v1/lv-imports", tags=["KV – LV-Import"])
@@ -80,7 +82,12 @@ def _import_out(imp: LvImport, detail: bool = False) -> dict:
         "created_at": imp.created_at.isoformat() if imp.created_at else None,
         "grunddaten": {
             "ebf_m2": imp.ebf_m2, "anzahl_einheiten": imp.anzahl_einheiten,
-            "gebaeudetyp": imp.gebaeudetyp, "projektart": imp.projektart, "region": imp.region,
+            "gebaeudetyp": imp.gebaeudetyp, "projektart": imp.projektart,
+            "zertifizierung": imp.zertifizierung, "region": imp.region,
+            # Punkt 19 — aus dem Deckblatt erkannt.
+            "projekt_name": imp.projekt_name, "projekt_nummer": imp.projekt_nummer,
+            "ort": imp.ort, "unternehmer": imp.unternehmer,
+            "offert_datum": imp.offert_datum,
         },
     }
     if detail:
@@ -123,6 +130,19 @@ async def upload_lv(
     imp.is_searchable = pipeline.is_searchable
     imp.extract_method = pipeline.extraction_method
     try:
+        # Punkt 19 — Projektangaben aus dem Deckblatt vorschlagen (nur belegbare;
+        # EBF/Zertifizierung/Projektart werden NICHT geraten).
+        projekt = extract_project_data(pipeline.grunddaten_pages)
+        imp.projekt_name = (projekt.get("project_name") or {}).get("value")
+        imp.projekt_nummer = (projekt.get("project_number") or {}).get("value")
+        imp.ort = (projekt.get("location") or {}).get("value")
+        imp.unternehmer = (projekt.get("contractor") or {}).get("value")
+        imp.offert_datum = (projekt.get("offer_date") or {}).get("value")
+        if projekt.get("building_use"):
+            imp.gebaeudetyp = projekt["building_use"]["value"]
+        if projekt.get("units"):
+            imp.anzahl_einheiten = projekt["units"]["value"]
+
         features = extract_features(pipeline.technik_pages, pipeline.technik_word_pages)
         # Punkt 13 — Kosten primär aus der Kostenzusammenstellung; nur wenn es
         # keine gibt, werden die LV-Positionstotale ausgewertet.
@@ -179,6 +199,14 @@ def list_lv(user: User = Depends(get_current_user), db: Session = Depends(get_db
         .all()
     )
     return [_import_out(imp) for imp in rows]
+
+
+@router.get("/fachwerte")
+def fachwerte_listen(user: User = Depends(get_current_user)):
+    """Punkt 5/20 — die EINE Registry kontrollierter Auswahllisten für das
+    Frontend. Muss VOR `/{import_id}` stehen, sonst fängt der int-Pfad zu."""
+    from app import fachwerte
+    return fachwerte.as_frontend()
 
 
 @router.get("/ocr-status")
@@ -279,10 +307,30 @@ def update_import(import_id: int, body: dict, user: User = Depends(get_current_u
             imp.anzahl_einheiten = None if body["anzahl_einheiten"] in (None, "") else int(float(body["anzahl_einheiten"]))
         except (TypeError, ValueError):
             raise HTTPException(status_code=422, detail="Ungültige Einheiten")
-    for feld in ("gebaeudetyp", "projektart", "region"):
+    # Punkt 20 — kategoriale Merkmale nur als kanonischer Code speichern.
+    # Freitext wird über die zentrale Registry normalisiert; lässt er sich nicht
+    # zuordnen, wird er abgelehnt statt als neue Schreibweise verewigt.
+    for feld, registry in (("gebaeudetyp", "building_uses"),
+                           ("projektart", "project_types"),
+                           ("zertifizierung", "certifications")):
+        if feld not in body:
+            continue
+        val = body[feld]
+        if val in (None, ""):
+            setattr(imp, feld, None)
+            continue
+        code = fachwerte.normalize(registry, val)
+        if not code:
+            raise HTTPException(status_code=422, detail={
+                "message": f"Unbekannter Wert für {feld}. Bitte aus der Liste wählen.",
+                "feld": feld, "erlaubt": fachwerte.codes(registry),
+            })
+        setattr(imp, feld, code)
+    for feld in ("region", "projekt_name", "projekt_nummer", "ort", "unternehmer",
+                 "offert_datum"):
         if feld in body:
             val = body[feld]
-            setattr(imp, feld, None if val in (None, "") else str(val))
+            setattr(imp, feld, None if val in (None, "") else str(val)[:200])
     db.commit()
     return _import_out(imp, detail=True)
 
@@ -327,14 +375,26 @@ def approve_lv(import_id: int, user: User = Depends(get_current_user), db: Sessi
         except (TypeError, ValueError):
             return None
 
+    # Punkt 6/7 — mehrere Wärmeerzeuger und Wärmeabgaben als kanonische Codes.
+    # `generator_types` ist die vollständige Liste; fehlt sie (Altimport), wird
+    # der Einzelwert `generator_type` verwendet.
+    erzeuger = fachwerte.normalize_list("generator_types", eff.get("generator_types"))
+    if not erzeuger and eff.get("generator_type"):
+        erzeuger = fachwerte.normalize_list("generator_types", eff["generator_type"])
+    abgabe = fachwerte.normalize_list("heat_delivery_types", eff.get("heat_delivery_types"))
+
     ref = RefProjekt(
         tenant_id=user.tenant_id, erstellt_von=user.id,
-        name=f"LV-Import: {imp.filename}",
+        name=imp.projekt_name or f"LV-Import: {imp.filename}",
         installierte_leistung_neu_kw=num("generator_power_kw"),
-        waermeerzeuger=[eff["generator_type"]] if eff.get("generator_type") else [],
-        # Projektgrunddaten aus dem Review (Item 6).
+        waermeerzeuger=erzeuger,
+        waermeabgabe=abgabe,
+        # Hybrid ist kein gewählter Erzeuger, sondern abgeleitet (Punkt 7).
+        anlagenkonfiguration="hybrid" if fachwerte.ist_hybrid(erzeuger) else None,
+        # Projektgrunddaten aus dem Review (Item 6 / Punkt 20) — kanonische Codes.
         ebf_m2=imp.ebf_m2, anzahl_einheiten=imp.anzahl_einheiten,
         gebaeudetyp=imp.gebaeudetyp, projektart=imp.projektart,
+        zertifizierung=imp.zertifizierung,
     )
     # Legacy-Spalten aus dem EINEN zentralen Mapping befüllen (Rückwärts-
     # kompatibilität zur bestehenden Ähnlichkeit, die noch Spalten liest).

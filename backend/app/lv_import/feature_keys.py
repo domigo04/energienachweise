@@ -8,7 +8,15 @@ from __future__ import annotations
 
 # MVP-Kostentreiber (B4). value-Typ: "int" (Stück), "float" (Menge), "text".
 FEATURE_DEFS = {
-    "generator_type": {"typ": "text", "einheit": None, "label": "Erzeugertyp"},
+    # Punkt 6/7 — Wärmeerzeuger sind mehrwertig ("EWS-WP + Gas"). `generator_type`
+    # bleibt als Einzelwert für die bestehende Ähnlichkeit erhalten (Rückwärts-
+    # kompatibilität) und trägt den ERSTEN Erzeuger; `generator_types` hält die
+    # vollständige Liste als kommaseparierte Codes.
+    "generator_type": {"typ": "text", "einheit": None, "label": "Erzeugertyp (primär)"},
+    "generator_types": {"typ": "list", "einheit": None, "label": "Wärmeerzeuger",
+                        "registry": "generator_types"},
+    "heat_delivery_types": {"typ": "list", "einheit": None, "label": "Wärmeabgabe",
+                            "registry": "heat_delivery_types"},
     "generator_count": {"typ": "int", "einheit": None, "label": "Wärmeerzeuger"},
     "generator_power_kw": {"typ": "float", "einheit": "kW", "label": "Erzeugerleistung"},
     "borehole_count": {"typ": "int", "einheit": None, "label": "Erdsonden"},

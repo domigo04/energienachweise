@@ -378,7 +378,29 @@ def test_grunddaten_fliessen_ins_refprojekt():
     ref = db.query(RefProjekt).first()
     assert ref.ebf_m2 == 1420.0
     assert ref.anzahl_einheiten == 10
-    assert ref.gebaeudetyp == "MFH"
+    # Punkt 20 — kategoriale Merkmale werden auf den kanonischen Code normalisiert
+    # („MFH" → "mfh"), damit die Ähnlichkeit nicht an Schreibweisen scheitert.
+    assert ref.gebaeudetyp == "mfh"
+
+
+def test_unbekannter_kategorialer_wert_wird_abgelehnt():
+    """Punkt 20 — keine neue Freitext-Schreibweise in vergleichsrelevanten Feldern."""
+    from app.routers.hc_lv_import import update_import
+    from types import SimpleNamespace
+    from fastapi import HTTPException
+
+    db = _db()
+    imp = LvImport(tenant_id=1, filename="z.pdf", file_hash="hz", status=LvImportStatus.review.value)
+    db.add(imp)
+    db.commit()
+    user = SimpleNamespace(id=1, tenant_id=1, name="D", email="d@x.ch")
+    try:
+        update_import(imp.id, {"zertifizierung": "Irgendein Fantasielabel"}, user=user, db=db)
+        assert False, "hätte 422 liefern müssen"
+    except HTTPException as e:
+        assert e.status_code == 422
+        assert e.detail["feld"] == "zertifizierung"
+        assert "minergie_p" in e.detail["erlaubt"]
 
 
 def test_nicht_freigegeben_hat_kein_refprojekt():

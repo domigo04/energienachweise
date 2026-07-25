@@ -95,6 +95,31 @@ def _generator_type(zeilen) -> Optional[dict]:
     return None
 
 
+def _mehrfachwerte(zeilen, registry: str) -> Optional[dict]:
+    """Alle vorkommenden Codes eines mehrwertigen Merkmals (Punkt 6/7).
+
+    Ein Projekt kann „EWS-WP + Gas" oder „FBH + Heizkörper" haben. Erkannt wird
+    über die zentrale Registry — es entstehen nie Freitexte, nur Codes.
+    """
+    from app import fachwerte
+
+    gefunden: list[str] = []
+    quelle = None
+    for seite, line in zeilen:
+        code = fachwerte.normalize(registry, line)
+        if not code or code == "sonstige":
+            continue
+        if code not in gefunden:
+            gefunden.append(code)
+            if quelle is None:
+                quelle = (seite, line)
+    if not gefunden:
+        return None
+    return {"value": ",".join(gefunden), "codes": gefunden,
+            "confidence": MEDIUM if len(gefunden) == 1 else LOW,
+            "source_page": quelle[0], "source_text": quelle[1]}
+
+
 def _generator_power(zeilen) -> Optional[dict]:
     total = 0.0
     quelle = None
@@ -238,6 +263,14 @@ def extract_features(pages, word_pages=None) -> dict:
                     ("pipe_length_m", _pipe_length)):
         if _fehlt(result, key):
             f = fn(zeilen)
+            if f is not None:
+                result[key] = f
+
+    # Mehrwertige Merkmale (Punkt 6/7) — immer über die zentrale Registry.
+    for key, registry in (("generator_types", "generator_types"),
+                          ("heat_delivery_types", "heat_delivery_types")):
+        if _fehlt(result, key):
+            f = _mehrfachwerte(zeilen, registry)
             if f is not None:
                 result[key] = f
 

@@ -121,7 +121,11 @@ def _ensure_columns():
             ("last_login_at", "TIMESTAMP"),
         ],
         "ref_kostenzeilen": [("gewerk", "VARCHAR")],
-        "lv_imports": [("extract_method", "VARCHAR")],
+        "lv_imports": [
+            ("extract_method", "VARCHAR"), ("zertifizierung", "VARCHAR"),
+            ("projekt_name", "VARCHAR"), ("projekt_nummer", "VARCHAR"),
+            ("ort", "VARCHAR"), ("unternehmer", "VARCHAR"), ("offert_datum", "VARCHAR"),
+        ],
         "lv_import_features": [
             ("source_excerpt", "TEXT"), ("source_bbox", "VARCHAR"),
             ("derived_from", "VARCHAR"),

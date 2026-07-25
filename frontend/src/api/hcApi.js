@@ -84,6 +84,19 @@ export const getSchemaAudit = (schemaId) =>
 export const deleteSchema = (schemaId) =>
   api.delete(`${BASE}/schemas/${schemaId}`);
 
+// --- Underlay: Hintergrund-Plan zum Nachzeichnen (§ Editor #5) ---
+export const getSchemaUnderlay = (schemaId) =>
+  api.get(`${BASE}/schemas/${schemaId}/underlay`).then(r => r.data);
+
+export const setSchemaUnderlay = (schemaId, underlay) =>
+  api.put(`${BASE}/schemas/${schemaId}/underlay`, underlay).then(r => r.data);
+
+export const patchSchemaUnderlay = (schemaId, transform) =>
+  api.patch(`${BASE}/schemas/${schemaId}/underlay`, transform).then(r => r.data);
+
+export const deleteSchemaUnderlay = (schemaId) =>
+  api.delete(`${BASE}/schemas/${schemaId}/underlay`);
+
 // --- Hydraulik-Berechnung (Backend = einzige Rechen-Wahrheit) ---
 export const hydraulikBerechnen = (graph, config = {}) =>
   api.post(`${BASE}/hydraulik/berechnen`, graph, config).then(r => r.data);

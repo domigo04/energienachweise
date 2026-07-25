@@ -1,6 +1,6 @@
 from datetime import datetime
 import json
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
@@ -19,6 +19,9 @@ from app.schemas.hc_schemas import (
     SchemaRevisionDetailOut,
     SchemaRevisionOut,
     SchemaUpdate,
+    UnderlayIn,
+    UnderlayOut,
+    UnderlayTransformIn,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["Heizungscockpit – Schema"])
@@ -309,6 +312,104 @@ def save_schema_graph(schema_id: int, body: SchemaUpdate,
     s.updated_at = datetime.utcnow()
     db.commit()
     return {"id": s.id, "updated_at": s.updated_at}
+
+
+# ── Underlay: Hintergrund-Plan zum Nachzeichnen (§ Editor #5) ──
+# Firmenweit im Projekt gespeichert, aber getrennt vom autospeichernden Graphen.
+_UNDERLAY_MIME_OK = {"image/png", "image/jpeg", "image/webp"}
+_UNDERLAY_MAX_CHARS = 12_000_000  # ~9 MB Bilddaten als Data-URL
+
+
+def _underlay_dict(schema: HcSchema) -> dict | None:
+    value = _json_dict(schema.underlay_json)
+    return value or None
+
+
+def _clamp(value, low, high, fallback):
+    try:
+        return max(low, min(high, float(value)))
+    except (TypeError, ValueError):
+        return fallback
+
+
+@router.get("/schemas/{schema_id}/underlay", response_model=Optional[UnderlayOut])
+def get_schema_underlay(schema_id: int, user: User = Depends(get_current_user),
+                        db: Session = Depends(get_db)):
+    schema = _require_schema(schema_id, user, db)
+    return _underlay_dict(schema)
+
+
+@router.put("/schemas/{schema_id}/underlay", response_model=UnderlayOut)
+def set_schema_underlay(schema_id: int, body: UnderlayIn,
+                        user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    schema = _require_schema(schema_id, user, db)
+    if body.mime not in _UNDERLAY_MIME_OK:
+        raise HTTPException(status_code=422, detail="Nur PNG/JPG/WebP (PDF wird im Browser zu PNG gerastert).")
+    if not body.data.startswith("data:") or len(body.data) > _UNDERLAY_MAX_CHARS:
+        raise HTTPException(status_code=413, detail="Bild zu gross (max. ~9 MB).")
+    underlay = {
+        "mime": body.mime,
+        "data": body.data,
+        "name": (body.name or "").strip()[:200] or None,
+        "w": _clamp(body.w, 1, 100000, 1),
+        "h": _clamp(body.h, 1, 100000, 1),
+        "x": float(body.x), "y": float(body.y),
+        "scale": _clamp(body.scale, 0.02, 50, 1.0),
+        "opacity": _clamp(body.opacity, 0.05, 1.0, 0.6),
+        "locked": bool(body.locked),
+    }
+    schema.underlay_json = json.dumps(underlay, separators=(",", ":"), ensure_ascii=False)
+    schema.updated_at = datetime.utcnow()
+    db.add(HcAuditEvent(
+        tenant_id=user.tenant_id, project_id=schema.project_id, schema_id=schema.id,
+        entity_type="schema", entity_id=schema.id, action="underlay_gesetzt",
+        actor_id=user.id, actor_name=user.name or user.email,
+        details_json=json.dumps({"name": underlay["name"], "mime": underlay["mime"]},
+                                separators=(",", ":"), ensure_ascii=False),
+    ))
+    db.commit()
+    return underlay
+
+
+@router.patch("/schemas/{schema_id}/underlay", response_model=UnderlayOut)
+def patch_schema_underlay(schema_id: int, body: UnderlayTransformIn,
+                          user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Nur Lage/Deckkraft/Sperre aktualisieren — ohne das Bild erneut zu senden."""
+    schema = _require_schema(schema_id, user, db)
+    underlay = _underlay_dict(schema)
+    if not underlay:
+        raise HTTPException(status_code=404, detail="Kein Underlay vorhanden")
+    if body.x is not None:
+        underlay["x"] = float(body.x)
+    if body.y is not None:
+        underlay["y"] = float(body.y)
+    if body.scale is not None:
+        underlay["scale"] = _clamp(body.scale, 0.02, 50, underlay.get("scale", 1.0))
+    if body.opacity is not None:
+        underlay["opacity"] = _clamp(body.opacity, 0.05, 1.0, underlay.get("opacity", 0.6))
+    if body.locked is not None:
+        underlay["locked"] = bool(body.locked)
+    schema.underlay_json = json.dumps(underlay, separators=(",", ":"), ensure_ascii=False)
+    schema.updated_at = datetime.utcnow()
+    db.commit()
+    return underlay
+
+
+@router.delete("/schemas/{schema_id}/underlay")
+def delete_schema_underlay(schema_id: int, user: User = Depends(get_current_user),
+                           db: Session = Depends(get_db)):
+    schema = _require_schema(schema_id, user, db)
+    if schema.underlay_json:
+        schema.underlay_json = None
+        schema.updated_at = datetime.utcnow()
+        db.add(HcAuditEvent(
+            tenant_id=user.tenant_id, project_id=schema.project_id, schema_id=schema.id,
+            entity_type="schema", entity_id=schema.id, action="underlay_entfernt",
+            actor_id=user.id, actor_name=user.name or user.email,
+            details_json="{}",
+        ))
+        db.commit()
+    return {"ok": True}
 
 
 @router.get("/schemas/{schema_id}/revisions", response_model=List[SchemaRevisionOut])

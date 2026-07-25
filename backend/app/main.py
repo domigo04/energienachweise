@@ -102,6 +102,7 @@ def _ensure_columns():
             ("projektart", "VARCHAR"), ("region", "VARCHAR"), ("zertifizierung", "VARCHAR"),
         ],
         "hc_projects": [("erstellt_von", "INTEGER"), ("verantwortlicher_id", "INTEGER")],
+        "hc_schemas": [("underlay_json", "TEXT")],
         "ref_projekte": [
             ("anlagenkonfiguration", "VARCHAR"),
             ("installierte_leistung_neu_kw", "FLOAT"), ("flaeche_fbh_m2", "FLOAT"),

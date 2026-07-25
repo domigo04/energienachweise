@@ -224,6 +224,45 @@ class SchemaRevisionDetailOut(SchemaRevisionOut):
     calculation: Optional[dict] = None
 
 
+# ── Underlay: Hintergrund-Plan zum Nachzeichnen (§ Editor #5) ──
+# Das Bild wird firmenweit im Projekt gespeichert (One Source of Truth), aber
+# getrennt vom Graphen, damit der häufige Autosave leicht bleibt. PDFs werden
+# beim Upload im Browser einmal zu PNG gerastert; der Server sieht nur Bilder.
+class UnderlayIn(BaseModel):
+    mime: str
+    data: str                       # Data-URL (base64)
+    name: Optional[str] = None
+    w: float                        # natürliche Bildbreite in px
+    h: float                        # natürliche Bildhöhe in px
+    x: float = 0.0
+    y: float = 0.0
+    scale: float = 1.0
+    opacity: float = 0.6
+    locked: bool = False
+
+
+class UnderlayTransformIn(BaseModel):
+    """Nur die Lage-/Darstellungswerte — ohne das Bild-Blob erneut zu senden."""
+    x: Optional[float] = None
+    y: Optional[float] = None
+    scale: Optional[float] = None
+    opacity: Optional[float] = None
+    locked: Optional[bool] = None
+
+
+class UnderlayOut(BaseModel):
+    mime: str
+    data: str
+    name: Optional[str] = None
+    w: float
+    h: float
+    x: float = 0.0
+    y: float = 0.0
+    scale: float = 1.0
+    opacity: float = 0.6
+    locked: bool = False
+
+
 class AuditEventOut(BaseModel):
     id: int
     project_id: int

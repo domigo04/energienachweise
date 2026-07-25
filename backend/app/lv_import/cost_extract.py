@@ -14,24 +14,42 @@ _CHF = re.compile(r"(?:chf|fr\.?)\s*([\d’'\s.]+\d)|([\d’'\s.]+\d)\s*(?:chf|f
 
 
 def extract_costs(pages) -> list[dict]:
+    """Alle erkannten Kostenpositionen je BKP SAMMELN und aggregieren — nicht
+    „erster Treffer gewinnt". Beträge derselben BKP werden summiert, die Zahl der
+    Einzelpositionen und die erste Fundstelle festgehalten."""
     zeilen = _seiten_zeilen(pages)
-    out: list[dict] = []
-    gesehen: set[str] = set()
+    agg: dict[str, dict] = {}
+    reihenfolge: list[str] = []
     for seite, line in zeilen:
         b = _BKP.search(line)
-        c = _CHF.search(line)
         if not b:
             continue
         bkp_nr = b.group(1) or b.group(2)
+        c = _CHF.search(line)
         betrag = parse_number(c.group(1) or c.group(2)) if c else None
-        if bkp_nr in gesehen:
-            continue
-        gesehen.add(bkp_nr)
+        if bkp_nr not in agg:
+            agg[bkp_nr] = {
+                "bkp_nr": bkp_nr, "summe": 0.0, "mit_betrag": 0, "positionen": 0,
+                "source_page": seite, "source_text": line,
+            }
+            reihenfolge.append(bkp_nr)
+        eintrag = agg[bkp_nr]
+        eintrag["positionen"] += 1
+        if betrag is not None:
+            eintrag["summe"] += betrag
+            eintrag["mit_betrag"] += 1
+
+    out = []
+    for bkp_nr in reihenfolge:
+        e = agg[bkp_nr]
+        hat_betrag = e["mit_betrag"] > 0
         out.append({
             "bkp_nr": bkp_nr,
-            "detected_amount": betrag,
-            "confidence": HIGH if betrag is not None else MEDIUM,
-            "source_page": seite,
-            "source_text": line,
+            "detected_amount": round(e["summe"], 2) if hat_betrag else None,
+            "positionen": e["positionen"],
+            # high nur, wenn ALLE Positionen einen Betrag hatten.
+            "confidence": HIGH if hat_betrag and e["mit_betrag"] == e["positionen"] else MEDIUM,
+            "source_page": e["source_page"],
+            "source_text": e["source_text"],
         })
     return out

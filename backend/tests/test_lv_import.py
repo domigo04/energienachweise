@@ -100,6 +100,26 @@ def test_bkp_ohne_betrag_blockiert_nicht():
     assert costs[0]["confidence"] == "medium"
 
 
+def test_kosten_werden_aggregiert_nicht_erster_treffer():
+    """Mehrere Positionen derselben BKP werden summiert, nicht „erster gewinnt"."""
+    text = ("BKP 242 Wärmeerzeugung CHF 45'000\n"
+            "BKP 242 Zubehör CHF 5'000\n"
+            "BKP 243 Verteilung CHF 30'000")
+    costs = {c["bkp_nr"]: c for c in extract_costs(_pages(text))}
+    assert costs["242"]["detected_amount"] == 50000     # 45k + 5k summiert
+    assert costs["242"]["positionen"] == 2
+    assert costs["243"]["detected_amount"] == 30000
+
+
+def test_pipe_length_extrahiert_oder_manuell():
+    # Wird erkannt, wenn Rohr + Laufmeter vorhanden.
+    f = extract_features(_pages("Heizungsleitung Stahlrohr\n620 m"))
+    assert f["pipe_length_m"]["value"] == 620
+    assert f["pipe_length_m"]["confidence"] in ("low", "medium")
+    # Ohne Angabe: nicht geraten → bleibt manuell zu erfassen.
+    assert "pipe_length_m" not in extract_features(_pages("Nur Text ohne Rohre"))
+
+
 # ── B12 — gemeinsame Feature-Sprache ────────────────────────────────────────
 
 def test_feature_keys_mappen_auf_projectcontext():
@@ -161,7 +181,7 @@ def test_freigabe_uebernimmt_in_refprojekt():
     db.add(LvImportFeature(lv_import_id=imp.id, key="generator_type", value="ews_wp", confidence="medium", confirmed=True))
     db.add(LvImportFeature(lv_import_id=imp.id, key="heat_meter_count", value="10",
                            confirmed_value="13", confidence="medium", confirmed=True))
-    db.add(LvImportCost(lv_import_id=imp.id, bkp_nr="241", detected_amount=45000.0))
+    db.add(LvImportCost(lv_import_id=imp.id, bkp_nr="241", detected_amount=45000.0, confirmed=True))
     db.commit()
 
     user = SimpleNamespace(id=1, tenant_id=1, name="Dominic", email="d@x.ch")
@@ -205,6 +225,50 @@ def test_freigabe_blockiert_ohne_bestaetigung():
         assert e.status_code == 422
         assert "pump_count" in e.detail["unconfirmed"]
     assert db.query(RefProjekt).count() == 0
+
+
+def test_freigabe_blockiert_bei_ungepruefter_kostenposition():
+    """Item 5: verwendete Kosten (mit Betrag) müssen bestätigt sein."""
+    from app.routers.hc_lv_import import approve_lv
+    from types import SimpleNamespace
+    from fastapi import HTTPException
+
+    db = _db()
+    imp = LvImport(tenant_id=1, filename="k.pdf", file_hash="hc", status=LvImportStatus.review.value)
+    db.add(imp)
+    db.flush()
+    # alle Features geprüft, aber die Kostenposition nicht.
+    db.add(LvImportFeature(lv_import_id=imp.id, key="pump_count", value="4", confirmed=True))
+    db.add(LvImportCost(lv_import_id=imp.id, bkp_nr="242", detected_amount=45000.0, confirmed=False))
+    db.commit()
+
+    user = SimpleNamespace(id=1, tenant_id=1, name="D", email="d@x.ch")
+    try:
+        approve_lv(imp.id, user=user, db=db)
+        assert False, "hätte blockieren müssen"
+    except HTTPException as e:
+        assert e.status_code == 422
+        assert "242" in e.detail["unconfirmed_costs"]
+
+
+def test_grunddaten_fliessen_ins_refprojekt():
+    from app.routers.hc_lv_import import approve_lv, update_import
+    from types import SimpleNamespace
+
+    db = _db()
+    imp = LvImport(tenant_id=1, filename="g.pdf", file_hash="hg", status=LvImportStatus.review.value)
+    db.add(imp)
+    db.flush()
+    db.add(LvImportFeature(lv_import_id=imp.id, key="pump_count", value="4", confirmed=True))
+    db.commit()
+    user = SimpleNamespace(id=1, tenant_id=1, name="D", email="d@x.ch")
+
+    update_import(imp.id, {"ebf_m2": 1420, "anzahl_einheiten": 10, "gebaeudetyp": "MFH"}, user=user, db=db)
+    approve_lv(imp.id, user=user, db=db)
+    ref = db.query(RefProjekt).first()
+    assert ref.ebf_m2 == 1420.0
+    assert ref.anzahl_einheiten == 10
+    assert ref.gebaeudetyp == "MFH"
 
 
 def test_nicht_freigegeben_hat_kein_refprojekt():

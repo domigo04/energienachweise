@@ -36,6 +36,10 @@ FEATURE_TERMS: dict[str, list[str]] = {
         "wärmepumpe", "waermepumpe", "sole/wasser-wärmepumpe", "luft/wasser-wärmepumpe",
         "wärmeerzeuger", "erdsonden-wp", "sole-wasser-wp",
     ],
+    "pipe": [
+        "rohr", "rohrleitung", "verrohrung", "heizungsleitung", "stahlrohr",
+        "kupferrohr", "verbundrohr", "pressfitting-rohr",
+    ],
 }
 
 # Freitext → strukturierter Erzeugertyp (generator_type, gleiche Codes wie

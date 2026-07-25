@@ -166,6 +166,33 @@ def _borehole(zeilen):
     return cnt, mtr
 
 
+def _pipe_length(zeilen):
+    """Rohrmeter (B7/§11 Item 7): Laufmeter aus Rohr-/Leitungspositionen summieren.
+    LV-Formate sind sehr unterschiedlich → bewusst konservativ und mit tiefer/
+    mittlerer Confidence; wird nichts gefunden, bleibt der Wert manuell zu erfassen."""
+    total = 0.0
+    treffer = 0
+    quelle = None
+    for i, (seite, line) in enumerate(zeilen):
+        if not any(t in line.lower() for t in FEATURE_TERMS["pipe"]):
+            continue
+        for j in range(i, min(i + 2, len(zeilen))):
+            m = _METER.search(zeilen[j][1])
+            if m:
+                v = parse_number(m.group(1))
+                if v:
+                    total += v
+                    treffer += 1
+                    if quelle is None:
+                        quelle = (seite, line)
+                break
+    if not quelle:
+        return None
+    return {"value": round(total, 1),
+            "confidence": MEDIUM if treffer >= 2 else LOW,
+            "source_page": quelle[0], "source_text": quelle[1]}
+
+
 def extract_features(pages) -> dict:
     """Alle MVP-Features aus den Seiten ableiten. Nur gefundene Features stehen
     im Ergebnis (kein Rauschen); jeder Wert trägt Herkunft + Confidence."""
@@ -181,7 +208,8 @@ def extract_features(pages) -> dict:
 
     for key, fn in (("generator_type", _generator_type),
                     ("generator_power_kw", _generator_power),
-                    ("storage_volume_l", _storage_volume)):
+                    ("storage_volume_l", _storage_volume),
+                    ("pipe_length_m", _pipe_length)):
         f = fn(zeilen)
         if f is not None:
             result[key] = f

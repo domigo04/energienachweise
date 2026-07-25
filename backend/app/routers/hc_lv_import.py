@@ -48,12 +48,17 @@ def _feature_out(f: LvImportFeature) -> dict:
     }
 
 
+def _cost_effective(c: LvImportCost):
+    return c.confirmed_amount if c.confirmed_amount is not None else c.detected_amount
+
+
 def _cost_out(c: LvImportCost) -> dict:
     return {
         "id": c.id, "bkp_nr": c.bkp_nr,
         "detected_amount": c.detected_amount, "confirmed_amount": c.confirmed_amount,
         "confidence": c.confidence, "source_page": c.source_page, "source_text": c.source_text,
-        "effective_amount": c.confirmed_amount if c.confirmed_amount is not None else c.detected_amount,
+        "positionen": c.positionen, "confirmed": c.confirmed, "manual": c.manual,
+        "effective_amount": _cost_effective(c),
     }
 
 
@@ -64,6 +69,10 @@ def _import_out(imp: LvImport, detail: bool = False) -> dict:
         "is_searchable": imp.is_searchable, "project_id": imp.project_id,
         "ref_projekt_id": imp.ref_projekt_id, "created_by_name": imp.created_by_name,
         "created_at": imp.created_at.isoformat() if imp.created_at else None,
+        "grunddaten": {
+            "ebf_m2": imp.ebf_m2, "anzahl_einheiten": imp.anzahl_einheiten,
+            "gebaeudetyp": imp.gebaeudetyp, "projektart": imp.projektart, "region": imp.region,
+        },
     }
     if detail:
         base["features"] = [_feature_out(f) for f in imp.features]
@@ -121,6 +130,7 @@ async def upload_lv(
                 lv_import_id=imp.id, bkp_nr=c["bkp_nr"],
                 detected_amount=c.get("detected_amount"), confidence=c.get("confidence"),
                 source_page=c.get("source_page"), source_text=c.get("source_text"),
+                positionen=c.get("positionen", 1),
             ))
         imp.status = LvImportStatus.review.value if imp.is_searchable else LvImportStatus.extracted.value
     except Exception:
@@ -182,8 +192,61 @@ def update_cost(
             c.confirmed_amount = None if amt in (None, "") else float(amt)
         except (TypeError, ValueError):
             raise HTTPException(status_code=422, detail="Ungültiger Betrag")
+    if "confirmed" in body:
+        c.confirmed = bool(body["confirmed"])
     db.commit()
     return _cost_out(c)
+
+
+@router.post("/{import_id}/costs", status_code=201)
+def add_cost(import_id: int, body: dict, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Manuelle BKP-Kostenposition hinzufügen."""
+    imp = _get_import(db, user, import_id)
+    bkp_nr = str(body.get("bkp_nr") or "").strip()
+    if not bkp_nr:
+        raise HTTPException(status_code=422, detail="BKP-Nummer fehlt")
+    try:
+        betrag = None if body.get("confirmed_amount") in (None, "") else float(body["confirmed_amount"])
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Ungültiger Betrag")
+    c = LvImportCost(lv_import_id=imp.id, bkp_nr=bkp_nr, confirmed_amount=betrag,
+                     manual=True, confirmed=bool(body.get("confirmed", False)), positionen=1)
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    return _cost_out(c)
+
+
+@router.delete("/{import_id}/costs/{cost_id}", status_code=204)
+def delete_cost(import_id: int, cost_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    imp = _get_import(db, user, import_id)
+    c = next((x for x in imp.costs if x.id == cost_id), None)
+    if not c:
+        raise HTTPException(status_code=404, detail="Kostenposition nicht gefunden")
+    db.delete(c)
+    db.commit()
+
+
+@router.patch("/{import_id}")
+def update_import(import_id: int, body: dict, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Projektgrunddaten im Review ergänzen (Item 6). Fliessen bei Freigabe ins RefProjekt."""
+    imp = _get_import(db, user, import_id)
+    if "ebf_m2" in body:
+        try:
+            imp.ebf_m2 = None if body["ebf_m2"] in (None, "") else float(body["ebf_m2"])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="Ungültige EBF")
+    if "anzahl_einheiten" in body:
+        try:
+            imp.anzahl_einheiten = None if body["anzahl_einheiten"] in (None, "") else int(float(body["anzahl_einheiten"]))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="Ungültige Einheiten")
+    for feld in ("gebaeudetyp", "projektart", "region"):
+        if feld in body:
+            val = body[feld]
+            setattr(imp, feld, None if val in (None, "") else str(val))
+    db.commit()
+    return _import_out(imp, detail=True)
 
 
 def _effective_feature(f: LvImportFeature):
@@ -208,6 +271,15 @@ def approve_lv(import_id: int, user: User = Depends(get_current_user), db: Sessi
             "unconfirmed": unbestaetigt,
         })
 
+    # Freigabe blockieren, solange VERWENDETE Kosten (mit effektivem Betrag)
+    # ungeprüft sind (Item 5).
+    kosten_offen = [c.bkp_nr for c in imp.costs if _cost_effective(c) is not None and not c.confirmed]
+    if kosten_offen:
+        raise HTTPException(status_code=422, detail={
+            "message": "Bitte alle verwendeten Kostenpositionen bestätigen.",
+            "unconfirmed_costs": kosten_offen,
+        })
+
     eff = {f.key: _effective_feature(f) for f in imp.features}
 
     def num(key):
@@ -222,6 +294,9 @@ def approve_lv(import_id: int, user: User = Depends(get_current_user), db: Sessi
         name=f"LV-Import: {imp.filename}",
         installierte_leistung_neu_kw=num("generator_power_kw"),
         waermeerzeuger=[eff["generator_type"]] if eff.get("generator_type") else [],
+        # Projektgrunddaten aus dem Review (Item 6).
+        ebf_m2=imp.ebf_m2, anzahl_einheiten=imp.anzahl_einheiten,
+        gebaeudetyp=imp.gebaeudetyp, projektart=imp.projektart,
     )
     # Legacy-Spalten aus dem EINEN zentralen Mapping befüllen (Rückwärts-
     # kompatibilität zur bestehenden Ähnlichkeit, die noch Spalten liest).

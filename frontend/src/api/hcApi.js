@@ -164,6 +164,9 @@ export const updateLvFeature = (id, featureId, data) =>
   api.patch(`${BASE}/lv-imports/${id}/features/${featureId}`, data).then(r => r.data);
 export const updateLvCost = (id, costId, data) =>
   api.patch(`${BASE}/lv-imports/${id}/costs/${costId}`, data).then(r => r.data);
+export const addLvCost = (id, data) => api.post(`${BASE}/lv-imports/${id}/costs`, data).then(r => r.data);
+export const deleteLvCost = (id, costId) => api.delete(`${BASE}/lv-imports/${id}/costs/${costId}`);
+export const updateLvImport = (id, data) => api.patch(`${BASE}/lv-imports/${id}`, data).then(r => r.data);
 export const approveLvImport = (id) => api.post(`${BASE}/lv-imports/${id}/approve`).then(r => r.data);
 
 // --- Auswertung: Mehrfach-Löschen ---

@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Upload, FileText, CheckCircle2, AlertTriangle } from "lucide-react";
+import { ArrowLeft, Upload, FileText, CheckCircle2, AlertTriangle, Trash2, Plus } from "lucide-react";
 import {
   uploadLvImport, listLvImports, getLvImport,
-  updateLvFeature, updateLvCost, approveLvImport,
+  updateLvFeature, updateLvCost, addLvCost, deleteLvCost, updateLvImport, approveLvImport,
 } from "../../api/hcApi";
 
 // B9 — Review-Seite des LV-Imports. Ohne :id ist es die Upload-Ansicht.
@@ -101,6 +101,39 @@ function UploadAnsicht() {
   );
 }
 
+// Kleine Zeile zum manuellen Hinzufügen einer BKP-Kostenposition (P0 Item 3).
+function NeueKostZeile({ onAdd }) {
+  const [bkp, setBkp] = useState("");
+  const [betrag, setBetrag] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const hinzufuegen = async () => {
+    if (!bkp.trim() || busy) return;
+    setBusy(true);
+    try {
+      await onAdd(bkp.trim(), betrag === "" ? null : betrag);
+      setBkp(""); setBetrag("");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 bg-slate-50/40 px-4 py-3 sm:px-5">
+      <input className="input w-24" placeholder="BKP-Nr." value={bkp}
+        onChange={(e) => setBkp(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") hinzufuegen(); }} />
+      <span className="text-xs text-slate-400">CHF</span>
+      <input className="input w-28" type="number" placeholder="Betrag" value={betrag}
+        onChange={(e) => setBetrag(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") hinzufuegen(); }} />
+      <button onClick={hinzufuegen} disabled={!bkp.trim() || busy} className="btn-secondary min-h-8">
+        <Plus className="size-4" /> Position hinzufügen
+      </button>
+    </div>
+  );
+}
+
 // ── Review-Ansicht (mit :id) ────────────────────────────────────────────────
 function ReviewAnsicht({ id }) {
   const [imp, setImp] = useState(null);
@@ -122,32 +155,52 @@ function ReviewAnsicht({ id }) {
 
   const featureByKey = Object.fromEntries((imp.features || []).map((f) => [f.key, f]));
   const gesperrt = imp.status === "approved";
-  const total = (imp.features || []).length;
-  const geprueft = (imp.features || []).filter((f) => f.confirmed).length;
-  const alleGeprueft = total > 0 && geprueft === total;
+  const featTotal = (imp.features || []).length;
+  const featGeprueft = (imp.features || []).filter((f) => f.confirmed).length;
+  // Verwendete Kosten = Positionen mit effektivem Betrag; sie müssen bestätigt sein.
+  const kostenVerwendet = (imp.costs || []).filter((c) => c.effective_amount != null);
+  const kostenOffen = kostenVerwendet.filter((c) => !c.confirmed).length;
+  const alleGeprueft = featTotal > 0 && featGeprueft === featTotal && kostenOffen === 0;
 
   const setFeature = async (feature, patch) => {
     const updated = await updateLvFeature(id, feature.id, patch);
     setImp((cur) => ({ ...cur, features: cur.features.map((f) => (f.id === feature.id ? updated : f)) }));
+  };
+  const setCost = async (cost, patch) => {
+    const updated = await updateLvCost(id, cost.id, patch);
+    setImp((cur) => ({ ...cur, costs: cur.costs.map((c) => (c.id === cost.id ? updated : c)) }));
+  };
+  const entferneKost = async (cost) => {
+    await deleteLvCost(id, cost.id);
+    setImp((cur) => ({ ...cur, costs: cur.costs.filter((c) => c.id !== cost.id) }));
+  };
+  const kostHinzufuegen = async (bkp_nr, betrag) => {
+    const neu = await addLvCost(id, { bkp_nr, confirmed_amount: betrag, confirmed: true });
+    setImp((cur) => ({ ...cur, costs: [...cur.costs, neu] }));
+  };
+  const setGrunddaten = async (patch) => {
+    const updated = await updateLvImport(id, patch);
+    setImp((cur) => ({ ...cur, grunddaten: updated.grunddaten }));
   };
   const alleBestaetigen = async () => {
     for (const f of (imp.features || []).filter((x) => !x.confirmed)) {
       // eslint-disable-next-line no-await-in-loop
       await setFeature(f, { confirmed: true });
     }
-  };
-  const setCost = async (cost, patch) => {
-    const updated = await updateLvCost(id, cost.id, patch);
-    setImp((cur) => ({ ...cur, costs: cur.costs.map((c) => (c.id === cost.id ? updated : c)) }));
+    for (const c of kostenVerwendet.filter((x) => !x.confirmed)) {
+      // eslint-disable-next-line no-await-in-loop
+      await setCost(c, { confirmed: true });
+    }
   };
   const freigeben = async () => {
     if (!confirm("Referenzdaten freigeben? Danach entsteht ein Referenzprojekt aus diesem Import.")) return;
     setApproving(true);
+    setError("");
     try {
       const res = await approveLvImport(id);
       setImp((cur) => ({ ...cur, ...res.import }));
     } catch {
-      setError("Freigabe fehlgeschlagen");
+      setError("Freigabe fehlgeschlagen — bitte alle Werte und Kosten prüfen.");
     } finally {
       setApproving(false);
     }
@@ -174,6 +227,29 @@ function ReviewAnsicht({ id }) {
           <AlertTriangle className="mt-0.5 size-4 shrink-0" /> Kein durchsuchbarer Text gefunden — Bild-PDF. OCR ist ein späterer Schritt; Werte bitte manuell erfassen.
         </div>
       )}
+
+      {/* Projektgrunddaten (im Review ergänzen) */}
+      <section className="card mb-6 overflow-hidden">
+        <div className="border-b border-slate-100 bg-slate-50/60 px-4 py-3 sm:px-5">
+          <h2 className="text-sm font-bold text-slate-800">Projektgrunddaten</h2>
+        </div>
+        <div className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 sm:px-5">
+          {[
+            ["ebf_m2", "EBF [m²]", "number"],
+            ["anzahl_einheiten", "Nutzungseinheiten", "number"],
+            ["gebaeudetyp", "Gebäudetyp", "text"],
+            ["projektart", "Projektart", "text"],
+            ["region", "Region", "text"],
+          ].map(([key, label, typ]) => (
+            <div key={key}>
+              <label className="label">{label}</label>
+              <input type={typ} className="input" disabled={gesperrt}
+                defaultValue={imp.grunddaten?.[key] ?? ""}
+                onBlur={(e) => setGrunddaten({ [key]: e.target.value })} />
+            </div>
+          ))}
+        </div>
+      </section>
 
       {/* Technischer Fingerprint nach Kategorien */}
       <div className="space-y-6">
@@ -226,31 +302,42 @@ function ReviewAnsicht({ id }) {
           <p className="text-xs text-slate-400">Erkannter Erzeugertyp: {anzeige("generator_type", featureByKey.generator_type.effective_value)}</p>
         )}
 
-        {/* BKP-Kosten */}
-        {(imp.costs || []).length > 0 && (
-          <section className="card overflow-hidden">
-            <div className="border-b border-slate-100 bg-slate-50/60 px-4 py-3 sm:px-5">
-              <h2 className="text-sm font-bold text-slate-800">BKP-Kosten</h2>
-            </div>
-            <div className="divide-y divide-slate-100">
-              {imp.costs.map((c) => (
-                <div key={c.id} className="grid gap-2 px-4 py-3 sm:grid-cols-[1fr_auto] sm:items-center sm:px-5">
-                  <div>
-                    <span className="font-medium text-slate-900">BKP {c.bkp_nr}</span>
-                    {c.source_text && <div className="mt-0.5 text-[11px] text-slate-400">{c.source_page != null ? `Seite ${c.source_page}: ` : ""}„{c.source_text}"</div>}
-                  </div>
-                  <div className="flex items-center gap-2 sm:justify-end">
-                    <span className="text-xs text-slate-400">CHF</span>
-                    <input className="input w-32" disabled={gesperrt}
-                      defaultValue={c.confirmed_amount ?? (c.detected_amount ?? "")}
-                      placeholder={c.detected_amount != null ? String(c.detected_amount) : "—"}
-                      onBlur={(e) => setCost(c, { confirmed_amount: e.target.value })} />
-                  </div>
+        {/* BKP-Kosten — aggregiert, bestätigbar, manuell ergänzbar */}
+        <section className="card overflow-hidden">
+          <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/60 px-4 py-3 sm:px-5">
+            <h2 className="text-sm font-bold text-slate-800">BKP-Kosten</h2>
+            {kostenOffen > 0 && <span className="text-[11px] font-semibold text-amber-600">{kostenOffen} unbestätigt</span>}
+          </div>
+          <div className="divide-y divide-slate-100">
+            {(imp.costs || []).map((c) => (
+              <div key={c.id} className="grid gap-2 px-4 py-3 sm:grid-cols-[1fr_auto] sm:items-center sm:px-5">
+                <div>
+                  <span className="font-medium text-slate-900">BKP {c.bkp_nr}</span>
+                  {c.positionen > 1 && <span className="ml-1 text-[11px] text-slate-400">({c.positionen} Positionen aggregiert)</span>}
+                  {c.manual && <span className="ml-1 rounded bg-slate-100 px-1 text-[10px] font-semibold text-slate-500">manuell</span>}
+                  {c.source_text && <div className="mt-0.5 text-[11px] text-slate-400">{c.source_page != null ? `Seite ${c.source_page}: ` : ""}„{c.source_text}"</div>}
                 </div>
-              ))}
-            </div>
-          </section>
-        )}
+                <div className="flex items-center gap-2 sm:justify-end">
+                  <span className="text-xs text-slate-400">CHF</span>
+                  <input className="input w-28" disabled={gesperrt}
+                    defaultValue={c.confirmed_amount ?? (c.detected_amount ?? "")}
+                    placeholder={c.detected_amount != null ? String(c.detected_amount) : "—"}
+                    onBlur={(e) => setCost(c, { confirmed_amount: e.target.value, confirmed: true })} />
+                  <label className={`inline-flex items-center gap-1 text-[11px] font-semibold ${c.confirmed ? "text-green-600" : "text-slate-400"}`}>
+                    <input type="checkbox" disabled={gesperrt} checked={!!c.confirmed}
+                      onChange={(e) => setCost(c, { confirmed: e.target.checked })} /> ok
+                  </label>
+                  {!gesperrt && (
+                    <button onClick={() => entferneKost(c)} className="btn-ghost min-h-8 min-w-8 text-slate-400 hover:text-red-500" title="Position löschen">
+                      <Trash2 className="size-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+            {!gesperrt && <NeueKostZeile onAdd={kostHinzufuegen} />}
+          </div>
+        </section>
       </div>
 
       {/* Freigabe — nur wenn alle Werte geprüft sind (bestätigt oder bewusst unbekannt) */}
@@ -262,7 +349,9 @@ function ReviewAnsicht({ id }) {
           </div>
         ) : (
           <>
-            <span className="text-xs font-semibold text-slate-500">{geprueft} / {total} geprüft</span>
+            <span className="text-xs font-semibold text-slate-500">
+              {featGeprueft} / {featTotal} Werte geprüft{kostenOffen > 0 ? ` · ${kostenOffen} Kosten offen` : ""}
+            </span>
             {!alleGeprueft && (
               <button onClick={alleBestaetigen} className="btn-secondary">Alle als geprüft markieren</button>
             )}

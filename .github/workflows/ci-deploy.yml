@@ -1,0 +1,105 @@
+# CI und automatischer Deploy (Roadmap P6 #20 "CI für Backendtests und
+# Frontend-Build").
+#
+# Ablauf:
+#   1. `test` läuft bei JEDEM Push und Pull Request — Backendtests + Frontend-
+#      Build. Das ist das Sicherheitsnetz vor der Produktion.
+#   2. `deploy` läuft NUR auf main, NUR wenn die Tests grün sind und NUR wenn
+#      das Repository-Secret RAILWAY_TOKEN gesetzt ist.
+#
+# Warum die Secret-Bedingung: ist Railway bereits über die eigene GitHub-
+# Integration mit dem Repo verbunden, deployt Railway selbst. Dieser Job würde
+# dann doppelt deployen. Ohne Token bleibt er still übersprungen — es gibt also
+# nie zwei konkurrierende Deployments.
+#
+# Einrichtung (einmalig), falls Railway NICHT schon selbst baut:
+#   Railway → Account Settings → Tokens → Token erzeugen
+#   GitHub  → Settings → Secrets and variables → Actions
+#             Secret   RAILWAY_TOKEN   = <Token>
+#             Variable RAILWAY_SERVICE = <Name des Backend-Service>
+name: CI & Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Tests & Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python einrichten
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      # Systempakete für die deutsche OCR — dieselben wie in backend/nixpacks.toml,
+      # damit die OCR-Kette auch im CI vollständig ist.
+      - name: OCR-Systempakete
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq tesseract-ocr tesseract-ocr-deu poppler-utils
+
+      - name: Backend-Abhängigkeiten
+        run: pip install -r backend/requirements.txt pytest
+
+      - name: Backendtests
+        working-directory: backend
+        run: python -m pytest tests -q
+
+      - name: Node einrichten
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Frontend-Abhängigkeiten
+        working-directory: frontend
+        run: npm ci
+
+      - name: Frontend-Build
+        working-directory: frontend
+        run: npm run build
+
+  deploy:
+    name: Deploy auf Railway
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Token vorhanden?
+        id: check
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          if [ -n "$RAILWAY_TOKEN" ]; then
+            echo "vorhanden=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "vorhanden=false" >> "$GITHUB_OUTPUT"
+            echo "Kein RAILWAY_TOKEN gesetzt — Deploy übersprungen."
+            echo "Das ist korrekt, wenn Railway bereits über die eigene"
+            echo "GitHub-Integration deployt."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.vorhanden == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.vorhanden == 'true'
+        with:
+          node-version: "20"
+
+      - name: Railway CLI
+        if: steps.check.outputs.vorhanden == 'true'
+        run: npm install -g @railway/cli
+
+      - name: Deploy
+        if: steps.check.outputs.vorhanden == 'true'
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: railway up --service "${{ vars.RAILWAY_SERVICE }}" --detach

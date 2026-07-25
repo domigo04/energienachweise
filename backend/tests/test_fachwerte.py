@@ -158,3 +158,21 @@ def test_ebf_zertifizierung_projektart_werden_nicht_geraten():
 def test_leeres_deckblatt_liefert_nichts():
     assert extract_project_data([]) == {}
     assert extract_project_data(_deckblatt("   ")) == {}
+
+
+# ── Altbestand vs. LV-Import: die Ähnlichkeit darf nicht auseinanderfallen ──
+
+def test_nutzungsnaehe_versteht_alt_und_neu_gleich():
+    """Alte Referenzen tragen Freitext ("MFH"), neue Importe kanonische Codes
+    ("mfh"). Beides muss in der Ähnlichkeit dasselbe bedeuten — sonst würde die
+    Kostenschätzung nach dem Import still schlechter."""
+    from app.calculations.grobkostenschaetzung import nutzungsnaehe
+    assert nutzungsnaehe("MFH", "mfh") == 1.0
+    assert nutzungsnaehe("Mehrfamilienhaus", "mfh") == 1.0
+    assert nutzungsnaehe("mfh", "mfh") == 1.0
+    # MFH ↔ EFH bleiben fachlich benachbart, gemischte Schreibweise inklusive.
+    assert nutzungsnaehe("MFH", "efh") == 0.5
+    assert nutzungsnaehe("EFH", "mfh") == 0.5
+    # Unterschiedliche Nutzung bleibt unähnlich.
+    assert nutzungsnaehe("MFH", "Spital") == 0.0
+    assert nutzungsnaehe(None, "mfh") == 0.0

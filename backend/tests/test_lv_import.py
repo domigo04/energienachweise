@@ -120,6 +120,51 @@ def test_pipe_length_extrahiert_oder_manuell():
     assert "pipe_length_m" not in extract_features(_pages("Nur Text ohne Rohre"))
 
 
+# ── Block C #10/#11 — Positionsblock-Parser + Bauteilmengen ─────────────────
+
+def test_positionsblock_menge_betrag_getrennt_von_nummer():
+    """Nummer oben, Bezeichnung/Menge/Betrag darunter — als ein Block gelesen."""
+    from app.lv_import.positions import parse_positions
+    text = ("Pos. 241.100\n"
+            "Wärmepumpe Sole/Wasser\n"
+            "Menge 1 Stk à 25'000.00      25'000.00")
+    pos = parse_positions(_pages(text))
+    assert len(pos) == 1
+    assert pos[0]["pos_nr"] == "241.100"
+    assert pos[0]["bkp_nr"] == "241"           # Sub-Position → BKP-Gruppe 241
+    assert pos[0]["menge"] == 1
+    assert pos[0]["einheit"] == "stk"
+    assert pos[0]["betrag"] == 25000.0          # Total, nicht der Einzelpreis
+    assert "Wärmepumpe" in pos[0]["beschreibung"]
+
+
+def test_positionsblock_kosten_je_bkp_aggregiert():
+    """Zwei Positionen derselben BKP → summiert; Betrag darf unter der Nummer stehen."""
+    text = ("241.1 Wärmepumpe\nMenge 1 Stk  CHF 25'000\n"
+            "241.2 Inbetriebnahme\nPauschal  CHF 3'000\n"
+            "242.1 Verteiler\nMenge 1 Stk  CHF 8'000")
+    costs = {c["bkp_nr"]: c for c in extract_costs(_pages(text))}
+    assert costs["241"]["detected_amount"] == 28000     # 25k + 3k
+    assert costs["241"]["positionen"] == 2
+    assert costs["242"]["detected_amount"] == 8000
+
+
+def test_bauteilmengen_aus_positionsbloecken_als_fallback():
+    """Block-LV ohne enge Mengenzeile: Bauteilmengen kommen aus dem Positionsblock."""
+    text = ("242.1 Umwälzpumpe Heizkreis\nHocheffizienz\nMenge 4 Stk\n"
+            "242.2 3-Weg-Mischventil\nDN25\nMenge 2 Stk")
+    f = extract_features(_pages(text))
+    assert f["pump_count"]["value"] == 4
+    assert f["valve_3way_count"]["value"] == 2
+
+
+def test_mengenzeile_ist_kein_positionsstart():
+    """Reine Mengen-/Maßzeilen dürfen keine Position eröffnen."""
+    from app.lv_import.positions import parse_positions
+    pos = parse_positions(_pages("620 m Heizungsleitung\n82 kW\n1'500 Liter"))
+    assert pos == []
+
+
 # ── B12 — gemeinsame Feature-Sprache ────────────────────────────────────────
 
 def test_feature_keys_mappen_auf_projectcontext():

@@ -44,3 +44,19 @@ FEATURE_TO_CONTEXT = {
 
 def context_key(feature_key: str) -> str | None:
     return FEATURE_TO_CONTEXT.get(feature_key)
+
+
+# Umkehrung: ProjectContext-Parameterschlüssel → kanonischer Feature-Schlüssel.
+CONTEXT_TO_FEATURE = {ctx: feat for feat, ctx in FEATURE_TO_CONTEXT.items()}
+
+
+# Legacy-RefProjekt-Spalten → kanonischer Feature-Schlüssel. Historische
+# Referenzprojekte tragen nur einen Teil der Merkmale als eigene Spalten; der
+# Rest existiert erst über die generische RefProjektFeature-Struktur (neue
+# Importe). Nur HIER gepflegt (ein zentrales Mapping, B12).
+REFPROJEKT_COLUMN_TO_FEATURE = {
+    "heizleistung_kw": "generator_power_kw",
+    "bohrmeter": "borehole_total_m",
+    "anzahl_waermemessungen": "heat_meter_count",
+    "laufmeter_rohre_heizung": "pipe_length_m",
+}

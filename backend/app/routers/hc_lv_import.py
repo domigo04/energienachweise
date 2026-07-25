@@ -220,13 +220,17 @@ def approve_lv(import_id: int, user: User = Depends(get_current_user), db: Sessi
     ref = RefProjekt(
         tenant_id=user.tenant_id, erstellt_von=user.id,
         name=f"LV-Import: {imp.filename}",
-        heizleistung_kw=num("generator_power_kw"),
         installierte_leistung_neu_kw=num("generator_power_kw"),
-        bohrmeter=num("borehole_total_m"),
-        anzahl_waermemessungen=int(num("heat_meter_count")) if num("heat_meter_count") is not None else None,
-        laufmeter_rohre_heizung=num("pipe_length_m"),
         waermeerzeuger=[eff["generator_type"]] if eff.get("generator_type") else [],
     )
+    # Legacy-Spalten aus dem EINEN zentralen Mapping befüllen (Rückwärts-
+    # kompatibilität zur bestehenden Ähnlichkeit, die noch Spalten liest).
+    from app.lv_import.feature_keys import REFPROJEKT_COLUMN_TO_FEATURE
+    for column, feature_key in REFPROJEKT_COLUMN_TO_FEATURE.items():
+        v = num(feature_key)
+        if v is None:
+            continue
+        setattr(ref, column, int(round(v)) if column == "anzahl_waermemessungen" else v)
     db.add(ref)
     db.flush()
 

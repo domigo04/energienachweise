@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Upload, FileText, CheckCircle2, AlertTriangle, Trash2, Plus } from "lucide-react";
+import { ArrowLeft, Upload, FileText, CheckCircle2, AlertTriangle, Trash2, Plus, ChevronDown, Loader2 } from "lucide-react";
 import {
-  uploadLvImport, listLvImports, getLvImport,
+  uploadLvImport, listLvImports, getLvImport, getFachwerte,
   updateLvFeature, updateLvCost, addLvCost, deleteLvCost, updateLvImport, approveLvImport,
 } from "../../api/hcApi";
 
@@ -10,10 +10,20 @@ import {
 // Aus einem Unternehmer-LV entsteht ein geprüfter technischer Fingerprint +
 // reale BKP-Kosten; erst die Freigabe übernimmt die Daten als Referenzprojekt.
 
+// Mehrwertige Merkmale kommen aus der zentralen Registry (Punkt 6/7) und werden
+// als Checkbox-Gruppe dargestellt, nicht als Zahlenfeld.
+const MULTI_FEATURES = { generator_types: "generator_types", heat_delivery_types: "heat_delivery_types" };
+
 const KATEGORIEN = [
-  { titel: "Wärmeerzeugung", keys: ["generator_type", "generator_count", "generator_power_kw", "borehole_count", "borehole_total_m"] },
+  { titel: "Wärmeerzeugung", keys: ["generator_types", "generator_count", "generator_power_kw"] },
+  { titel: "Erdsonden", keys: ["borehole_count", "borehole_length_each_m", "borehole_total_m"] },
   { titel: "Speicher", keys: ["buffer_count", "storage_volume_l"] },
-  { titel: "Wärmeverteilung", keys: ["pump_count", "valve_2way_count", "valve_3way_count", "pipe_length_m"] },
+  { titel: "Wärmeabgabe", keys: ["heat_delivery_types", "radiator_count"] },
+  {
+    titel: "Wärmeverteilung",
+    keys: ["pump_count", "valve_2way_count", "valve_3way_count", "balancing_valve_count",
+           "pipe_length_source_m", "pipe_length_distribution_m", "pipe_length_m"],
+  },
   { titel: "Wärmemessung", keys: ["heat_meter_count"] },
 ];
 
@@ -48,18 +58,138 @@ const METHODE = {
 // Alt-Importe ohne gespeicherte Methode aus is_searchable herleiten.
 const methodeOf = (imp) => METHODE[imp.extract_method] ? imp.extract_method : (imp.is_searchable ? "text" : "image");
 
-// Block C #9 — der Review läuft in vier klaren Schritten statt einer langen Seite.
+// Punkt 21 — vier klare Schritte statt einer langen Seite.
 const SCHRITTE = [
-  { key: "grunddaten", titel: "Grunddaten" },
-  { key: "werte", titel: "Technische Werte" },
-  { key: "kosten", titel: "BKP-Kosten" },
-  { key: "freigabe", titel: "Freigabe" },
+  { key: "projekt", titel: "Projekt" },
+  { key: "technik", titel: "Technik" },
+  { key: "kosten", titel: "Kosten" },
+  { key: "freigabe", titel: "Prüfen & Freigeben" },
 ];
 
 function anzeige(key, wert) {
   if (wert == null || wert === "") return "—";
   if (key === "generator_type") return GENERATOR_TYPE_LABELS[wert] || wert;
   return wert;
+}
+
+// Aufklappbare Fundstelle (Punkt 12/22): kompakte Zeile, Details auf Wunsch.
+function Quelle({ feature, tag, tagStyle }) {
+  const [offen, setOffen] = useState(false);
+  if (!feature.source_text && !feature.derived_from) return null;
+  const mehr = feature.source_excerpt && feature.source_excerpt !== feature.source_text;
+  return (
+    <div className="mt-1 text-[11px] text-slate-400">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className={`rounded px-1 py-0.5 text-[10px] font-semibold ${tagStyle}`} title="Herkunft des Werts">{tag}</span>
+        {feature.derived_from
+          ? <span className="font-medium text-slate-500">Berechnet: {feature.derived_from}</span>
+          : <span>{feature.source_page != null ? `Seite ${feature.source_page}: ` : ""}„{feature.source_text}"</span>}
+        {mehr && (
+          <button type="button" onClick={() => setOffen((o) => !o)}
+            className="inline-flex items-center gap-0.5 text-brand-600 hover:underline">
+            Quelle anzeigen <ChevronDown className={`size-3 transition ${offen ? "rotate-180" : ""}`} />
+          </button>
+        )}
+      </div>
+      {offen && (
+        <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-50 p-2 text-[10px] leading-relaxed text-slate-500">
+          {feature.source_page != null ? `Seite ${feature.source_page}\n` : ""}{feature.source_excerpt}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+// Kontrollierte Mehrfachauswahl aus der zentralen Registry (Punkt 6/7).
+function MultiSelect({ optionen, werte, disabled, onChange }) {
+  const gesetzt = new Set(werte);
+  const toggle = (code) => {
+    const neu = new Set(gesetzt);
+    if (neu.has(code)) neu.delete(code); else neu.add(code);
+    onChange(optionen.filter((o) => neu.has(o.code)).map((o) => o.code));
+  };
+  return (
+    <div className="grid gap-1.5 sm:grid-cols-2">
+      {optionen.map((o) => (
+        <label key={o.code}
+          className={`flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs transition ${gesetzt.has(o.code) ? "border-brand-400 bg-brand-50 font-semibold text-brand-700" : "border-slate-200 text-slate-600 hover:border-slate-300"}`}>
+          <input type="checkbox" checked={gesetzt.has(o.code)} disabled={disabled}
+            onChange={() => toggle(o.code)} />
+          {o.label}
+        </label>
+      ))}
+    </div>
+  );
+}
+
+// Punkt 24 — sichtbarer Verarbeitungszustand statt scheinbar eingefrorener Seite.
+const PROCESSING = [
+  "Datei eingelesen",
+  "Seiten klassifiziert",
+  "Technische Mengen werden erkannt",
+  "Kosten werden ausgewertet",
+  "Resultat wird vorbereitet",
+];
+
+function ProcessingAnsicht({ schritt }) {
+  return (
+    <div className="mx-auto max-w-lg px-4 py-16">
+      <div className="card p-6">
+        <div className="flex items-center gap-2 text-slate-800">
+          <Loader2 className="size-5 animate-spin text-brand-500" />
+          <h1 className="text-base font-bold">PDF wird analysiert …</h1>
+        </div>
+        <p className="mt-1 text-xs text-slate-400">
+          Das kann bei grossen LVs einen Moment dauern. Bitte nicht schliessen.
+        </p>
+        <ul className="mt-5 space-y-2.5">
+          {PROCESSING.map((text, i) => (
+            <li key={text} className="flex items-center gap-2.5 text-sm">
+              {i < schritt
+                ? <CheckCircle2 className="size-4 shrink-0 text-green-600" />
+                : i === schritt
+                  ? <Loader2 className="size-4 shrink-0 animate-spin text-brand-500" />
+                  : <span className="size-4 shrink-0 rounded-full border border-slate-200" />}
+              <span className={i <= schritt ? "text-slate-700" : "text-slate-300"}>{text}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+// Punkt 25 — Zusammenfassung nach der Verarbeitung.
+function ImportZusammenfassung({ report, imp, offen }) {
+  if (!report || !Object.keys(report).length) return null;
+  const typen = report.page_types || {};
+  const zeilen = [
+    [`${report.page_count ?? imp.page_count} Seiten analysiert`, true],
+    [`${typen.lv || 0} LV-Seiten erkannt`, (typen.lv || 0) > 0],
+    [`${typen.cost_summary || 0} Kostenzusammenstellungs-Seiten erkannt`, (typen.cost_summary || 0) > 0],
+    [`${report.features_erkannt ?? 0} technische Werte erkannt`, (report.features_erkannt ?? 0) > 0],
+    [`${report.kostenpositionen ?? 0} Kostenpositionen erkannt`, (report.kostenpositionen ?? 0) > 0],
+  ];
+  return (
+    <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+      <p className="text-xs font-bold text-slate-700">Import abgeschlossen</p>
+      <ul className="mt-1.5 grid gap-x-4 gap-y-0.5 text-[11px] text-slate-500 sm:grid-cols-2">
+        {zeilen.map(([text, ok]) => (
+          <li key={text} className={ok ? "" : "text-slate-400"}>· {text}</li>
+        ))}
+        {offen > 0 && (
+          <li className="font-semibold text-amber-600">· {offen} Angaben müssen geprüft werden</li>
+        )}
+      </ul>
+      {report.cost_source && (
+        <p className="mt-1.5 text-[11px] text-slate-400">
+          Kostenquelle: {report.cost_source === "cost_summary"
+            ? "Kostenzusammenstellung (bevorzugt)"
+            : "LV-Positionstotale (keine Kostenzusammenstellung gefunden)"}
+        </p>
+      )}
+    </div>
+  );
 }
 
 // ── Upload-Ansicht (ohne :id) ───────────────────────────────────────────────
@@ -71,6 +201,15 @@ function UploadAnsicht() {
   const [imports, setImports] = useState([]);
 
   useEffect(() => { listLvImports().then(setImports).catch(() => {}); }, []);
+
+  // Punkt 24 — der Upload arbeitet synchron; statt Fake-Prozenten laufen die
+  // Schritte optisch weiter, damit die Seite nicht eingefroren wirkt.
+  const [schritt, setSchritt] = useState(0);
+  useEffect(() => {
+    if (!busy) { setSchritt(0); return undefined; }
+    const t = setInterval(() => setSchritt((s) => Math.min(s + 1, PROCESSING.length - 1)), 1200);
+    return () => clearInterval(t);
+  }, [busy]);
 
   const onFile = async (e) => {
     const file = e.target.files?.[0];
@@ -86,6 +225,8 @@ function UploadAnsicht() {
       setBusy(false);
     }
   };
+
+  if (busy) return <ProcessingAnsicht schritt={schritt} />;
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-6 sm:py-8 lg:px-8">
@@ -164,8 +305,12 @@ function ReviewAnsicht({ id }) {
   const [approving, setApproving] = useState(false);
   const [schritt, setSchritt] = useState(0);
 
+  const [listen, setListen] = useState(null);
+
   useEffect(() => {
     getLvImport(id).then(setImp).catch(() => setError("Import konnte nicht geladen werden")).finally(() => setLoading(false));
+    // Punkt 5/20 — Auswahllisten zentral holen, keine Kopie im Frontend.
+    getFachwerte().then((f) => setListen(f.listen)).catch(() => {});
   }, [id]);
 
   if (loading) return <div className="p-8 text-sm text-slate-400">Lade Import…</div>;
@@ -185,8 +330,39 @@ function ReviewAnsicht({ id }) {
   // Verwendete Kosten = Positionen mit effektivem Betrag; sie müssen bestätigt sein.
   const kostenVerwendet = (imp.costs || []).filter((c) => c.effective_amount != null);
   const kostenOffen = kostenVerwendet.filter((c) => !c.confirmed).length;
+  // Punkt 23 — Kosten nach BKP-Gruppe bündeln; das Gruppentotal ist eine eigene
+  // Kontrollzeile und wird nicht als Einzelposition mitgezählt.
+  const kostenGruppen = useMemo(() => {
+    const map = new Map();
+    for (const c of imp.costs || []) {
+      const g = c.bkp_nr || "—";
+      if (!map.has(g)) map.set(g, { gruppe: g, positionen: [], total: null });
+      if (c.is_group_total) map.get(g).total = c;
+      else map.get(g).positionen.push(c);
+    }
+    for (const eintrag of map.values()) {
+      eintrag.positionen.sort((a, b) =>
+        String(a.original_position || a.bkp_nr).localeCompare(String(b.original_position || b.bkp_nr), "de", { numeric: true }));
+      const summe = eintrag.positionen.reduce((s, c) => s + (c.effective_amount ?? 0), 0);
+      if (!eintrag.total && eintrag.positionen.length) {
+        eintrag.total = { effective_amount: summe, sum_hint: "(Summe der Positionen)" };
+      } else if (eintrag.total && eintrag.positionen.length) {
+        const diff = Math.abs((eintrag.total.effective_amount ?? 0) - summe);
+        eintrag.total = { ...eintrag.total, sum_hint: diff > 1 ? `(Positionen: ${summe.toLocaleString("de-CH")})` : null };
+      }
+    }
+    return [...map.values()].sort((a, b) => a.gruppe.localeCompare(b.gruppe, "de", { numeric: true }));
+  }, [imp.costs]);
+  // Verwendete Kosten = Einzelpositionen; Gruppentotale nur wo es keine gibt
+  // (dieselbe Regel wie im Backend bei der Freigabe — keine Doppelzählung).
+  const kostenTotal = kostenGruppen.reduce((s, g) => s + (
+    g.positionen.length
+      ? g.positionen.reduce((x, c) => x + (c.effective_amount ?? 0), 0)
+      : (g.total?.effective_amount ?? 0)
+  ), 0);
   const alleGeprueft = featTotal > 0 && featGeprueft === featTotal && kostenOffen === 0;
-  const grunddatenGesetzt = ["ebf_m2", "anzahl_einheiten", "gebaeudetyp", "projektart", "region"]
+  const grunddatenGesetzt = ["ebf_m2", "anzahl_einheiten", "gebaeudetyp", "projektart",
+    "zertifizierung", "region", "projekt_name"]
     .some((k) => imp.grunddaten?.[k] != null && imp.grunddaten?.[k] !== "");
   // Fortschritt je Schritt für den Stepper (Freigabe selbst ist nie „fertig").
   const schrittFertig = [
@@ -267,7 +443,11 @@ function ReviewAnsicht({ id }) {
         </div>
       )}
 
-      {/* Schritt-Navigation (Block C #9) */}
+      {/* Punkt 25 — was wurde beim Import erkannt */}
+      <ImportZusammenfassung report={imp.report} imp={imp}
+        offen={(featTotal - featGeprueft) + kostenOffen} />
+
+      {/* Schritt-Navigation (Punkt 21) */}
       <ol className="mb-6 flex flex-wrap items-center gap-2">
         {SCHRITTE.map((s, i) => (
           <li key={s.key} className="flex min-w-0 flex-1 basis-40">
@@ -282,26 +462,49 @@ function ReviewAnsicht({ id }) {
         ))}
       </ol>
 
-      {/* Schritt 1 — Projektgrunddaten (im Review ergänzen) */}
+      {/* Schritt 1 — Projekt (Punkt 20: kategoriale Werte als Select) */}
       {schritt === 0 && (
       <section className="card overflow-hidden">
         <div className="border-b border-slate-100 bg-slate-50/60 px-4 py-3 sm:px-5">
-          <h2 className="text-sm font-bold text-slate-800">Projektgrunddaten</h2>
-          <p className="mt-0.5 text-[11px] text-slate-400">Optional, fliessen bei Freigabe ins Referenzprojekt.</p>
+          <h2 className="text-sm font-bold text-slate-800">Projektinformationen</h2>
+          <p className="mt-0.5 text-[11px] text-slate-400">
+            Aus dem Deckblatt erkannte Angaben bitte prüfen. Vergleichsrelevante Merkmale
+            sind Auswahllisten — kein Freitext.
+          </p>
         </div>
-        <div className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 sm:px-5">
+        <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 sm:px-5">
           {[
+            ["projekt_name", "Projektname", "text"],
+            ["projekt_nummer", "Projekt-Nr.", "text"],
+            ["ort", "Ort", "text"],
+            ["unternehmer", "Unternehmer", "text"],
+            ["offert_datum", "Datum", "text"],
+            ["region", "Region", "text"],
             ["ebf_m2", "EBF [m²]", "number"],
             ["anzahl_einheiten", "Nutzungseinheiten", "number"],
-            ["gebaeudetyp", "Gebäudetyp", "text"],
-            ["projektart", "Projektart", "text"],
-            ["region", "Region", "text"],
           ].map(([key, label, typ]) => (
             <div key={key}>
               <label className="label">{label}</label>
               <input type={typ} className="input" disabled={gesperrt}
                 defaultValue={imp.grunddaten?.[key] ?? ""}
                 onBlur={(e) => setGrunddaten({ [key]: e.target.value })} />
+            </div>
+          ))}
+          {[
+            ["gebaeudetyp", "Gebäudenutzung", "building_uses"],
+            ["projektart", "Projektart", "project_types"],
+            ["zertifizierung", "Zertifizierung", "certifications"],
+          ].map(([key, label, liste]) => (
+            <div key={key}>
+              <label className="label">{label}</label>
+              <select className="input" disabled={gesperrt || !listen}
+                value={imp.grunddaten?.[key] ?? ""}
+                onChange={(e) => setGrunddaten({ [key]: e.target.value })}>
+                <option value="">— nicht erfasst —</option>
+                {(listen?.[liste] || []).map((o) => (
+                  <option key={o.code} value={o.code}>{o.label}</option>
+                ))}
+              </select>
             </div>
           ))}
         </div>
@@ -320,26 +523,46 @@ function ReviewAnsicht({ id }) {
                 <h2 className="text-sm font-bold text-slate-800">{kat.titel}</h2>
               </div>
               <div className="divide-y divide-slate-100">
-                {rows.map((f) => (
-                  <div key={f.id} className="grid gap-2 px-4 py-3.5 sm:grid-cols-[1fr_auto] sm:items-center sm:px-5">
+                {rows.map((f) => {
+                  const multi = MULTI_FEATURES[f.key];
+                  const werte = (f.effective_value || "").split(",").map((s) => s.trim()).filter(Boolean);
+                  const nichtErkannt = f.value == null && !f.confirmed_value;
+                  return (
+                  <div key={f.id} className={`grid gap-2 px-4 py-3.5 sm:px-5 ${multi ? "" : "sm:grid-cols-[1fr_auto] sm:items-center"}`}>
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-medium text-slate-900">{f.label}</span>
-                        {f.confidence && <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${CONF_STYLE[f.confidence]}`}>{CONF_LABEL[f.confidence]}</span>}
+                        {f.confidence && !multi && <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${CONF_STYLE[f.confidence]}`}>{CONF_LABEL[f.confidence]}</span>}
+                        {nichtErkannt && (
+                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+                            nicht zuverlässig erkannt
+                          </span>
+                        )}
                       </div>
-                      {f.source_text && (
-                        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">
-                          <span className={`rounded px-1 py-0.5 text-[10px] font-semibold ${M.tagStyle}`} title="Herkunft des Werts">{M.tag}</span>
-                          <span>{f.source_page != null ? `Seite ${f.source_page}: ` : ""}„{f.source_text}"</span>
+                      <Quelle feature={f} tag={M.tag} tagStyle={M.tagStyle} />
+                      {multi && listen && (
+                        <div className="mt-2">
+                          <MultiSelect
+                            optionen={listen[multi] || []}
+                            werte={werte}
+                            disabled={gesperrt}
+                            onChange={(codes) => setFeature(f, { confirmed_value: codes.join(","), confirmed: true })}
+                          />
+                          <label className={`mt-2 inline-flex items-center gap-1 text-[11px] font-semibold ${f.confirmed ? "text-green-600" : "text-slate-400"}`}>
+                            <input type="checkbox" disabled={gesperrt} checked={!!f.confirmed}
+                              onChange={(e) => setFeature(f, { confirmed: e.target.checked })} />
+                            geprüft
+                          </label>
                         </div>
                       )}
                     </div>
+                    {!multi && (
                     <div className="flex items-center gap-2 sm:justify-end">
                       <input
                         className="input w-36"
                         disabled={gesperrt}
                         defaultValue={f.confirmed_value ?? (f.value ?? "")}
-                        placeholder={f.value != null ? String(f.value) : "unbekannt"}
+                        placeholder={f.value != null ? String(f.value) : "Wert eingeben"}
                         onBlur={(e) => setFeature(f, { confirmed_value: e.target.value, confirmed: true })}
                       />
                       {f.unit && <span className="w-6 text-xs text-slate-400">{f.unit}</span>}
@@ -349,8 +572,10 @@ function ReviewAnsicht({ id }) {
                         geprüft
                       </label>
                     </div>
+                    )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </section>
           );
@@ -366,47 +591,89 @@ function ReviewAnsicht({ id }) {
       </div>
       )}
 
-      {/* Schritt 3 — BKP-Kosten (aggregiert, bestätigbar, manuell ergänzbar) */}
+      {/* Schritt 3 — Kosten je BKP-Gruppe mit Total und Summenprüfung (Punkt 23) */}
       {schritt === 2 && (
-      <div className="space-y-6">
+      <div className="space-y-5">
+        {kostenGruppen.map(({ gruppe, positionen, total }) => (
+          <section key={gruppe} className="card overflow-hidden">
+            <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/60 px-4 py-3 sm:px-5">
+              <h2 className="text-sm font-bold text-slate-800">
+                BKP {gruppe}{total?.original_title ? ` – ${total.original_title}` : ""}
+              </h2>
+              {total?.validation_status === "valid" && (
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-green-600">
+                  <CheckCircle2 className="size-3.5" /> Summe geprüft
+                </span>
+              )}
+              {total?.validation_status === "mismatch" && (
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-600">
+                  <AlertTriangle className="size-3.5" /> Summe weicht ab
+                </span>
+              )}
+            </div>
+            <div className="divide-y divide-slate-100">
+              {positionen.map((c) => (
+                <div key={c.id} className="grid gap-2 px-4 py-2.5 sm:grid-cols-[1fr_auto] sm:items-center sm:px-5">
+                  <div className="min-w-0">
+                    <span className="text-sm font-medium text-slate-900">
+                      {c.original_position || `BKP ${c.bkp_nr}`}
+                      {c.original_title ? ` ${c.original_title}` : ""}
+                    </span>
+                    {c.positionen > 1 && !c.original_position && (
+                      <span className="ml-1 text-[11px] text-slate-400">({c.positionen} Positionen aggregiert)</span>
+                    )}
+                    {c.manual && <span className="ml-1 rounded bg-slate-100 px-1 text-[10px] font-semibold text-slate-500">manuell</span>}
+                    {!c.canonical_key && !c.manual && (
+                      <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-700" title="Konnte keiner Standardposition zugeordnet werden">
+                        Zuordnung prüfen
+                      </span>
+                    )}
+                    {c.source_text && (
+                      <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">
+                        <span className={`rounded px-1 py-0.5 text-[10px] font-semibold ${M.tagStyle}`}>{M.tag}</span>
+                        <span className="truncate">{c.source_page != null ? `Seite ${c.source_page}` : ""}</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 sm:justify-end">
+                    <span className="text-xs text-slate-400">CHF</span>
+                    <input className="input w-28" disabled={gesperrt}
+                      defaultValue={c.confirmed_amount ?? (c.detected_amount ?? "")}
+                      placeholder={c.detected_amount != null ? String(c.detected_amount) : "—"}
+                      onBlur={(e) => setCost(c, { confirmed_amount: e.target.value, confirmed: true })} />
+                    <label className={`inline-flex items-center gap-1 text-[11px] font-semibold ${c.confirmed ? "text-green-600" : "text-slate-400"}`}>
+                      <input type="checkbox" disabled={gesperrt} checked={!!c.confirmed}
+                        onChange={(e) => setCost(c, { confirmed: e.target.checked })} /> ok
+                    </label>
+                    {!gesperrt && (
+                      <button onClick={() => entferneKost(c)} className="btn-ghost min-h-8 min-w-8 text-slate-400 hover:text-red-500" title="Position entfernen">
+                        <Trash2 className="size-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {total && (
+                <div className="flex items-center justify-between bg-slate-50/60 px-4 py-2.5 text-sm sm:px-5">
+                  <span className="font-bold text-slate-700">Total {gruppe}</span>
+                  <span className="font-bold text-slate-900">
+                    CHF {(total.effective_amount ?? 0).toLocaleString("de-CH")}
+                    {total.sum_hint && <span className="ml-2 text-[11px] font-normal text-slate-400">{total.sum_hint}</span>}
+                  </span>
+                </div>
+              )}
+            </div>
+          </section>
+        ))}
         <section className="card overflow-hidden">
           <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/60 px-4 py-3 sm:px-5">
-            <h2 className="text-sm font-bold text-slate-800">BKP-Kosten</h2>
+            <h2 className="text-sm font-bold text-slate-800">Kostenposition ergänzen</h2>
             {kostenOffen > 0 && <span className="text-[11px] font-semibold text-amber-600">{kostenOffen} unbestätigt</span>}
           </div>
-          <div className="divide-y divide-slate-100">
-            {(imp.costs || []).map((c) => (
-              <div key={c.id} className="grid gap-2 px-4 py-3 sm:grid-cols-[1fr_auto] sm:items-center sm:px-5">
-                <div>
-                  <span className="font-medium text-slate-900">BKP {c.bkp_nr}</span>
-                  {c.positionen > 1 && <span className="ml-1 text-[11px] text-slate-400">({c.positionen} Positionen aggregiert)</span>}
-                  {c.manual && <span className="ml-1 rounded bg-slate-100 px-1 text-[10px] font-semibold text-slate-500">manuell</span>}
-                  {c.source_text && (
-                    <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">
-                      <span className={`rounded px-1 py-0.5 text-[10px] font-semibold ${M.tagStyle}`} title="Herkunft des Betrags">{M.tag}</span>
-                      <span>{c.source_page != null ? `Seite ${c.source_page}: ` : ""}„{c.source_text}"</span>
-                    </div>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 sm:justify-end">
-                  <span className="text-xs text-slate-400">CHF</span>
-                  <input className="input w-28" disabled={gesperrt}
-                    defaultValue={c.confirmed_amount ?? (c.detected_amount ?? "")}
-                    placeholder={c.detected_amount != null ? String(c.detected_amount) : "—"}
-                    onBlur={(e) => setCost(c, { confirmed_amount: e.target.value, confirmed: true })} />
-                  <label className={`inline-flex items-center gap-1 text-[11px] font-semibold ${c.confirmed ? "text-green-600" : "text-slate-400"}`}>
-                    <input type="checkbox" disabled={gesperrt} checked={!!c.confirmed}
-                      onChange={(e) => setCost(c, { confirmed: e.target.checked })} /> ok
-                  </label>
-                  {!gesperrt && (
-                    <button onClick={() => entferneKost(c)} className="btn-ghost min-h-8 min-w-8 text-slate-400 hover:text-red-500" title="Position löschen">
-                      <Trash2 className="size-4" />
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
-            {!gesperrt && <NeueKostZeile onAdd={kostHinzufuegen} />}
+          {!gesperrt && <NeueKostZeile onAdd={kostHinzufuegen} />}
+          <div className="flex items-center justify-between px-4 py-3 text-sm sm:px-5">
+            <span className="font-bold text-slate-700">Verwendete Kosten total</span>
+            <span className="font-bold text-slate-900">CHF {kostenTotal.toLocaleString("de-CH")}</span>
           </div>
         </section>
       </div>

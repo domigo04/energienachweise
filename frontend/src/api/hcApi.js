@@ -181,6 +181,10 @@ export const addLvCost = (id, data) => api.post(`${BASE}/lv-imports/${id}/costs`
 export const deleteLvCost = (id, costId) => api.delete(`${BASE}/lv-imports/${id}/costs/${costId}`);
 export const updateLvImport = (id, data) => api.patch(`${BASE}/lv-imports/${id}`, data).then(r => r.data);
 export const approveLvImport = (id) => api.post(`${BASE}/lv-imports/${id}/approve`).then(r => r.data);
+// Zentrale Auswahllisten (Punkt 5/20) — eine Quelle für alle kategorialen Werte.
+export const getFachwerte = () => api.get(`${BASE}/lv-imports/fachwerte`).then(r => r.data);
+// Debug-Dump beim Arbeiten an echten LVs (Punkt 30).
+export const getLvImportDebug = (id) => api.get(`${BASE}/lv-imports/${id}/debug`).then(r => r.data);
 
 // --- Auswertung: Mehrfach-Löschen ---
 export const deleteRefsBulk = (ids) => api.post(`${BASE}/auswertung/loeschen`, { ids }).then(r => r.data);

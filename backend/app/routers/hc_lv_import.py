@@ -8,6 +8,7 @@ freigegebene Imports rechnen NIE in der Kostenschätzung mit.
 from __future__ import annotations
 
 import hashlib
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
@@ -24,6 +25,7 @@ from app.lv_import.cost_summary import parse_cost_summary, to_cost_rows, has_cos
 from app.lv_import.project_extract import extract_project_data
 from app import fachwerte
 from app.lv_import.feature_keys import FEATURE_DEFS, FEATURE_KEYS, FEATURE_TO_CONTEXT
+from app.lv_import import page_classifier as pc
 
 router = APIRouter(prefix="/api/v1/lv-imports", tags=["KV – LV-Import"])
 
@@ -93,7 +95,16 @@ def _import_out(imp: LvImport, detail: bool = False) -> dict:
     if detail:
         base["features"] = [_feature_out(f) for f in imp.features]
         base["costs"] = [_cost_out(c) for c in imp.costs]
+        # Punkt 25 — Verarbeitungsbericht für die Import-Zusammenfassung.
+        base["report"] = _report(imp)
     return base
+
+
+def _report(imp: LvImport) -> dict:
+    try:
+        return json.loads(imp.debug_json) if imp.debug_json else {}
+    except (ValueError, TypeError):
+        return {}
 
 
 @router.post("", status_code=201)
@@ -181,6 +192,26 @@ async def upload_lv(
                 source_page=c.get("source_page"), source_text=c.get("source_text"),
                 positionen=c.get("positionen", 1),
             ))
+        # Punkt 25/30 — Verarbeitungsbericht: was wurde erkannt, was muss geprüft
+        # werden. Speist die Import-Zusammenfassung und den Debug-Dump.
+        erkannte = [k for k, f in features.items() if f.get("value") is not None]
+        pruefen = [c["bkp_nr"] for c in costs if not c.get("canonical_key")
+                   and not c.get("is_group_total")]
+        imp.debug_json = json.dumps({
+            **pipeline.debug_dump(),
+            "cost_source": "cost_summary" if has_cost_summary(summary) else "lv_positions",
+            "features_erkannt": len(erkannte),
+            "features_total": len(FEATURE_KEYS),
+            "feature_keys_erkannt": erkannte,
+            "kostenpositionen": len([c for c in costs if not c.get("is_group_total")]),
+            "gruppentotale": len([c for c in costs if c.get("is_group_total")]),
+            "kosten_ohne_zuordnung": len(pruefen),
+            "gruppen_validierung": {
+                g: i.get("validation_status")
+                for g, i in (summary.get("group_totals") or {}).items()},
+            "trade_total": summary.get("trade_total"),
+            "projekt_erkannt": sorted(projekt.keys()),
+        }, ensure_ascii=False)
         imp.status = LvImportStatus.review.value if imp.is_searchable else LvImportStatus.extracted.value
     except Exception:
         imp.status = LvImportStatus.failed.value
@@ -221,6 +252,43 @@ def ocr_status(user: User = Depends(get_current_user)):
 @router.get("/{import_id}")
 def get_lv(import_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return _import_out(_get_import(db, user, import_id), detail=True)
+
+
+@router.get("/{import_id}/debug")
+def debug_lv(import_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Punkt 30 — Debug-Dump für die Arbeit an echten LVs.
+
+    Zeigt Seitenklassifikation, erkannte Features, Kostenzeilen samt kanonischer
+    Zuordnung und die Gruppen-Summenprüfung. Nur für die eigene Firma sichtbar
+    (wie jeder andere Import-Zugriff) und im normalen UI nicht verlinkt.
+    """
+    imp = _get_import(db, user, import_id)
+    report = _report(imp)
+    return {
+        "import_id": imp.id, "filename": imp.filename,
+        "extract_method": imp.extract_method,
+        "page_classification": report.get("classification", []),
+        "page_types": report.get("page_types", {}),
+        "cost_source": report.get("cost_source"),
+        "gruppen_validierung": report.get("gruppen_validierung", {}),
+        "trade_total": report.get("trade_total"),
+        "features": [
+            {"key": f.key, "value": f.value, "confidence": f.confidence,
+             "derived_from": f.derived_from, "source_page": f.source_page,
+             "source_text": f.source_text, "source_excerpt": f.source_excerpt,
+             "source_bbox": f.source_bbox}
+            for f in imp.features
+        ],
+        "costs": [
+            {"bkp_nr": c.bkp_nr, "original_position": c.original_position,
+             "original_title": c.original_title, "canonical_key": c.canonical_key,
+             "is_group_total": bool(c.is_group_total),
+             "validation_status": c.validation_status,
+             "detected_amount": c.detected_amount, "source_page": c.source_page}
+            for c in imp.costs
+        ],
+        "report": report,
+    }
 
 
 @router.patch("/{import_id}/features/{feature_id}")

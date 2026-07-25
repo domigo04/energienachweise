@@ -243,6 +243,46 @@ def component_counts(rows) -> dict:
     return result
 
 
+# ── Erzeugerleistung ───────────────────────────────────────────────────────
+# kW, aber nicht kWh (Arbeit) — und nie eine blosse Zahl ohne Einheit.
+_KW = re.compile(r"(\d+(?:[.,]\d+)?)\s*kw\b(?!h)", re.IGNORECASE)
+
+
+def _leistung_kw(row) -> Optional[float]:
+    m = _KW.search(row.get("text") or "")
+    return parse_number(m.group(1)) if m else None
+
+
+def generator_power(rows) -> dict:
+    """Erzeugerleistung in kW (Punkt 31 „Leistung korrekt").
+
+    Die Leistung steht im LV oft einige Zeilen unter der Erzeugerposition
+    (Fabrikat, Typ, dann Leistung). Gesucht wird darum im Positionskontext —
+    begrenzt durch die nächste Position bzw. das nächste Bauteil, damit nie die
+    Leistung eines anderen Geräts übernommen wird.
+    """
+    terms = FEATURE_TERMS["heat_generator"]
+    summe = 0.0
+    treffer = 0
+    fund = None
+    for i, row in enumerate(rows):
+        low = (row.get("text") or "").lower()
+        if not any(t in low for t in terms):
+            continue
+        kw, _idx = _menge_im_kontext(rows, i, _leistung_kw, max_folge=4)
+        if kw is None:
+            continue
+        summe += kw
+        treffer += 1
+        if fund is None:
+            fund = _fund(row, rows, i)
+    if not treffer:
+        return {}
+    return {"generator_power_kw": {
+        "value": round(summe, 1), "confidence": HIGH if treffer == 1 else MEDIUM,
+        "positionen": treffer, **fund}}
+
+
 # ── Punkt 5 — Erdsonden über mehrere Muster ────────────────────────────────
 
 # Muster A: "5 Erdsonden à 180 m"

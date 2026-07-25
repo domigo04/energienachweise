@@ -208,3 +208,27 @@ def test_extract_features_nutzt_wortkoordinaten_wenn_vorhanden():
     pages = [{"page": 5, "text": "Umwälzpumpe Heizkreis Stk. 2\nLeistung 570 W"}]
     f = extract_features(pages, word_pages)
     assert f["pump_count"]["value"] == 2
+
+
+# ── Erzeugerleistung im Positionskontext ───────────────────────────────────
+
+def test_erzeugerleistung_einige_zeilen_unter_der_position():
+    """Punkt 31 — die Leistung steht oft erst nach Fabrikat/Typ."""
+    text = ("242.1 Waermeerzeuger Sole/Wasser-Waermepumpe\n"
+            "Fabrikat Muster\nTyp XY-35\nLeistung 35.3 kW")
+    res = q.generator_power(_rows(text))
+    assert res["generator_power_kw"]["value"] == 35.3
+
+
+def test_kwh_ist_keine_leistung():
+    """kWh (Arbeit) darf nie als Leistung gelesen werden."""
+    res = q.generator_power(_rows("Waermepumpe\nJahresertrag 12000 kWh"))
+    assert res == {}
+
+
+def test_leistung_endet_an_der_naechsten_position():
+    """Die Leistung eines anderen Geräts wird nicht übernommen."""
+    text = ("242.1 Waermeerzeuger Sole/Wasser\n"
+            "243.3 Apparate\nUmwaelzpumpe Stk. 1\nLeistung 570 W\n")
+    res = q.generator_power(_rows(text))
+    assert res == {}

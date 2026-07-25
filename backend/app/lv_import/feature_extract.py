@@ -246,6 +246,7 @@ def extract_features(pages, word_pages=None) -> dict:
     streng.update(q.boreholes(rows))
     streng.update(q.storages(rows))
     streng.update(q.pipe_lengths(rows))
+    streng.update(q.generator_power(rows))
     result.update(streng)
 
     # ── 2) Alte Heuristik nur für noch fehlende Werte ──────────────────────

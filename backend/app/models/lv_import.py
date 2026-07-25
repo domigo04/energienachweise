@@ -52,6 +52,9 @@ class LvImport(Base):
     ort = Column(String, nullable=True)
     unternehmer = Column(String, nullable=True)
     offert_datum = Column(String, nullable=True)
+    # Punkt 25/30 — Verarbeitungsbericht (Seitenklassen, Trefferzahlen) als JSON
+    # für die Import-Zusammenfassung und den Debug-Dump.
+    debug_json = Column(Text, nullable=True)
     created_by = Column(Integer, nullable=True, index=True)
     created_by_name = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

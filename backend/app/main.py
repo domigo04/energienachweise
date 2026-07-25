@@ -125,6 +125,7 @@ def _ensure_columns():
             ("extract_method", "VARCHAR"), ("zertifizierung", "VARCHAR"),
             ("projekt_name", "VARCHAR"), ("projekt_nummer", "VARCHAR"),
             ("ort", "VARCHAR"), ("unternehmer", "VARCHAR"), ("offert_datum", "VARCHAR"),
+            ("debug_json", "TEXT"),
         ],
         "lv_import_features": [
             ("source_excerpt", "TEXT"), ("source_bbox", "VARCHAR"),

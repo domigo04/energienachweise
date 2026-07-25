@@ -17,7 +17,7 @@ from app.database import get_db
 from app.models.auth import User
 from app.models.lv_import import LvImport, LvImportFeature, LvImportCost, LvImportStatus
 from app.models.kv import RefProjekt, RefKostenzeile, RefProjektFeature
-from app.lv_import.pdf_extract import extract_best
+from app.lv_import.pipeline import LvPipeline
 from app.lv_import.feature_extract import extract_features
 from app.lv_import.cost_extract import extract_costs
 from app.lv_import.feature_keys import FEATURE_DEFS, FEATURE_KEYS, FEATURE_TO_CONTEXT
@@ -105,17 +105,18 @@ async def upload_lv(
     db.add(imp)
     db.flush()
 
-    # B3 / P0 #1 — Extraktion (born-digital, sonst deutscher OCR-Fallback). Die
-    # gewählte Methode (digital/ocr/image) wird festgehalten, damit im Review
-    # sichtbar bleibt, woher ein Wert stammt. Fehler dürfen den Import nicht
-    # sprengen.
-    pages, searchable, method = extract_best(raw)
-    imp.page_count = len(pages)
-    imp.is_searchable = searchable
-    imp.extract_method = method
+    # B3 / P0 #1 / Punkt 29 — EINE Pipeline: Text, Wortkoordinaten, Seiten-
+    # klassifikation und alle Extraktoren laufen genau einmal und teilen ihre
+    # Zwischenergebnisse. Die Methode (spatial_pdf/text/ocr/image) wird
+    # festgehalten, damit im Review sichtbar bleibt, woher ein Wert stammt.
+    # Fehler dürfen den Import nicht sprengen.
+    pipeline = LvPipeline(raw)
+    imp.page_count = pipeline.page_count
+    imp.is_searchable = pipeline.is_searchable
+    imp.extract_method = pipeline.extraction_method
     try:
-        features = extract_features(pages)
-        costs = extract_costs(pages)
+        features = extract_features(pipeline.technik_pages)
+        costs = extract_costs(pipeline.lv_pages)
         # ALLE kanonischen Features anlegen (auch nicht erkannte) → der Nutzer
         # sieht die vollständige Checkliste und kann fehlende Werte ergänzen.
         for key in FEATURE_KEYS:

@@ -1,0 +1,50 @@
+# Sanitisierte Seitenmuster eines echten Unternehmerangebots (Punkt 26).
+# Keine echten Namen, Adressen oder Offertdaten — nur die Strukturmerkmale, an
+# denen die Seitenklassifikation entscheidet.
+# Format: Seiten sind durch eine Zeile "=== <erwartete Klasse> ===" getrennt.
+
+=== cover ===
+Ausschreibung und Angebot
+Heizungsanlage
+Projekt: 3-MFH Musterstrasse / Ueberbauung Musterweg
+Ort: Musterberg
+Bauherr: Muster Immobilien AG
+Unternehmer: Muster Heizungsbau AG
+Eingabesumme (inkl. MWST)
+Datum: 12.03.2024
+
+=== conditions ===
+Allgemeine Bedingungen
+Es gelten die Bestimmungen der SIA 118.
+Zahlungsbedingungen: 30 Tage netto.
+Garantie: 2 Jahre ab Abnahme.
+Haftung des Unternehmers gemaess Werkvertrag.
+
+=== description ===
+Technische Beschreibung
+Anlagebeschrieb der Waermeerzeugung.
+Die Anlage wird als monovalente Sole/Wasser-Anlage ausgefuehrt.
+Grundlagen: SIA 384/1
+
+=== schema ===
+Prinzipschema Heizung
+Legende Heizung
+Pos. 1 Waermepumpe
+Pos. 2 Pufferspeicher
+Pos. 3 Umwaelzpumpe
+
+=== lv ===
+Pos.    Bezeichnung der Arbeit                  Ausmass   Einheitspreis   TOTAL
+241.11  Rohrleitungen Primaerkreis
+        Geschweisste Gasrohre DN 32       m         12          18.50      222.00
+        Geschweisste Gasrohre DN 40       m         18          21.00      378.00
+
+=== cost_summary ===
+KOSTENZUSAMMENSTELLUNG
+BKP     Bezeichnung                                              CHF
+241.10  Expansion und Sicherheit Primaerkreis                 1'410.00
+241.11  Rohrleitungen Primaerkreis                            2'407.00
+241.12  Apparate und Armaturen Primaerkreis                   2'162.00
+241.13  Rohrleitungen Primaerkreis Erdsondensammler          10'223.00
+241.14  Erdsonden inkl. Bohrarbeiten                         87'050.00
+Total BKP 241                                               103'252.00

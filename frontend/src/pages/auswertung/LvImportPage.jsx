@@ -38,12 +38,15 @@ const STATUS_STYLE = {
 // tag = kleiner Marker an jeder Fundstelle, damit im Review sichtbar ist, ob ein
 // Wert aus Digitaltext oder OCR kommt.
 const METHODE = {
+  spatial_pdf: { kopf: "digitaler Text mit Tabellenerkennung", tag: "Tabelle", tagStyle: "bg-slate-100 text-slate-500" },
+  text: { kopf: "digitaler Text", tag: "Digital", tagStyle: "bg-slate-100 text-slate-500" },
   digital: { kopf: "durchsuchbar (digitaler Text)", tag: "Digital", tagStyle: "bg-slate-100 text-slate-500" },
   ocr: { kopf: "per OCR (Deutsch) erkannt", tag: "OCR", tagStyle: "bg-amber-100 text-amber-800" },
   image: { kopf: "Bild-PDF ohne Textebene", tag: "manuell", tagStyle: "bg-slate-100 text-slate-500" },
+  manual: { kopf: "manuell erfasst", tag: "manuell", tagStyle: "bg-slate-100 text-slate-500" },
 };
 // Alt-Importe ohne gespeicherte Methode aus is_searchable herleiten.
-const methodeOf = (imp) => METHODE[imp.extract_method] ? imp.extract_method : (imp.is_searchable ? "digital" : "image");
+const methodeOf = (imp) => METHODE[imp.extract_method] ? imp.extract_method : (imp.is_searchable ? "text" : "image");
 
 // Block C #9 — der Review läuft in vier klaren Schritten statt einer langen Seite.
 const SCHRITTE = [

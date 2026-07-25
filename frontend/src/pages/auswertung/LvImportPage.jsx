@@ -313,28 +313,15 @@ function ReviewAnsicht({ id }) {
     getFachwerte().then((f) => setListen(f.listen)).catch(() => {});
   }, [id]);
 
-  if (loading) return <div className="p-8 text-sm text-slate-400">Lade Import…</div>;
-  if (!imp) return (
-    <div className="mx-auto max-w-3xl p-8">
-      <div className="mb-4 text-red-600">{error}</div>
-      <Link to="/auswertung/import" className="text-sm text-brand-600 hover:underline">← Zurück zum Upload</Link>
-    </div>
-  );
-
-  const featureByKey = Object.fromEntries((imp.features || []).map((f) => [f.key, f]));
-  const methode = methodeOf(imp);
-  const M = METHODE[methode];
-  const gesperrt = imp.status === "approved";
-  const featTotal = (imp.features || []).length;
-  const featGeprueft = (imp.features || []).filter((f) => f.confirmed).length;
-  // Verwendete Kosten = Positionen mit effektivem Betrag; sie müssen bestätigt sein.
-  const kostenVerwendet = (imp.costs || []).filter((c) => c.effective_amount != null);
-  const kostenOffen = kostenVerwendet.filter((c) => !c.confirmed).length;
+  // ACHTUNG: alle Hooks MÜSSEN vor den frühen `return`s stehen. React verlangt
+  // in jedem Render dieselbe Hook-Reihenfolge; ein useMemo nach `if (loading)
+  // return …` wird im ersten Render übersprungen und lässt die Seite beim
+  // zweiten Render abstürzen (weisser Bildschirm).
   // Punkt 23 — Kosten nach BKP-Gruppe bündeln; das Gruppentotal ist eine eigene
   // Kontrollzeile und wird nicht als Einzelposition mitgezählt.
   const kostenGruppen = useMemo(() => {
     const map = new Map();
-    for (const c of imp.costs || []) {
+    for (const c of imp?.costs || []) {
       const g = c.bkp_nr || "—";
       if (!map.has(g)) map.set(g, { gruppe: g, positionen: [], total: null });
       if (c.is_group_total) map.get(g).total = c;
@@ -352,7 +339,25 @@ function ReviewAnsicht({ id }) {
       }
     }
     return [...map.values()].sort((a, b) => a.gruppe.localeCompare(b.gruppe, "de", { numeric: true }));
-  }, [imp.costs]);
+  }, [imp?.costs]);
+
+  if (loading) return <div className="p-8 text-sm text-slate-400">Lade Import…</div>;
+  if (!imp) return (
+    <div className="mx-auto max-w-3xl p-8">
+      <div className="mb-4 text-red-600">{error}</div>
+      <Link to="/auswertung/import" className="text-sm text-brand-600 hover:underline">← Zurück zum Upload</Link>
+    </div>
+  );
+
+  const featureByKey = Object.fromEntries((imp.features || []).map((f) => [f.key, f]));
+  const methode = methodeOf(imp);
+  const M = METHODE[methode];
+  const gesperrt = imp.status === "approved";
+  const featTotal = (imp.features || []).length;
+  const featGeprueft = (imp.features || []).filter((f) => f.confirmed).length;
+  // Verwendete Kosten = Positionen mit effektivem Betrag; sie müssen bestätigt sein.
+  const kostenVerwendet = (imp.costs || []).filter((c) => c.effective_amount != null);
+  const kostenOffen = kostenVerwendet.filter((c) => !c.confirmed).length;
   // Verwendete Kosten = Einzelpositionen; Gruppentotale nur wo es keine gibt
   // (dieselbe Regel wie im Backend bei der Freigabe — keine Doppelzählung).
   const kostenTotal = kostenGruppen.reduce((s, g) => s + (

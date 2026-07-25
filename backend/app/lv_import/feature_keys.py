@@ -8,18 +8,34 @@ from __future__ import annotations
 
 # MVP-Kostentreiber (B4). value-Typ: "int" (Stück), "float" (Menge), "text".
 FEATURE_DEFS = {
-    "generator_type": {"typ": "text", "einheit": None, "label": "Erzeugertyp"},
+    # Punkt 6/7 — Wärmeerzeuger sind mehrwertig ("EWS-WP + Gas"). `generator_type`
+    # bleibt als Einzelwert für die bestehende Ähnlichkeit erhalten (Rückwärts-
+    # kompatibilität) und trägt den ERSTEN Erzeuger; `generator_types` hält die
+    # vollständige Liste als kommaseparierte Codes.
+    "generator_type": {"typ": "text", "einheit": None, "label": "Erzeugertyp (primär)"},
+    "generator_types": {"typ": "list", "einheit": None, "label": "Wärmeerzeuger",
+                        "registry": "generator_types"},
+    "heat_delivery_types": {"typ": "list", "einheit": None, "label": "Wärmeabgabe",
+                            "registry": "heat_delivery_types"},
     "generator_count": {"typ": "int", "einheit": None, "label": "Wärmeerzeuger"},
     "generator_power_kw": {"typ": "float", "einheit": "kW", "label": "Erzeugerleistung"},
     "borehole_count": {"typ": "int", "einheit": None, "label": "Erdsonden"},
+    "borehole_length_each_m": {"typ": "float", "einheit": "m", "label": "Länge je Sonde"},
     "borehole_total_m": {"typ": "float", "einheit": "m", "label": "Bohrmeter"},
     "buffer_count": {"typ": "int", "einheit": None, "label": "Pufferspeicher"},
     "storage_volume_l": {"typ": "float", "einheit": "l", "label": "Speichervolumen"},
     "pump_count": {"typ": "int", "einheit": None, "label": "Pumpen"},
     "valve_2way_count": {"typ": "int", "einheit": None, "label": "2-Weg-Ventile"},
     "valve_3way_count": {"typ": "int", "einheit": None, "label": "3-Weg-Ventile"},
+    "balancing_valve_count": {"typ": "int", "einheit": None, "label": "Abgleichventile (STAD)"},
+    "radiator_count": {"typ": "int", "einheit": None, "label": "Heizkörper"},
     "heat_meter_count": {"typ": "int", "einheit": None, "label": "Wärmezähler"},
-    "pipe_length_m": {"typ": "float", "einheit": "m", "label": "Rohrmeter"},
+    # Rohrmeter getrennt nach Seite (Punkt 11): Quelle = Primärkreis/Erdsonden-
+    # sammler, Verteilung = Heizungsverteilung. pipe_length_m ist die Summe und
+    # bleibt der Kostentreiber für die bestehende Ähnlichkeit.
+    "pipe_length_source_m": {"typ": "float", "einheit": "m", "label": "Rohrmeter Quelle"},
+    "pipe_length_distribution_m": {"typ": "float", "einheit": "m", "label": "Rohrmeter Verteilung"},
+    "pipe_length_m": {"typ": "float", "einheit": "m", "label": "Rohrmeter total"},
 }
 
 FEATURE_KEYS = list(FEATURE_DEFS.keys())

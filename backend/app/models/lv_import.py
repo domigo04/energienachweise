@@ -40,9 +40,21 @@ class LvImport(Base):
     # Projektgrunddaten (im Review ergänzbar) → fliessen bei Freigabe ins RefProjekt.
     ebf_m2 = Column(Float, nullable=True)
     anzahl_einheiten = Column(Integer, nullable=True)
-    gebaeudetyp = Column(String, nullable=True)
-    projektart = Column(String, nullable=True)
+    # Punkt 20 — kategoriale Werte tragen kanonische Codes aus app.fachwerte,
+    # keine Freitexte. Freitext wäre für die Ähnlichkeit unbrauchbar.
+    gebaeudetyp = Column(String, nullable=True)      # building_uses-Code
+    projektart = Column(String, nullable=True)       # project_types-Code
+    zertifizierung = Column(String, nullable=True)   # certifications-Code
     region = Column(String, nullable=True)
+    # Punkt 19 — aus dem Deckblatt erkannte Projektangaben.
+    projekt_name = Column(String, nullable=True)
+    projekt_nummer = Column(String, nullable=True)
+    ort = Column(String, nullable=True)
+    unternehmer = Column(String, nullable=True)
+    offert_datum = Column(String, nullable=True)
+    # Punkt 25/30 — Verarbeitungsbericht (Seitenklassen, Trefferzahlen) als JSON
+    # für die Import-Zusammenfassung und den Debug-Dump.
+    debug_json = Column(Text, nullable=True)
     created_by = Column(Integer, nullable=True, index=True)
     created_by_name = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
@@ -64,7 +76,13 @@ class LvImportFeature(Base):
     unit = Column(String, nullable=True)
     confidence = Column(String, nullable=True)     # high | medium | low
     source_page = Column(Integer, nullable=True)
-    source_text = Column(Text, nullable=True)
+    source_text = Column(Text, nullable=True)       # EINE kompakte Fundstellenzeile
+    # Punkt 12: wenige relevante Zeilen statt ganzer Seitenblöcke, plus optional
+    # die Position im PDF. Der Rechenweg abgeleiteter Werte (z.B. „6 × 150 m")
+    # bleibt als derived_from sichtbar.
+    source_excerpt = Column(Text, nullable=True)
+    source_bbox = Column(String, nullable=True)
+    derived_from = Column(String, nullable=True)
     confirmed_value = Column(String, nullable=True) # vom Nutzer bestätigt/korrigiert
     confirmed = Column(Boolean, nullable=False, default=False)
 
@@ -76,7 +94,17 @@ class LvImportCost(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     lv_import_id = Column(Integer, ForeignKey("lv_imports.id"), nullable=False, index=True)
-    bkp_nr = Column(String, nullable=False)
+    bkp_nr = Column(String, nullable=False)          # BKP-Gruppe, z.B. "241"
+    # Punkt 14 — die Detailinformation bleibt erhalten: Originalnummer und
+    # Originaltitel der Position, dazu der kanonische Schlüssel (Punkt 17), weil
+    # Planer Unterpositionen je Projekt unterschiedlich nummerieren.
+    original_position = Column(String, nullable=True)    # z.B. "241.10"
+    original_title = Column(String, nullable=True)
+    canonical_key = Column(String, nullable=True, index=True)
+    # Punkt 15 — Gruppentotal als eigene Kontrollzeile inkl. Summenprüfung.
+    is_group_total = Column(Boolean, nullable=False, default=False)
+    validation_status = Column(String, nullable=True)    # valid | mismatch | unchecked
+    source = Column(String, nullable=True)               # cost_summary | lv_positions | manual
     detected_amount = Column(Float, nullable=True)
     confirmed_amount = Column(Float, nullable=True)  # später massgebend (B8)
     confidence = Column(String, nullable=True)

@@ -95,6 +95,31 @@ def _generator_type(zeilen) -> Optional[dict]:
     return None
 
 
+def _mehrfachwerte(zeilen, registry: str) -> Optional[dict]:
+    """Alle vorkommenden Codes eines mehrwertigen Merkmals (Punkt 6/7).
+
+    Ein Projekt kann „EWS-WP + Gas" oder „FBH + Heizkörper" haben. Erkannt wird
+    über die zentrale Registry — es entstehen nie Freitexte, nur Codes.
+    """
+    from app import fachwerte
+
+    gefunden: list[str] = []
+    quelle = None
+    for seite, line in zeilen:
+        code = fachwerte.normalize(registry, line)
+        if not code or code == "sonstige":
+            continue
+        if code not in gefunden:
+            gefunden.append(code)
+            if quelle is None:
+                quelle = (seite, line)
+    if not gefunden:
+        return None
+    return {"value": ",".join(gefunden), "codes": gefunden,
+            "confidence": MEDIUM if len(gefunden) == 1 else LOW,
+            "source_page": quelle[0], "source_text": quelle[1]}
+
+
 def _generator_power(zeilen) -> Optional[dict]:
     total = 0.0
     quelle = None
@@ -193,35 +218,78 @@ def _pipe_length(zeilen):
             "source_page": quelle[0], "source_text": quelle[1]}
 
 
-def extract_features(pages) -> dict:
+def extract_features(pages, word_pages=None) -> dict:
     """Alle MVP-Features aus den Seiten ableiten. Nur gefundene Features stehen
-    im Ergebnis (kein Rauschen); jeder Wert trägt Herkunft + Confidence."""
+    im Ergebnis (kein Rauschen); jeder Wert trägt Herkunft + Confidence.
+
+    Reihenfolge der Autorität (Punkt 10/11): die strengen, einheitengebundenen
+    Extraktoren aus `quantities` gewinnen. Die alte zeilennahe Heuristik bleibt
+    nur als Fallback für Formate, in denen die strenge Variante nichts findet —
+    so wird kein bestehender Import schlechter (Punkt 28).
+    """
     zeilen = _seiten_zeilen(pages)
     result: dict[str, dict] = {}
 
+    # ── 1) Strenge Extraktion (Einheit + Kontext verlangt) ─────────────────
+    from app.lv_import import quantities as q
+
+    rows = q.build_rows(pages, word_pages)
+    streng: dict[str, dict] = {}
+    bauteile = q.component_counts(rows)
+    for family, key in (("pump", "pump_count"), ("valve_2way", "valve_2way_count"),
+                        ("valve_3way", "valve_3way_count"),
+                        ("balancing_valve", "balancing_valve_count"),
+                        ("radiator", "radiator_count"),
+                        ("heat_meter", "heat_meter_count")):
+        if family in bauteile:
+            streng[key] = bauteile[family]
+    streng.update(q.boreholes(rows))
+    streng.update(q.storages(rows))
+    streng.update(q.pipe_lengths(rows))
+    streng.update(q.generator_power(rows))
+    result.update(streng)
+
+    # ── 2) Alte Heuristik nur für noch fehlende Werte ──────────────────────
     for family, key in (("pump", "pump_count"), ("valve_2way", "valve_2way_count"),
                         ("valve_3way", "valve_3way_count"), ("heat_meter", "heat_meter_count"),
                         ("buffer", "buffer_count"), ("heat_generator", "generator_count")):
-        f = _count_feature(zeilen, family)
-        if f is not None:
-            result[key] = f
+        if _fehlt(result, key):
+            f = _count_feature(zeilen, family)
+            if f is not None:
+                result[key] = f
 
     for key, fn in (("generator_type", _generator_type),
                     ("generator_power_kw", _generator_power),
                     ("storage_volume_l", _storage_volume),
                     ("pipe_length_m", _pipe_length)):
-        f = fn(zeilen)
-        if f is not None:
-            result[key] = f
+        if _fehlt(result, key):
+            f = fn(zeilen)
+            if f is not None:
+                result[key] = f
 
-    cnt, mtr = _borehole(zeilen)
-    if cnt is not None:
-        result["borehole_count"] = cnt
-    if mtr is not None:
-        result["borehole_total_m"] = mtr
+    # Mehrwertige Merkmale (Punkt 6/7) — immer über die zentrale Registry.
+    for key, registry in (("generator_types", "generator_types"),
+                          ("heat_delivery_types", "heat_delivery_types")):
+        if _fehlt(result, key):
+            f = _mehrfachwerte(zeilen, registry)
+            if f is not None:
+                result[key] = f
+
+    if _fehlt(result, "borehole_count") or _fehlt(result, "borehole_total_m"):
+        cnt, mtr = _borehole(zeilen)
+        if cnt is not None and _fehlt(result, "borehole_count"):
+            result["borehole_count"] = cnt
+        if mtr is not None and _fehlt(result, "borehole_total_m"):
+            result["borehole_total_m"] = mtr
 
     _bauteilmengen_ergaenzen(pages, result)
     return result
+
+
+def _fehlt(result: dict, key: str) -> bool:
+    """True, wenn für `key` noch kein belastbarer Wert vorliegt."""
+    vorhanden = result.get(key)
+    return vorhanden is None or vorhanden.get("value") is None
 
 
 def _bauteilmengen_ergaenzen(pages, result: dict) -> None:

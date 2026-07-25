@@ -8,6 +8,7 @@ freigegebene Imports rechnen NIE in der Kostenschätzung mit.
 from __future__ import annotations
 
 import hashlib
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
@@ -17,10 +18,14 @@ from app.database import get_db
 from app.models.auth import User
 from app.models.lv_import import LvImport, LvImportFeature, LvImportCost, LvImportStatus
 from app.models.kv import RefProjekt, RefKostenzeile, RefProjektFeature
-from app.lv_import.pdf_extract import extract_best
+from app.lv_import.pipeline import LvPipeline
 from app.lv_import.feature_extract import extract_features
 from app.lv_import.cost_extract import extract_costs
+from app.lv_import.cost_summary import parse_cost_summary, to_cost_rows, has_cost_summary
+from app.lv_import.project_extract import extract_project_data
+from app import fachwerte
 from app.lv_import.feature_keys import FEATURE_DEFS, FEATURE_KEYS, FEATURE_TO_CONTEXT
+from app.lv_import import page_classifier as pc
 
 router = APIRouter(prefix="/api/v1/lv-imports", tags=["KV – LV-Import"])
 
@@ -44,6 +49,8 @@ def _feature_out(f: LvImportFeature) -> dict:
         "confirmed_value": f.confirmed_value, "confirmed": f.confirmed,
         "confidence": f.confidence,
         "source_page": f.source_page, "source_text": f.source_text,
+        # Punkt 12/22: kompakter Auszug + Rechenweg abgeleiteter Werte.
+        "source_excerpt": f.source_excerpt, "derived_from": f.derived_from,
         "effective_value": f.confirmed_value if f.confirmed_value not in (None, "") else f.value,
     }
 
@@ -55,6 +62,11 @@ def _cost_effective(c: LvImportCost):
 def _cost_out(c: LvImportCost) -> dict:
     return {
         "id": c.id, "bkp_nr": c.bkp_nr,
+        # Punkt 14/17 — Originalnummer, Originaltitel und kanonische Zuordnung.
+        "original_position": c.original_position, "original_title": c.original_title,
+        "canonical_key": c.canonical_key,
+        "is_group_total": bool(c.is_group_total),
+        "validation_status": c.validation_status, "source": c.source,
         "detected_amount": c.detected_amount, "confirmed_amount": c.confirmed_amount,
         "confidence": c.confidence, "source_page": c.source_page, "source_text": c.source_text,
         "positionen": c.positionen, "confirmed": c.confirmed, "manual": c.manual,
@@ -72,13 +84,27 @@ def _import_out(imp: LvImport, detail: bool = False) -> dict:
         "created_at": imp.created_at.isoformat() if imp.created_at else None,
         "grunddaten": {
             "ebf_m2": imp.ebf_m2, "anzahl_einheiten": imp.anzahl_einheiten,
-            "gebaeudetyp": imp.gebaeudetyp, "projektart": imp.projektart, "region": imp.region,
+            "gebaeudetyp": imp.gebaeudetyp, "projektart": imp.projektart,
+            "zertifizierung": imp.zertifizierung, "region": imp.region,
+            # Punkt 19 — aus dem Deckblatt erkannt.
+            "projekt_name": imp.projekt_name, "projekt_nummer": imp.projekt_nummer,
+            "ort": imp.ort, "unternehmer": imp.unternehmer,
+            "offert_datum": imp.offert_datum,
         },
     }
     if detail:
         base["features"] = [_feature_out(f) for f in imp.features]
         base["costs"] = [_cost_out(c) for c in imp.costs]
+        # Punkt 25 — Verarbeitungsbericht für die Import-Zusammenfassung.
+        base["report"] = _report(imp)
     return base
+
+
+def _report(imp: LvImport) -> dict:
+    try:
+        return json.loads(imp.debug_json) if imp.debug_json else {}
+    except (ValueError, TypeError):
+        return {}
 
 
 @router.post("", status_code=201)
@@ -105,22 +131,43 @@ async def upload_lv(
     db.add(imp)
     db.flush()
 
-    # B3 / P0 #1 — Extraktion (born-digital, sonst deutscher OCR-Fallback). Die
-    # gewählte Methode (digital/ocr/image) wird festgehalten, damit im Review
-    # sichtbar bleibt, woher ein Wert stammt. Fehler dürfen den Import nicht
-    # sprengen.
-    pages, searchable, method = extract_best(raw)
-    imp.page_count = len(pages)
-    imp.is_searchable = searchable
-    imp.extract_method = method
+    # B3 / P0 #1 / Punkt 29 — EINE Pipeline: Text, Wortkoordinaten, Seiten-
+    # klassifikation und alle Extraktoren laufen genau einmal und teilen ihre
+    # Zwischenergebnisse. Die Methode (spatial_pdf/text/ocr/image) wird
+    # festgehalten, damit im Review sichtbar bleibt, woher ein Wert stammt.
+    # Fehler dürfen den Import nicht sprengen.
+    pipeline = LvPipeline(raw)
+    imp.page_count = pipeline.page_count
+    imp.is_searchable = pipeline.is_searchable
+    imp.extract_method = pipeline.extraction_method
     try:
-        features = extract_features(pages)
-        costs = extract_costs(pages)
+        # Punkt 19 — Projektangaben aus dem Deckblatt vorschlagen (nur belegbare;
+        # EBF/Zertifizierung/Projektart werden NICHT geraten).
+        projekt = extract_project_data(pipeline.grunddaten_pages)
+        imp.projekt_name = (projekt.get("project_name") or {}).get("value")
+        imp.projekt_nummer = (projekt.get("project_number") or {}).get("value")
+        imp.ort = (projekt.get("location") or {}).get("value")
+        imp.unternehmer = (projekt.get("contractor") or {}).get("value")
+        imp.offert_datum = (projekt.get("offer_date") or {}).get("value")
+        if projekt.get("building_use"):
+            imp.gebaeudetyp = projekt["building_use"]["value"]
+        if projekt.get("units"):
+            imp.anzahl_einheiten = projekt["units"]["value"]
+
+        features = extract_features(pipeline.technik_pages, pipeline.technik_word_pages)
+        # Punkt 13 — Kosten primär aus der Kostenzusammenstellung; nur wenn es
+        # keine gibt, werden die LV-Positionstotale ausgewertet.
+        summary = parse_cost_summary(pipeline.cost_summary_pages)
+        if has_cost_summary(summary):
+            costs = to_cost_rows(summary)
+        else:
+            costs = [dict(c, source="lv_positions") for c in extract_costs(pipeline.lv_pages)]
         # ALLE kanonischen Features anlegen (auch nicht erkannte) → der Nutzer
         # sieht die vollständige Checkliste und kann fehlende Werte ergänzen.
         for key in FEATURE_KEYS:
             f = features.get(key)
             val = f.get("value") if f else None
+            bbox = (f or {}).get("source_bbox")
             db.add(LvImportFeature(
                 lv_import_id=imp.id, key=key,
                 value=None if val is None else str(val),
@@ -128,14 +175,43 @@ async def upload_lv(
                 confidence=f.get("confidence") if f else None,
                 source_page=f.get("source_page") if f else None,
                 source_text=f.get("source_text") if f else None,
+                source_excerpt=f.get("source_excerpt") if f else None,
+                source_bbox=",".join(str(round(v, 1)) for v in bbox) if bbox else None,
+                derived_from=f.get("derived_from") if f else None,
             ))
         for c in costs:
             db.add(LvImportCost(
                 lv_import_id=imp.id, bkp_nr=c["bkp_nr"],
+                original_position=c.get("original_position"),
+                original_title=c.get("original_title"),
+                canonical_key=c.get("canonical_key"),
+                is_group_total=bool(c.get("is_group_total", False)),
+                validation_status=c.get("validation_status"),
+                source=c.get("source"),
                 detected_amount=c.get("detected_amount"), confidence=c.get("confidence"),
                 source_page=c.get("source_page"), source_text=c.get("source_text"),
                 positionen=c.get("positionen", 1),
             ))
+        # Punkt 25/30 — Verarbeitungsbericht: was wurde erkannt, was muss geprüft
+        # werden. Speist die Import-Zusammenfassung und den Debug-Dump.
+        erkannte = [k for k, f in features.items() if f.get("value") is not None]
+        pruefen = [c["bkp_nr"] for c in costs if not c.get("canonical_key")
+                   and not c.get("is_group_total")]
+        imp.debug_json = json.dumps({
+            **pipeline.debug_dump(),
+            "cost_source": "cost_summary" if has_cost_summary(summary) else "lv_positions",
+            "features_erkannt": len(erkannte),
+            "features_total": len(FEATURE_KEYS),
+            "feature_keys_erkannt": erkannte,
+            "kostenpositionen": len([c for c in costs if not c.get("is_group_total")]),
+            "gruppentotale": len([c for c in costs if c.get("is_group_total")]),
+            "kosten_ohne_zuordnung": len(pruefen),
+            "gruppen_validierung": {
+                g: i.get("validation_status")
+                for g, i in (summary.get("group_totals") or {}).items()},
+            "trade_total": summary.get("trade_total"),
+            "projekt_erkannt": sorted(projekt.keys()),
+        }, ensure_ascii=False)
         imp.status = LvImportStatus.review.value if imp.is_searchable else LvImportStatus.extracted.value
     except Exception:
         imp.status = LvImportStatus.failed.value
@@ -156,6 +232,14 @@ def list_lv(user: User = Depends(get_current_user), db: Session = Depends(get_db
     return [_import_out(imp) for imp in rows]
 
 
+@router.get("/fachwerte")
+def fachwerte_listen(user: User = Depends(get_current_user)):
+    """Punkt 5/20 — die EINE Registry kontrollierter Auswahllisten für das
+    Frontend. Muss VOR `/{import_id}` stehen, sonst fängt der int-Pfad zu."""
+    from app import fachwerte
+    return fachwerte.as_frontend()
+
+
 @router.get("/ocr-status")
 def ocr_status(user: User = Depends(get_current_user)):
     """P0 #1 — Diagnose, ob die deutsche OCR im Deployment einsatzbereit ist
@@ -168,6 +252,43 @@ def ocr_status(user: User = Depends(get_current_user)):
 @router.get("/{import_id}")
 def get_lv(import_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return _import_out(_get_import(db, user, import_id), detail=True)
+
+
+@router.get("/{import_id}/debug")
+def debug_lv(import_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Punkt 30 — Debug-Dump für die Arbeit an echten LVs.
+
+    Zeigt Seitenklassifikation, erkannte Features, Kostenzeilen samt kanonischer
+    Zuordnung und die Gruppen-Summenprüfung. Nur für die eigene Firma sichtbar
+    (wie jeder andere Import-Zugriff) und im normalen UI nicht verlinkt.
+    """
+    imp = _get_import(db, user, import_id)
+    report = _report(imp)
+    return {
+        "import_id": imp.id, "filename": imp.filename,
+        "extract_method": imp.extract_method,
+        "page_classification": report.get("classification", []),
+        "page_types": report.get("page_types", {}),
+        "cost_source": report.get("cost_source"),
+        "gruppen_validierung": report.get("gruppen_validierung", {}),
+        "trade_total": report.get("trade_total"),
+        "features": [
+            {"key": f.key, "value": f.value, "confidence": f.confidence,
+             "derived_from": f.derived_from, "source_page": f.source_page,
+             "source_text": f.source_text, "source_excerpt": f.source_excerpt,
+             "source_bbox": f.source_bbox}
+            for f in imp.features
+        ],
+        "costs": [
+            {"bkp_nr": c.bkp_nr, "original_position": c.original_position,
+             "original_title": c.original_title, "canonical_key": c.canonical_key,
+             "is_group_total": bool(c.is_group_total),
+             "validation_status": c.validation_status,
+             "detected_amount": c.detected_amount, "source_page": c.source_page}
+            for c in imp.costs
+        ],
+        "report": report,
+    }
 
 
 @router.patch("/{import_id}/features/{feature_id}")
@@ -254,10 +375,30 @@ def update_import(import_id: int, body: dict, user: User = Depends(get_current_u
             imp.anzahl_einheiten = None if body["anzahl_einheiten"] in (None, "") else int(float(body["anzahl_einheiten"]))
         except (TypeError, ValueError):
             raise HTTPException(status_code=422, detail="Ungültige Einheiten")
-    for feld in ("gebaeudetyp", "projektart", "region"):
+    # Punkt 20 — kategoriale Merkmale nur als kanonischer Code speichern.
+    # Freitext wird über die zentrale Registry normalisiert; lässt er sich nicht
+    # zuordnen, wird er abgelehnt statt als neue Schreibweise verewigt.
+    for feld, registry in (("gebaeudetyp", "building_uses"),
+                           ("projektart", "project_types"),
+                           ("zertifizierung", "certifications")):
+        if feld not in body:
+            continue
+        val = body[feld]
+        if val in (None, ""):
+            setattr(imp, feld, None)
+            continue
+        code = fachwerte.normalize(registry, val)
+        if not code:
+            raise HTTPException(status_code=422, detail={
+                "message": f"Unbekannter Wert für {feld}. Bitte aus der Liste wählen.",
+                "feld": feld, "erlaubt": fachwerte.codes(registry),
+            })
+        setattr(imp, feld, code)
+    for feld in ("region", "projekt_name", "projekt_nummer", "ort", "unternehmer",
+                 "offert_datum"):
         if feld in body:
             val = body[feld]
-            setattr(imp, feld, None if val in (None, "") else str(val))
+            setattr(imp, feld, None if val in (None, "") else str(val)[:200])
     db.commit()
     return _import_out(imp, detail=True)
 
@@ -302,14 +443,26 @@ def approve_lv(import_id: int, user: User = Depends(get_current_user), db: Sessi
         except (TypeError, ValueError):
             return None
 
+    # Punkt 6/7 — mehrere Wärmeerzeuger und Wärmeabgaben als kanonische Codes.
+    # `generator_types` ist die vollständige Liste; fehlt sie (Altimport), wird
+    # der Einzelwert `generator_type` verwendet.
+    erzeuger = fachwerte.normalize_list("generator_types", eff.get("generator_types"))
+    if not erzeuger and eff.get("generator_type"):
+        erzeuger = fachwerte.normalize_list("generator_types", eff["generator_type"])
+    abgabe = fachwerte.normalize_list("heat_delivery_types", eff.get("heat_delivery_types"))
+
     ref = RefProjekt(
         tenant_id=user.tenant_id, erstellt_von=user.id,
-        name=f"LV-Import: {imp.filename}",
+        name=imp.projekt_name or f"LV-Import: {imp.filename}",
         installierte_leistung_neu_kw=num("generator_power_kw"),
-        waermeerzeuger=[eff["generator_type"]] if eff.get("generator_type") else [],
-        # Projektgrunddaten aus dem Review (Item 6).
+        waermeerzeuger=erzeuger,
+        waermeabgabe=abgabe,
+        # Hybrid ist kein gewählter Erzeuger, sondern abgeleitet (Punkt 7).
+        anlagenkonfiguration="hybrid" if fachwerte.ist_hybrid(erzeuger) else None,
+        # Projektgrunddaten aus dem Review (Item 6 / Punkt 20) — kanonische Codes.
         ebf_m2=imp.ebf_m2, anzahl_einheiten=imp.anzahl_einheiten,
         gebaeudetyp=imp.gebaeudetyp, projektart=imp.projektart,
+        zertifizierung=imp.zertifizierung,
     )
     # Legacy-Spalten aus dem EINEN zentralen Mapping befüllen (Rückwärts-
     # kompatibilität zur bestehenden Ähnlichkeit, die noch Spalten liest).
@@ -329,13 +482,25 @@ def approve_lv(import_id: int, user: User = Depends(get_current_user), db: Sessi
             key=f.key, value=eff.get(f.key), unit=f.unit,
         ))
 
+    # Punkt 14/15 — Einzelpositionen sind massgebend. Ein Gruppentotal ist nur
+    # eine Kontrollzeile und darf NIE zusätzlich zu seinen Unterpositionen in die
+    # Referenzkosten fliessen (sonst zählt jede Gruppe doppelt). Nur wenn eine
+    # Gruppe gar keine Einzelposition hat, wird ihr Total selbst verwendet.
+    gruppen_mit_positionen = {
+        c.bkp_nr for c in imp.costs
+        if not c.is_group_total and _cost_effective(c) is not None
+    }
     for c in imp.costs:
-        betrag = c.confirmed_amount if c.confirmed_amount is not None else c.detected_amount
+        betrag = _cost_effective(c)
         if betrag is None:
+            continue
+        if c.is_group_total and c.bkp_nr in gruppen_mit_positionen:
             continue
         db.add(RefKostenzeile(
             tenant_id=user.tenant_id, ref_projekt_id=ref.id, gewerk="heizung",
-            bkp_nr=c.bkp_nr, bkp_name=None, betrag_chf=float(betrag),
+            # Originalnummer erhalten, wenn vorhanden (Punkt 14).
+            bkp_nr=c.original_position or c.bkp_nr,
+            bkp_name=c.original_title, betrag_chf=float(betrag),
         ))
 
     imp.status = LvImportStatus.approved.value

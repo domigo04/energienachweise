@@ -113,12 +113,37 @@ def groessennaehe(a: Optional[float], b: Optional[float]) -> float:
     return min(a, b) / max(a, b)
 
 
+def _nutzung_code(wert) -> Optional[str]:
+    """Nutzung auf den kanonischen Code bringen (app.fachwerte).
+
+    Altbestand trägt Freitext („MFH", „Mehrfamilienhaus"), neue LV-Importe
+    kanonische Codes („mfh"). Ohne diese Normalisierung würden beide als
+    verschieden gelten und die Ähnlichkeit still schlechter — darum wird für den
+    Vergleich IMMER normalisiert. Nicht zuordenbarer Text bleibt als
+    kleingeschriebener Originalwert erhalten (besser als None)."""
+    from app import fachwerte
+
+    if wert in (None, ""):
+        return None
+    return fachwerte.normalize("building_uses", wert) or str(wert).strip().lower()
+
+
+# Wohnnutzungen als kanonische Codes (MFH ↔ EFH sind fachlich benachbart).
+WOHNNUTZUNG_CODES = {"mfh", "efh"}
+
+
 def nutzungsnaehe(a: str, b: str) -> float:
     """Gleiche Nutzung 1.0, beides Wohnen (MFH↔EFH) 0.5, sonst 0.0 —
-    ein Spital-Kennwert sagt über ein EFH praktisch nichts aus."""
-    if a == b:
+    ein Spital-Kennwert sagt über ein EFH praktisch nichts aus.
+
+    Vergleicht kanonisch, damit „MFH" (Altbestand) und „mfh" (LV-Import)
+    dasselbe bedeuten."""
+    ca, cb = _nutzung_code(a), _nutzung_code(b)
+    if ca is None or cb is None:
+        return 0.0
+    if ca == cb:
         return 1.0
-    if a in WOHNNUTZUNGEN and b in WOHNNUTZUNGEN:
+    if ca in WOHNNUTZUNG_CODES and cb in WOHNNUTZUNG_CODES:
         return 0.5
     return 0.0
 

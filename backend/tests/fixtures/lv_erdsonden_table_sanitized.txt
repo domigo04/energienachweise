@@ -1,0 +1,9 @@
+# Sanitisierte Erdsonden-Tabelle (Punkt 26) — Struktur eines echten LV.
+# Die Störzahlen ober- und unterhalb sind bewusst enthalten: sie stammen aus
+# Nachbarspalten/Ausschreibungswerten und dürfen NICHT als Sondenanzahl gelesen
+# werden (Punkt 5).
+241.14 Erdsonden inkl. Bohrarbeiten
+Bohrdurchmesser mm 152
+Laenge/Sonde m 150
+Total Sonden 6
+Verpressung Stk. 6

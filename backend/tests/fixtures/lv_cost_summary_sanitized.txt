@@ -1,0 +1,46 @@
+# Sanitisierte Kostenzusammenstellung (Punkt 26) — Struktur und Beträge eines
+# echten Unternehmerangebots, ohne Namen, Adressen oder weitere Offertdaten.
+# Dient als Golden-LV-Regressionstest (Punkt 16).
+KOSTENZUSAMMENSTELLUNG
+
+BKP     Bezeichnung                                                        CHF
+
+241     Energielagerung
+241.10  Expansion und Sicherheit Primaerkreis WP zu Erdsondensammler    1'410.00
+241.11  Rohrleitungen Primaerkreis WP zu Erdsondensammler               2'407.00
+241.12  Apparate und Armaturen Primaerkreis WP zu Erdsondensammler      2'162.00
+241.13  Rohrleitungen Primaerkreis EWS                                 10'223.00
+241.14  Erdsonden inkl. Bohrarbeiten                                   87'050.00
+Total BKP 241                                                         103'252.00
+
+242     Waermeerzeugung
+242.1   Waermeerzeuger Sole/Wasser-Waermepumpe                         50'650.00
+242.2   Expansion und Sicherheit Waermeerzeugung                          780.00
+242.3   Apparate und Armaturen Waermeerzeugung                          5'328.00
+Total BKP 242                                                          56'758.00
+
+243     Waermeverteilung
+243.1   Rohrleitungen Verteilung                                        4'423.00
+243.2   Flaechenheizung                                                14'961.00
+243.3   Apparate und Armaturen Verteilung                               5'782.00
+243.4   Waermemessung                                                  11'997.00
+243.5   Montage und Transport Verteilung                               33'980.00
+Total BKP 243                                                          71'143.00
+
+247     Isolationen
+247.1   Isolation Rohrleitungen                                         4'191.00
+247.2   Isolation Apparate                                                554.00
+Total BKP 247                                                           4'745.00
+
+248     Uebrige Installationen
+248.2   Elektroanschluesse                                             11'757.00
+248.3   Inbetriebnahme und Einregulierung                                9'009.00
+Total BKP 248                                                          20'766.00
+
+249     Uebrige Arbeiten
+249.1   Bauliche Anpassungen                                            1'000.00
+249.2   Provisorien                                                     5'000.00
+249.3   Regiearbeiten                                                   3'000.00
+Total BKP 249                                                           9'000.00
+
+Total BKP 24                                                          265'664.00

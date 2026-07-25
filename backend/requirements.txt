@@ -21,3 +21,4 @@ openpyxl  # liest die BFS-Baupreisindex-Excel-Datei
 numpy  # Potenzfunktion-Regression (Grobkostenschätzung BKP)
 pytesseract  # OCR gescannter LVs (P0 #1) — braucht das Tesseract-Binary (nixpacks.toml)
 pdf2image  # rendert Bild-PDF-Seiten für OCR — braucht poppler-utils (nixpacks.toml)
+pdfplumber  # Wortkoordinaten für die räumliche LV-Tabellenerkennung (Punkt 3/4)

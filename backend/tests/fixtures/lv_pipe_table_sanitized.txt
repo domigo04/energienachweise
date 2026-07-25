@@ -1,0 +1,14 @@
+# Sanitisierte Rohrleitungstabelle (Punkt 26).
+# Abschnitt 243.1 = echte Verteilrohre → zaehlen als Rohrmeter (12+18+42+78+60+42 = 252).
+# Abschnitt 243.2 = Flaechenheizung → darf NICHT in die Verteilrohrmeter fliessen.
+243.1 Rohrleitungen
+Geschweisste Gasrohre DN 32 m 12
+Geschweisste Gasrohre DN 40 m 18
+Geschweisste Siederohre DN 50 m 42
+Stahlrohre DN 25 m 78
+C-Stahlrohre DN 20 m 60
+Pressrohre DN 15 m 42
+243.2 Flaechenheizung
+Bodenheizungsrohre 17x2 m 1450
+Heizkreisschlaufen m 820
+Flaechenheizungsschlangen m 300

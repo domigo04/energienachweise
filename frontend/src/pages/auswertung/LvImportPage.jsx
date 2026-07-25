@@ -34,6 +34,14 @@ const STATUS_STYLE = {
   failed: "bg-red-100 text-red-700",
 };
 
+// Block C #9 — der Review läuft in vier klaren Schritten statt einer langen Seite.
+const SCHRITTE = [
+  { key: "grunddaten", titel: "Grunddaten" },
+  { key: "werte", titel: "Technische Werte" },
+  { key: "kosten", titel: "BKP-Kosten" },
+  { key: "freigabe", titel: "Freigabe" },
+];
+
 function anzeige(key, wert) {
   if (wert == null || wert === "") return "—";
   if (key === "generator_type") return GENERATOR_TYPE_LABELS[wert] || wert;
@@ -140,6 +148,7 @@ function ReviewAnsicht({ id }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [approving, setApproving] = useState(false);
+  const [schritt, setSchritt] = useState(0);
 
   useEffect(() => {
     getLvImport(id).then(setImp).catch(() => setError("Import konnte nicht geladen werden")).finally(() => setLoading(false));
@@ -161,6 +170,15 @@ function ReviewAnsicht({ id }) {
   const kostenVerwendet = (imp.costs || []).filter((c) => c.effective_amount != null);
   const kostenOffen = kostenVerwendet.filter((c) => !c.confirmed).length;
   const alleGeprueft = featTotal > 0 && featGeprueft === featTotal && kostenOffen === 0;
+  const grunddatenGesetzt = ["ebf_m2", "anzahl_einheiten", "gebaeudetyp", "projektart", "region"]
+    .some((k) => imp.grunddaten?.[k] != null && imp.grunddaten?.[k] !== "");
+  // Fortschritt je Schritt für den Stepper (Freigabe selbst ist nie „fertig").
+  const schrittFertig = [
+    grunddatenGesetzt,
+    featTotal > 0 && featGeprueft === featTotal,
+    kostenOffen === 0,
+    false,
+  ];
 
   const setFeature = async (feature, patch) => {
     const updated = await updateLvFeature(id, feature.id, patch);
@@ -228,10 +246,27 @@ function ReviewAnsicht({ id }) {
         </div>
       )}
 
-      {/* Projektgrunddaten (im Review ergänzen) */}
-      <section className="card mb-6 overflow-hidden">
+      {/* Schritt-Navigation (Block C #9) */}
+      <ol className="mb-6 flex flex-wrap items-center gap-2">
+        {SCHRITTE.map((s, i) => (
+          <li key={s.key} className="flex min-w-0 flex-1 basis-40">
+            <button type="button" onClick={() => setSchritt(i)}
+              className={`flex min-w-0 flex-1 items-center gap-2 rounded-xl border px-3 py-2 text-left transition ${i === schritt ? "border-brand-400 bg-brand-50" : "border-slate-200 bg-white hover:border-slate-300"}`}>
+              <span className={`flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${schrittFertig[i] ? "bg-green-500 text-white" : i === schritt ? "bg-brand-500 text-white" : "bg-slate-200 text-slate-500"}`}>
+                {schrittFertig[i] ? "✓" : i + 1}
+              </span>
+              <span className={`truncate text-xs font-semibold ${i === schritt ? "text-brand-700" : "text-slate-600"}`}>{s.titel}</span>
+            </button>
+          </li>
+        ))}
+      </ol>
+
+      {/* Schritt 1 — Projektgrunddaten (im Review ergänzen) */}
+      {schritt === 0 && (
+      <section className="card overflow-hidden">
         <div className="border-b border-slate-100 bg-slate-50/60 px-4 py-3 sm:px-5">
           <h2 className="text-sm font-bold text-slate-800">Projektgrunddaten</h2>
+          <p className="mt-0.5 text-[11px] text-slate-400">Optional, fliessen bei Freigabe ins Referenzprojekt.</p>
         </div>
         <div className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 sm:px-5">
           {[
@@ -250,8 +285,10 @@ function ReviewAnsicht({ id }) {
           ))}
         </div>
       </section>
+      )}
 
-      {/* Technischer Fingerprint nach Kategorien */}
+      {/* Schritt 2 — Technischer Fingerprint nach Kategorien */}
+      {schritt === 1 && (
       <div className="space-y-6">
         {KATEGORIEN.map((kat) => {
           const rows = kat.keys.map((k) => featureByKey[k]).filter(Boolean);
@@ -301,8 +338,15 @@ function ReviewAnsicht({ id }) {
         {featureByKey.generator_type && (
           <p className="text-xs text-slate-400">Erkannter Erzeugertyp: {anzeige("generator_type", featureByKey.generator_type.effective_value)}</p>
         )}
+        {!KATEGORIEN.some((kat) => kat.keys.some((k) => featureByKey[k])) && (
+          <p className="text-sm text-slate-400">Keine technischen Werte erkannt — bitte im nächsten Schritt Kosten und ggf. Werte manuell ergänzen.</p>
+        )}
+      </div>
+      )}
 
-        {/* BKP-Kosten — aggregiert, bestätigbar, manuell ergänzbar */}
+      {/* Schritt 3 — BKP-Kosten (aggregiert, bestätigbar, manuell ergänzbar) */}
+      {schritt === 2 && (
+      <div className="space-y-6">
         <section className="card overflow-hidden">
           <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/60 px-4 py-3 sm:px-5">
             <h2 className="text-sm font-bold text-slate-800">BKP-Kosten</h2>
@@ -339,26 +383,61 @@ function ReviewAnsicht({ id }) {
           </div>
         </section>
       </div>
+      )}
 
-      {/* Freigabe — nur wenn alle Werte geprüft sind (bestätigt oder bewusst unbekannt) */}
-      <div className="mt-6 flex flex-wrap items-center gap-3">
-        {gesperrt ? (
-          <div className="flex items-center gap-2 text-sm font-medium text-violet-700">
-            <CheckCircle2 className="size-4" /> Freigegeben
-            {imp.ref_projekt_id && <Link to="/auswertung" className="text-brand-600 hover:underline">· Referenzprojekt ansehen</Link>}
-          </div>
-        ) : (
-          <>
-            <span className="text-xs font-semibold text-slate-500">
-              {featGeprueft} / {featTotal} Werte geprüft{kostenOffen > 0 ? ` · ${kostenOffen} Kosten offen` : ""}
-            </span>
-            {!alleGeprueft && (
-              <button onClick={alleBestaetigen} className="btn-secondary">Alle als geprüft markieren</button>
-            )}
-            <button onClick={freigeben} disabled={approving || !alleGeprueft} className="btn-primary" title={!alleGeprueft ? "Zuerst alle Werte prüfen" : ""}>
-              <CheckCircle2 className="size-4" /> {approving ? "Gebe frei…" : "Referenzdaten freigeben"}
-            </button>
-          </>
+      {/* Schritt 4 — Freigabe (nur wenn alle Werte geprüft und Kosten bestätigt) */}
+      {schritt === 3 && (
+      <section className="card overflow-hidden">
+        <div className="border-b border-slate-100 bg-slate-50/60 px-4 py-3 sm:px-5">
+          <h2 className="text-sm font-bold text-slate-800">Freigabe</h2>
+        </div>
+        <div className="space-y-4 p-4 sm:px-5">
+          {gesperrt ? (
+            <div className="flex items-center gap-2 text-sm font-medium text-violet-700">
+              <CheckCircle2 className="size-4" /> Freigegeben
+              {imp.ref_projekt_id && <Link to="/auswertung" className="text-brand-600 hover:underline">· Referenzprojekt ansehen</Link>}
+            </div>
+          ) : (
+            <>
+              <ul className="space-y-1.5 text-sm text-slate-700">
+                <li className="flex items-center gap-2">
+                  {schrittFertig[1] ? <CheckCircle2 className="size-4 text-green-600" /> : <AlertTriangle className="size-4 text-amber-500" />}
+                  Technische Werte: {featGeprueft} / {featTotal} geprüft
+                </li>
+                <li className="flex items-center gap-2">
+                  {kostenOffen === 0 ? <CheckCircle2 className="size-4 text-green-600" /> : <AlertTriangle className="size-4 text-amber-500" />}
+                  Kosten: {kostenOffen === 0 ? "alle verwendeten bestätigt" : `${kostenOffen} offen`}
+                </li>
+                <li className="flex items-center gap-2 text-slate-500">
+                  {grunddatenGesetzt ? <CheckCircle2 className="size-4 text-green-600" /> : <span className="size-4" />}
+                  Grunddaten: {grunddatenGesetzt ? "erfasst" : "leer (optional)"}
+                </li>
+              </ul>
+              <div className="flex flex-wrap items-center gap-3">
+                {!alleGeprueft && (
+                  <button onClick={alleBestaetigen} className="btn-secondary">Alle als geprüft markieren</button>
+                )}
+                <button onClick={freigeben} disabled={approving || !alleGeprueft} className="btn-primary" title={!alleGeprueft ? "Zuerst alle Werte prüfen" : ""}>
+                  <CheckCircle2 className="size-4" /> {approving ? "Gebe frei…" : "Referenzdaten freigeben"}
+                </button>
+              </div>
+              {!alleGeprueft && (
+                <p className="text-xs text-amber-600">Freigabe erst möglich, wenn alle technischen Werte geprüft und alle verwendeten Kostenpositionen bestätigt sind.</p>
+              )}
+            </>
+          )}
+        </div>
+      </section>
+      )}
+
+      {/* Schritt-Navigation unten */}
+      <div className="mt-6 flex items-center justify-between gap-3">
+        <button type="button" disabled={schritt === 0}
+          onClick={() => setSchritt((s) => Math.max(0, s - 1))}
+          className="btn-ghost disabled:opacity-40">Zurück</button>
+        {schritt < SCHRITTE.length - 1 && (
+          <button type="button" onClick={() => setSchritt((s) => Math.min(SCHRITTE.length - 1, s + 1))}
+            className="btn-primary">Weiter</button>
         )}
       </div>
     </div>

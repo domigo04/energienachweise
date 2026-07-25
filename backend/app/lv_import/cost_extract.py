@@ -1,43 +1,36 @@
-"""B8 — BKP-Beträge best-effort erkennen. Blockiert den Import NIE; fehlende
-oder unsichere Beträge werden im Review manuell ergänzt (confirmed_amount)."""
+"""B8 / Block C #10 — BKP-Beträge aus strukturierten Positionsblöcken erkennen.
+
+Blockiert den Import NIE; fehlende oder unsichere Beträge werden im Review
+manuell ergänzt (confirmed_amount). Grundlage ist der Positionsblock-Parser
+(positions.py): eine Position = ein Block, Beträge werden je BKP aggregiert —
+nicht „erster Treffer gewinnt".
+"""
 from __future__ import annotations
 
-import re
-
-from app.lv_import.normalization import parse_number
-from app.lv_import.feature_extract import _seiten_zeilen, HIGH, MEDIUM
-
-# BKP-Nummer: "BKP 241", "BKP 242.3" oder eine führende 2xx(.x)-Position.
-_BKP = re.compile(r"bkp\s*(\d{3}(?:\.\d+)?)|^\s*(2\d{2}(?:\.\d+)?)\b", re.IGNORECASE)
-# Betrag mit CHF/Fr. — nur mit Währungsmarker, um Mengen nicht als Preise zu lesen.
-_CHF = re.compile(r"(?:chf|fr\.?)\s*([\d’'\s.]+\d)|([\d’'\s.]+\d)\s*(?:chf|fr\.?)", re.IGNORECASE)
+from app.lv_import.feature_extract import HIGH, MEDIUM
+from app.lv_import.positions import parse_positions
 
 
 def extract_costs(pages) -> list[dict]:
-    """Alle erkannten Kostenpositionen je BKP SAMMELN und aggregieren — nicht
-    „erster Treffer gewinnt". Beträge derselben BKP werden summiert, die Zahl der
-    Einzelpositionen und die erste Fundstelle festgehalten."""
-    zeilen = _seiten_zeilen(pages)
+    """Positionen je BKP SAMMELN und aggregieren: Beträge summieren, Zahl der
+    Einzelpositionen und erste Fundstelle festhalten."""
     agg: dict[str, dict] = {}
     reihenfolge: list[str] = []
-    for seite, line in zeilen:
-        b = _BKP.search(line)
-        if not b:
+    for p in parse_positions(pages):
+        bkp_nr = p.get("bkp_nr")
+        if not bkp_nr:
             continue
-        bkp_nr = b.group(1) or b.group(2)
-        c = _CHF.search(line)
-        betrag = parse_number(c.group(1) or c.group(2)) if c else None
         if bkp_nr not in agg:
             agg[bkp_nr] = {
-                "bkp_nr": bkp_nr, "summe": 0.0, "mit_betrag": 0, "positionen": 0,
-                "source_page": seite, "source_text": line,
+                "summe": 0.0, "mit_betrag": 0, "positionen": 0,
+                "source_page": p["source_page"], "source_text": p["source_text"],
             }
             reihenfolge.append(bkp_nr)
-        eintrag = agg[bkp_nr]
-        eintrag["positionen"] += 1
-        if betrag is not None:
-            eintrag["summe"] += betrag
-            eintrag["mit_betrag"] += 1
+        e = agg[bkp_nr]
+        e["positionen"] += 1
+        if p.get("betrag") is not None:
+            e["summe"] += p["betrag"]
+            e["mit_betrag"] += 1
 
     out = []
     for bkp_nr in reihenfolge:

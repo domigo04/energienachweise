@@ -68,9 +68,14 @@ const DEFAULT_LAYER_VISIBILITY = Object.fromEntries(LEITUNGS_LAYER.map(layer => 
 const CAD_GRID = 10;
 const EMPTY_OBJECT = Object.freeze({});
 const EMPTY_ARRAY = Object.freeze([]);
+const GRID_OPTIONEN = [2, 5, 10, 20, 25, 50];   // mm-Raster (Block A #2)
+const TOLERANZ_OPTIONEN = [4, 8, 12, 20];        // Fangtoleranz in mm
 const DEFAULT_DRAWING_CONFIG = {
   corner_radius:8,
   grid_size:CAD_GRID,
+  // Objektfang-Toleranz in mm (Block A #2). Wird beim Zeichnen durch den Zoom
+  // geteilt, damit die gefühlte Fangdistanz auf dem Schirm konstant bleibt.
+  snap_tolerance:10,
   shortcut_polyline:'p',
   shortcut_line:'l',
   // Bauteil-Befehle auf frei belegbaren Tasten (Feedback Dominic). Verschieben
@@ -113,7 +118,8 @@ function graphFuerSpeicherung(nodes, edges, layerConfig, drawingConfig) {
 
 const normalisiereDrawingConfig = (config = {}) => ({
   corner_radius:Math.max(0, Math.min(40, Number(config.corner_radius ?? DEFAULT_DRAWING_CONFIG.corner_radius) || 0)),
-  grid_size:[5, 10, 20].includes(Number(config.grid_size)) ? Number(config.grid_size) : DEFAULT_DRAWING_CONFIG.grid_size,
+  grid_size:GRID_OPTIONEN.includes(Number(config.grid_size)) ? Number(config.grid_size) : DEFAULT_DRAWING_CONFIG.grid_size,
+  snap_tolerance:Math.max(2, Math.min(40, Number(config.snap_tolerance ?? DEFAULT_DRAWING_CONFIG.snap_tolerance) || DEFAULT_DRAWING_CONFIG.snap_tolerance)),
   shortcut_polyline:shortcutTaste(config.shortcut_polyline, DEFAULT_DRAWING_CONFIG.shortcut_polyline),
   shortcut_line:shortcutTaste(config.shortcut_line, DEFAULT_DRAWING_CONFIG.shortcut_line),
   shortcut_rotate:shortcutTaste(config.shortcut_rotate, DEFAULT_DRAWING_CONFIG.shortcut_rotate),
@@ -1375,6 +1381,11 @@ function EditorInner() {
   // erzeugt ein Klick eine hydraulische Leitung. Sonst kein Edge-Erzeugen.
   const [zeichenModus, setZeichenModus] = useState(false);
   const zeichenModusRef = useRef(false);
+  // Dauerhafter Leitungsmodus (Block A #3): bleibt nach dem Abschluss einer
+  // Leitung aktiv, damit mehrere Leitungen ohne erneutes Einschalten gezeichnet
+  // werden können. Esc/Rechtsklick beenden ihn bewusst.
+  const [dauerLeitung, setDauerLeitung] = useState(false);
+  const dauerLeitungRef = useRef(false);
   const [leitungsCursor, setLeitungsCursor] = useState(null);
   const [leitungsSnap, setLeitungsSnap] = useState(null);
   const [leitungsGuides, setLeitungsGuides] = useState([]);
@@ -1414,6 +1425,7 @@ function EditorInner() {
 
   useEffect(() => { leitungsEntwurfRef.current = leitungsEntwurf; }, [leitungsEntwurf]);
   useEffect(() => { zeichenModusRef.current = zeichenModus; }, [zeichenModus]);
+  useEffect(() => { dauerLeitungRef.current = dauerLeitung; }, [dauerLeitung]);
   useEffect(() => { leitungsCursorRef.current = leitungsCursor; }, [leitungsCursor]);
 
   useEffect(() => {
@@ -2090,7 +2102,7 @@ function EditorInner() {
       leitungsCursorRef.current = null;
       setLeitungsGuides([]);
       setSelectedEdgeId(existing.id);
-      setZeichenModus(false);
+      setZeichenModus(dauerLeitungRef.current);   // im Dauermodus aktiv bleiben
       return;
     }
 
@@ -2138,7 +2150,7 @@ function EditorInner() {
       setLeitungsCursor(null);
       setLeitungsSnap(null);
       setLeitungsGuides([]);
-      setZeichenModus(false);
+      setZeichenModus(dauerLeitungRef.current);
       return;
     }
     const returnPair = ruecklaufPaarErstellen(edge, startPoint, endPoint);
@@ -2163,7 +2175,8 @@ function EditorInner() {
     leitungsCursorRef.current = null;
     setLeitungsGuides([]);
     setSelectedEdgeId(edgeId);
-    setZeichenModus(false);   // nach erfolgreichem Abschluss Zeichenmodus beenden
+    // Nach Abschluss beenden — ausser der dauerhafte Leitungsmodus ist aktiv.
+    setZeichenModus(dauerLeitungRef.current);
   }, [activeLayer, cadAnker, drawingConfig, handleAusrichtung, handlePosition, letzterEntwurfsPunkt, leitungTeilen, routePunkte, ruecklaufPaarErstellen, setEdges, setNodes, snap]);
 
   const cadKlick = useCallback((event, nurBeiAnschluss = false) => {
@@ -2204,7 +2217,7 @@ function EditorInner() {
     const alignment = objektAusrichtung(raw, [
         ...objektFangpunkte,
         ...(previous ? [{ ...previous, kind:'draft', priority:1000 }] : []),
-      ], 10 / zoom, drawingConfig.grid_size);
+      ], drawingConfig.snap_tolerance / zoom, drawingConfig.grid_size);
     const point = event.shiftKey || shiftPressed
       ? auf45GradFangen(previous, alignment.point, drawingConfig.grid_size)
       : orthogonalerSegmentfang(previous, alignment.point, drawingConfig.grid_size);
@@ -2293,7 +2306,7 @@ function EditorInner() {
       const alignment = objektAusrichtung(raw, [
           ...objektFangpunkte,
           ...(previous ? [{ ...previous, kind:'draft', priority:1000 }] : []),
-        ], 10 / zoom, drawingConfig.grid_size);
+        ], drawingConfig.snap_tolerance / zoom, drawingConfig.grid_size);
       const point = event.shiftKey || shiftPressed
         ? auf45GradFangen(previous, alignment.point, drawingConfig.grid_size)
         : orthogonalerSegmentfang(previous, alignment.point, drawingConfig.grid_size);
@@ -2302,7 +2315,7 @@ function EditorInner() {
       setLeitungsSnap(null);
       setLeitungsGuides(guidesAmPunkt(alignment.guides, point));
     });
-  }, [activeLayer, drawingConfig.grid_size, getZoom, letzterEntwurfsPunkt, naechsteLeitung, naechsterBauteilAnschluss, naechsterFreierLeitungsEndpunkt, objektFangpunkte, screenToFlowPosition, shiftPressed]);
+  }, [activeLayer, drawingConfig.grid_size, drawingConfig.snap_tolerance, getZoom, letzterEntwurfsPunkt, naechsteLeitung, naechsterBauteilAnschluss, naechsterFreierLeitungsEndpunkt, objektFangpunkte, screenToFlowPosition, shiftPressed]);
 
   const cadEntwurfRoute = (() => {
     if (!leitungsEntwurf) return [];
@@ -2665,8 +2678,8 @@ function EditorInner() {
           return;
         }
         // Esc bricht jede aktive Zeichenaktion vollständig ab UND verlässt den
-        // Zeichenmodus.
-        if (ev.key === 'Escape' && (leitungsEntwurfRef.current || zeichenModusRef.current)) {
+        // Zeichenmodus — auch den dauerhaften Leitungsmodus.
+        if (ev.key === 'Escape' && (leitungsEntwurfRef.current || zeichenModusRef.current || dauerLeitungRef.current)) {
           leitungsEntwurfRef.current = null;
           leitungsCursorRef.current = null;
           setLeitungsEntwurf(null);
@@ -2674,6 +2687,7 @@ function EditorInner() {
           setLeitungsSnap(null);
           setLeitungsGuides([]);
           setZeichenModus(false);
+          setDauerLeitung(false);
           return;
         }
         if (ev.key === 'Enter' && leitungsEntwurfRef.current && leitungsCursorRef.current) {
@@ -3138,8 +3152,8 @@ function EditorInner() {
   }, [cadCursorAktualisieren, drawingConfig.grid_size, screenToFlowPosition, spiegelAchse?.start]);
   const onPaneContextMenu = useCallback((event) => {
     // Rechtsklick bricht jede aktive Zeichenaktion vollständig ab (kein
-    // versehentliches Abschliessen einer Leitung).
-    if (!leitungsEntwurfRef.current && !zeichenModusRef.current) return;
+    // versehentliches Abschliessen einer Leitung) und beendet den Dauermodus.
+    if (!leitungsEntwurfRef.current && !zeichenModusRef.current && !dauerLeitungRef.current) return;
     event.preventDefault();
     leitungsEntwurfRef.current = null;
     leitungsCursorRef.current = null;
@@ -3148,6 +3162,7 @@ function EditorInner() {
     setLeitungsSnap(null);
     setLeitungsGuides([]);
     setZeichenModus(false);
+    setDauerLeitung(false);
   }, []);
   const selectedNode  = selected  ? nodes.find(n => n.id === selected.id)  || null : null;
   const selectedEdge  = selectedEdgeId ? edges.find(e => e.id === selectedEdgeId) || null : null;
@@ -3384,9 +3399,15 @@ function EditorInner() {
               <input type="number" min="0" max="40" value={drawingConfig.corner_radius} onChange={event=>drawingConfigAktualisieren('corner_radius', event.target.value)} style={{ width:42, border:'1px solid #cbd5e1', borderRadius:5, padding:3, fontSize:10 }}/>
             </label>
             <label style={{ display:'grid', gridTemplateColumns:'88px 1fr', alignItems:'center', gap:7, marginBottom:10, fontSize:10, color:'#475569' }}>
-              Raster
+              mm-Raster
               <select value={drawingConfig.grid_size} onChange={event=>drawingConfigAktualisieren('grid_size', event.target.value)} style={{ border:'1px solid #cbd5e1', borderRadius:5, padding:4, background:'white', fontSize:10 }}>
-                <option value="5">5 px · fein</option><option value="10">10 px · normal</option><option value="20">20 px · grob</option>
+                {GRID_OPTIONEN.map(mm => <option key={mm} value={mm}>{mm} mm</option>)}
+              </select>
+            </label>
+            <label style={{ display:'grid', gridTemplateColumns:'88px 1fr', alignItems:'center', gap:7, marginBottom:10, fontSize:10, color:'#475569' }}>
+              Fangtoleranz
+              <select value={drawingConfig.snap_tolerance} onChange={event=>drawingConfigAktualisieren('snap_tolerance', event.target.value)} style={{ border:'1px solid #cbd5e1', borderRadius:5, padding:4, background:'white', fontSize:10 }}>
+                {TOLERANZ_OPTIONEN.map(mm => <option key={mm} value={mm}>{mm} mm{mm === 4 ? ' · exakt' : mm === 20 ? ' · grosszügig' : ''}</option>)}
               </select>
             </label>
             <label style={{ display:'flex', gap:7, alignItems:'center', padding:'8px 0', borderTop:'1px solid #f1f5f9', fontSize:10, fontWeight:700, color:'#334155' }}>
@@ -3440,12 +3461,20 @@ function EditorInner() {
           <span>{alleWarnungen.length ? `${alleWarnungen.length} Warnungen` : 'Keine Warnungen'}</span>
         </button>
 
-        <button
-          onClick={() => setZeichenModus(v => !v)}
-          className={`hc-auto-return${zeichenModus ? ' is-active' : ''}`}
-          title="Leitung zeichnen (Taste L/P) · Esc oder Rechtsklick bricht ab">
-          ✏ Leitung {zeichenModus ? 'zeichnen …' : 'zeichnen'}
-        </button>
+        <div style={{ display:'inline-flex', gap:4 }}>
+          <button
+            onClick={() => setZeichenModus(v => !v)}
+            className={`hc-auto-return${zeichenModus ? ' is-active' : ''}`}
+            title="Leitung zeichnen (Taste L/P) · Esc oder Rechtsklick bricht ab">
+            ✏ Leitung {zeichenModus ? 'zeichnen …' : 'zeichnen'}
+          </button>
+          <button
+            onClick={() => setDauerLeitung(v => { const next = !v; if (next) setZeichenModus(true); return next; })}
+            className={`hc-auto-return${dauerLeitung ? ' is-active' : ''}`}
+            title="Dauerhafter Leitungsmodus: bleibt nach jeder Leitung aktiv, bis Esc oder Rechtsklick">
+            ⤾ Dauer {dauerLeitung ? 'an' : 'aus'}
+          </button>
+        </div>
 
         <div className="hc-editor-toolbar__spacer" />
 

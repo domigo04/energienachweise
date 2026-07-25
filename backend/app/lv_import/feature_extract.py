@@ -220,4 +220,36 @@ def extract_features(pages) -> dict:
     if mtr is not None:
         result["borehole_total_m"] = mtr
 
+    _bauteilmengen_ergaenzen(pages, result)
     return result
+
+
+def _bauteilmengen_ergaenzen(pages, result: dict) -> None:
+    """Block C #11 — Bauteilmengen aus Positionsblöcken NUR dort ergänzen, wo die
+    zeilenbasierte Zählung nichts Belastbares fand. So profitieren block-
+    formatierte LVs, ohne die bestehende Zählung zu verändern."""
+    # Lazy import: positions.py nutzt _seiten_zeilen aus diesem Modul.
+    from app.lv_import.positions import component_quantities
+
+    mengen = component_quantities(pages)
+    if not mengen:
+        return
+    familie_zu_key = {
+        "pump": "pump_count", "valve_2way": "valve_2way_count",
+        "valve_3way": "valve_3way_count", "heat_meter": "heat_meter_count",
+        "buffer": "buffer_count",
+    }
+    for family, key in familie_zu_key.items():
+        m = mengen.get(family)
+        if not m:
+            continue
+        vorhanden = result.get(key)
+        if vorhanden is None or vorhanden.get("value") is None:
+            result[key] = {"value": int(round(m["summe"])), "confidence": MEDIUM,
+                           "source_page": m["source_page"], "source_text": m["source_text"]}
+    rohr = mengen.get("pipe")
+    if rohr:
+        vorhanden = result.get("pipe_length_m")
+        if vorhanden is None or vorhanden.get("value") is None:
+            result["pipe_length_m"] = {"value": round(rohr["summe"], 1), "confidence": MEDIUM,
+                                       "source_page": rohr["source_page"], "source_text": rohr["source_text"]}

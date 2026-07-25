@@ -205,6 +205,19 @@ def test_ist_durchsuchbar_heuristik():
     assert ist_durchsuchbar([]) is False
 
 
+def test_ocr_verfuegbar_diagnose():
+    """Diagnose meldet die OCR-Kette; wirft nie und ist erst 'ready', wenn alle
+    Bausteine da sind (env-unabhängig getestet über die Konsistenz der Flags)."""
+    from app.lv_import.pdf_extract import ocr_verfuegbar
+    info = ocr_verfuegbar()
+    for k in ("pytesseract", "pdf2image", "tesseract_binary", "poppler",
+              "deutsch", "languages", "ready"):
+        assert k in info
+    assert isinstance(info["languages"], list)
+    assert info["ready"] == (info["pytesseract"] and info["pdf2image"]
+                             and info["tesseract_binary"] and info["deutsch"] and info["poppler"])
+
+
 # ── B12 — gemeinsame Feature-Sprache ────────────────────────────────────────
 
 def test_feature_keys_mappen_auf_projectcontext():

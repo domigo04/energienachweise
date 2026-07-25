@@ -156,6 +156,15 @@ def list_lv(user: User = Depends(get_current_user), db: Session = Depends(get_db
     return [_import_out(imp) for imp in rows]
 
 
+@router.get("/ocr-status")
+def ocr_status(user: User = Depends(get_current_user)):
+    """P0 #1 — Diagnose, ob die deutsche OCR im Deployment einsatzbereit ist
+    (Tesseract-Binary + Sprachpaket deu + poppler). Muss VOR `/{import_id}`
+    stehen, sonst fängt der int-Pfad die Anfrage ab."""
+    from app.lv_import.pdf_extract import ocr_verfuegbar
+    return ocr_verfuegbar()
+
+
 @router.get("/{import_id}")
 def get_lv(import_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return _import_out(_get_import(db, user, import_id), detail=True)

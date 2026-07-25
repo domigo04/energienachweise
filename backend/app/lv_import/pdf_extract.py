@@ -66,6 +66,39 @@ def ocr_pages(pdf_bytes: bytes) -> list[dict]:
     return pages
 
 
+def ocr_verfuegbar() -> dict:
+    """Diagnose der OCR-Kette im laufenden Deployment (P0 #1). Best-effort, wirft
+    nie — meldet nur, was vorhanden ist. Erlaubt es, nach einem Railway-Build in
+    einem Klick zu prüfen, ob gescannte LVs per deutscher OCR gelesen werden
+    können, ohne erst eine Scan-PDF hochladen zu müssen."""
+    from shutil import which
+    info = {
+        "pytesseract": False, "pdf2image": False, "tesseract_binary": False,
+        "poppler": False, "languages": [], "deutsch": False, "ready": False,
+    }
+    try:
+        import pytesseract
+        info["pytesseract"] = True
+        try:
+            info["tesseract_binary"] = bool(pytesseract.get_tesseract_version())
+            langs = [str(l) for l in pytesseract.get_languages(config="")]
+            info["languages"] = langs
+            info["deutsch"] = "deu" in langs
+        except Exception:
+            pass
+    except Exception:
+        pass
+    try:
+        import pdf2image  # noqa: F401
+        info["pdf2image"] = True
+        info["poppler"] = which("pdftoppm") is not None
+    except Exception:
+        pass
+    info["ready"] = (info["pytesseract"] and info["pdf2image"]
+                     and info["tesseract_binary"] and info["deutsch"] and info["poppler"])
+    return info
+
+
 def extract_best(pdf_bytes: bytes):
     """Beste verfügbare Extraktion: zuerst born-digital, sonst OCR-Fallback.
     Rückgabe: (pages, is_searchable, method) mit method ∈ {digital, ocr, image}."""

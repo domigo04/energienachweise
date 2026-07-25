@@ -1,6 +1,11 @@
-"""B3 — Textextraktion aus born-digital PDF (pypdf). Seitenzuordnung bleibt
-erhalten (Herkunftsanzeige B9). OCR ist ein späterer Fallback und hier bewusst
-NICHT enthalten; Bild-PDFs liefern dann leere Seiten (Status bleibt sauber).
+"""B3 / P0 #1 — Textextraktion aus PDF. Seitenzuordnung bleibt erhalten
+(Herkunftsanzeige B9).
+
+`extract_best` erkennt automatisch, ob eine Textebene vorhanden ist: gibt es
+born-digital Text, wird dieser genommen ("digital"); sonst greift der deutsche
+OCR-Fallback ("ocr"). Findet auch OCR nichts oder fehlen die OCR-Abhängigkeiten,
+bleibt es ein Bild-PDF ("image") und die Werte werden manuell erfasst — der
+Import stürzt nie ab.
 
 Getrennte Schicht: kein DB-, kein Web-Bezug — nur Bytes → Seiten.
 """

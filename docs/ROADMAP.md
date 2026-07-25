@@ -1,103 +1,170 @@
 # Roadmap
 
-Die Reihenfolge richtet sich nach realer Nutzbarkeit, nicht nach sichtbarer
-Featuremenge.
+Diese Reihenfolge folgt Dominics neuer Prioritätenliste. Der Fokus hat sich
+bewusst verschoben:
 
-## P0 – Produktionsgrundlage
+> Erst echte historische LVs zuverlässig lesbar machen. Danach den Editor
+> perfektionieren.
 
-- [x] Projektzugriff konsequent auf firmenweit umstellen
-- [x] Rollen Plattformadmin, Firmenadmin und Firmenmitglied einführen
-- [x] Firmenadmin-Antrag und Bestätigung protokollieren
-- [x] direkte Schema-, Gruppen-, Kosten- und Exportrouten auf Firma begrenzen
-- [ ] PostgreSQL-Persistenz auf Railway verifizieren
+Sie ersetzt die frühere Reihenfolge (Editor/Produktionsgrundlage zuerst). Die
+alten P0-Punkte zur Produktionshärtung sind nicht gestrichen, sondern nach P6
+gewandert. `[x]` = im Code vorhanden und durch Test/Build abgesichert;
+`[~]` = teilweise; `[ ]` = offen.
+
+## P0 – Muss zuerst funktionieren
+
+### 1 OCR für gescannte LVs
+
+- [x] automatische Erkennung: Textebene vorhanden oder Scan
+      (`pdf_extract.ist_durchsuchbar`)
+- [x] bei Scan automatisch OCR (`pdf_extract.extract_best` → deutscher
+      `ocr_pages`-Fallback, `lang="deu"`)
+- [x] Seitenbezug erhalten (OCR liefert Seiten wie der Digitaltext; Herkunft
+      bleibt an Wert und Kostenposition)
+- [x] OCR-Ergebnis speichern: Methode (`digital`/`ocr`/`image`) als
+      `LvImport.extract_method`, erkannte Werte samt Fundstelle bleiben erhalten,
+      Original-PDF ohnehin unveränderbar gespeichert
+- [x] im Review anzeigen, ob Wert aus Digitaltext oder OCR kommt (Marker
+      «Digital»/«OCR» an jeder Fundstelle, Hinweisbanner bei OCR/Bild-PDF)
+- [ ] deutsche OCR auf Railway sauber installieren — Abhängigkeiten deklariert
+      (`requirements.txt`: `pytesseract`, `pdf2image`; `backend/nixpacks.toml`:
+      `tesseract-ocr`, `tesseract-ocr-deu`, `poppler-utils`). Fehlt eine
+      Abhängigkeit, bleibt der Import ein Bild-PDF (kein Absturz). **Deploy muss
+      noch verifiziert werden** (Testscan hochladen → Methode `ocr`).
+
+### 2 LV-Positionsblock-Parser
+
+- [x] echte Positionen statt Einzelzeilen (`lv_import/positions.py`):
+      Positionsnummer, Beschreibung, Menge, Einheit, EP/Total je Block; BKP-Gruppe
+      aggregiert. Reine Mengen-/Betragszeilen eröffnen keine Position.
+
+### 3 Technische Mengen zuverlässig erkennen
+
+- [x] Rohrmeter, Pumpen, 2-Weg-, 3-Weg-Ventile, Wärmezähler, Speicher,
+      Wärmeerzeuger (+ Leistung/Typ), Erdsonden (+ Bohrmeter)
+      (`feature_extract.py` + Bauteilmengen aus Positionsblöcken)
+- [ ] STAD / Abgleichventile als eigene Familie erkennen (fehlt in
+      `synonyms.FEATURE_TERMS`)
+- [ ] Heizkörper zählen (fehlt als Feature-Familie; `anzahl_heizkoerper` existiert
+      erst als RefProjekt-Spalte)
+- Nächster Schritt nach OCR: die zwei offenen Familien ergänzen (Synonyme +
+      Feature-Key + ProjectContext-Mapping + Test).
+
+### 4 LV-Review fachlich sauber (vier Schritte)
+
+- [x] 1 Projektinformationen · 2 Technische Mengen · 3 Kosten · 4 Prüfen &
+      Freigeben (`LvImportPage.jsx`, Stepper)
+
+## P1 – Datenqualität
+
+### 5 Zentrale Auswahllisten
+
+- [ ] keine freien Schreibweisen für vergleichsrelevante Merkmale; zentrale
+      Listen für Gebäudenutzung, Projektart, Zertifizierung, Wärmeerzeuger,
+      Wärmeabgabe, Ausbauumfang (heute teils Freitext in Info-Seite und LV-Review)
+
+### 6 Wärmeerzeuger als Multi-Select
+
+- [ ] mehrere gleichzeitig (z. B. EWS-WP + Gas, Fernwärme + WP). Datenmodell hält
+      `waermeerzeuger` bereits als Liste — Eingabe/Erkennung noch einwertig.
+
+### 7 Wärmeabgabe als Multi-Select
+
+- [ ] mehrere gleichzeitig (z. B. FBH + Heizkörper)
+
+### 8 Projektinfos auf dieselben Selects umstellen
+
+- [ ] insbesondere Zertifizierung nicht mehr als Freitext
+
+## P2 – Kostenimport sicher machen
+
+### 9 Kostenpositionen manuell hinzufügen/löschen
+
+- [x] «+ BKP-Position» und Löschen funktionieren immer
+      (`add_cost`/`delete_cost`, `NeueKostZeile`)
+
+### 10 Kosten explizit bestätigen
+
+- [x] nur bestätigte Kosten fliessen in die Referenz (`confirmed`, effektiver
+      Betrag)
+
+### 11 Freigabe komplett absichern
+
+- [x] Freigabe erst bei geprüften technischen Merkmalen **und** bestätigten
+      verwendeten Kosten (`approve_lv` blockiert sonst mit 422)
+- [~] Projektangaben: Grunddaten fliessen ein, sind aber optional (kein Pflicht-
+      Gate) — bewusst, bis P1 die Selects liefert
+
+## P3 – Schemaeditor auf echten CAD-Workflow
+
+### 12 Orthogonales Mitziehen beim Verschieben
+
+- [x] angrenzender Eckpunkt wandert mit, Anschluss bleibt 90°
+      (`orthogonalerSegmentfang`, `mitgezogeneWaypoints`)
+
+### 13 Feines mm-Raster
+
+- [~] Raster/Fang existiert (`GRID_OPTIONEN = [2,5,10,20,25,50]` mm), aber noch
+      nicht wie gefordert: 1 mm als Standard, 1/2/5/10 mm, Pfeiltaste 1 mm,
+      Shift+Pfeil 10 mm, sichtbares Raster getrennt vom Fangraster
+
+### 14 Kleinere Fangtoleranzen
+
+- [~] mm-Fang eingeführt; «nicht mehr so aggressives Anspringen» noch feinjustieren
+
+### 15 Dauerhafter Leitungsmodus
+
+- [x] `L` → zeichnen, zeichnen, zeichnen → `Esc` (bleibt nach Abschluss aktiv)
+
+### 16 CAD-/Revit-Optik weiter härten
+
+- [~] Zonen-Handles/kleinere Grips vorhanden; offen: Handles nur bei Bedarf,
+      Bogenradius standardmässig 0, weniger React-Flow-Look
+
+## P4 – PDF-Unterlage
+
+### 17 PDF-/Bild-Underlay
+
+- [x] Hochladen → Seite wählen → halbtransparent → skalieren → verschieben →
+      sperren → abzeichnen (`schema/underlay`, `hc_schemas.underlay_json`)
+
+## P5 – Kostenlogik verbessern
+
+### 18 Neue gegen alte Schätzmethode backtesten
+
+- [ ] alte Schätzung vs. neue BKP-Ähnlichkeit vs. reale Projektkosten
+      (Leave-one-out), nicht sofort umschalten
+
+### 19 Skalierung pro BKP-Position verbessern
+
+- [~] BKP-Ähnlichkeit auf kanonischer Feature-Ebene vorhanden; feinere Skalierung
+      je Position (WP→kW, Erdsonden→Bohrmeter, Rohr→Rohrmeter, Speicher→Liter,
+      Wärmezähler→Stück) noch offen
+
+## P6 – Produktionshärtung
+
+### 20 Datenbank absichern
+
 - [ ] Alembic-Migrationen wiederherstellen
-- [ ] Startmigrationen und `DROP TABLE` aus der App entfernen
-- [ ] Backup und Restore testen
+- [ ] Startup-Migrationen (`_ensure_columns`/`_ensure_indexes`) und `DROP TABLE`
+      aus der App entfernen
+- [ ] PostgreSQL-Persistenz auf Railway verifizieren
+- [ ] Backup und Restore-Test
 - [ ] CI für Backendtests und Frontend-Build
+- [x] Projektzugriff firmenweit, Rollen Plattform-/Firmenadmin/Mitglied,
+      Antrag+Bestätigung protokolliert, direkte Routen firmenbegrenzt (aus der
+      alten P0-Grundlage bereits erledigt)
 
-## P1 – Editor stabilisieren und verkleinern
+## Reihenfolge für die Umsetzung
 
-- [ ] `HydraulikEditor.jsx` in Zustand, Geometrie, Werkzeuge, API und UI trennen
-- [ ] gemeinsame Typen und standardisierte Bauteilklassen einführen
-- [ ] wiederholte Node-, Handle- und Eigenschaftslogik vereinheitlichen
-- [x] Anschlusszone für Wärmeerzeuger und Speicher — dichte, neutrale
-      Rand-Handles (`ZoneHandles` in `HydraulikNodes.jsx`), Leitung dockt überall
-      an; VL/RL kommt aus dem Layer/Stroke, nicht aus dem Handle (durch
-      `test_erzeuger_anschlusszone_neutrale_handles_gleiche_physik` abgesichert).
-      Benannte Alt-Handles bleiben für Bestandsschemas erhalten.
-- [x] Textblöcke: freier, verschiebbarer Textblock (Palette «Beschriftung»),
-      Doppelklick editiert inline, Schriftgrösse im Panel
-- [ ] `Ctrl`/`Cmd` für Auswahl erweitern
-- [ ] `Shift` für gezieltes Abwählen
-- [ ] reale Performancefälle messen und mindestens 30 FPS halten
-- [ ] Editor-End-to-End-Test für Zeichnen, Speichern, Laden und Export
+1. OCR → 2. Positionsblock-Parser → 3. Rohrmeter + Bauteilmengen (STAD/Heizkörper
+offen) → 4. LV-Review → 5. zentrale Selects / Multi-Selects → 6. Kosten-Review +
+Freigabe → 7. Editor-CAD-Hardening → 8. PDF-Underlay → 9. Backtesting →
+10. Produktionshärtung.
 
-React Flow bleibt. Ein Rendererwechsel wird nur bei einem gemessenen,
-reproduzierbaren Blocker neu beurteilt.
-
-## P2 – Revisionen, Rechenweg und Zusammenarbeit
-
-- [ ] explizites „Stand speichern“ für Schema und Kostenschätzung
-- [ ] Vorgängerversion öffnen und vergleichen
-- [ ] freigegebene Revisionen unveränderbar machen
-- [ ] Berechnungsversion und Resultatsnapshot speichern
-- [ ] Änderungsprotokoll mit Benutzer und Diff
-- [ ] Rechenweg wie in Excel im PDF-/Excel-Export
-- [ ] manuelle Überschreibungen mit Quelle und Begründung
-- [ ] Anwesenheit und Soft-Locks für bearbeitete Bereiche
-
-Die Kostenschätzung besitzt bereits Freigabesnapshots. Diese werden erweitert,
-nicht parallel neu erfunden.
-
-## P3 – Eine fachliche Projektwahrheit
-
-- [x] Projekt als One Source of Truth verankert (Doku + ProjectContext-Hub)
-- [x] Grunddaten zentral in `HcProjectBaseData`, Kostenschätzung liest sie
-- [x] ProjectContext vervollständigt: Erzeugertyp, Erzeuger- vs.
-      Verbraucherleistung, Bohrmeter (Sonden × Länge) und Speichervolumen
-      live aus dem Schema (Golden-Project-Test §49)
-- [x] Projektinformations-Seite (`/projekte/:id/info`): EBF, Nutzung, Einheiten,
-      Projektart, Region, Zertifizierung zentral bearbeiten (§9)
-- [x] Projektmengen-Seite (`/projekte/:id/mengen`): kompletter ProjectContext
-      mit Herkunft (Schema/Projekt/Ergänzung/manuell), Ergänzungen (zusätzliche
-      Wärmezähler, Rohrmeter) und Overrides; Audit läuft weiter (§20/§37)
-- [x] Projekt-Dashboard als Railway-Universum: ProjectModuleNode, gemessene
-      SVG-Verbindungen, Backend-Statusdienst (`GET /projects/{id}/status`),
-      Modulstatus, Fortschritt, Stale-Erkennung der Kostenschätzung (§10-16)
-- [ ] separate Heizgruppen mit Schema-Verbrauchergruppen verbinden
-- [ ] Projektdetail-Drawer „Problem beheben" (§41)
-- [ ] Plankopf und Bauteileigenschaftstabellen aus der Revision erzeugen
-  - [x] Plankopf-Name eines neuen Schemas automatisch aus Projekt + Datum
-        vorbelegen (frei überschreibbar)
-  - [x] Legende/Bauteilkästchen im Editor automatisch sichtbar (Wahl gemerkt)
-  - [ ] schwarze Bauteil-Parameterblöcke automatisch unter jedem Bauteil
-        (Vorbild `PS_HEI_SWW-.pdf`): Fabrikat/Typ, Massenstrom, VL/RL, Leistung,
-        Pumpe, Zwangs-Ventil mit DN/KVS/Druckverlust, Wärmezähler. Werte grössten-
-        teils schon in der Legende berechnet. Offen: welche Felder berechnet vs.
-        manuell, Layout, Editor und/oder nur PDF
-- [ ] Projektvorlagen für typische Anlagen
-
-## P4 – Coldstart der Kostendaten
-
-- [ ] Submission als PDF/Bild hochladen
-- [ ] Positionen und Beträge automatisch extrahieren
-- [ ] Prüfoberfläche für unsichere Zuordnungen
-- [ ] Korrektur- und Freigabeprozess
-- [ ] Originaldatei und Herkunft dauerhaft verknüpfen
-
-Es werden keine Referenzdaten anderer Firmen geliefert oder vermischt.
-
-## P5 – Rückrechnung und Kalibrierung
-
-- [ ] Rückrechnung gegen abgeschlossene 3-Plan-Projekte
-- [ ] Leave-one-out-Backtesting pro BKP und total
-- [ ] Fehlerkennzahlen und systematische Abweichungen anzeigen
-- [ ] Gewichte nur innerhalb fachlicher Grenzen optimieren
-- [ ] unabhängigen Prüfbestand verwenden
-- [ ] Konfigurationen versionieren und manuell freigeben
-
-Erst nach genügend echten Projekten entscheiden, ob ein genetischer Algorithmus
-gegenüber einer einfacheren begrenzten Optimierung einen messbaren Vorteil hat.
+Editoränderungen (P3) immer zusätzlich im vollständigen Ablauf prüfen
+(CLAUDE.md → «Prüfen»): platzieren, drehen, verschieben, löschen, Leitung
+zeichnen, berechnen, speichern, neu laden, PDF vergleichen.
 
 ## Später
 
@@ -116,3 +183,5 @@ Ein Pilot ist erfolgreich, wenn ein Planer:
 - einen geprüften Stand exportiert;
 - das Projekt später identisch wieder öffnet;
 - beim nächsten Projekt freiwillig wieder das Heizungscockpit verwendet.
+</content>
+</invoke>

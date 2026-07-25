@@ -31,6 +31,10 @@ class LvImport(Base):
     original_pdf = Column(LargeBinary, nullable=True)          # Original nie überschreiben
     page_count = Column(Integer, nullable=False, default=0)
     is_searchable = Column(Boolean, nullable=False, default=True)  # born-digital vs. Bild-PDF
+    # Herkunft des Textes (P0 #1): "digital" = Textebene, "ocr" = per OCR erkannt,
+    # "image" = kein Text gefunden. Wird im Review angezeigt, damit sichtbar ist,
+    # ob ein Wert aus Digitaltext oder OCR stammt.
+    extract_method = Column(String, nullable=True)
     status = Column(String, nullable=False, default=LvImportStatus.uploaded.value)
     ref_projekt_id = Column(Integer, nullable=True)            # gesetzt nach Freigabe
     # Projektgrunddaten (im Review ergänzbar) → fliessen bei Freigabe ins RefProjekt.

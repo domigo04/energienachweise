@@ -17,6 +17,8 @@ from app.lv_import.feature_keys import (
     FEATURE_KEYS,
     FEATURE_TO_CONTEXT,
     REFPROJEKT_COLUMN_TO_FEATURE,
+    GRUNDDATEN_CONTEXT,
+    GRUNDDATEN_REFPROJEKT,
 )
 from app.lv_import.synonyms import GENERATOR_TYPE_TERMS
 
@@ -73,6 +75,30 @@ def canonical_from_refprojekt(ref) -> dict:
                 break
 
     return out
+
+
+def profile_from_context(context: dict) -> dict:
+    """Vollständiges Vergleichsprofil eines aktuellen Projekts: kanonische
+    technische Features + Grunddaten (EBF/Einheiten/Nutzung) für die Ähnlichkeit."""
+    from app.project_context import effective_map
+
+    prof = canonical_from_context(context)
+    eff = effective_map(context)
+    for gkey, ctx_key in GRUNDDATEN_CONTEXT.items():
+        val = eff.get(ctx_key)
+        if val is not None:
+            prof[gkey] = val
+    return prof
+
+
+def profile_from_refprojekt(ref) -> dict:
+    """Vollständiges Vergleichsprofil eines Referenzprojekts (Features + Grunddaten)."""
+    prof = canonical_from_refprojekt(ref)
+    for gkey, column in GRUNDDATEN_REFPROJEKT.items():
+        val = getattr(ref, column, None)
+        if val is not None:
+            prof[gkey] = val
+    return prof
 
 
 def leerer_feature_satz() -> dict:

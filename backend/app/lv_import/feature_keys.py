@@ -60,3 +60,10 @@ REFPROJEKT_COLUMN_TO_FEATURE = {
     "anzahl_waermemessungen": "heat_meter_count",
     "laufmeter_rohre_heizung": "pipe_length_m",
 }
+
+# Zusätzliche Vergleichsmerkmale (Grunddaten) für die BKP-Ähnlichkeit. Keine
+# LV-Kostentreiber, aber relevant für Verteilung/Messung. Auch hier ein
+# zentrales Mapping je Quelle.
+GRUNDDATEN_KEYS = ("ebf_m2", "units", "building_use")
+GRUNDDATEN_CONTEXT = {"ebf_m2": "ebf_m2", "units": "anzahl_nutzungseinheiten", "building_use": "nutzung"}
+GRUNDDATEN_REFPROJEKT = {"ebf_m2": "ebf_m2", "units": "anzahl_einheiten", "building_use": "gebaeudetyp"}

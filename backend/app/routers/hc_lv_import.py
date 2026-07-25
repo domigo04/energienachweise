@@ -16,11 +16,11 @@ from app.auth import get_current_user
 from app.database import get_db
 from app.models.auth import User
 from app.models.lv_import import LvImport, LvImportFeature, LvImportCost, LvImportStatus
-from app.models.kv import RefProjekt, RefKostenzeile
-from app.lv_import.pdf_extract import extract_pages, ist_durchsuchbar
+from app.models.kv import RefProjekt, RefKostenzeile, RefProjektFeature
+from app.lv_import.pdf_extract import extract_best
 from app.lv_import.feature_extract import extract_features
 from app.lv_import.cost_extract import extract_costs
-from app.lv_import.feature_keys import FEATURE_DEFS, FEATURE_TO_CONTEXT
+from app.lv_import.feature_keys import FEATURE_DEFS, FEATURE_KEYS, FEATURE_TO_CONTEXT
 
 router = APIRouter(prefix="/api/v1/lv-imports", tags=["KV – LV-Import"])
 
@@ -95,21 +95,26 @@ async def upload_lv(
     db.add(imp)
     db.flush()
 
-    # B3 — Extraktion (born-digital). Fehler dürfen den Import nicht sprengen.
-    pages = extract_pages(raw)
+    # B3 — Extraktion (born-digital, sonst OCR-Fallback). Fehler dürfen den
+    # Import nicht sprengen.
+    pages, searchable, _method = extract_best(raw)
     imp.page_count = len(pages)
-    imp.is_searchable = ist_durchsuchbar(pages)
+    imp.is_searchable = searchable
     try:
         features = extract_features(pages)
         costs = extract_costs(pages)
-        for key, f in features.items():
-            val = f.get("value")
+        # ALLE kanonischen Features anlegen (auch nicht erkannte) → der Nutzer
+        # sieht die vollständige Checkliste und kann fehlende Werte ergänzen.
+        for key in FEATURE_KEYS:
+            f = features.get(key)
+            val = f.get("value") if f else None
             db.add(LvImportFeature(
                 lv_import_id=imp.id, key=key,
                 value=None if val is None else str(val),
                 unit=FEATURE_DEFS.get(key, {}).get("einheit"),
-                confidence=f.get("confidence"),
-                source_page=f.get("source_page"), source_text=f.get("source_text"),
+                confidence=f.get("confidence") if f else None,
+                source_page=f.get("source_page") if f else None,
+                source_text=f.get("source_text") if f else None,
             ))
         for c in costs:
             db.add(LvImportCost(
@@ -194,6 +199,15 @@ def approve_lv(import_id: int, user: User = Depends(get_current_user), db: Sessi
     if imp.status == LvImportStatus.approved.value:
         raise HTTPException(status_code=409, detail="Import ist bereits freigegeben")
 
+    # Freigabe nur, wenn jeder relevante Wert geprüft ist — bestätigt ODER
+    # bewusst als unbekannt markiert (beides setzt confirmed=True).
+    unbestaetigt = [f.key for f in imp.features if not f.confirmed]
+    if unbestaetigt:
+        raise HTTPException(status_code=422, detail={
+            "message": "Bitte alle Werte prüfen (bestätigen oder als unbekannt markieren).",
+            "unconfirmed": unbestaetigt,
+        })
+
     eff = {f.key: _effective_feature(f) for f in imp.features}
 
     def num(key):
@@ -215,6 +229,13 @@ def approve_lv(import_id: int, user: User = Depends(get_current_user), db: Sessi
     )
     db.add(ref)
     db.flush()
+
+    # Kompletter normalisierter Fingerprint (ALLE Merkmale, gemeinsame Sprache).
+    for f in imp.features:
+        db.add(RefProjektFeature(
+            tenant_id=user.tenant_id, ref_projekt_id=ref.id,
+            key=f.key, value=eff.get(f.key), unit=f.unit,
+        ))
 
     for c in imp.costs:
         betrag = c.confirmed_amount if c.confirmed_amount is not None else c.detected_amount

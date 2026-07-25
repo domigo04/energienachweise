@@ -119,7 +119,7 @@ from app.database import Base
 from app.models.auth import User  # noqa: F401 — registriert hc_users
 from app.models.heizungscockpit import HcProject  # noqa: F401 — FK-Ziel project_id
 from app.models.lv_import import LvImport, LvImportFeature, LvImportCost, LvImportStatus
-from app.models.kv import RefProjekt, RefKostenzeile
+from app.models.kv import RefProjekt, RefKostenzeile, RefProjektFeature
 
 
 def _db():
@@ -155,11 +155,12 @@ def test_freigabe_uebernimmt_in_refprojekt():
     imp = LvImport(tenant_id=1, filename="MFH.pdf", file_hash="h", status=LvImportStatus.review.value)
     db.add(imp)
     db.flush()
-    db.add(LvImportFeature(lv_import_id=imp.id, key="generator_power_kw", value="82", confidence="medium"))
-    db.add(LvImportFeature(lv_import_id=imp.id, key="borehole_total_m", value="720", confidence="high"))
-    db.add(LvImportFeature(lv_import_id=imp.id, key="generator_type", value="ews_wp", confidence="medium"))
+    # Alle Werte geprüft (bestätigt) — Voraussetzung der Freigabe.
+    db.add(LvImportFeature(lv_import_id=imp.id, key="generator_power_kw", value="82", confidence="medium", confirmed=True))
+    db.add(LvImportFeature(lv_import_id=imp.id, key="borehole_total_m", value="720", confidence="high", confirmed=True))
+    db.add(LvImportFeature(lv_import_id=imp.id, key="generator_type", value="ews_wp", confidence="medium", confirmed=True))
     db.add(LvImportFeature(lv_import_id=imp.id, key="heat_meter_count", value="10",
-                           confirmed_value="13", confidence="medium"))
+                           confirmed_value="13", confidence="medium", confirmed=True))
     db.add(LvImportCost(lv_import_id=imp.id, bkp_nr="241", detected_amount=45000.0))
     db.commit()
 
@@ -176,6 +177,34 @@ def test_freigabe_uebernimmt_in_refprojekt():
     zeile = db.query(RefKostenzeile).first()
     assert zeile.bkp_nr == "241" and zeile.betrag_chf == 45000.0
     assert res["ref_projekt_id"] == ref.id
+    # Kompletter Fingerprint in der generischen Feature-Struktur (alle Merkmale).
+    feats = {f.key: f.value for f in db.query(RefProjektFeature).all()}
+    assert feats["heat_meter_count"] == "13"
+    assert feats["borehole_total_m"] == "720"
+    assert "generator_type" in feats
+
+
+def test_freigabe_blockiert_ohne_bestaetigung():
+    """Freigabe nur, wenn alle Werte geprüft (bestätigt/bewusst unbekannt) sind."""
+    from app.routers.hc_lv_import import approve_lv
+    from types import SimpleNamespace
+    from fastapi import HTTPException
+
+    db = _db()
+    imp = LvImport(tenant_id=1, filename="x.pdf", file_hash="h3", status=LvImportStatus.review.value)
+    db.add(imp)
+    db.flush()
+    db.add(LvImportFeature(lv_import_id=imp.id, key="pump_count", value="4", confirmed=False))
+    db.commit()
+
+    user = SimpleNamespace(id=1, tenant_id=1, name="D", email="d@x.ch")
+    try:
+        approve_lv(imp.id, user=user, db=db)
+        assert False, "Freigabe hätte blockieren müssen"
+    except HTTPException as e:
+        assert e.status_code == 422
+        assert "pump_count" in e.detail["unconfirmed"]
+    assert db.query(RefProjekt).count() == 0
 
 
 def test_nicht_freigegeben_hat_kein_refprojekt():

@@ -70,6 +70,9 @@ class RefProjekt(Base):
     gewerke = relationship(
         "RefProjektGewerk", back_populates="ref_projekt", cascade="all, delete-orphan"
     )
+    features = relationship(
+        "RefProjektFeature", back_populates="ref_projekt", cascade="all, delete-orphan"
+    )
 
 
 class RefKostenzeile(Base):
@@ -104,6 +107,25 @@ class RefProjektGewerk(Base):
     korrektur_betrag_chf = Column(Float, nullable=False, default=0.0)
 
     ref_projekt = relationship("RefProjekt", back_populates="gewerke")
+
+
+class RefProjektFeature(Base):
+    """Generische normalisierte Kostentreiber eines Referenzprojekts (B12).
+
+    Speichert ALLE technischen Merkmale in der gemeinsamen Feature-Sprache
+    (feature_keys, identisch zu ProjectContext) — nicht nur die wenigen Spalten,
+    die RefProjekt historisch besitzt. So bleibt der komplette Fingerprint eines
+    freigegebenen LV-Imports für die spätere BKP-Ähnlichkeit erhalten."""
+    __tablename__ = "ref_projekt_features"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, default=1, index=True)
+    ref_projekt_id = Column(Integer, ForeignKey("ref_projekte.id"), index=True)
+    key = Column(String, nullable=False, index=True)   # kanonischer Feature-Schlüssel
+    value = Column(String, nullable=True)               # None = bewusst unbekannt
+    unit = Column(String, nullable=True)
+
+    ref_projekt = relationship("RefProjekt", back_populates="features")
 
 
 class Kostenschaetzung(Base):

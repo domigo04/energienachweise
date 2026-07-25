@@ -122,10 +122,19 @@ function ReviewAnsicht({ id }) {
 
   const featureByKey = Object.fromEntries((imp.features || []).map((f) => [f.key, f]));
   const gesperrt = imp.status === "approved";
+  const total = (imp.features || []).length;
+  const geprueft = (imp.features || []).filter((f) => f.confirmed).length;
+  const alleGeprueft = total > 0 && geprueft === total;
 
   const setFeature = async (feature, patch) => {
     const updated = await updateLvFeature(id, feature.id, patch);
     setImp((cur) => ({ ...cur, features: cur.features.map((f) => (f.id === feature.id ? updated : f)) }));
+  };
+  const alleBestaetigen = async () => {
+    for (const f of (imp.features || []).filter((x) => !x.confirmed)) {
+      // eslint-disable-next-line no-await-in-loop
+      await setFeature(f, { confirmed: true });
+    }
   };
   const setCost = async (cost, patch) => {
     const updated = await updateLvCost(id, cost.id, patch);
@@ -192,13 +201,18 @@ function ReviewAnsicht({ id }) {
                     </div>
                     <div className="flex items-center gap-2 sm:justify-end">
                       <input
-                        className="input w-40"
+                        className="input w-36"
                         disabled={gesperrt}
                         defaultValue={f.confirmed_value ?? (f.value ?? "")}
                         placeholder={f.value != null ? String(f.value) : "unbekannt"}
                         onBlur={(e) => setFeature(f, { confirmed_value: e.target.value, confirmed: true })}
                       />
-                      {f.unit && <span className="text-xs text-slate-400">{f.unit}</span>}
+                      {f.unit && <span className="w-6 text-xs text-slate-400">{f.unit}</span>}
+                      <label className={`inline-flex items-center gap-1 text-[11px] font-semibold ${f.confirmed ? "text-green-600" : "text-slate-400"}`} title="Wert geprüft (bestätigt oder bewusst unbekannt)">
+                        <input type="checkbox" disabled={gesperrt} checked={!!f.confirmed}
+                          onChange={(e) => setFeature(f, { confirmed: e.target.checked })} />
+                        geprüft
+                      </label>
                     </div>
                   </div>
                 ))}
@@ -239,17 +253,23 @@ function ReviewAnsicht({ id }) {
         )}
       </div>
 
-      {/* Freigabe */}
-      <div className="mt-6 flex items-center gap-3">
+      {/* Freigabe — nur wenn alle Werte geprüft sind (bestätigt oder bewusst unbekannt) */}
+      <div className="mt-6 flex flex-wrap items-center gap-3">
         {gesperrt ? (
           <div className="flex items-center gap-2 text-sm font-medium text-violet-700">
             <CheckCircle2 className="size-4" /> Freigegeben
             {imp.ref_projekt_id && <Link to="/auswertung" className="text-brand-600 hover:underline">· Referenzprojekt ansehen</Link>}
           </div>
         ) : (
-          <button onClick={freigeben} disabled={approving} className="btn-primary">
-            <CheckCircle2 className="size-4" /> {approving ? "Gebe frei…" : "Referenzdaten freigeben"}
-          </button>
+          <>
+            <span className="text-xs font-semibold text-slate-500">{geprueft} / {total} geprüft</span>
+            {!alleGeprueft && (
+              <button onClick={alleBestaetigen} className="btn-secondary">Alle als geprüft markieren</button>
+            )}
+            <button onClick={freigeben} disabled={approving || !alleGeprueft} className="btn-primary" title={!alleGeprueft ? "Zuerst alle Werte prüfen" : ""}>
+              <CheckCircle2 className="size-4" /> {approving ? "Gebe frei…" : "Referenzdaten freigeben"}
+            </button>
+          </>
         )}
       </div>
     </div>

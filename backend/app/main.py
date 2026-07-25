@@ -80,7 +80,7 @@ from app.models.heizungscockpit import (  # noqa: F401 — Tabellen vor create_a
     HcCalculationResult, HcSchema, HcSchemaRevision, BkpEintrag, HcGruppeTyp,
 )
 from app.models.auth import Firma, User, Role  # noqa: F401
-from app.models.kv import RefProjekt, RefKostenzeile, RefProjektGewerk, Kostenschaetzung, BauindexEintrag  # noqa: F401
+from app.models.kv import RefProjekt, RefKostenzeile, RefProjektGewerk, RefProjektFeature, Kostenschaetzung, BauindexEintrag  # noqa: F401
 from app.models.grobkostenschaetzung import Korrekturfaktor  # noqa: F401
 from app.models.lv_import import LvImport, LvImportFeature, LvImportCost  # noqa: F401
 from app.auth import hash_password

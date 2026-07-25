@@ -11,6 +11,13 @@
 //   - gültiger Layer
 //
 // Gibt die fertige Edge zurück oder null, wenn eine Regel verletzt ist.
+// Eine NEUE hydraulische Leitung darf NUR im expliziten Zeichenmodus (oder bei
+// bereits laufendem Entwurf) beginnen. Ausserhalb davon erzeugt kein Klick/Drag
+// auf Nodes oder Handles eine Leitung → exakt 0 neue Edges.
+export function canStartHydraulicLine(zeichenModus, hasDraft) {
+  return Boolean(zeichenModus || hasDraft);
+}
+
 export function createHydraulicEdge(params, existingEdges = []) {
   const {
     id, source, sourceHandle = null, target, targetHandle = null,

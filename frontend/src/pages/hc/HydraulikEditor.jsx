@@ -16,6 +16,7 @@ import './HydraulikEditor.css';
 import { NODE_TYPES, NUMMERIERT, ROTATABLE } from '../../components/hc/nodes/HydraulikNodes';
 import { EDGE_TYPES } from '../../components/hc/edges/FlowEdge';
 import { pairedHandleId, parallelWaypoints, roundedPolylinePath, splitRouteAtPoint, reconnectThroughNode, adaptivePolyline } from '../../components/hc/edges/geometry';
+import { createHydraulicEdge, canStartHydraulicLine } from './schema/edgeFactory';
 import { SCHALTUNGEN } from '../../components/hc/nodes/schaltungen';
 import {
   createSchema,
@@ -1370,6 +1371,10 @@ function EditorInner() {
   const [shiftPressed, setShiftPressed] = useState(false);
   const [drawingConfig, setDrawingConfig] = useState(DEFAULT_DRAWING_CONFIG);
   const [leitungsEntwurf, setLeitungsEntwurf] = useState(null);
+  // Expliziter Zeichenmodus: NUR wenn aktiv (oder eine Leitung im Entwurf ist),
+  // erzeugt ein Klick eine hydraulische Leitung. Sonst kein Edge-Erzeugen.
+  const [zeichenModus, setZeichenModus] = useState(false);
+  const zeichenModusRef = useRef(false);
   const [leitungsCursor, setLeitungsCursor] = useState(null);
   const [leitungsSnap, setLeitungsSnap] = useState(null);
   const [leitungsGuides, setLeitungsGuides] = useState([]);
@@ -1408,6 +1413,7 @@ function EditorInner() {
   const leitungsCursorFrame = useRef(null);
 
   useEffect(() => { leitungsEntwurfRef.current = leitungsEntwurf; }, [leitungsEntwurf]);
+  useEffect(() => { zeichenModusRef.current = zeichenModus; }, [zeichenModus]);
   useEffect(() => { leitungsCursorRef.current = leitungsCursor; }, [leitungsCursor]);
 
   useEffect(() => {
@@ -1657,7 +1663,6 @@ function EditorInner() {
       : x));
   }, [setNodes, snap]);
 
-  const connectStart = useRef(null);
   const clipboard = useRef(null);
   const nodesRef = useRef([]);
   const edgesRef = useRef([]);
@@ -2085,6 +2090,7 @@ function EditorInner() {
       leitungsCursorRef.current = null;
       setLeitungsGuides([]);
       setSelectedEdgeId(existing.id);
+      setZeichenModus(false);
       return;
     }
 
@@ -2113,22 +2119,28 @@ function EditorInner() {
       : null;
     const targetSide = snapHit?.type === 'port' ? snapHit.handlePosition : null;
     const polylinePoints = adaptivePolyline(startPoint, endPoint, finalPoints, sourceSide, targetSide).slice(1, -1);
-    let edge = {
-      id:edgeId,
-      source:draft.startEndpoint?.nodeId || sourceAnchorId,
-      sourceHandle:draft.startEndpoint?.handleId || 'center-source',
-      target:snapHit?.type === 'port' ? snapHit.nodeId : targetAnchorId,
-      targetHandle:snapHit?.type === 'port' ? snapHit.handleId : 'center-target',
-      type:'flow',
-      data:{
-        layer_id:layer.id,
-        cad_polyline:true,
-        polyline_version:1,
-        corner_radius:drawingConfig.corner_radius,
-        points:polylinePoints,
-      },
-      style:{ stroke:layer.color, strokeWidth:4.5 },
-    };
+    // EINZIGE Edge-Quelle: validiert Selbstanschluss/Null-Länge/Duplikat/Layer.
+    let edge = createHydraulicEdge({
+      id: edgeId,
+      source: draft.startEndpoint?.nodeId || sourceAnchorId,
+      sourceHandle: draft.startEndpoint?.handleId || 'center-source',
+      target: snapHit?.type === 'port' ? snapHit.nodeId : targetAnchorId,
+      targetHandle: snapHit?.type === 'port' ? snapHit.handleId : 'center-target',
+      layerId: layer.id, layerColor: layer.color,
+      points: polylinePoints, cornerRadius: drawingConfig.corner_radius,
+      startPoint, endPoint,
+    }, edgesRef.current);
+    if (!edge) {
+      // Ungültige Leitung (z. B. Selbstanschluss) → Zeichnen sauber beenden.
+      leitungsEntwurfRef.current = null;
+      leitungsCursorRef.current = null;
+      setLeitungsEntwurf(null);
+      setLeitungsCursor(null);
+      setLeitungsSnap(null);
+      setLeitungsGuides([]);
+      setZeichenModus(false);
+      return;
+    }
     const returnPair = ruecklaufPaarErstellen(edge, startPoint, endPoint);
     if (returnPair) {
       edge = returnPair.primaryEdge;
@@ -2151,6 +2163,7 @@ function EditorInner() {
     leitungsCursorRef.current = null;
     setLeitungsGuides([]);
     setSelectedEdgeId(edgeId);
+    setZeichenModus(false);   // nach erfolgreichem Abschluss Zeichenmodus beenden
   }, [activeLayer, cadAnker, drawingConfig, handleAusrichtung, handlePosition, letzterEntwurfsPunkt, leitungTeilen, routePunkte, ruecklaufPaarErstellen, setEdges, setNodes, snap]);
 
   const cadKlick = useCallback((event, nurBeiAnschluss = false) => {
@@ -2216,6 +2229,9 @@ function EditorInner() {
     if (layer.role === 'rl' && handleId?.startsWith('vl')) return;
     const point = handlePosition(nodeId, handleId);
     if (!point) return;
+    // Handles sind nur Fang-/Zielpunkte: eine NEUE Leitung darf von hier nur im
+    // expliziten Zeichenmodus starten (kein versehentliches Ziehen).
+    if (!canStartHydraulicLine(zeichenModusRef.current, Boolean(draft))) return;
     event.preventDefault();
     event.stopPropagation();
     if (!draft) {
@@ -2636,6 +2652,7 @@ function EditorInner() {
           setSelected(null);
           setSelectedEdgeId(null);
           setEndpointMenu(null);
+          setZeichenModus(true);   // expliziten Zeichenmodus aktivieren
           return;
         }
         if (ev.key === 'Escape' && spiegelAchse) {
@@ -2647,13 +2664,16 @@ function EditorInner() {
           setEdgeMenu(null);
           return;
         }
-        if (ev.key === 'Escape' && leitungsEntwurfRef.current) {
+        // Esc bricht jede aktive Zeichenaktion vollständig ab UND verlässt den
+        // Zeichenmodus.
+        if (ev.key === 'Escape' && (leitungsEntwurfRef.current || zeichenModusRef.current)) {
           leitungsEntwurfRef.current = null;
           leitungsCursorRef.current = null;
           setLeitungsEntwurf(null);
           setLeitungsCursor(null);
           setLeitungsSnap(null);
           setLeitungsGuides([]);
+          setZeichenModus(false);
           return;
         }
         if (ev.key === 'Enter' && leitungsEntwurfRef.current && leitungsCursorRef.current) {
@@ -2906,105 +2926,11 @@ function EditorInner() {
     }
   };
 
-  const onConnect = useCallback((params) => {
-    // Ein Bauteil darf sich nicht mit sich selbst verbinden (bei den vielen
-    // Zonen-Anschlüssen sonst schnell versehentlich ausgelöst).
-    if (params.source === params.target) return;
-    snap();
-    const startPoint = handlePosition(params.source, params.sourceHandle);
-    const endPoint = handlePosition(params.target, params.targetHandle);
-    const sourceSide = handleAusrichtung(params.source, params.sourceHandle);
-    const targetSide = handleAusrichtung(params.target, params.targetHandle);
-    let edge = {
-      ...params, id:newId(), type:'flow',
-      data:{
-        ...(params.data || {}),
-        layer_id:activeLayer.id,
-        cad_polyline:true,
-        polyline_version:1,
-        corner_radius:drawingConfig.corner_radius,
-        points:adaptivePolyline(startPoint, endPoint, [], sourceSide, targetSide).slice(1, -1),
-      },
-      style:{ stroke:activeLayer.color, strokeWidth:2.5 },
-    };
-    const returnPair = ruecklaufPaarErstellen(edge, startPoint, endPoint);
-    if (returnPair) edge = returnPair.primaryEdge;
-    const exists = edgesRef.current.some(item => item.source === params.source
-      && item.target === params.target
-      && item.sourceHandle === params.sourceHandle
-      && item.targetHandle === params.targetHandle);
-    if (exists) return;
-    if (returnPair?.createdNodes.length) setNodes(nodesNow => [...nodesNow, ...returnPair.createdNodes]);
-    setEdges(items => [...items, edge, ...(returnPair ? [returnPair.returnEdge] : [])]);
-  }, [activeLayer, drawingConfig.corner_radius, handleAusrichtung, handlePosition, ruecklaufPaarErstellen, setEdges, setNodes, snap]);
-
-  const onConnectStart = useCallback((_, params) => { connectStart.current = params; }, []);
-
-  // Bestehende React-Flow-Schnellverbindung bleibt erhalten. Wird im Leeren
-  // losgelassen, entsteht nur ein unsichtbarer CAD-Anker – kein Junction-Bauteil.
-  const onConnectEnd = useCallback((event) => {
-    const cs = connectStart.current; connectStart.current = null;
-    if (!cs?.nodeId) return;
-    if (event.target?.closest?.('.react-flow__handle')) return;  // auf einem Bauteil gelandet → onConnect
-    const { clientX, clientY } = event.changedTouches ? event.changedTouches[0] : event;
-    const raw = screenToFlowPosition({ x: clientX, y: clientY });
-    const origin = handlePosition(cs.nodeId, cs.handleId);
-    const p = event.shiftKey
-      ? auf45GradFangen(origin, raw, drawingConfig.grid_size)
-      : orthogonalerSegmentfang(origin, raw, drawingConfig.grid_size);
-    const jid = newId();
-    snap();
-    const vonQuelle = cs.handleType !== 'target';
-    const hit = naechsteLeitung(p, activeLayer.id, 22 / Math.max(getZoom(), 0.2));
-
-    // Grundsatz: eine hydraulische Leitung entsteht nur durch eine BEWUSSTE
-    // Aktion. Ein im Leeren losgelassener Handle-Zug (bei vielen Anschlüssen
-    // schnell versehentlich ausgelöst) darf keine zufällige Leitung erzeugen.
-    // Nur das Ablegen direkt auf einer bestehenden Leitung bildet bewusst ein
-    // T-Stück; zum freien Zeichnen dienen die Leitungswerkzeuge (p/l).
-    if (!hit) return;
-    const junctionPoint = { x:hit.x, y:hit.y };
-
-    let branch = {
-      id:newId(),
-      source:vonQuelle ? cs.nodeId : jid,
-      sourceHandle:vonQuelle ? cs.handleId : 'center-source',
-      target:vonQuelle ? jid : cs.nodeId,
-      targetHandle:vonQuelle ? 'center-target' : cs.handleId,
-      type:'flow',
-      data:{
-        layer_id:activeLayer.id,
-        cad_polyline:true,
-        polyline_version:1,
-        corner_radius:drawingConfig.corner_radius,
-        points:adaptivePolyline(
-          vonQuelle ? origin : junctionPoint,
-          vonQuelle ? junctionPoint : origin,
-          [],
-          vonQuelle ? handleAusrichtung(cs.nodeId, cs.handleId) : null,
-          vonQuelle ? null : handleAusrichtung(cs.nodeId, cs.handleId),
-        ).slice(1, -1),
-      },
-      style:{ stroke:activeLayer.color, strokeWidth:4.5 },
-    };
-    const startPoint = vonQuelle ? origin : junctionPoint;
-    const endPoint = vonQuelle ? junctionPoint : origin;
-    const returnPair = ruecklaufPaarErstellen(branch, startPoint, endPoint);
-    if (returnPair) branch = returnPair.primaryEdge;
-    setNodes(items => [
-      ...items,
-      cadAnker(jid, junctionPoint, activeLayer),
-      ...(returnPair?.createdNodes || []),
-    ]);
-    const pairedEdges = returnPair ? [returnPair.returnEdge] : [];
-
-    // Bewusstes Ablegen des Leitungsendes auf einer Leitung erzeugt ein echtes
-    // T-Stück. Die bestehende Leitung wird topologisch in zwei Teile geteilt;
-    // eine reine optische Kreuzung bleibt dagegen weiterhin unverbunden.
-    const [first, second] = leitungTeilen(hit, jid, activeLayer.id);
-    setEdges(es => [...es.filter(edge => edge.id !== hit.edge.id), first, second, branch, ...pairedEdges]);
-    setSelectedEdgeId(null);
-  }, [activeLayer, cadAnker, drawingConfig.corner_radius, drawingConfig.grid_size, getZoom, handleAusrichtung, handlePosition, leitungTeilen, naechsteLeitung, ruecklaufPaarErstellen, screenToFlowPosition, setNodes, setEdges, snap]);
+  // React-Flow-Drag-to-connect ist bewusst DEAKTIVIERT (keine zufälligen
+  // Leitungen). Handles dienen nur als Fang-/Zielpunkte des expliziten
+  // Zeichenmodus. Neue hydraulische Leitungen entstehen ausschliesslich über
+  // den CAD-Klick-Pfad und createHydraulicEdge(). Deshalb kein onConnect/
+  // onConnectStart/onConnectEnd mehr.
 
   const onDragOver = useCallback(e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }, []);
 
@@ -3116,7 +3042,9 @@ function EditorInner() {
   }, [getZoom, naechsteSichtbareLeitung, screenToFlowPosition, setEdges, setNodes, snap]);
 
   const onNodeClick = useCallback((event, node) => {
-    if (leitungsEntwurfRef.current) { cadKlick(event, true); return; }
+    // Im Zeichenmodus oder bei aktivem Entwurf: Klick auf ein Bauteil startet/
+    // führt die Leitung an dessen Anschluss (nur bei Anschluss-Treffer).
+    if (leitungsEntwurfRef.current || zeichenModusRef.current) { cadKlick(event, true); return; }
     setEndpointMenu(null);
     setSelected(node);
     setSelectedEdgeId(null);
@@ -3190,7 +3118,9 @@ function EditorInner() {
     if (leitungsEntwurfRef.current) { cadKlick(event); return; }
     setEndpointMenu(null);
     setEdgeMenu(null);
-    if (!selected && !selectedEdgeId) {
+    // Eine NEUE Leitung startet ausschliesslich im expliziten Zeichenmodus.
+    // Ausserhalb davon deselektiert ein Pane-Klick nur — er zeichnet nie.
+    if (canStartHydraulicLine(zeichenModusRef.current, false)) {
       cadKlick(event);
       return;
     }
@@ -3207,11 +3137,18 @@ function EditorInner() {
     cadCursorAktualisieren(event);
   }, [cadCursorAktualisieren, drawingConfig.grid_size, screenToFlowPosition, spiegelAchse?.start]);
   const onPaneContextMenu = useCallback((event) => {
-    if (!leitungsEntwurfRef.current) return;
+    // Rechtsklick bricht jede aktive Zeichenaktion vollständig ab (kein
+    // versehentliches Abschliessen einer Leitung).
+    if (!leitungsEntwurfRef.current && !zeichenModusRef.current) return;
     event.preventDefault();
-    const raw = screenToFlowPosition({ x:event.clientX, y:event.clientY });
-    leitungsEntwurfAbschliessen(raw, leitungsSnap, event.shiftKey || shiftPressed);
-  }, [leitungsEntwurfAbschliessen, leitungsSnap, screenToFlowPosition, shiftPressed]);
+    leitungsEntwurfRef.current = null;
+    leitungsCursorRef.current = null;
+    setLeitungsEntwurf(null);
+    setLeitungsCursor(null);
+    setLeitungsSnap(null);
+    setLeitungsGuides([]);
+    setZeichenModus(false);
+  }, []);
   const selectedNode  = selected  ? nodes.find(n => n.id === selected.id)  || null : null;
   const selectedEdge  = selectedEdgeId ? edges.find(e => e.id === selectedEdgeId) || null : null;
   const auslegungNode = auslegung ? nodes.find(n => n.id === auslegung.id) || null : null;
@@ -3503,6 +3440,13 @@ function EditorInner() {
           <span>{alleWarnungen.length ? `${alleWarnungen.length} Warnungen` : 'Keine Warnungen'}</span>
         </button>
 
+        <button
+          onClick={() => setZeichenModus(v => !v)}
+          className={`hc-auto-return${zeichenModus ? ' is-active' : ''}`}
+          title="Leitung zeichnen (Taste L/P) · Esc oder Rechtsklick bricht ab">
+          ✏ Leitung {zeichenModus ? 'zeichnen …' : 'zeichnen'}
+        </button>
+
         <div className="hc-editor-toolbar__spacer" />
 
         <div className="hc-layer-control">
@@ -3568,9 +3512,6 @@ function EditorInner() {
             nodes={displayNodes} edges={displayEdges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            onConnectStart={onConnectStart}
-            onConnectEnd={onConnectEnd}
             onDrop={onDrop}
             onDragOver={onDragOver}
             onNodeClick={onNodeClick}
@@ -3585,6 +3526,8 @@ function EditorInner() {
             connectionMode={ConnectionMode.Loose}
             connectionLineComponent={connectionLineRenderer}
             connectionLineStyle={{ stroke:activeLayer.color, strokeWidth:2.5 }}
+            paneClickDistance={6}
+            nodeClickDistance={6}
             snapToGrid snapGrid={[drawingConfig.grid_size,drawingConfig.grid_size]}
             selectionOnDrag
             nodesDraggable
@@ -3597,7 +3540,7 @@ function EditorInner() {
             minZoom={0.2}
             maxZoom={4}
             fitView
-            className={leitungsEntwurf ? 'cursor-crosshair hc-hydraulik-flow' : 'hc-hydraulik-flow'}
+            className={(zeichenModus || leitungsEntwurf) ? 'cursor-crosshair hc-hydraulik-flow' : 'hc-hydraulik-flow'}
           >
             <Background color="#e2e8f0" gap={drawingConfig.grid_size * 2}/>
             <Controls/>

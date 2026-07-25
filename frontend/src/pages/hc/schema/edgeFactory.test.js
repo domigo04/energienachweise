@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createHydraulicEdge } from "./edgeFactory";
+import { createHydraulicEdge, canStartHydraulicLine } from "./edgeFactory";
 
 // Prio 1: keine zufälligen Leitungen. createHydraulicEdge ist die einzige
 // Edge-Quelle und muss jede ungültige Erzeugung verweigern.
@@ -52,5 +52,20 @@ describe("createHydraulicEdge", () => {
     const { startPoint, endPoint, ...ohnePos } = gueltig;
     void startPoint; void endPoint;
     expect(createHydraulicEdge(ohnePos, [])).not.toBeNull();
+  });
+});
+
+describe("canStartHydraulicLine — Zeichnen nur im expliziten Modus", () => {
+  it("ohne Zeichenmodus und ohne Entwurf startet KEINE Leitung (0 Edges)", () => {
+    // 50 Klicks/Drags ohne Zeichenmodus → jedes Mal false → keine Leitung.
+    for (let i = 0; i < 50; i += 1) {
+      expect(canStartHydraulicLine(false, false)).toBe(false);
+    }
+  });
+
+  it("startet nur im Zeichenmodus oder bei laufendem Entwurf", () => {
+    expect(canStartHydraulicLine(true, false)).toBe(true);
+    expect(canStartHydraulicLine(false, true)).toBe(true);
+    expect(canStartHydraulicLine(true, true)).toBe(true);
   });
 });

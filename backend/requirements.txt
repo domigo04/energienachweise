@@ -19,3 +19,5 @@ psycopg2-binary  # Postgres-Treiber für Prod (DATABASE_URL=postgresql+psycopg2:
 httpx  # ausgehende Anfragen (Baupreisindex-Abruf gegen opendata.swiss)
 openpyxl  # liest die BFS-Baupreisindex-Excel-Datei
 numpy  # Potenzfunktion-Regression (Grobkostenschätzung BKP)
+pytesseract  # OCR gescannter LVs (P0 #1) — braucht das Tesseract-Binary (nixpacks.toml)
+pdf2image  # rendert Bild-PDF-Seiten für OCR — braucht poppler-utils (nixpacks.toml)

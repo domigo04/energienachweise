@@ -34,6 +34,17 @@ const STATUS_STYLE = {
   failed: "bg-red-100 text-red-700",
 };
 
+// P0 #1 — Herkunft des Textes: aus digitaler Textebene oder per OCR erkannt.
+// tag = kleiner Marker an jeder Fundstelle, damit im Review sichtbar ist, ob ein
+// Wert aus Digitaltext oder OCR kommt.
+const METHODE = {
+  digital: { kopf: "durchsuchbar (digitaler Text)", tag: "Digital", tagStyle: "bg-slate-100 text-slate-500" },
+  ocr: { kopf: "per OCR (Deutsch) erkannt", tag: "OCR", tagStyle: "bg-amber-100 text-amber-800" },
+  image: { kopf: "Bild-PDF ohne Textebene", tag: "manuell", tagStyle: "bg-slate-100 text-slate-500" },
+};
+// Alt-Importe ohne gespeicherte Methode aus is_searchable herleiten.
+const methodeOf = (imp) => METHODE[imp.extract_method] ? imp.extract_method : (imp.is_searchable ? "digital" : "image");
+
 // Block C #9 — der Review läuft in vier klaren Schritten statt einer langen Seite.
 const SCHRITTE = [
   { key: "grunddaten", titel: "Grunddaten" },
@@ -79,7 +90,7 @@ function UploadAnsicht() {
         <ArrowLeft className="size-4" /> Auswertung
       </Link>
       <h1 className="text-xl font-bold text-slate-900">Unternehmer-LV importieren</h1>
-      <p className="mt-1 text-sm text-slate-500">Aus einem alten LV entsteht ein geprüfter technischer Fingerprint + reale BKP-Kosten. Zunächst born-digital PDF.</p>
+      <p className="mt-1 text-sm text-slate-500">Aus einem alten LV entsteht ein geprüfter technischer Fingerprint + reale BKP-Kosten. Digitaler Text wird direkt gelesen, gescannte PDFs automatisch per deutscher OCR.</p>
 
       {error && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
@@ -163,6 +174,8 @@ function ReviewAnsicht({ id }) {
   );
 
   const featureByKey = Object.fromEntries((imp.features || []).map((f) => [f.key, f]));
+  const methode = methodeOf(imp);
+  const M = METHODE[methode];
   const gesperrt = imp.status === "approved";
   const featTotal = (imp.features || []).length;
   const featGeprueft = (imp.features || []).filter((f) => f.confirmed).length;
@@ -235,14 +248,19 @@ function ReviewAnsicht({ id }) {
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <h1 className="truncate text-xl font-bold text-slate-900">{imp.filename}</h1>
-          <p className="mt-0.5 text-xs text-slate-500">{imp.page_count} Seiten · {imp.is_searchable ? "durchsuchbar" : "Bild-PDF (OCR folgt)"}</p>
+          <p className="mt-0.5 text-xs text-slate-500">{imp.page_count} Seiten · {M.kopf}</p>
         </div>
         <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${STATUS_STYLE[imp.status] || STATUS_STYLE.uploaded}`}>{imp.status}</span>
       </div>
 
-      {!imp.is_searchable && (
+      {methode === "ocr" && (
         <div className="mb-6 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0" /> Kein durchsuchbarer Text gefunden — Bild-PDF. OCR ist ein späterer Schritt; Werte bitte manuell erfassen.
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" /> Kein digitaler Text — die Werte wurden automatisch per OCR (Deutsch) erkannt. Bitte besonders sorgfältig prüfen; jede Fundstelle ist mit «OCR» markiert.
+        </div>
+      )}
+      {methode === "image" && (
+        <div className="mb-6 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" /> Kein Text gefunden — auch die OCR lieferte nichts (oder ist auf dem Server nicht verfügbar). Werte bitte manuell erfassen.
         </div>
       )}
 
@@ -307,8 +325,9 @@ function ReviewAnsicht({ id }) {
                         {f.confidence && <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${CONF_STYLE[f.confidence]}`}>{CONF_LABEL[f.confidence]}</span>}
                       </div>
                       {f.source_text && (
-                        <div className="mt-1 text-[11px] text-slate-400">
-                          {f.source_page != null ? `Seite ${f.source_page}: ` : ""}„{f.source_text}"
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">
+                          <span className={`rounded px-1 py-0.5 text-[10px] font-semibold ${M.tagStyle}`} title="Herkunft des Werts">{M.tag}</span>
+                          <span>{f.source_page != null ? `Seite ${f.source_page}: ` : ""}„{f.source_text}"</span>
                         </div>
                       )}
                     </div>
@@ -359,7 +378,12 @@ function ReviewAnsicht({ id }) {
                   <span className="font-medium text-slate-900">BKP {c.bkp_nr}</span>
                   {c.positionen > 1 && <span className="ml-1 text-[11px] text-slate-400">({c.positionen} Positionen aggregiert)</span>}
                   {c.manual && <span className="ml-1 rounded bg-slate-100 px-1 text-[10px] font-semibold text-slate-500">manuell</span>}
-                  {c.source_text && <div className="mt-0.5 text-[11px] text-slate-400">{c.source_page != null ? `Seite ${c.source_page}: ` : ""}„{c.source_text}"</div>}
+                  {c.source_text && (
+                    <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">
+                      <span className={`rounded px-1 py-0.5 text-[10px] font-semibold ${M.tagStyle}`} title="Herkunft des Betrags">{M.tag}</span>
+                      <span>{c.source_page != null ? `Seite ${c.source_page}: ` : ""}„{c.source_text}"</span>
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 sm:justify-end">
                   <span className="text-xs text-slate-400">CHF</span>

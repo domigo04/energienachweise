@@ -1,0 +1,11 @@
+# Railway/Nixpacks — System-Pakete fürs Backend (P0 #1: deutsche OCR).
+#
+# Nur die apt-Pakete werden ergänzt; den Python-Build (requirements.txt) und
+# den Start (uvicorn) erkennt Nixpacks weiterhin automatisch. Ohne diese Pakete
+# bleibt der OCR-Fallback wirkungslos und gescannte LVs bleiben Bild-PDFs.
+#
+#   tesseract-ocr      OCR-Engine (Binary, das pytesseract aufruft)
+#   tesseract-ocr-deu  deutsches Sprachpaket (extract_best nutzt lang="deu")
+#   poppler-utils      liefert pdftoppm, das pdf2image zum Rendern braucht
+[phases.setup]
+aptPkgs = ["tesseract-ocr", "tesseract-ocr-deu", "poppler-utils"]

@@ -165,6 +165,59 @@ def test_mengenzeile_ist_kein_positionsstart():
     assert pos == []
 
 
+# ── P0 #1 — OCR / Extraktionsmethode (digital vs. ocr vs. image) ─────────────
+
+def _digital_pdf_bytes(text: str = "Waermepumpe Sole 82 kW") -> bytes:
+    """Kleines born-digital PDF mit echter Textebene (reportlab)."""
+    import io
+    from reportlab.pdfgen import canvas
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf)
+    c.drawString(100, 700, text)
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
+def test_extract_best_erkennt_digitalen_text():
+    """Textebene vorhanden → Methode 'digital'; OCR wird gar nicht erst gebraucht."""
+    from app.lv_import.pdf_extract import extract_best
+    pages, searchable, method = extract_best(_digital_pdf_bytes("Waermepumpe 82 kW"))
+    assert searchable is True
+    assert method == "digital"
+    assert any("Waermepumpe" in (p["text"] or "") for p in pages)
+
+
+def test_extract_best_ohne_text_ist_image():
+    """Kein Text und kein funktionierendes OCR → 'image'; nichts wird erfunden."""
+    from app.lv_import.pdf_extract import extract_best
+    pages, searchable, method = extract_best(b"")
+    assert searchable is False
+    assert method == "image"
+    assert pages == []
+
+
+def test_ist_durchsuchbar_heuristik():
+    """Automatische Erkennung Textebene vs. Scan."""
+    from app.lv_import.pdf_extract import ist_durchsuchbar
+    assert ist_durchsuchbar([{"page": 1, "text": "Pos. 241 Waermepumpe"}]) is True
+    assert ist_durchsuchbar([{"page": 1, "text": "   "}]) is False
+    assert ist_durchsuchbar([]) is False
+
+
+def test_ocr_verfuegbar_diagnose():
+    """Diagnose meldet die OCR-Kette; wirft nie und ist erst 'ready', wenn alle
+    Bausteine da sind (env-unabhängig getestet über die Konsistenz der Flags)."""
+    from app.lv_import.pdf_extract import ocr_verfuegbar
+    info = ocr_verfuegbar()
+    for k in ("pytesseract", "pdf2image", "tesseract_binary", "poppler",
+              "deutsch", "languages", "ready"):
+        assert k in info
+    assert isinstance(info["languages"], list)
+    assert info["ready"] == (info["pytesseract"] and info["pdf2image"]
+                             and info["tesseract_binary"] and info["deutsch"] and info["poppler"])
+
+
 # ── B12 — gemeinsame Feature-Sprache ────────────────────────────────────────
 
 def test_feature_keys_mappen_auf_projectcontext():
@@ -209,6 +262,18 @@ def test_lv_import_status_und_features_persistieren():
     assert geladen.features[0].key == "pump_count"
     assert geladen.features[0].confirmed is False
     assert geladen.costs[0].detected_amount == 45000.0
+
+
+def test_lv_import_extract_method_persistiert():
+    """P0 #1 — die Herkunft des Textes (digital/ocr/image) bleibt am Import,
+    damit das Review sie anzeigen kann."""
+    db = _db()
+    imp = LvImport(tenant_id=1, filename="scan.pdf", file_hash="ocr1",
+                   status=LvImportStatus.review.value, is_searchable=True,
+                   extract_method="ocr")
+    db.add(imp)
+    db.commit()
+    assert db.query(LvImport).first().extract_method == "ocr"
 
 
 def test_freigabe_uebernimmt_in_refprojekt():

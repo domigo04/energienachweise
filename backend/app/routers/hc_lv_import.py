@@ -66,7 +66,8 @@ def _import_out(imp: LvImport, detail: bool = False) -> dict:
     base = {
         "id": imp.id, "filename": imp.filename, "file_hash": imp.file_hash,
         "status": imp.status, "page_count": imp.page_count,
-        "is_searchable": imp.is_searchable, "project_id": imp.project_id,
+        "is_searchable": imp.is_searchable, "extract_method": imp.extract_method,
+        "project_id": imp.project_id,
         "ref_projekt_id": imp.ref_projekt_id, "created_by_name": imp.created_by_name,
         "created_at": imp.created_at.isoformat() if imp.created_at else None,
         "grunddaten": {
@@ -104,11 +105,14 @@ async def upload_lv(
     db.add(imp)
     db.flush()
 
-    # B3 — Extraktion (born-digital, sonst OCR-Fallback). Fehler dürfen den
-    # Import nicht sprengen.
-    pages, searchable, _method = extract_best(raw)
+    # B3 / P0 #1 — Extraktion (born-digital, sonst deutscher OCR-Fallback). Die
+    # gewählte Methode (digital/ocr/image) wird festgehalten, damit im Review
+    # sichtbar bleibt, woher ein Wert stammt. Fehler dürfen den Import nicht
+    # sprengen.
+    pages, searchable, method = extract_best(raw)
     imp.page_count = len(pages)
     imp.is_searchable = searchable
+    imp.extract_method = method
     try:
         features = extract_features(pages)
         costs = extract_costs(pages)
@@ -150,6 +154,15 @@ def list_lv(user: User = Depends(get_current_user), db: Session = Depends(get_db
         .all()
     )
     return [_import_out(imp) for imp in rows]
+
+
+@router.get("/ocr-status")
+def ocr_status(user: User = Depends(get_current_user)):
+    """P0 #1 — Diagnose, ob die deutsche OCR im Deployment einsatzbereit ist
+    (Tesseract-Binary + Sprachpaket deu + poppler). Muss VOR `/{import_id}`
+    stehen, sonst fängt der int-Pfad die Anfrage ab."""
+    from app.lv_import.pdf_extract import ocr_verfuegbar
+    return ocr_verfuegbar()
 
 
 @router.get("/{import_id}")

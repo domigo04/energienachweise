@@ -62,6 +62,27 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      # Hook-Regeln prüfen. Der Build sieht diese Fehler NICHT: ein useMemo nach
+      # einem frühen `return` kompiliert sauber und stürzt erst im Browser ab
+      # (React-Fehler #310, weisse Seite). Bewusst nur diese eine Regel — der
+      # Bestand hat andere, ältere Lint-Befunde, die den Deploy nicht blockieren
+      # sollen.
+      - name: React-Hook-Regeln
+        working-directory: frontend
+        run: |
+          npx eslint src -f json -o /tmp/eslint.json || true
+          node -e '
+            const r = require("/tmp/eslint.json");
+            const bad = r.flatMap(f => f.messages
+              .filter(m => m.ruleId === "react-hooks/rules-of-hooks")
+              .map(m => `${f.filePath}:${m.line}  ${m.message}`));
+            if (bad.length) {
+              console.error("Verstoss gegen die React-Hook-Regeln:\n" + bad.join("\n"));
+              process.exit(1);
+            }
+            console.log("Hook-Regeln eingehalten.");
+          '
+
       - name: Frontend-Build
         working-directory: frontend
         run: npm run build

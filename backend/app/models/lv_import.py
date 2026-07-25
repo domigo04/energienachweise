@@ -82,7 +82,17 @@ class LvImportCost(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     lv_import_id = Column(Integer, ForeignKey("lv_imports.id"), nullable=False, index=True)
-    bkp_nr = Column(String, nullable=False)
+    bkp_nr = Column(String, nullable=False)          # BKP-Gruppe, z.B. "241"
+    # Punkt 14 — die Detailinformation bleibt erhalten: Originalnummer und
+    # Originaltitel der Position, dazu der kanonische Schlüssel (Punkt 17), weil
+    # Planer Unterpositionen je Projekt unterschiedlich nummerieren.
+    original_position = Column(String, nullable=True)    # z.B. "241.10"
+    original_title = Column(String, nullable=True)
+    canonical_key = Column(String, nullable=True, index=True)
+    # Punkt 15 — Gruppentotal als eigene Kontrollzeile inkl. Summenprüfung.
+    is_group_total = Column(Boolean, nullable=False, default=False)
+    validation_status = Column(String, nullable=True)    # valid | mismatch | unchecked
+    source = Column(String, nullable=True)               # cost_summary | lv_positions | manual
     detected_amount = Column(Float, nullable=True)
     confirmed_amount = Column(Float, nullable=True)  # später massgebend (B8)
     confidence = Column(String, nullable=True)

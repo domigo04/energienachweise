@@ -126,6 +126,11 @@ def _ensure_columns():
             ("source_excerpt", "TEXT"), ("source_bbox", "VARCHAR"),
             ("derived_from", "VARCHAR"),
         ],
+        "lv_import_costs": [
+            ("original_position", "VARCHAR"), ("original_title", "VARCHAR"),
+            ("canonical_key", "VARCHAR"), ("is_group_total", "BOOLEAN"),
+            ("validation_status", "VARCHAR"), ("source", "VARCHAR"),
+        ],
     }
     is_sqlite = engine.url.get_backend_name().startswith("sqlite")
     # Einmalige Dev-Migration (2026-07-14): die kurzlebige parallele
@@ -155,6 +160,7 @@ def _ensure_columns():
         conn.execute(text("UPDATE hc_firmen SET is_active = TRUE WHERE is_active IS NULL"))
         conn.execute(text("UPDATE hc_users SET firma_role = 'mitglied' WHERE firma_role IS NULL"))
         conn.execute(text("UPDATE ref_kostenzeilen SET gewerk = 'heizung' WHERE gewerk IS NULL"))
+        conn.execute(text("UPDATE lv_import_costs SET is_group_total = FALSE WHERE is_group_total IS NULL"))
         conn.commit()
 
 

@@ -20,6 +20,7 @@ from app.models.kv import RefProjekt, RefKostenzeile, RefProjektFeature
 from app.lv_import.pipeline import LvPipeline
 from app.lv_import.feature_extract import extract_features
 from app.lv_import.cost_extract import extract_costs
+from app.lv_import.cost_summary import parse_cost_summary, to_cost_rows, has_cost_summary
 from app.lv_import.feature_keys import FEATURE_DEFS, FEATURE_KEYS, FEATURE_TO_CONTEXT
 
 router = APIRouter(prefix="/api/v1/lv-imports", tags=["KV – LV-Import"])
@@ -57,6 +58,11 @@ def _cost_effective(c: LvImportCost):
 def _cost_out(c: LvImportCost) -> dict:
     return {
         "id": c.id, "bkp_nr": c.bkp_nr,
+        # Punkt 14/17 — Originalnummer, Originaltitel und kanonische Zuordnung.
+        "original_position": c.original_position, "original_title": c.original_title,
+        "canonical_key": c.canonical_key,
+        "is_group_total": bool(c.is_group_total),
+        "validation_status": c.validation_status, "source": c.source,
         "detected_amount": c.detected_amount, "confirmed_amount": c.confirmed_amount,
         "confidence": c.confidence, "source_page": c.source_page, "source_text": c.source_text,
         "positionen": c.positionen, "confirmed": c.confirmed, "manual": c.manual,
@@ -118,7 +124,13 @@ async def upload_lv(
     imp.extract_method = pipeline.extraction_method
     try:
         features = extract_features(pipeline.technik_pages, pipeline.technik_word_pages)
-        costs = extract_costs(pipeline.lv_pages)
+        # Punkt 13 — Kosten primär aus der Kostenzusammenstellung; nur wenn es
+        # keine gibt, werden die LV-Positionstotale ausgewertet.
+        summary = parse_cost_summary(pipeline.cost_summary_pages)
+        if has_cost_summary(summary):
+            costs = to_cost_rows(summary)
+        else:
+            costs = [dict(c, source="lv_positions") for c in extract_costs(pipeline.lv_pages)]
         # ALLE kanonischen Features anlegen (auch nicht erkannte) → der Nutzer
         # sieht die vollständige Checkliste und kann fehlende Werte ergänzen.
         for key in FEATURE_KEYS:
@@ -139,6 +151,12 @@ async def upload_lv(
         for c in costs:
             db.add(LvImportCost(
                 lv_import_id=imp.id, bkp_nr=c["bkp_nr"],
+                original_position=c.get("original_position"),
+                original_title=c.get("original_title"),
+                canonical_key=c.get("canonical_key"),
+                is_group_total=bool(c.get("is_group_total", False)),
+                validation_status=c.get("validation_status"),
+                source=c.get("source"),
                 detected_amount=c.get("detected_amount"), confidence=c.get("confidence"),
                 source_page=c.get("source_page"), source_text=c.get("source_text"),
                 positionen=c.get("positionen", 1),
@@ -336,13 +354,25 @@ def approve_lv(import_id: int, user: User = Depends(get_current_user), db: Sessi
             key=f.key, value=eff.get(f.key), unit=f.unit,
         ))
 
+    # Punkt 14/15 — Einzelpositionen sind massgebend. Ein Gruppentotal ist nur
+    # eine Kontrollzeile und darf NIE zusätzlich zu seinen Unterpositionen in die
+    # Referenzkosten fliessen (sonst zählt jede Gruppe doppelt). Nur wenn eine
+    # Gruppe gar keine Einzelposition hat, wird ihr Total selbst verwendet.
+    gruppen_mit_positionen = {
+        c.bkp_nr for c in imp.costs
+        if not c.is_group_total and _cost_effective(c) is not None
+    }
     for c in imp.costs:
-        betrag = c.confirmed_amount if c.confirmed_amount is not None else c.detected_amount
+        betrag = _cost_effective(c)
         if betrag is None:
+            continue
+        if c.is_group_total and c.bkp_nr in gruppen_mit_positionen:
             continue
         db.add(RefKostenzeile(
             tenant_id=user.tenant_id, ref_projekt_id=ref.id, gewerk="heizung",
-            bkp_nr=c.bkp_nr, bkp_name=None, betrag_chf=float(betrag),
+            # Originalnummer erhalten, wenn vorhanden (Punkt 14).
+            bkp_nr=c.original_position or c.bkp_nr,
+            bkp_name=c.original_title, betrag_chf=float(betrag),
         ))
 
     imp.status = LvImportStatus.approved.value

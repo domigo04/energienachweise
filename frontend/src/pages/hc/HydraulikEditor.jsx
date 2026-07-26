@@ -9,7 +9,7 @@ import {
   ReactFlow, Background, BackgroundVariant, Controls, MiniMap,
   useNodesState, useEdgesState,
   Panel, ConnectionMode, useReactFlow, ReactFlowProvider,
-  NodeToolbar, Position, useStore, useUpdateNodeInternals, ViewportPortal,
+  NodeToolbar, Position, SelectionMode, useStore, useUpdateNodeInternals, ViewportPortal,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import './HydraulikEditor.css';
@@ -18,16 +18,16 @@ import { EDGE_TYPES } from '../../components/hc/edges/FlowEdge';
 import { pairedHandleId, parallelWaypoints, roundedPolylinePath, splitRouteAtPoint, reconnectThroughNode, adaptivePolyline, segmentAchse, mitgezogeneWaypoints } from '../../components/hc/edges/geometry';
 import { createHydraulicEdge, canStartHydraulicLine } from './schema/edgeFactory';
 import {
-  DRAW_PIPE, HOME, escape as escapeMode, finishCommand, initialMode, istModify,
-  modeLabel, startCommand, toggleCommand, zeichnetLeitung,
+  DRAW_PIPE, HOME, PLACE, escape as escapeMode, finishCommand, initialMode,
+  istBefehl, istModify, modeLabel, startCommand, toggleCommand, zeichnetLeitung,
 } from './schema/editorMode';
 import {
   constrainPoint, laengeAusBuffer, laengeTaste, massAnker, massLabel,
   rasterPunkt as rasterAufGitter,
   punktAusLaenge,
 } from './schema/cadConstraints';
-import { ENDPOINT, GRID, NEAREST, PORT, fangStil } from './schema/cadSnap';
-import { segmentVerschieben } from './schema/cadEdit';
+import { ENDPOINT, GRID, MIDPOINT, NEAREST, PORT, fangStil } from './schema/cadSnap';
+import { routeBereinigen, segmentVerschieben } from './schema/cadEdit';
 import {
   CAD_GRID, DEFAULT_DRAWING_CONFIG, GRID_OPTIONEN,
   graphFuerEditor, normalisiereDrawingConfig,
@@ -275,6 +275,58 @@ function ConstrainedConnectionLine({ fromX, fromY, toX, toY, fromPosition, conne
   return <path d={roundedPolylinePath(route, 8)} fill="none"
     stroke={connectionLineStyle.stroke || '#64748b'} strokeWidth={2.5} strokeDasharray="8 5" />;
 }
+// Punkt 5 — temporäres Mass als Zeichenhilfsmittel, nicht als Web-Badge.
+//
+// Aufbau wie eine CAD-Masskette: zwei Masshilfslinien vom Segment nach aussen,
+// eine Masslinie dazwischen, Endstriche und die Zahl freigestellt darüber. Alle
+// Grössen in Screen-Pixeln durch den Zoom geteilt, damit die Darstellung bei
+// 25 % und bei 400 % gleich aussieht und der Text immer lesbar bleibt.
+function CadMass({ mass, zoom }) {
+  if (!mass?.a || !mass?.b || !mass.laenge) return null;
+  const z = Math.max(zoom || 1, 0.05);
+  const { a, b } = mass;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const laenge = Math.hypot(dx, dy) || 1;
+  // Normale des Segments — die Richtung, in die die Masskette versetzt wird.
+  const nx = -dy / laenge;
+  const ny = dx / laenge;
+  const versatz = 22 / z;
+  const ueberstand = 5 / z;          // Masshilfslinie ragt etwas über die Masslinie
+  const a2 = { x:a.x + nx * versatz, y:a.y + ny * versatz };
+  const b2 = { x:b.x + nx * versatz, y:b.y + ny * versatz };
+  const mitte = { x:(a2.x + b2.x) / 2, y:(a2.y + b2.y) / 2 };
+  const senkrecht = Math.abs(dx) < Math.abs(dy);
+  // Bei senkrechtem Segment steht die Zahl daneben, bei waagrechtem darüber —
+  // sonst liegt sie quer auf der Masslinie.
+  const textX = mitte.x + (senkrecht ? 0 : 0);
+  const textY = mitte.y - (senkrecht ? 0 : 6 / z);
+  const stift = 1 / z;
+  return (
+    <g pointerEvents="none" stroke="#0f172a" strokeWidth={stift} opacity="0.85">
+      {/* Masshilfslinien an den Segmentenden */}
+      <line x1={a.x} y1={a.y} x2={a2.x + nx * ueberstand} y2={a2.y + ny * ueberstand} />
+      <line x1={b.x} y1={b.y} x2={b2.x + nx * ueberstand} y2={b2.y + ny * ueberstand} />
+      {/* Masslinie */}
+      <line x1={a2.x} y1={a2.y} x2={b2.x} y2={b2.y} />
+      {/* Endstriche (CAD-Schrägstriche statt Pfeilspitzen) */}
+      {[a2, b2].map((punkt, i) => (
+        <line key={i}
+          x1={punkt.x - (nx + dx / laenge) * ueberstand} y1={punkt.y - (ny + dy / laenge) * ueberstand}
+          x2={punkt.x + (nx + dx / laenge) * ueberstand} y2={punkt.y + (ny + dy / laenge) * ueberstand} />
+      ))}
+      {/* Zahl freigestellt: weisser Halo statt Kasten, damit die Zeichnung
+          darunter sichtbar bleibt. */}
+      <text x={textX} y={textY} textAnchor="middle" dominantBaseline={senkrecht ? 'middle' : 'auto'}
+        stroke="#ffffff" strokeWidth={3.5 / z} strokeLinejoin="round" paintOrder="stroke"
+        fill="#0f172a" fontSize={12 / z} fontWeight="700"
+        fontFamily="ui-monospace, SFMono-Regular, monospace">
+        {mass.label}
+      </text>
+    </g>
+  );
+}
+
 // Punkt 5 — der Fangmarker. Jeder Fangtyp hat eine eigene Form, damit man ohne
 // Lesen erkennt, woran man fängt; der Kurztext benennt ihn zusätzlich.
 // Die Koordinate kommt aus demselben Objekt, das den Punkt setzt — dadurch kann
@@ -1381,6 +1433,8 @@ function EditorInner() {
   const zeichenModus = zeichnetLeitung(editorMode);
   const dauerLeitung = zeichenModus && editorMode.persistent;
   const istGrundzustand = istModify(editorMode);
+  // Welches Bauteil ist gerade „geladen"? Treibt Palette-Hervorhebung und Vorschau.
+  const platzierTyp = istBefehl(editorMode, PLACE) ? editorMode.payload?.nodeType : null;
   const zeichenModusRef = useRef(false);
   const dauerLeitungRef = useRef(false);
   // ORTHO wie im CAD: umschaltbarer Zustand, kein fest verdrahtetes Verhalten.
@@ -1390,6 +1444,19 @@ function EditorInner() {
   // Objektfang gesamthaft abschaltbar (CAD-Statusleiste). Das Raster bleibt.
   const [snapAn, setSnapAn] = useState(true);
   const snapAnRef = useRef(true);
+  // Punkt 16 — Space hält temporär das Pan-Werkzeug. Solange es gedrückt ist,
+  // darf kein Punkt gesetzt und nichts ausgewählt werden.
+  const [spacePan, setSpacePan] = useState(false);
+  const spacePanRef = useRef(false);
+  // Punkt 11 — Fensterauswahl mit Richtungslogik wie in Revit/AutoCAD:
+  // links→rechts fängt nur vollständig umschlossene Elemente ('full'),
+  // rechts→links auch bloss berührte ('partial').
+  const [selectionMode, setSelectionMode] = useState(SelectionMode.Full);
+  // Punkt 2 — Weltkoordinate der Platzierungsvorschau. Sie ist die EINZIGE
+  // Quelle für die Anzeige UND für den Klick, damit das Bauteil genau dort
+  // landet, wo der Geist steht.
+  const [platzierVorschau, setPlatzierVorschau] = useState(null);
+  const platzierVorschauRef = useRef(null);
   // Numerische Direkteingabe während des Zeichnens: Puffer der getippten Länge.
   // Solange er nicht null ist, dürfen KEINE Shortcuts feuern.
   const [laengenPuffer, setLaengenPuffer] = useState(null);
@@ -1447,6 +1514,8 @@ function EditorInner() {
   }, [editorMode]);
   useEffect(() => { orthoAnRef.current = orthoAn; }, [orthoAn]);
   useEffect(() => { snapAnRef.current = snapAn; }, [snapAn]);
+  useEffect(() => { spacePanRef.current = spacePan; }, [spacePan]);
+  useEffect(() => { platzierVorschauRef.current = platzierVorschau; }, [platzierVorschau]);
   useEffect(() => { laengenPufferRef.current = laengenPuffer; }, [laengenPuffer]);
   useEffect(() => { leitungsCursorRef.current = leitungsCursor; }, [leitungsCursor]);
 
@@ -1522,6 +1591,13 @@ function EditorInner() {
   const editorGraphAnwenden = useCallback((graph) => {
     const geladen = graphFuerEditor(graph);
     setDrawingConfig(geladen.drawingConfig);
+    // Genau EINMAL einpassen, mit Deckel bei 1:1. Ein Schema mit einem einzigen
+    // Bauteil soll nicht auf 400 % aufgezogen werden.
+    if (geladen.nodes.length) {
+      requestAnimationFrame(() => {
+        fitView({ padding:0.25, duration:0, minZoom:0.2, maxZoom:1 });
+      });
+    }
     setOrthoAn(geladen.drawingConfig.ortho !== false);
     setSnapAn(geladen.drawingConfig.object_snap !== false);
     setNodes(geladen.nodes);
@@ -1831,6 +1907,24 @@ function EditorInner() {
     return anschlussSeite(bounds.find(item => item.id === handleId), internal);
   }, [getInternalNode]);
 
+  // Punkt 20 — Geometrie nach einem Edit normalisieren. Nullsegmente und
+  // funktionslose kollineare Ecken werden nicht gespeichert. Läuft am Ende eines
+  // Drags: während des Ziehens darf ein Punkt kurz kollinear liegen, ohne unter
+  // der Hand zu verschwinden.
+  const leitungNormalisieren = useCallback((edgeId) => {
+    setEdges(items => items.map(item => {
+      if (item.id !== edgeId) return item;
+      const punkte = Array.isArray(item.data?.points) ? item.data.points : null;
+      if (!punkte?.length) return item;
+      const start = handlePosition(item.source, item.sourceHandle);
+      const end = handlePosition(item.target, item.targetHandle);
+      const bereinigt = routeBereinigen(punkte, { start, end, toleranz:0.5 });
+      if (bereinigt.length === punkte.length
+        && bereinigt.every((p, i) => p.x === punkte[i].x && p.y === punkte[i].y)) return item;
+      return { ...item, data:{ ...(item.data || {}), cad_polyline:true, points:bereinigt } };
+    }));
+  }, [handlePosition, setEdges]);
+
   const routePunkte = useCallback((edge) => {
     const start = handlePosition(edge.source, edge.sourceHandle);
     const end = handlePosition(edge.target, edge.targetHandle);
@@ -1993,6 +2087,29 @@ function EditorInner() {
         const hit = projektionAufSegment(point, route[segmentIndex], route[segmentIndex + 1]);
         if (!hit || hit.t <= 0.04 || hit.t >= 0.96 || hit.distance > radius) continue;
         if (!best || hit.distance < best.distance) best = { ...hit, edge, route, segmentIndex };
+      }
+    });
+    return best;
+  }, [layerVisibility, routePunkte]);
+
+  // Punkt 9 — Mittelpunkt eines geraden Leitungssegments. PERPENDICULAR bleibt
+  // bewusst unimplementiert: ein halber Fang ist schlechter als keiner, und
+  // Port/Endpunkt/Mittelpunkt deckt den Alltag ab.
+  const naechsterMittelpunkt = useCallback((point, radius = 14, excludedEdgeIds = new Set()) => {
+    let best = null;
+    edgesRef.current.forEach(edge => {
+      if (excludedEdgeIds.has(edge.id)) return;
+      if (layerVisibility[layerVonEdge(edge).id] === false) return;
+      const route = routePunkte(edge);
+      for (let i = 0; i < route.length - 1; i += 1) {
+        const a = route[i];
+        const b = route[i + 1];
+        if (Math.hypot(b.x - a.x, b.y - a.y) < 2) continue;
+        const mitte = { x:(a.x + b.x) / 2, y:(a.y + b.y) / 2 };
+        const distanz = Math.hypot(point.x - mitte.x, point.y - mitte.y);
+        if (distanz <= radius && (!best || distanz < best.distanz)) {
+          best = { ...mitte, distanz, edgeId:edge.id, position:mitte };
+        }
       }
     });
     return best;
@@ -2317,6 +2434,9 @@ function EditorInner() {
   }, [activeLayer, cadAnker, drawingConfig, handleAusrichtung, handlePosition, letzterEntwurfsPunkt, leitungTeilen, routePunkte, ruecklaufPaarErstellen, setEdges, setNodes, snap]);
 
   const cadKlick = useCallback((event, nurBeiAnschluss = false) => {
+    // Nur die linke Taste zeichnet. Mittlere Taste = Pan, rechte = abschliessen.
+    if (event.button != null && event.button !== 0) return true;
+    if (spacePanRef.current) return true;          // Space hält das Pan-Werkzeug
     event.preventDefault();
     event.stopPropagation();
     const raw = screenToFlowPosition({ x:event.clientX, y:event.clientY });
@@ -2347,6 +2467,11 @@ function EditorInner() {
     }
     if (nurBeiAnschluss) return true;
     const excludedEdges = draft.extendEdgeId ? new Set([draft.extendEdgeId]) : new Set();
+    const midHit = fangAktiv ? naechsterMittelpunkt(raw, 14 / zoom, excludedEdges) : null;
+    if (midHit) {
+      leitungsEntwurfAbschliessen(midHit.position, { ...midHit, type:'midpoint' }, event.shiftKey || shiftPressed);
+      return true;
+    }
     const lineHit = fangAktiv ? naechsteLeitung(raw, layer.id, 22 / zoom, excludedEdges) : null;
     if (lineHit) {
       leitungsEntwurfAbschliessen(lineHit, { ...lineHit, type:'line' }, event.shiftKey || shiftPressed);
@@ -2366,9 +2491,10 @@ function EditorInner() {
     leitungsEntwurfRef.current = next;
     setLeitungsEntwurf(next);
     return true;
-  }, [activeLayer, drawingConfig, getZoom, letzterEntwurfsPunkt, leitungsEntwurfAbschliessen, leitungsEntwurfStarten, naechsteLeitung, naechsterBauteilAnschluss, naechsterFreierLeitungsEndpunkt, objektFangpunkte, screenToFlowPosition, shiftPressed]);
+  }, [activeLayer, drawingConfig, getZoom, letzterEntwurfsPunkt, leitungsEntwurfAbschliessen, leitungsEntwurfStarten, naechsteLeitung, naechsterBauteilAnschluss, naechsterFreierLeitungsEndpunkt, naechsterMittelpunkt, objektFangpunkte, screenToFlowPosition, shiftPressed]);
 
   const cadHandlePointerDown = useCallback((event) => {
+    if (event.button !== 0 || spacePanRef.current) return;
     const handle = event.target?.closest?.('.react-flow__handle');
     if (!handle) return;
     const nodeId = handle.dataset.nodeid;
@@ -2436,6 +2562,14 @@ function EditorInner() {
         return;
       }
       const excludedEdges = draft.extendEdgeId ? new Set([draft.extendEdgeId]) : new Set();
+      const midHit = fangAktiv ? naechsterMittelpunkt(raw, 14 / zoom, excludedEdges) : null;
+      if (midHit) {
+        leitungsCursorRef.current = midHit.position;
+        setLeitungsCursor(midHit.position);
+        setLeitungsSnap({ ...midHit, type:'midpoint' });
+        setLeitungsGuides([]);
+        return;
+      }
       const lineHit = fangAktiv ? naechsteLeitung(raw, layer.id, 22 / zoom, excludedEdges) : null;
       if (lineHit) {
         leitungsCursorRef.current = { x:lineHit.x, y:lineHit.y };
@@ -2459,7 +2593,7 @@ function EditorInner() {
       setLeitungsSnap(null);
       setLeitungsGuides(guidesAmPunkt(alignment.guides, point));
     });
-  }, [activeLayer, drawingConfig.grid_size, drawingConfig.snap_tolerance, getZoom, letzterEntwurfsPunkt, naechsteLeitung, naechsterBauteilAnschluss, naechsterFreierLeitungsEndpunkt, objektFangpunkte, screenToFlowPosition, shiftPressed]);
+  }, [activeLayer, drawingConfig.grid_size, drawingConfig.snap_tolerance, getZoom, letzterEntwurfsPunkt, naechsteLeitung, naechsterBauteilAnschluss, naechsterFreierLeitungsEndpunkt, naechsterMittelpunkt, objektFangpunkte, screenToFlowPosition, shiftPressed]);
 
   const cadEntwurfRoute = (() => {
     if (!leitungsEntwurf) return [];
@@ -2496,10 +2630,13 @@ function EditorInner() {
     if (cadEntwurfRoute.length < 2) return null;
     const a = cadEntwurfRoute.at(-2);
     const b = cadEntwurfRoute.at(-1);
-    const anker = massAnker(a, b, Math.max(10, drawingConfig.grid_size * 1.4));
+    // Abstand in SCREEN-Pixeln denken und in Weltmass umrechnen, sonst klebt die
+    // Masslinie beim Reinzoomen auf der Leitung und fliegt beim Rauszoomen weg.
+    const abstand = 22 / Math.max(zoomAnzeige, 0.05);
+    const anker = massAnker(a, b, abstand);
     if (!anker?.laenge) return null;
-    return { ...anker, label:massLabel(anker.laenge) };
-  }, [cadEntwurfRoute, drawingConfig.grid_size]);
+    return { ...anker, a, b, label:massLabel(anker.laenge) };
+  }, [cadEntwurfRoute, zoomAnzeige]);
 
   // Punkt 5 — den intern gefundenen Fang auf einen CAD-Fangtyp abbilden. Das ist
   // die EINZIGE Stelle, an der die Darstellung entsteht; Koordinate und Marker
@@ -2510,9 +2647,11 @@ function EditorInner() {
       // Ein Port-Treffer mit Bauteil ist ein Anschluss, einer ohne (freier
       // Leitungsanfang) ein Endpunkt. Auf einer Leitung liegt der Fang zwischen
       // zwei Punkten — im CAD „Nearest".
-      const typ = leitungsSnap.type === 'line'
-        ? NEAREST
-        : leitungsSnap.handleId ? PORT : ENDPOINT;
+      const typ = leitungsSnap.type === 'midpoint'
+        ? MIDPOINT
+        : leitungsSnap.type === 'line'
+          ? NEAREST
+          : leitungsSnap.handleId ? PORT : ENDPOINT;
       return { ...fangStil(typ), typ, x:leitungsSnap.x, y:leitungsSnap.y };
     }
     if (!snapAn || !leitungsCursor) return null;
@@ -2658,14 +2797,18 @@ function EditorInner() {
           : item));
       });
     };
-    const up = () => { edgeSegmentDrag.current = null; };
+    const up = () => {
+      const beendet = edgeSegmentDrag.current;
+      edgeSegmentDrag.current = null;
+      if (beendet?.edgeId) leitungNormalisieren(beendet.edgeId);
+    };
     window.addEventListener('pointermove', move, { passive:true });
     window.addEventListener('pointerup', up);
     return () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
     };
-  }, [drawingConfig.grid_size, screenToFlowPosition, setEdges]);
+  }, [drawingConfig.grid_size, leitungNormalisieren, screenToFlowPosition, setEdges]);
 
   useEffect(() => {
     const move = (event) => {
@@ -2692,7 +2835,11 @@ function EditorInner() {
         }));
       });
     };
-    const up = () => { edgePointDrag.current = null; };
+    const up = () => {
+      const beendet = edgePointDrag.current;
+      edgePointDrag.current = null;
+      if (beendet?.edgeId) leitungNormalisieren(beendet.edgeId);
+    };
     window.addEventListener('pointermove', move, { passive:true });
     window.addEventListener('pointerup', up);
     return () => {
@@ -2700,7 +2847,7 @@ function EditorInner() {
       window.removeEventListener('pointerup', up);
       if (edgePointFrame.current) cancelAnimationFrame(edgePointFrame.current);
     };
-  }, [drawingConfig.grid_size, handlePosition, screenToFlowPosition, setEdges]);
+  }, [drawingConfig.grid_size, handlePosition, leitungNormalisieren, screenToFlowPosition, setEdges]);
 
   const endpointDragStart = useCallback((event, edgeId, side) => {
     event.preventDefault();
@@ -2823,6 +2970,60 @@ function EditorInner() {
     };
   }, [drawingConfig.grid_size, getZoom, leitungTeilen, naechsteLeitung, naechsterBauteilAnschluss, screenToFlowPosition, setEdges, setNodes]);
 
+  // Punkt 16 — Space hält das Pan-Werkzeug, wie in vielen CAD- und
+  // Grafikprogrammen. Bewusst ein eigener Effekt: der Zustand hängt an keydown
+  // UND keyup, und Space darf die Seite nicht scrollen.
+  useEffect(() => {
+    const tippt = () => {
+      const tag = document.activeElement?.tagName;
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
+        || document.activeElement?.isContentEditable;
+    };
+    const down = (ev) => {
+      if (ev.code !== 'Space' || ev.repeat || tippt()) return;
+      ev.preventDefault();
+      setSpacePan(true);
+    };
+    const up = (ev) => { if (ev.code === 'Space') setSpacePan(false); };
+    // Verlässt das Fenster den Fokus, bleibt Space sonst gedrückt „hängen".
+    const verlassen = () => setSpacePan(false);
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    window.addEventListener('blur', verlassen);
+    return () => {
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', up);
+      window.removeEventListener('blur', verlassen);
+    };
+  }, []);
+
+  // Punkt 11 — Richtung des Auswahlrechtecks bestimmt die Auswahlart. Die
+  // Richtung steht erst beim Ziehen fest, darum am pointerdown die Startposition
+  // merken und beim Bewegen umschalten.
+  const auswahlStart = useRef(null);
+  useEffect(() => {
+    if (!istGrundzustand) return undefined;
+    const down = (ev) => {
+      if (ev.button !== 0 || spacePanRef.current) return;
+      auswahlStart.current = ev.clientX;
+    };
+    const move = (ev) => {
+      if (auswahlStart.current == null) return;
+      const dx = ev.clientX - auswahlStart.current;
+      if (Math.abs(dx) < 4) return;                 // noch keine klare Richtung
+      setSelectionMode(dx >= 0 ? SelectionMode.Full : SelectionMode.Partial);
+    };
+    const up = () => { auswahlStart.current = null; };
+    window.addEventListener('pointerdown', down, true);
+    window.addEventListener('pointermove', move, { passive:true });
+    window.addEventListener('pointerup', up);
+    return () => {
+      window.removeEventListener('pointerdown', down, true);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+  }, [istGrundzustand]);
+
   // Keyboard-Shortcuts: Zeichenwerkzeuge sind konfigurierbar; V/R wechseln
   // weiterhin schnell den Heizungs-Layer, D dreht ein Bauteil.
   React.useEffect(() => {
@@ -2886,6 +3087,8 @@ function EditorInner() {
           setLeitungsSnap(null);
           setLeitungsGuides([]);
           setLaengenPuffer(null);
+          platzierVorschauRef.current = null;
+          setPlatzierVorschau(null);
           setSpiegelAchse(null);
           setEndpointMenu(null);
           setEdgeMenu(null);
@@ -3150,12 +3353,14 @@ function EditorInner() {
 
   const onDragOver = useCallback(e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }, []);
 
-  const onDrop = useCallback(e => {
-    e.preventDefault();
-    const raw = e.dataTransfer.getData('application/reactflow');
-    if (!raw) return;
+  // EINE Stelle, an der ein Bauteil entsteht (Punkt 2). Vorher hing die ganze
+  // Erzeugung inklusive Inline-Einfügen in `onDrop` — dadurch war Drag&Drop der
+  // einzige Weg, und der `PLACE`-Befehl blieb toter Code. Jetzt rufen Drop UND
+  // Klick-Platzierung dieselbe Funktion, sodass beide Wege identisch verhalten.
+  const bauteilPlatzieren = useCallback((raw, weltPosition, screenPunkt = null) => {
+    if (!raw) return null;
     snap();
-    const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    const pos = weltPosition;
     const p = STD_PALETTE.find(p => p.type === raw);
     const id = newId();
     const lineHit = INLINE_SPLIT_TYPES.has(raw) ? naechsteSichtbareLeitung(pos, 30 / Math.max(getZoom(), 0.2)) : null;
@@ -3253,19 +3458,67 @@ function EditorInner() {
         return [...cleaned, first, second];
       });
     }
-    // Verbrauchergruppe: direkt nach dem Ablegen die Schaltung wählen
-    if (raw === 'gruppe') setSchaltungswahl({ nodeId: id, x: e.clientX, y: e.clientY });
-  }, [getZoom, naechsteSichtbareLeitung, screenToFlowPosition, setEdges, setNodes, snap]);
+    // Verbrauchergruppe: direkt nach dem Setzen die Schaltung wählen
+    if (raw === 'gruppe' && screenPunkt) setSchaltungswahl({ nodeId: id, x: screenPunkt.x, y: screenPunkt.y });
+    return id;
+  }, [getZoom, naechsteSichtbareLeitung, setEdges, setNodes, snap]);
+
+  // Drag&Drop bleibt erhalten — es ist jetzt nur einer von zwei Wegen.
+  const onDrop = useCallback((e) => {
+    e.preventDefault();
+    const raw = e.dataTransfer.getData('application/reactflow');
+    if (!raw) return;
+    bauteilPlatzieren(raw, screenToFlowPosition({ x:e.clientX, y:e.clientY }), { x:e.clientX, y:e.clientY });
+  }, [bauteilPlatzieren, screenToFlowPosition]);
+
+  // Punkt 2 — Bibliothek anklicken statt ziehen. Der Befehl bleibt aktiv, solange
+  // er als Dauerbefehl gewählt wurde; sonst ist nach dem Setzen wieder `modify`.
+  const platzierenStarten = useCallback((typ, { persistent = false } = {}) => {
+    setSelected(null);
+    setSelectedEdgeId(null);
+    setEndpointMenu(null);
+    setEdgeMenu(null);
+    // Ein laufender Leitungsentwurf wird verworfen — zwei Befehle gleichzeitig
+    // gibt es nicht.
+    leitungsEntwurfRef.current = null;
+    setLeitungsEntwurf(null);
+    setLeitungsSnap(null);
+    setLeitungsGuides([]);
+    setLaengenPuffer(null);
+    setEditorMode(startCommand(PLACE, { persistent, payload:{ nodeType:typ } }));
+  }, []);
+
+  // Klick im Platzierungsbefehl. Die Weltkoordinate ist DIESELBE, die die
+  // Vorschau anzeigt — sonst würde das Bauteil neben dem Geist landen.
+  const platzierenKlick = useCallback((event) => {
+    if (event.button !== 0 || spacePanRef.current) return false;
+    const typ = editorModeRef.current?.payload?.nodeType;
+    if (!typ) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    const punkt = platzierVorschauRef.current
+      || rasterPunkt(screenToFlowPosition({ x:event.clientX, y:event.clientY }), drawingConfig.grid_size);
+    bauteilPlatzieren(typ, punkt, { x:event.clientX, y:event.clientY });
+    setEditorMode(finishCommand(editorModeRef.current));
+    return true;
+  }, [bauteilPlatzieren, drawingConfig.grid_size, screenToFlowPosition]);
 
   const onNodeClick = useCallback((event, node) => {
+    // Im Platzierungsbefehl setzt ein Klick ein Bauteil — auch wenn unter dem
+    // Cursor schon eines liegt. Sonst „verschluckt" das vorhandene Bauteil den
+    // Klick und der Planer glaubt, der Befehl sei kaputt.
+    if (istBefehl(editorModeRef.current, PLACE)) { platzierenKlick(event); return; }
     // Im Zeichenmodus oder bei aktivem Entwurf: Klick auf ein Bauteil startet/
     // führt die Leitung an dessen Anschluss (nur bei Anschluss-Treffer).
-    if (leitungsEntwurfRef.current || zeichenModusRef.current) { cadKlick(event, true); return; }
+    if (leitungsEntwurfRef.current || zeichenModusRef.current) {
+      cadKlick(event, !zeichenModusRef.current && !leitungsEntwurfRef.current);
+      return;
+    }
     setEndpointMenu(null);
     setSelected(node);
     setSelectedEdgeId(null);
     setInspectorOpen(true);
-  }, [cadKlick]);
+  }, [cadKlick, platzierenKlick]);
   const onNodeDoubleClick = useCallback((_, node) => {
     if (node.type === 'label') return; // Textblock: Doppelklick editiert inline
     if (!leitungsEntwurfRef.current) setAuslegung(node);
@@ -3320,6 +3573,10 @@ function EditorInner() {
   }, [cadAnker, routePunkte, setEdges, setNodes, snap]);
 
   const onPaneClick = useCallback((event) => {
+    // Pan darf die Auswahl nicht anfassen (Punkt 16). Ohne diese Prüfung würde
+    // ein Space-Pan die aktuelle Auswahl beim Loslassen abwählen.
+    if (spacePanRef.current) return;
+    if (istBefehl(editorModeRef.current, PLACE)) { platzierenKlick(event); return; }
     if (spiegelAchse) {
       event.preventDefault();
       const point = rasterPunkt(screenToFlowPosition({ x:event.clientX, y:event.clientY }), drawingConfig.grid_size);
@@ -3343,15 +3600,27 @@ function EditorInner() {
     setSelected(null);
     setSelectedEdgeId(null);
     setMarkierteEdgeIds([]);
-  }, [cadKlick, drawingConfig.grid_size, screenToFlowPosition, selected, selectedEdgeId, spiegelAchse, spiegelKopieErstellen]);
+  }, [cadKlick, drawingConfig.grid_size, screenToFlowPosition, selected, selectedEdgeId, spiegelAchse, spiegelKopieErstellen, platzierenKlick]);
 
   const canvasMouseMove = useCallback((event) => {
+    // Platzierungsvorschau folgt dem Cursor — mit Raster und Ausrichtungslinien.
+    if (istBefehl(editorModeRef.current, PLACE)) {
+      const raw = screenToFlowPosition({ x:event.clientX, y:event.clientY });
+      const zoom = Math.max(getZoom(), 0.2);
+      const alignment = objektAusrichtung(raw, snapAnRef.current ? objektFangpunkte : [],
+        drawingConfig.snap_tolerance / zoom, drawingConfig.grid_size);
+      platzierVorschauRef.current = alignment.point;
+      setPlatzierVorschau(alignment.point);
+      setLeitungsGuides(alignment.guides);
+      return;
+    }
     if (spiegelAchse?.start) {
       const cursor = rasterPunkt(screenToFlowPosition({ x:event.clientX, y:event.clientY }), drawingConfig.grid_size);
       setSpiegelAchse(current => current ? { ...current, cursor } : current);
     }
     cadCursorAktualisieren(event);
-  }, [cadCursorAktualisieren, drawingConfig.grid_size, screenToFlowPosition, spiegelAchse?.start]);
+  }, [cadCursorAktualisieren, drawingConfig.grid_size, drawingConfig.snap_tolerance, getZoom,
+      objektFangpunkte, screenToFlowPosition, spiegelAchse?.start]);
   const onPaneContextMenu = useCallback((event) => {
     // Rechtsklick bricht jede aktive Zeichenaktion vollständig ab (kein
     // versehentliches Abschliessen einer Leitung) und beendet den Dauermodus.
@@ -3731,7 +4000,9 @@ function EditorInner() {
               {open && <div className="hc-palette-group__items">
                 {group.items.map(item=><div key={item.type} draggable
                   onDragStart={event=>{ event.dataTransfer.setData('application/reactflow',item.type); event.dataTransfer.effectAllowed='move'; }}
-                  className="hc-palette-item">
+                  onClick={event=>platzierenStarten(item.type, { persistent:event.shiftKey })}
+                  title={`${item.label} — klicken, dann auf die Zeichenfläche klicken. Shift-Klick: mehrere setzen.`}
+                  className={`hc-palette-item${platzierTyp === item.type ? ' is-armed' : ''}`}>
                   <span className="hc-palette-item__grip">⠿</span>
                   <span>
                     <strong>{item.label}</strong>
@@ -3745,7 +4016,8 @@ function EditorInner() {
         </aside>
 
         {/* Canvas */}
-        <main className="hc-canvas-wrap" onPointerDownCapture={cadHandlePointerDown}>
+        <main className="hc-canvas-wrap" onPointerDownCapture={cadHandlePointerDown}
+          onPointerMove={canvasMouseMove}>
           <ReactFlow
             nodes={displayNodes} edges={displayEdges}
             onNodesChange={onNodesChange}
@@ -3758,7 +4030,6 @@ function EditorInner() {
             onNodeDoubleClick={onNodeDoubleClick}
             onEdgeClick={onEdgeClick}
             onPaneClick={onPaneClick}
-            onPaneMouseMove={canvasMouseMove}
             onPaneContextMenu={onPaneContextMenu}
             nodeTypes={NODE_TYPES}
             edgeTypes={EDGE_TYPES}
@@ -3768,18 +4039,31 @@ function EditorInner() {
             paneClickDistance={6}
             nodeClickDistance={6}
             snapToGrid snapGrid={[drawingConfig.grid_size,drawingConfig.grid_size]}
-            selectionOnDrag
-            nodesDraggable
+            nodesDraggable={istGrundzustand}
             nodesConnectable={false}
-            panOnDrag
+            // Punkt 16 — CAD-Maus: mittlere Taste ist IMMER Pan, Space+links ist
+            // temporäres Pan. Vorher waren `panOnDrag` (links = schieben) und
+            // `selectionOnDrag` (links = Auswahlrechteck) gleichzeitig aktiv; was
+            // die linke Taste tat, war damit nicht vorhersehbar.
+            panOnDrag={spacePan ? [0, 1] : [1]}
+            // Auswahlrechteck nur im Grundzustand und nur ohne Space — während
+            // Zeichnen, Platzieren oder Pan darf kein Rechteck aufziehen.
+            selectionOnDrag={istGrundzustand && !spacePan}
+            selectionMode={selectionMode}
+            selectionKeyCode={null}
             multiSelectionKeyCode="Shift"
+            // Löschen macht der Editor selbst (mit Undo-Schnappschuss und
+            // Aufräumen der Anker). React Flow soll NICHT zusätzlich löschen.
+            deleteKeyCode={null}
+            // Mausrad zoomt auf die Cursorposition (React-Flow-Standard); das
+            // Zoomen per Doppelklick ist im CAD unerwartet und bleibt aus.
+            zoomOnDoubleClick={false}
             defaultEdgeOptions={{ type:'flow', style:{ strokeWidth:2.5 } }}
             // Weiter reinzoomen können, damit das Schema gross und detailliert
             // dargestellt werden kann; für grosse Anlagen auch weiter raus.
             minZoom={0.2}
             maxZoom={4}
-            fitView
-            className={(zeichenModus || leitungsEntwurf) ? 'cursor-crosshair hc-hydraulik-flow' : 'hc-hydraulik-flow'}
+            className={`hc-hydraulik-flow${spacePan ? ' hc-flow--pan' : istGrundzustand ? '' : ' hc-flow--draw'}`}
           >
             {/* CAD-Optik (§ Editor #4): Millimeterpapier — feine Minor-Punkte am
                 Raster (bleiben beim Rauszoomen ruhig) plus kräftigere Major-Linien
@@ -3841,15 +4125,46 @@ function EditorInner() {
                 {/* Punkt 5 — sichtbarer Fang. Form UND Text sagen, woran gefangen
                     wird; die Koordinate ist dieselbe, die der Klick setzt. */}
                 {snapMarker && <SnapMarker marker={snapMarker} />}
+                {/* Punkt 2 — Platzierungsvorschau. Kein echter Node: ein Geist mit
+                    Handles würde React Flow durchscheinen lassen und könnte
+                    versehentlich im Graphen landen. */}
+                {platzierTyp && platzierVorschau && (
+                  <g pointerEvents="none" opacity="0.5">
+                    <rect x={platzierVorschau.x - 20 / zoomAnzeige} y={platzierVorschau.y - 20 / zoomAnzeige}
+                      width={40 / zoomAnzeige} height={40 / zoomAnzeige} rx={3 / zoomAnzeige}
+                      fill="rgba(79,70,229,0.10)" stroke="#4f46e5"
+                      strokeWidth={1.5 / zoomAnzeige} strokeDasharray={`${5 / zoomAnzeige} ${3 / zoomAnzeige}`} />
+                    <line x1={platzierVorschau.x - 9 / zoomAnzeige} y1={platzierVorschau.y}
+                      x2={platzierVorschau.x + 9 / zoomAnzeige} y2={platzierVorschau.y}
+                      stroke="#4f46e5" strokeWidth={1.2 / zoomAnzeige} />
+                    <line x1={platzierVorschau.x} y1={platzierVorschau.y - 9 / zoomAnzeige}
+                      x2={platzierVorschau.x} y2={platzierVorschau.y + 9 / zoomAnzeige}
+                      stroke="#4f46e5" strokeWidth={1.2 / zoomAnzeige} />
+                  </g>
+                )}
                 {/* Punkt 7 — temporäres Mass des laufenden Segments. */}
-                {cadMass && (
+                {cadMass && <CadMass mass={cadMass} zoom={zoomAnzeige} />}
+                {/* Punkt 6 — getippte Länge direkt am Segmentende. Bewusst im
+                    Viewport und nicht am Bildschirmrand: beim Zeichnen schaut
+                    niemand nach unten in eine Leiste. */}
+                {laengenPuffer !== null && leitungsCursor && (
                   <g pointerEvents="none">
-                    <rect x={cadMass.x - 30} y={cadMass.y - 11} width="60" height="22" rx="5"
-                      fill="#0f172aee" />
-                    <text x={cadMass.x} y={cadMass.y + 5} textAnchor="middle"
-                      fill="#f8fafc" fontSize="13" fontWeight="700" fontFamily="ui-monospace, monospace">
-                      {cadMass.label}
+                    <rect x={leitungsCursor.x + 14 / zoomAnzeige} y={leitungsCursor.y - 30 / zoomAnzeige}
+                      width={92 / zoomAnzeige} height={24 / zoomAnzeige} rx={4 / zoomAnzeige}
+                      fill="#0f172af2" />
+                    <text x={leitungsCursor.x + 20 / zoomAnzeige} y={leitungsCursor.y - 13 / zoomAnzeige}
+                      fill="#f8fafc" fontSize={13 / zoomAnzeige} fontWeight="700"
+                      fontFamily="ui-monospace, SFMono-Regular, monospace">
+                      {(laengenPuffer || '0')}
                     </text>
+                    <text x={leitungsCursor.x + 98 / zoomAnzeige} y={leitungsCursor.y - 13 / zoomAnzeige}
+                      textAnchor="end" fill="#94a3b8" fontSize={9 / zoomAnzeige} fontWeight="600">mm</text>
+                    {/* Blinkender Eingabestrich — macht sichtbar, dass die
+                        Tastatur gerade der Eingabe gehört. */}
+                    <rect className="hc-cad-caret"
+                      x={leitungsCursor.x + (22 + (laengenPuffer || '0').length * 7.8) / zoomAnzeige}
+                      y={leitungsCursor.y - 25 / zoomAnzeige}
+                      width={1.5 / zoomAnzeige} height={14 / zoomAnzeige} fill="#f8fafc" />
                   </g>
                 )}
                 {spiegelAchse?.start && spiegelAchse?.cursor && (
@@ -3981,20 +4296,16 @@ function EditorInner() {
 
           {/* Punkt 8 — numerische Direkteingabe als Canvas-Overlay, nicht als
               Formularfeld rechts. Erscheint nur, während tatsächlich getippt wird. */}
-          {laengenPuffer !== null && (
-            <div className="hc-cad-eingabe" role="status">
-              <span className="hc-cad-eingabe__label">Länge</span>
-              <span className="hc-cad-eingabe__wert">{laengenPuffer || '0'}</span>
-              <span className="hc-cad-eingabe__einheit">mm</span>
-              <span className="hc-cad-eingabe__hinweis">Enter = setzen · Esc = abbrechen</span>
-            </div>
-          )}
 
           {/* Punkt 15 — Statusleiste. Der aktive Modus steht immer hier. */}
           <div className="hc-statusbar">
-            <span className={`hc-statusbar__mode${istGrundzustand ? '' : ' is-command'}`}>
+            <span className={`hc-statusbar__mode${istGrundzustand ? '' : ' is-command'}`}
+              title={istGrundzustand
+                ? 'Grundzustand: auswählen und bearbeiten'
+                : 'Befehl aktiv — Esc führt zurück'}>
               {modeLabel(editorMode)}
-              {dauerLeitung ? ' · Dauer' : ''}
+              {platzierTyp ? `: ${STD_PALETTE.find(x => x.type === platzierTyp)?.label || platzierTyp}` : ''}
+              {editorMode.persistent ? ' · Dauer' : ''}
             </span>
             <button type="button"
               onClick={() => setOrthoAn(v => { setDrawingConfig(c => ({ ...c, ortho:!v })); return !v; })}
@@ -4014,7 +4325,10 @@ function EditorInner() {
             <span className="hc-statusbar__system" style={{ color:activeLayer.color }}>
               ● {activeLayer.label}
             </span>
-            {cadMass && <span className="hc-statusbar__mass">{cadMass.label}</span>}
+            {laengenPuffer !== null
+              ? <span className="hc-statusbar__mass is-input">{laengenPuffer || '0'} mm ⌫</span>
+              : cadMass && <span className="hc-statusbar__mass">{cadMass.label}</span>}
+            {spacePan && <span className="hc-statusbar__hint">Pan (Space)</span>}
             <span className="hc-statusbar__zoom">{Math.round(zoomAnzeige * 100)} %</span>
           </div>
         </main>

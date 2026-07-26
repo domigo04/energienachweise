@@ -1205,40 +1205,67 @@
   color: #64748b;
 }
 
-/* ── Numerische Direkteingabe (Punkt 8) ───────────────────────────────────
-   Bewusst über dem Canvas und nicht im rechten Formular: die Länge wird
-   während des Zeichnens getippt, nicht in einer Maske nachgetragen. */
-.hc-cad-eingabe {
-  position: absolute;
-  left: 50%;
-  bottom: 44px;
-  transform: translateX(-50%);
-  z-index: 24;
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 7px 14px;
-  border-radius: 8px;
-  background: #0f172af2;
+/* ── Numerische Direkteingabe (Punkt 6) ───────────────────────────────────
+   Die Eingabe wird im Viewport neben dem Segmentende gezeichnet (SVG), damit
+   der Blick beim Zeichnen an der Zeichnung bleibt. Hier nur der Cursor-Blink. */
+@keyframes hc-caret { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+.hc-cad-caret { animation: hc-caret 1s step-end infinite; }
+
+/* ── CAD-Cursor je Werkzeug ───────────────────────────────────────────────
+   Der Cursor ist die schnellste Rückmeldung darüber, was ein Klick jetzt tut. */
+.hc-flow--draw,
+.hc-flow--draw .react-flow__pane { cursor: crosshair; }
+.hc-flow--pan,
+.hc-flow--pan .react-flow__pane { cursor: grab; }
+.hc-flow--pan .react-flow__pane:active { cursor: grabbing; }
+
+/* Punkt 19 — Flowchart-Reste ausblenden.
+   React Flow bleibt Viewport und Node-Host, soll aber nicht wie ein
+   Flussdiagramm-Editor aussehen. */
+
+/* Kein Verbindungs-Cursor an Bauteilen: Anschlüsse sind Fangziele, keine
+   Ziehpunkte. Eine Leitung entsteht nur im Leitungsbefehl. */
+.react-flow__handle { cursor: default; }
+
+/* Dezentes Auswahlrechteck statt der kräftigen Standardbox. */
+.react-flow__selection {
+  background: rgba(79, 70, 229, 0.06);
+  border: 1px dashed rgba(79, 70, 229, 0.7);
+}
+
+/* Auswahl am Bauteil: dünne Kontur, keine dicke Box mit Griffen. */
+.react-flow__node.selected > * {
+  outline: 1px solid rgba(79, 70, 229, 0.85);
+  outline-offset: 2px;
+}
+
+/* Keine React-Flow-Attribution über der Zeichenfläche. */
+.react-flow__attribution { display: none; }
+
+/* Punkt 2 — „geladenes" Bauteil in der Bibliothek. Der Planer muss sehen,
+   welches Symbol am Cursor hängt, sonst klickt er ins Blaue. */
+.hc-palette-item.is-armed {
+  border-color: #4f46e5;
+  background: #eef2ff;
+  box-shadow: inset 2px 0 0 #4f46e5;
+}
+.hc-palette-item { cursor: pointer; }
+
+/* Punkt 18 — die Statusleiste liegt über der Zeichenfläche. Die React-Flow-
+   Bedienknöpfe unten links müssen darüber rücken, sonst verschwinden sie. */
+.hc-canvas-wrap .react-flow__controls { bottom: 34px; }
+.hc-canvas-wrap .react-flow__minimap { bottom: 34px; }
+
+.hc-statusbar__mass.is-input {
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #0f172a;
   color: #f8fafc;
-  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.3);
 }
-.hc-cad-eingabe__label {
-  font-size: 10px;
+.hc-statusbar__hint {
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #e0e7ff;
+  color: #4338ca;
   font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #94a3b8;
-}
-.hc-cad-eingabe__wert {
-  font-family: ui-monospace, monospace;
-  font-size: 19px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-}
-.hc-cad-eingabe__einheit { font-size: 11px; color: #cbd5e1; }
-.hc-cad-eingabe__hinweis {
-  margin-left: 6px;
-  font-size: 10px;
-  color: #94a3b8;
 }

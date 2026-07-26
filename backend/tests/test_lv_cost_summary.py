@@ -306,3 +306,70 @@ def test_gruppentotal_wird_genutzt_wenn_keine_einzelpositionen():
     approve_lv(imp.id, user=SimpleNamespace(id=1, tenant_id=1, name="D", email="d@x.ch"), db=db)
     zeilen = db.query(RefKostenzeile).all()
     assert len(zeilen) == 1 and zeilen[0].betrag_chf == 12000.0
+
+
+# ── Referenzkosten beziehen sich auf das Norm-LV ───────────────────────────
+
+def test_freigabe_schreibt_die_norm_nummer(summary):
+    """Zugeordnete Positionen zählen unter ihrer NORM-Nummer, nicht unter der
+    Angebotsnummer. Sonst landet „Isolation Rohrleitungen" (Angebot 247.1) in
+    Gruppe 247, obwohl es im Norm-LV 248.2 ist — und die Kostenschätzung, die
+    nach BKP-Gruppe vergleicht, bekommt eine verschobene Verteilung."""
+    from types import SimpleNamespace
+    from app.models.lv_import import LvImport, LvImportFeature, LvImportCost, LvImportStatus
+    from app.models.kv import RefKostenzeile
+    from app.routers.hc_lv_import import approve_lv
+
+    db = _db()
+    imp = LvImport(tenant_id=1, filename="norm.pdf", file_hash="n1",
+                   status=LvImportStatus.review.value)
+    db.add(imp)
+    db.flush()
+    db.add(LvImportFeature(lv_import_id=imp.id, key="pump_count", value="2", confirmed=True))
+    for row in to_cost_rows(summary):
+        db.add(LvImportCost(
+            lv_import_id=imp.id, bkp_nr=row["bkp_nr"],
+            original_position=row.get("original_position"),
+            original_title=row.get("original_title"),
+            canonical_key=row.get("canonical_key"),
+            is_group_total=row["is_group_total"],
+            detected_amount=row["detected_amount"], confirmed=True))
+    db.commit()
+    approve_lv(imp.id, user=SimpleNamespace(id=1, tenant_id=1, name="D", email="d@x.ch"), db=db)
+
+    alle = db.query(RefKostenzeile).all()
+    nach_nr: dict[str, list] = {}
+    for z in alle:
+        nach_nr.setdefault(z.bkp_nr, []).append(z)
+
+    # Angebot 247.1 „Isolation Rohrleitungen" → Norm 248.2 Rohrisolation Heizung.
+    norm_248_2 = [z for z in nach_nr["248.2"] if z.bkp_name == "Rohrisolation Heizung"]
+    assert len(norm_248_2) == 1 and norm_248_2[0].betrag_chf == 4191.0
+    # Angebot 242.1 „Wärmeerzeuger Sole/Wasser" → Norm 242.3.
+    assert nach_nr["242.3"][0].betrag_chf == 50650.0
+
+    # Nicht zugeordnete Positionen zählen nur auf GRUPPENebene — sie dürfen
+    # keine Norm-Position vortäuschen (Angebot 248.2 = Elektroanschlüsse ist
+    # etwas anderes als Norm 248.2 = Rohrisolation).
+    assert all("." not in z.bkp_nr for z in alle if z.bkp_name and "Elektro" in z.bkp_name)
+    for z in alle:
+        if z.bkp_nr not in norm_lv.NORM_KEYS:
+            assert "." not in z.bkp_nr, f"{z.bkp_nr} ist weder Norm-Position noch Gruppe"
+
+    # Kein Geld verloren.
+    assert round(sum(z.betrag_chf for z in alle), 2) == GOLDEN_TRADE_TOTAL
+
+    # Und jede Zeile bleibt in einer Gruppe, die die Kostenschätzung auswertet.
+    from app.calculations.grobkostenschaetzung import BKP_GRUPPEN_ALLE
+    assert all(z.bkp_nr.split(".")[0] in BKP_GRUPPEN_ALLE for z in alle)
+
+
+def test_nicht_zugeordnete_position_behaelt_ihre_gruppe(summary):
+    """„Elektroanschlüsse" hat keine Norm-Position — der Betrag darf trotzdem
+    nicht verschwinden."""
+    from app.calculations.grobkostenschaetzung import BKP_GRUPPEN_ALLE
+
+    p = next(p for p in summary["positions"] if p["original_position"] == "248.2")
+    assert p["canonical_key"] is None
+    # Die Originalnummer liegt in einer Gruppe, die die Schätzung auswertet.
+    assert p["original_position"].split(".")[0] in BKP_GRUPPEN_ALLE

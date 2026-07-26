@@ -137,6 +137,7 @@ def _ensure_columns():
             ("validation_status", "VARCHAR"), ("source", "VARCHAR"),
             ("original_amount", "FLOAT"), ("mapping_method", "VARCHAR"),
             ("mapping_confidence", "FLOAT"), ("mapping_reason", "VARCHAR"),
+            ("mapping_confirmed", "BOOLEAN"),
         ],
     }
     is_sqlite = engine.url.get_backend_name().startswith("sqlite")
@@ -168,6 +169,7 @@ def _ensure_columns():
         conn.execute(text("UPDATE hc_users SET firma_role = 'mitglied' WHERE firma_role IS NULL"))
         conn.execute(text("UPDATE ref_kostenzeilen SET gewerk = 'heizung' WHERE gewerk IS NULL"))
         conn.execute(text("UPDATE lv_import_costs SET is_group_total = FALSE WHERE is_group_total IS NULL"))
+        conn.execute(text("UPDATE lv_import_costs SET mapping_confirmed = FALSE WHERE mapping_confirmed IS NULL"))
         conn.commit()
 
 

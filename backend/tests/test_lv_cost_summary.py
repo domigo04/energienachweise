@@ -249,46 +249,27 @@ def _db():
     return sessionmaker(bind=engine)()
 
 
-def test_freigabe_zaehlt_gruppentotal_nicht_zusaetzlich(summary):
-    """Punkt 14/15 — die Referenzkosten enthalten die Einzelpositionen, nicht
-    zusätzlich das Gruppentotal. Sonst wäre jedes importierte Projekt doppelt
-    so teuer wie in Wirklichkeit."""
-    from types import SimpleNamespace
-    from app.models.lv_import import LvImport, LvImportFeature, LvImportCost, LvImportStatus
+def test_gruppentotale_werden_nie_referenzkosten(summary):
+    """Ein Gruppentotal ist eine Kontrollzeile, keine Norm-LV-Position — es kann
+    also nie in die Referenz gelangen und kann dort auch nichts verdoppeln."""
     from app.models.kv import RefKostenzeile
     from app.routers.hc_lv_import import approve_lv
 
     db = _db()
-    imp = LvImport(tenant_id=1, filename="golden.pdf", file_hash="g1",
-                   status=LvImportStatus.review.value)
-    db.add(imp)
-    db.flush()
-    db.add(LvImportFeature(lv_import_id=imp.id, key="pump_count", value="2", confirmed=True))
-    for row in to_cost_rows(summary):
-        db.add(LvImportCost(
-            lv_import_id=imp.id, bkp_nr=row["bkp_nr"],
-            original_position=row.get("original_position"),
-            original_title=row.get("original_title"),
-            canonical_key=row.get("canonical_key"),
-            is_group_total=row["is_group_total"],
-            validation_status=row.get("validation_status"),
-            detected_amount=row["detected_amount"], confirmed=True))
-    db.commit()
-
-    user = SimpleNamespace(id=1, tenant_id=1, name="D", email="d@x.ch")
-    approve_lv(imp.id, user=user, db=db)
-
-    zeilen = db.query(RefKostenzeile).all()
-    assert len(zeilen) == len(GOLDEN_POSITIONS)         # keine Totalzeilen
-    assert round(sum(z.betrag_chf for z in zeilen), 2) == GOLDEN_TRADE_TOTAL
-    # Originalnummer und -titel bleiben in der Referenz erhalten (Punkt 14).
-    nummern = {z.bkp_nr for z in zeilen}
-    assert "241.14" in nummern
-    assert any("Erdsonden" in (z.bkp_name or "") for z in zeilen)
+    imp = _import_mit_kosten(db, summary)
+    approve_lv(imp.id, user=_user(), db=db)
+    for z in db.query(RefKostenzeile).all():
+        assert "." in z.bkp_nr, f"{z.bkp_nr} sieht wie ein Gruppentotal aus"
+        assert norm_lv.ist_norm_position(z.bkp_nr)
 
 
-def test_gruppentotal_wird_genutzt_wenn_keine_einzelpositionen():
-    """Hat eine Gruppe nur ein Total (kein Detail), zählt dieses Total."""
+def test_nur_gruppentotale_ergeben_keine_referenzkosten():
+    """EINSCHRÄNKUNG der Norm-LV-Regel, bewusst so:
+
+    Enthält ein LV ausschliesslich Gruppentotale (z.B. nur „Total BKP 244") und
+    keine Einzelpositionen, entstehen keine Referenzkosten — eine Gruppe ist
+    keine Norm-LV-Position, also gibt es nichts zu bestätigen. Solche LVs müssen
+    im Review manuell auf Norm-Positionen verteilt werden."""
     from types import SimpleNamespace
     from app.models.lv_import import LvImport, LvImportFeature, LvImportCost, LvImportStatus
     from app.models.kv import RefKostenzeile
@@ -304,23 +285,11 @@ def test_gruppentotal_wird_genutzt_wenn_keine_einzelpositionen():
                         detected_amount=12000.0, confirmed=True))
     db.commit()
     approve_lv(imp.id, user=SimpleNamespace(id=1, tenant_id=1, name="D", email="d@x.ch"), db=db)
-    zeilen = db.query(RefKostenzeile).all()
-    assert len(zeilen) == 1 and zeilen[0].betrag_chf == 12000.0
+    assert db.query(RefKostenzeile).count() == 0
 
 
-# ── Referenzkosten beziehen sich auf das Norm-LV ───────────────────────────
-
-def test_freigabe_schreibt_die_norm_nummer(summary):
-    """Zugeordnete Positionen zählen unter ihrer NORM-Nummer, nicht unter der
-    Angebotsnummer. Sonst landet „Isolation Rohrleitungen" (Angebot 247.1) in
-    Gruppe 247, obwohl es im Norm-LV 248.2 ist — und die Kostenschätzung, die
-    nach BKP-Gruppe vergleicht, bekommt eine verschobene Verteilung."""
-    from types import SimpleNamespace
+def _import_mit_kosten(db, summary, *, mapping_confirmed=True):
     from app.models.lv_import import LvImport, LvImportFeature, LvImportCost, LvImportStatus
-    from app.models.kv import RefKostenzeile
-    from app.routers.hc_lv_import import approve_lv
-
-    db = _db()
     imp = LvImport(tenant_id=1, filename="norm.pdf", file_hash="n1",
                    status=LvImportStatus.review.value)
     db.add(imp)
@@ -333,43 +302,102 @@ def test_freigabe_schreibt_die_norm_nummer(summary):
             original_title=row.get("original_title"),
             canonical_key=row.get("canonical_key"),
             is_group_total=row["is_group_total"],
-            detected_amount=row["detected_amount"], confirmed=True))
+            detected_amount=row["detected_amount"],
+            confirmed=True, mapping_confirmed=mapping_confirmed))
     db.commit()
-    approve_lv(imp.id, user=SimpleNamespace(id=1, tenant_id=1, name="D", email="d@x.ch"), db=db)
+    return imp
 
-    alle = db.query(RefKostenzeile).all()
-    nach_nr: dict[str, list] = {}
-    for z in alle:
-        nach_nr.setdefault(z.bkp_nr, []).append(z)
 
-    # Angebot 247.1 „Isolation Rohrleitungen" → Norm 248.2 Rohrisolation Heizung.
-    norm_248_2 = [z for z in nach_nr["248.2"] if z.bkp_name == "Rohrisolation Heizung"]
-    assert len(norm_248_2) == 1 and norm_248_2[0].betrag_chf == 4191.0
+_USER = None
+
+
+def _user():
+    from types import SimpleNamespace
+    return SimpleNamespace(id=1, tenant_id=1, name="D", email="d@x.ch")
+
+
+def test_nur_zugeordnete_positionen_werden_referenzkosten(summary):
+    """Vorgabe: das Ergebnis soll aussehen wie ein normal nach dem Norm-LV
+    ausgewertetes Projekt. Keine halbstandardisierten Gruppenzeilen wie „248"
+    für Leistungen, die es im Norm-LV nicht gibt."""
+    from app.models.kv import RefKostenzeile
+    from app.routers.hc_lv_import import approve_lv
+
+    db = _db()
+    imp = _import_mit_kosten(db, summary)
+    approve_lv(imp.id, user=_user(), db=db)
+
+    zeilen = db.query(RefKostenzeile).all()
+    # Jede Referenzzeile ist eine echte Norm-LV-Position.
+    assert zeilen
+    for z in zeilen:
+        assert norm_lv.ist_norm_position(z.bkp_nr), f"{z.bkp_nr} ist keine Norm-Position"
+        assert z.bkp_name == norm_lv.NORM_BY_KEY[z.bkp_nr]["bezeichnung"]
     # Angebot 242.1 „Wärmeerzeuger Sole/Wasser" → Norm 242.3.
-    assert nach_nr["242.3"][0].betrag_chf == 50650.0
-
-    # Nicht zugeordnete Positionen zählen nur auf GRUPPENebene — sie dürfen
-    # keine Norm-Position vortäuschen (Angebot 248.2 = Elektroanschlüsse ist
-    # etwas anderes als Norm 248.2 = Rohrisolation).
-    assert all("." not in z.bkp_nr for z in alle if z.bkp_name and "Elektro" in z.bkp_name)
-    for z in alle:
-        if z.bkp_nr not in norm_lv.NORM_KEYS:
-            assert "." not in z.bkp_nr, f"{z.bkp_nr} ist weder Norm-Position noch Gruppe"
-
-    # Kein Geld verloren.
-    assert round(sum(z.betrag_chf for z in alle), 2) == GOLDEN_TRADE_TOTAL
-
-    # Und jede Zeile bleibt in einer Gruppe, die die Kostenschätzung auswertet.
-    from app.calculations.grobkostenschaetzung import BKP_GRUPPEN_ALLE
-    assert all(z.bkp_nr.split(".")[0] in BKP_GRUPPEN_ALLE for z in alle)
+    nach_nr = {}
+    for z in zeilen:
+        nach_nr.setdefault(z.bkp_nr, []).append(z.betrag_chf)
+    assert nach_nr["242.3"] == [50650.0]
+    assert nach_nr["248.2"] == [4191.0]          # Angebot 247.1 Isolation Rohrleitungen
 
 
-def test_nicht_zugeordnete_position_behaelt_ihre_gruppe(summary):
-    """„Elektroanschlüsse" hat keine Norm-Position — der Betrag darf trotzdem
-    nicht verschwinden."""
-    from app.calculations.grobkostenschaetzung import BKP_GRUPPEN_ALLE
+def test_nicht_zugeordnete_positionen_bleiben_dokumentiert(summary):
+    """Das Geld verschwindet nicht — es bleibt im Import mit Originalnummer,
+    Titel und Begründung, fliesst aber nicht in die Referenzkosten."""
+    from app.models.kv import RefKostenzeile
+    from app.models.lv_import import LvImportCost
+    from app.routers.hc_lv_import import approve_lv
 
-    p = next(p for p in summary["positions"] if p["original_position"] == "248.2")
-    assert p["canonical_key"] is None
-    # Die Originalnummer liegt in einer Gruppe, die die Schätzung auswertet.
-    assert p["original_position"].split(".")[0] in BKP_GRUPPEN_ALLE
+    db = _db()
+    imp = _import_mit_kosten(db, summary)
+    approve_lv(imp.id, user=_user(), db=db)
+
+    ohne = [c for c in db.query(LvImportCost).all()
+            if not c.is_group_total and not c.canonical_key]
+    assert ohne, "Fixture sollte nicht zuordenbare Positionen enthalten"
+    for c in ohne:
+        assert c.original_position and c.original_title      # bleibt nachvollziehbar
+        assert c.detected_amount is not None
+
+    referenz = round(sum(z.betrag_chf for z in db.query(RefKostenzeile).all()), 2)
+    nicht_zugeordnet = round(sum(c.detected_amount for c in ohne), 2)
+    # Referenz + nicht zugeordnet = das volle Gewerktotal. Nichts geht verloren,
+    # es ist nur klar getrennt.
+    assert round(referenz + nicht_zugeordnet, 2) == GOLDEN_TRADE_TOTAL
+    assert referenz < GOLDEN_TRADE_TOTAL
+
+
+def test_freigabe_verlangt_gepruefte_zuordnung(summary):
+    """Zweites Gate: „Betrag stimmt" ist nicht „Zuordnung stimmt"."""
+    from fastapi import HTTPException
+    from app.routers.hc_lv_import import approve_lv
+
+    db = _db()
+    imp = _import_mit_kosten(db, summary, mapping_confirmed=False)
+    try:
+        approve_lv(imp.id, user=_user(), db=db)
+        assert False, "Freigabe hätte an der Zuordnung scheitern müssen"
+    except HTTPException as e:
+        assert e.status_code == 422
+        assert "unconfirmed_mappings" in e.detail
+
+
+def test_unbestaetigte_zuordnung_wird_nicht_uebernommen(summary):
+    """Auch eine erkannte Zuordnung zählt erst nach Bestätigung."""
+    from app.models.kv import RefKostenzeile
+    from app.models.lv_import import LvImportCost
+    from app.routers.hc_lv_import import approve_lv
+
+    db = _db()
+    imp = _import_mit_kosten(db, summary)
+    # Eine bestätigte Zuordnung zurücknehmen — Betrag bleibt bestätigt.
+    c = (db.query(LvImportCost)
+         .filter(LvImportCost.canonical_key == "242.3").first())
+    c.mapping_confirmed = False
+    db.commit()
+    try:
+        approve_lv(imp.id, user=_user(), db=db)
+        assert False, "hätte blockieren müssen"
+    except Exception:
+        pass
+    assert db.query(RefKostenzeile).count() == 0

@@ -291,7 +291,12 @@ def test_freigabe_uebernimmt_in_refprojekt():
     db.add(LvImportFeature(lv_import_id=imp.id, key="generator_type", value="ews_wp", confidence="medium", confirmed=True))
     db.add(LvImportFeature(lv_import_id=imp.id, key="heat_meter_count", value="10",
                            confirmed_value="13", confidence="medium", confirmed=True))
-    db.add(LvImportCost(lv_import_id=imp.id, bkp_nr="241", detected_amount=45000.0, confirmed=True))
+    # Kostenposition wie nach einem geprüften Review: Betrag bestätigt UND
+    # Norm-LV-Zuordnung bestätigt — nur dann wird sie Referenzkosten.
+    db.add(LvImportCost(lv_import_id=imp.id, bkp_nr="241", original_position="241.11",
+                        original_title="Rohrleitungen Primärkreis",
+                        canonical_key="241.11", mapping_confirmed=True,
+                        detected_amount=45000.0, confirmed=True))
     db.commit()
 
     user = SimpleNamespace(id=1, tenant_id=1, name="Dominic", email="d@x.ch")
@@ -305,7 +310,9 @@ def test_freigabe_uebernimmt_in_refprojekt():
     assert ref.anzahl_waermemessungen == 13          # confirmed_value gewinnt
     assert ref.waermeerzeuger == ["ews_wp"]
     zeile = db.query(RefKostenzeile).first()
-    assert zeile.bkp_nr == "241" and zeile.betrag_chf == 45000.0
+    # Referenzkosten tragen die NORM-Nummer und die Norm-Bezeichnung.
+    assert zeile.bkp_nr == "241.11" and zeile.betrag_chf == 45000.0
+    assert zeile.bkp_name == "Rohrleitungen Primärkreis WP / Erdsondensammler"
     assert res["ref_projekt_id"] == ref.id
     # Kompletter Fingerprint in der generischen Feature-Struktur (alle Merkmale).
     feats = {f.key: f.value for f in db.query(RefProjektFeature).all()}

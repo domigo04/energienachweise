@@ -5,8 +5,9 @@ einen bereits deterministisch extrahierten Positionstitel einer Position aus dem
 bestehenden Norm-LV zuordnen.
 
 Es liest KEIN PDF, erkennt KEINE Preise, zählt KEINE Mengen und erfindet KEINE
-Werte. Beträge, Mengen und Originalnummern stammen immer aus dem
-deterministischen Parser und werden dem Modell nur als Kontext gezeigt.
+Werte. Beträge werden dem Modell gar nicht gezeigt — für die Frage
+„Rohrleitungen Primärkreis WP → welche Norm-LV-Position?" sind sie irrelevant,
+und was nicht gesendet wird, kann auch nicht falsch verwendet werden.
 
 Absicherungen:
 
@@ -35,7 +36,14 @@ MIN_CONFIDENCE = 0.75
 # Klein halten: nur wirklich offene Positionen gehen ans Modell.
 MAX_POSITIONS = 40
 
-MODEL = "claude-opus-5"
+# Konfigurierbar, damit die Funktion ohne Codeänderung abschaltbar ist und
+# später ein anderes Modell eingesetzt werden kann.
+MODEL = os.getenv("COST_MAPPING_LLM_MODEL", "claude-opus-5")
+
+
+def _aktiviert() -> bool:
+    return (os.getenv("COST_MAPPING_LLM_ENABLED", "true").strip().lower()
+            not in ("0", "false", "no", "off", "nein"))
 
 _SYSTEM = """Du ordnest Positionen aus einem Schweizer Unternehmer-Leistungs\
 verzeichnis (Heizung) einer festen Norm-LV-Position zu.
@@ -74,7 +82,9 @@ _SCHEMA = {
 
 
 def verfuegbar() -> bool:
-    """Ist der LLM-Resolver einsatzbereit? Ohne SDK oder Schlüssel: nein."""
+    """Ist der LLM-Resolver einsatzbereit? Ohne Freigabe, SDK oder Schlüssel: nein."""
+    if not _aktiviert():
+        return False
     if not (os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN")):
         return False
     try:
@@ -89,16 +99,17 @@ def _norm_liste() -> str:
 
 
 def _prompt(offene: list[dict]) -> str:
+    # Bewusst ohne Beträge: für die Zuordnung irrelevant, also wird sie nicht
+    # gesendet (datensparsam).
     zeilen = "\n".join(
         f"{p.get('original_position') or '?'}\t{p.get('original_title') or ''}"
-        f"\t{p.get('original_amount') if p.get('original_amount') is not None else ''}"
         for p in offene
     )
     return (
         "Norm-LV (geschlossene Liste, Schlüssel<TAB>Bezeichnung):\n"
         f"{_norm_liste()}\n\n"
         "Zuzuordnende Positionen aus dem Unternehmer-LV "
-        "(Originalnummer<TAB>Bezeichnung<TAB>Betrag CHF):\n"
+        "(Originalnummer<TAB>Bezeichnung):\n"
         f"{zeilen}\n\n"
         "Gib für JEDE Position genau einen Eintrag zurück."
     )
@@ -122,6 +133,8 @@ def resolve(offene: list[dict], *, client=None) -> dict:
     if client is None:
         if not verfuegbar():
             return {}
+    elif not _aktiviert():
+        return {}                                  # ausdrücklich abgeschaltet
         import anthropic
         client = anthropic.Anthropic()
 

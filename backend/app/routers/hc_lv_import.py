@@ -71,6 +71,12 @@ def _cost_out(c: LvImportCost) -> dict:
         "mapping_method": c.mapping_method,
         "mapping_confidence": c.mapping_confidence,
         "mapping_reason": c.mapping_reason,
+        "mapping_confirmed": bool(c.mapping_confirmed),
+        # Fliesst diese Zeile in die Referenzkosten? Nur mit bestätigter
+        # Norm-LV-Zuordnung — sonst bleibt sie nur im Import dokumentiert.
+        "in_reference": bool(c.canonical_key and c.mapping_confirmed
+                             and not c.is_group_total
+                             and _cost_effective(c) is not None),
         "is_group_total": bool(c.is_group_total),
         "validation_status": c.validation_status, "source": c.source,
         "detected_amount": c.detected_amount, "confirmed_amount": c.confirmed_amount,
@@ -363,13 +369,18 @@ def update_cost(
             c.mapping_method = norm_lv.MANUAL
             c.mapping_confidence = 1.0
             c.mapping_reason = "manuell zugeordnet"
+            c.mapping_confirmed = True        # bewusst gewählt = geprüft
         else:
             raise HTTPException(status_code=422, detail={
                 "message": "Unbekannte Norm-LV-Position.",
                 "canonical_key": key,
             })
+    # Betrag geprüft (confirmed) und Zuordnung geprüft (mapping_confirmed) sind
+    # zwei verschiedene Aussagen und werden getrennt gesetzt.
     if "confirmed" in body:
         c.confirmed = bool(body["confirmed"])
+    if "mapping_confirmed" in body:
+        c.mapping_confirmed = bool(body["mapping_confirmed"])
     db.commit()
     return _cost_out(c)
 
@@ -476,6 +487,22 @@ def approve_lv(import_id: int, user: User = Depends(get_current_user), db: Sessi
             "unconfirmed_costs": kosten_offen,
         })
 
+    # Zweites, getrenntes Gate: die Norm-LV-Zuordnung. „Betrag stimmt" heisst
+    # nicht „Zuordnung stimmt". Bei einer Position ohne Norm-Entsprechung wird
+    # damit die bewusste Ausnahme bestätigt — sonst würde ihr Betrag stillschweigend
+    # aus der Referenz fallen.
+    zuordnung_offen = [
+        (c.original_position or c.bkp_nr) for c in imp.costs
+        if not c.is_group_total and _cost_effective(c) is not None
+        and not c.mapping_confirmed
+    ]
+    if zuordnung_offen:
+        raise HTTPException(status_code=422, detail={
+            "message": "Bitte für jede Kostenposition die Norm-LV-Zuordnung prüfen "
+                       "(zuordnen oder von der Referenz ausschliessen).",
+            "unconfirmed_mappings": zuordnung_offen,
+        })
+
     eff = {f.key: _effective_feature(f) for f in imp.features}
 
     def num(key):
@@ -524,36 +551,25 @@ def approve_lv(import_id: int, user: User = Depends(get_current_user), db: Sessi
             key=f.key, value=eff.get(f.key), unit=f.unit,
         ))
 
-    # Punkt 14/15 — Einzelpositionen sind massgebend. Ein Gruppentotal ist nur
-    # eine Kontrollzeile und darf NIE zusätzlich zu seinen Unterpositionen in die
-    # Referenzkosten fliessen (sonst zählt jede Gruppe doppelt). Nur wenn eine
-    # Gruppe gar keine Einzelposition hat, wird ihr Total selbst verwendet.
-    gruppen_mit_positionen = {
-        c.bkp_nr for c in imp.costs
-        if not c.is_group_total and _cost_effective(c) is not None
-    }
+    # Referenzkosten enthalten AUSSCHLIESSLICH Positionen mit bestätigter
+    # Norm-LV-Zuordnung. Damit sieht ein Import genauso aus wie ein normal nach
+    # dem Norm-LV ausgewertetes Projekt — keine halbstandardisierten Gruppenzeilen
+    # wie "248" für Leistungen, die es im Norm-LV nicht gibt.
+    #
+    # Der Betrag einer nicht zugeordneten Position verschwindet nicht: er bleibt
+    # in LvImportCost samt Originalnummer, Originaltitel und Begründung
+    # dokumentiert und ist im Review jederzeit einsehbar. Er fliesst nur nicht in
+    # die standardisierte Kostendatenbasis.
     for c in imp.costs:
+        if c.is_group_total or not c.canonical_key or not c.mapping_confirmed:
+            continue
         betrag = _cost_effective(c)
         if betrag is None:
             continue
-        if c.is_group_total and c.bkp_nr in gruppen_mit_positionen:
-            continue
-        # Referenzkosten beziehen sich auf das Norm-LV:
-        #   zugeordnet → NORM-Nummer. Sonst landete „Isolation Rohrleitungen"
-        #     unter der Angebotsnummer 247, obwohl es im Norm-LV 248.2 ist, und
-        #     die nach BKP-Gruppe vergleichende Schätzung bekäme eine verschobene
-        #     Verteilung.
-        #   nicht zugeordnet → nur die GRUPPE (z.B. "248"). Der Betrag zählt in
-        #     seiner Gruppe weiter mit (kein Geld verschwindet), kann aber keine
-        #     Norm-Position vortäuschen. Wichtig, weil sich Nummern überschneiden:
-        #     „Elektroanschlüsse" heisst im Angebot 248.2, während Norm 248.2 die
-        #     Rohrisolation ist — beides unter 248.2 zu schreiben würde zwei
-        #     verschiedene Leistungen vermischen.
         db.add(RefKostenzeile(
             tenant_id=user.tenant_id, ref_projekt_id=ref.id, gewerk="heizung",
-            bkp_nr=c.canonical_key or c.bkp_nr,
-            bkp_name=(norm_lv.NORM_BY_KEY[c.canonical_key]["bezeichnung"]
-                      if c.canonical_key else c.original_title),
+            bkp_nr=c.canonical_key,
+            bkp_name=norm_lv.NORM_BY_KEY[c.canonical_key]["bezeichnung"],
             betrag_chf=float(betrag),
         ))
 

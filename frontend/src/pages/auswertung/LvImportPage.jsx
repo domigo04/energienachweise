@@ -372,12 +372,19 @@ function ReviewAnsicht({ id }) {
   const kostenOffen = kostenVerwendet.filter((c) => !c.confirmed).length;
   // Verwendete Kosten = Einzelpositionen; Gruppentotale nur wo es keine gibt
   // (dieselbe Regel wie im Backend bei der Freigabe — keine Doppelzählung).
+  // Nur bestätigt zugeordnete Positionen landen in den Referenzkosten.
+  const referenzTotal = (imp.costs || [])
+    .filter((c) => c.in_reference)
+    .reduce((s, c) => s + (c.effective_amount ?? 0), 0);
+  const zuordnungOffen = (imp.costs || []).filter(
+    (c) => !c.is_group_total && c.effective_amount != null && !c.mapping_confirmed).length;
   const kostenTotal = kostenGruppen.reduce((s, g) => s + (
     g.positionen.length
       ? g.positionen.reduce((x, c) => x + (c.effective_amount ?? 0), 0)
       : (g.total?.effective_amount ?? 0)
   ), 0);
-  const alleGeprueft = featTotal > 0 && featGeprueft === featTotal && kostenOffen === 0;
+  const alleGeprueft = featTotal > 0 && featGeprueft === featTotal
+    && kostenOffen === 0 && zuordnungOffen === 0;
   const grunddatenGesetzt = ["ebf_m2", "anzahl_einheiten", "gebaeudetyp", "projektart",
     "zertifizierung", "region", "projekt_name"]
     .some((k) => imp.grunddaten?.[k] != null && imp.grunddaten?.[k] !== "");
@@ -414,9 +421,9 @@ function ReviewAnsicht({ id }) {
       // eslint-disable-next-line no-await-in-loop
       await setFeature(f, { confirmed: true });
     }
-    for (const c of kostenVerwendet.filter((x) => !x.confirmed)) {
+    for (const c of kostenVerwendet.filter((x) => !x.confirmed || !x.mapping_confirmed)) {
       // eslint-disable-next-line no-await-in-loop
-      await setCost(c, { confirmed: true });
+      await setCost(c, { confirmed: true, mapping_confirmed: true });
     }
   };
   const freigeben = async () => {
@@ -649,17 +656,17 @@ function ReviewAnsicht({ id }) {
                       </span>
                     )}
                     {!c.canonical_key && !c.manual && (
-                      <span className="ml-1 rounded bg-slate-100 px-1 text-[10px] font-semibold text-slate-500"
-                        title={c.mapping_reason || "Im Norm-LV nicht enthalten — der Betrag zählt trotzdem in seiner BKP-Gruppe"}>
-                        nicht im Norm-LV
+                      <span className={`ml-1 rounded px-1 text-[10px] font-semibold ${c.mapping_confirmed ? "bg-slate-100 text-slate-500" : "bg-amber-100 text-amber-700"}`}
+                        title={c.mapping_reason || "Keine passende Norm-LV-Position"}>
+                        {c.mapping_confirmed ? "von Referenz ausgeschlossen" : "keine passende Position"}
                       </span>
                     )}
                     {!c.is_group_total && normLv && (
-                      <div className="mt-1">
-                        <select className="input h-7 max-w-full py-0 text-[11px]" disabled={gesperrt}
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        <select className="input h-7 min-w-0 flex-1 py-0 text-[11px]" disabled={gesperrt}
                           value={c.canonical_key || ""}
                           onChange={(e) => setCost(c, { canonical_key: e.target.value })}>
-                          <option value="">— Norm-LV-Position wählen —</option>
+                          <option value="">— keine passende Norm-LV-Position —</option>
                           {Object.entries(normLv.gruppen || {}).map(([g, name]) => (
                             <optgroup key={g} label={`${g} ${name}`}>
                               {(normLv.positionen || []).filter((p) => p.gruppe === g).map((p) => (
@@ -668,6 +675,21 @@ function ReviewAnsicht({ id }) {
                             </optgroup>
                           ))}
                         </select>
+                        {c.canonical_key ? (
+                          <label className={`inline-flex shrink-0 items-center gap-1 text-[11px] font-semibold ${c.mapping_confirmed ? "text-green-600" : "text-amber-600"}`}
+                            title="Norm-LV-Zuordnung geprüft (unabhängig vom Betrag)">
+                            <input type="checkbox" disabled={gesperrt} checked={!!c.mapping_confirmed}
+                              onChange={(e) => setCost(c, { mapping_confirmed: e.target.checked })} />
+                            Zuordnung ok
+                          </label>
+                        ) : (
+                          <button type="button" disabled={gesperrt}
+                            onClick={() => setCost(c, { mapping_confirmed: !c.mapping_confirmed })}
+                            className={`shrink-0 rounded-lg border px-2 py-1 text-[11px] font-semibold transition ${c.mapping_confirmed ? "border-slate-300 bg-slate-100 text-slate-600" : "border-amber-300 text-amber-700 hover:bg-amber-50"}`}
+                            title="Diese Leistung hat keine Norm-LV-Position. Der Betrag bleibt im Import dokumentiert, fliesst aber nicht in die Referenzkosten.">
+                            {c.mapping_confirmed ? "ausgeschlossen ✓" : "Von Referenz ausschliessen"}
+                          </button>
+                        )}
                       </div>
                     )}
                     {c.source_text && (
@@ -710,12 +732,25 @@ function ReviewAnsicht({ id }) {
         <section className="card overflow-hidden">
           <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/60 px-4 py-3 sm:px-5">
             <h2 className="text-sm font-bold text-slate-800">Kostenposition ergänzen</h2>
-            {kostenOffen > 0 && <span className="text-[11px] font-semibold text-amber-600">{kostenOffen} unbestätigt</span>}
+            {kostenOffen > 0 && <span className="text-[11px] font-semibold text-amber-600">{kostenOffen} Betrag / {zuordnungOffen} Zuordnung offen</span>}
           </div>
           {!gesperrt && <NeueKostZeile onAdd={kostHinzufuegen} />}
-          <div className="flex items-center justify-between px-4 py-3 text-sm sm:px-5">
-            <span className="font-bold text-slate-700">Verwendete Kosten total</span>
-            <span className="font-bold text-slate-900">CHF {kostenTotal.toLocaleString("de-CH")}</span>
+          <div className="space-y-1 px-4 py-3 text-sm sm:px-5">
+            <div className="flex items-center justify-between">
+              <span className="text-slate-500">Im LV gelesen</span>
+              <span className="text-slate-600">CHF {kostenTotal.toLocaleString("de-CH")}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-slate-700">Davon in die Referenzkosten</span>
+              <span className="font-bold text-slate-900">CHF {referenzTotal.toLocaleString("de-CH")}</span>
+            </div>
+            {referenzTotal < kostenTotal && (
+              <p className="text-[11px] text-amber-600">
+                CHF {(kostenTotal - referenzTotal).toLocaleString("de-CH")} sind keiner
+                Norm-LV-Position zugeordnet und fliessen nicht in die Referenz. Sie
+                bleiben in diesem Import dokumentiert.
+              </p>
+            )}
           </div>
         </section>
       </div>
@@ -742,7 +777,13 @@ function ReviewAnsicht({ id }) {
                 </li>
                 <li className="flex items-center gap-2">
                   {kostenOffen === 0 ? <CheckCircle2 className="size-4 text-green-600" /> : <AlertTriangle className="size-4 text-amber-500" />}
-                  Kosten: {kostenOffen === 0 ? "alle verwendeten bestätigt" : `${kostenOffen} offen`}
+                  Beträge: {kostenOffen === 0 ? "alle verwendeten bestätigt" : `${kostenOffen} offen`}
+                </li>
+                <li className="flex items-center gap-2">
+                  {zuordnungOffen === 0 ? <CheckCircle2 className="size-4 text-green-600" /> : <AlertTriangle className="size-4 text-amber-500" />}
+                  Norm-LV-Zuordnung: {zuordnungOffen === 0
+                    ? `geprüft · CHF ${referenzTotal.toLocaleString("de-CH")} gehen in die Referenz`
+                    : `${zuordnungOffen} offen`}
                 </li>
                 <li className="flex items-center gap-2 text-slate-500">
                   {grunddatenGesetzt ? <CheckCircle2 className="size-4 text-green-600" /> : <span className="size-4" />}

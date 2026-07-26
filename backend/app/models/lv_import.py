@@ -100,7 +100,14 @@ class LvImportCost(Base):
     # Planer Unterpositionen je Projekt unterschiedlich nummerieren.
     original_position = Column(String, nullable=True)    # z.B. "241.10"
     original_title = Column(String, nullable=True)
-    canonical_key = Column(String, nullable=True, index=True)
+    canonical_key = Column(String, nullable=True, index=True)   # Norm-LV-Position
+    original_amount = Column(Float, nullable=True)              # wie im LV gelesen
+    # Wie die Zuordnung zustande kam: exact | rule | llm | manual. Zusammen mit
+    # confidence/reason bleibt später messbar, wie gut die automatische Zuordnung
+    # (insbesondere das LLM) wirklich ist.
+    mapping_method = Column(String, nullable=True)
+    mapping_confidence = Column(Float, nullable=True)
+    mapping_reason = Column(String, nullable=True)
     # Punkt 15 — Gruppentotal als eigene Kontrollzeile inkl. Summenprüfung.
     is_group_total = Column(Boolean, nullable=False, default=False)
     validation_status = Column(String, nullable=True)    # valid | mismatch | unchecked

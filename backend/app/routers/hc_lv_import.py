@@ -23,6 +23,7 @@ from app.lv_import.feature_extract import extract_features
 from app.lv_import.cost_extract import extract_costs
 from app.lv_import.cost_summary import parse_cost_summary, to_cost_rows, has_cost_summary
 from app.lv_import.project_extract import extract_project_data
+from app.lv_import import norm_lv, llm_mapper
 from app import fachwerte
 from app.lv_import.feature_keys import FEATURE_DEFS, FEATURE_KEYS, FEATURE_TO_CONTEXT
 from app.lv_import import page_classifier as pc
@@ -65,6 +66,11 @@ def _cost_out(c: LvImportCost) -> dict:
         # Punkt 14/17 — Originalnummer, Originaltitel und kanonische Zuordnung.
         "original_position": c.original_position, "original_title": c.original_title,
         "canonical_key": c.canonical_key,
+        "canonical_label": norm_lv.norm_label(c.canonical_key) if c.canonical_key else None,
+        "original_amount": c.original_amount,
+        "mapping_method": c.mapping_method,
+        "mapping_confidence": c.mapping_confidence,
+        "mapping_reason": c.mapping_reason,
         "is_group_total": bool(c.is_group_total),
         "validation_status": c.validation_status, "source": c.source,
         "detected_amount": c.detected_amount, "confirmed_amount": c.confirmed_amount,
@@ -157,9 +163,15 @@ async def upload_lv(
         features = extract_features(pipeline.technik_pages, pipeline.technik_word_pages)
         # Punkt 13 — Kosten primär aus der Kostenzusammenstellung; nur wenn es
         # keine gibt, werden die LV-Positionstotale ausgewertet.
-        summary = parse_cost_summary(pipeline.cost_summary_pages)
+        summary = parse_cost_summary(pipeline.cost_summary_pages,
+                                     pipeline.cost_summary_word_pages)
+        llm_zugeordnet = 0
         if has_cost_summary(summary):
             costs = to_cost_rows(summary)
+            # Erst deterministisch, dann optional das LLM für die Positionen, die
+            # keine eindeutige Norm-LV-Zuordnung haben. Ohne API-Zugang bleibt es
+            # bei „Zuordnung prüfen" — der Import funktioniert trotzdem.
+            llm_zugeordnet = llm_mapper.apply_to_rows(costs)
         else:
             costs = [dict(c, source="lv_positions") for c in extract_costs(pipeline.lv_pages)]
         # ALLE kanonischen Features anlegen (auch nicht erkannte) → der Nutzer
@@ -185,6 +197,10 @@ async def upload_lv(
                 original_position=c.get("original_position"),
                 original_title=c.get("original_title"),
                 canonical_key=c.get("canonical_key"),
+                original_amount=c.get("detected_amount"),
+                mapping_method=c.get("mapping_method"),
+                mapping_confidence=c.get("mapping_confidence"),
+                mapping_reason=c.get("mapping_reason"),
                 is_group_total=bool(c.get("is_group_total", False)),
                 validation_status=c.get("validation_status"),
                 source=c.get("source"),
@@ -206,6 +222,8 @@ async def upload_lv(
             "kostenpositionen": len([c for c in costs if not c.get("is_group_total")]),
             "gruppentotale": len([c for c in costs if c.get("is_group_total")]),
             "kosten_ohne_zuordnung": len(pruefen),
+            "kosten_per_llm_zugeordnet": llm_zugeordnet,
+            "llm_verfuegbar": llm_mapper.verfuegbar(),
             "gruppen_validierung": {
                 g: i.get("validation_status")
                 for g, i in (summary.get("group_totals") or {}).items()},
@@ -238,6 +256,13 @@ def fachwerte_listen(user: User = Depends(get_current_user)):
     Frontend. Muss VOR `/{import_id}` stehen, sonst fängt der int-Pfad zu."""
     from app import fachwerte
     return fachwerte.as_frontend()
+
+
+@router.get("/norm-lv")
+def norm_lv_positionen(user: User = Depends(get_current_user)):
+    """Das Norm-LV als geschlossene Auswahlliste für die manuelle Zuordnung.
+    Muss VOR `/{import_id}` stehen."""
+    return {**norm_lv.as_frontend(), "llm_verfuegbar": llm_mapper.verfuegbar()}
 
 
 @router.get("/ocr-status")
@@ -326,6 +351,23 @@ def update_cost(
             c.confirmed_amount = None if amt in (None, "") else float(amt)
         except (TypeError, ValueError):
             raise HTTPException(status_code=422, detail="Ungültiger Betrag")
+    # Manuelle Zuordnung ins Norm-LV. Nur Schlüssel aus der geschlossenen Liste;
+    # "" bzw. None hebt die Zuordnung auf.
+    if "canonical_key" in body:
+        key = body["canonical_key"]
+        if key in (None, ""):
+            c.canonical_key, c.mapping_method = None, None
+            c.mapping_confidence, c.mapping_reason = None, "manuell entfernt"
+        elif norm_lv.ist_norm_position(key):
+            c.canonical_key = key
+            c.mapping_method = norm_lv.MANUAL
+            c.mapping_confidence = 1.0
+            c.mapping_reason = "manuell zugeordnet"
+        else:
+            raise HTTPException(status_code=422, detail={
+                "message": "Unbekannte Norm-LV-Position.",
+                "canonical_key": key,
+            })
     if "confirmed" in body:
         c.confirmed = bool(body["confirmed"])
     db.commit()

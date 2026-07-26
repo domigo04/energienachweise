@@ -26,6 +26,7 @@ import re
 from typing import Optional
 
 from app.lv_import.normalization import parse_number
+from app.lv_import import norm_lv
 
 HIGH, MEDIUM, LOW = "high", "medium", "low"
 
@@ -57,121 +58,63 @@ def _falte(text: str) -> str:
     return re.sub(r"\s+", " ", low).strip()
 
 
-# ── Punkt 17 — kanonische Kostenpositionen ─────────────────────────────────
-# Regel je Schlüssel: ALLE `terms` müssen im normalisierten Titel vorkommen.
-# `context` (mindestens einer) bzw. `groups` (BKP-Gruppe) trennen gleichnamige
-# Positionen auf verschiedenen Anlagenseiten voneinander.
-CANONICAL_COST_POSITIONS: dict[str, dict] = {
-    # ── Wärmequelle / Primärkreis (BKP 241) ──
-    "source_expansion_safety": {
-        "terms": ["expansion"], "context": ["primaerkreis", "ews", "erdsonde", "sole"],
-        "groups": ["241"]},
-    "source_pipework": {
-        "terms": ["rohrleitungen"], "context": ["primaerkreis", "ews", "erdsonde", "sole"],
-        "groups": ["241"]},
-    "source_equipment_valves": {
-        "terms": ["apparate"], "context": ["primaerkreis", "ews", "erdsonde", "sole"],
-        "groups": ["241"]},
-    "source_installation_transport": {
-        "terms": ["montage"], "context": ["primaerkreis", "ews", "erdsonde", "sole"],
-        "groups": ["241"]},
-    # „Erdsondensammler" enthält als Zeichenkette „erdsonden" — die Position ist
-    # aber eine Rohrleitung, keine Bohrung. Darum verlangt `boreholes` einen
-    # Bohr-Bezug und schliesst die anderen Gewerkbegriffe ausdrücklich aus.
-    "boreholes": {
-        "terms": ["erdsonden"], "context": ["bohr", "sondenbohrung"], "groups": ["241"],
-        "not_terms": ["sammler", "rohrleitungen", "expansion", "apparate", "isolation",
-                      "montage"]},
-    # ── Wärmeerzeugung (BKP 242) ──
-    "heat_generator": {
-        "terms": ["waermeerzeuger"], "context": None, "groups": ["242"]},
-    "generation_expansion_safety": {
-        "terms": ["expansion"], "context": ["waermeerzeugung", "erzeugung"], "groups": ["242"]},
-    "generation_equipment_valves": {
-        "terms": ["apparate"], "context": ["waermeerzeugung", "erzeugung"], "groups": ["242"]},
-    "generation_installation_transport": {
-        "terms": ["montage"], "context": ["waermeerzeugung", "erzeugung"], "groups": ["242"]},
-    # ── Wärmeverteilung (BKP 243) ──
-    "distribution_pipework": {
-        "terms": ["rohrleitungen"], "context": ["verteilung", "heizungsverteilung"],
-        "groups": ["243"]},
-    "surface_heating": {
-        "terms": ["flaechenheizung"], "context": None, "groups": ["243"]},
-    "distribution_equipment_valves": {
-        "terms": ["apparate"], "context": ["verteilung"], "groups": ["243"]},
-    "heat_metering": {
-        "terms": ["waermemessung"], "context": None, "groups": ["243"]},
-    "distribution_installation_transport": {
-        "terms": ["montage"], "context": ["verteilung"], "groups": ["243"]},
-    # ── Isolationen (BKP 247) ──
-    "insulation_pipework": {
-        "terms": ["isolation", "rohrleitungen"], "context": None, "groups": ["247"]},
-    "insulation_equipment": {
-        "terms": ["isolation", "apparate"], "context": None, "groups": ["247"]},
-    # ── Übrige Installationen (BKP 248) ──
-    "electrical": {
-        "terms": ["elektro"], "context": None, "groups": ["248"]},
-    "commissioning": {
-        "terms": ["inbetriebnahme"], "context": None, "groups": ["248"]},
-    # ── Übrige Arbeiten (BKP 249) ──
-    "building_works": {
-        "terms": ["bauliche"], "context": None, "groups": ["249"]},
-    "provisional_works": {
-        "terms": ["provisor"], "context": None, "groups": ["249"]},
-    "hourly_works": {
-        "terms": ["regiearbeiten"], "context": None, "groups": ["249"]},
-}
-
-
-def canonical_key(title: str, bkp_group: Optional[str] = None) -> Optional[str]:
-    """Kanonischer Schlüssel aus dem Titel (Punkt 17).
-
-    Deterministisch: eine Regel passt nur, wenn alle ihre Begriffe vorkommen.
-    Bei mehreren Treffern gewinnt die spezifischste (meiste Begriffe + passende
-    Gruppe). Bleibt es uneindeutig, wird None geliefert (Punkt 18) — der Nutzer
-    prüft die Zuordnung im Review.
-    """
-    norm = _falte(title)
-    if not norm:
-        return None
-    kandidaten: list[tuple[int, str]] = []
-    for key, regel in CANONICAL_COST_POSITIONS.items():
-        if not all(t in norm for t in regel["terms"]):
-            continue
-        if any(t in norm for t in regel.get("not_terms") or ()):
-            continue                   # Ausschlussbegriff → diese Regel gilt nicht
-        score = len(regel["terms"])
-        kontext = regel.get("context")
-        gruppen = regel.get("groups") or []
-        kontext_ok = bool(kontext) and any(c in norm for c in kontext)
-        gruppe_ok = bool(bkp_group) and any(bkp_group.startswith(g) for g in gruppen)
-        if kontext:
-            # Kontext verlangt: entweder steht er im Titel oder die BKP-Gruppe passt.
-            if not (kontext_ok or gruppe_ok):
-                continue
-            score += 2 if kontext_ok else 1
-        elif gruppen:
-            if bkp_group and not gruppe_ok:
-                continue
-            score += 1 if gruppe_ok else 0
-        kandidaten.append((score, key))
-    if not kandidaten:
-        return None
-    kandidaten.sort(key=lambda x: -x[0])
-    if len(kandidaten) > 1 and kandidaten[0][0] == kandidaten[1][0]:
-        return None                    # uneindeutig → lieber nichts (Punkt 18)
-    return kandidaten[0][1]
+# ── Punkt 17 — kanonische Kostenpositionen ────────────────────────────────
+# Die geschlossene Liste ist das bestehende Norm-LV (app.data.bkp_positionen);
+# die Zuordnung lebt in `norm_lv`. Hier wird sie nur verwendet, damit es genau
+# EINE Quelle für Norm-Positionen gibt.
+canonical_key = norm_lv.match_title  # Rückwärtskompatibler Name
 
 
 # ── Punkt 14/15 — Zusammenstellung positionsweise auswerten ────────────────
 
-def parse_cost_summary(pages) -> dict:
+def _summary_lines(pages, word_pages=None):
+    """Zeilen der Zusammenstellung — bevorzugt räumlich (Punkt: Spatial-Parser).
+
+    Mit Wortkoordinaten wird jede Tabellenzeile aus ihren Spalten rekonstruiert
+    und der Betrag aus der RECHTESTEN Zahlenspalte gelesen. Das ist deutlich
+    robuster als „Zahl am Zeilenende": bei mehrspaltigen Zusammenstellungen
+    (z.B. Ausschreibungssumme neben Unternehmersumme) trifft die Textvariante
+    sonst die falsche Spalte, und umbrechende Titel zerreissen die Zeile.
+
+    Liefert (seite, text, betrag_rechts) — `betrag_rechts` ist None, wenn keine
+    Koordinaten vorliegen; dann entscheidet die Regex am Zeilenende.
+    """
+    if word_pages:
+        from app.lv_import.spatial import group_words_to_rows, row_text
+
+        out = []
+        for sp in word_pages:
+            seite = sp.get("page")
+            for row in group_words_to_rows(sp.get("words") or []):
+                text = row_text(row)
+                betrag = None
+                # Rechteste Spalte, die ein Geldbetrag ist.
+                for w in sorted(row, key=lambda x: -x["x0"]):
+                    m = _BETRAG_ENDE.match((w.get("text") or "").strip())
+                    if m:
+                        betrag = parse_number(m.group(1))
+                        break
+                out.append((seite, text, betrag))
+        if out:
+            return out
+    return [(p.get("page"), line.strip(), None)
+            for p in (pages or [])
+            for line in (p.get("text") or "").splitlines() if line.strip()]
+
+
+def parse_cost_summary(pages, word_pages=None) -> dict:
     """Kostenzusammenstellungs-Seiten auswerten.
+
+    Args:
+        pages: Textseiten der Klasse `cost_summary`.
+        word_pages: dieselben Seiten mit Wortkoordinaten (optional, robuster).
 
     Returns:
         {
           "positions":    [{bkp_group, original_position, original_title,
-                            canonical_key, amount, source_page, source_text}],
+                            original_amount, canonical_key, mapping_method,
+                            mapping_confidence, mapping_reason, amount,
+                            source_page, source_text}],
           "group_totals": {"241": {amount, sum_positions, validation_status, ...}},
           "trade_total":  265664.0 | None,
         }
@@ -181,59 +124,62 @@ def parse_cost_summary(pages) -> dict:
     group_names: dict[str, str] = {}
     trade_total = None
 
-    for p in pages or []:
-        seite = p.get("page")
-        for line in (p.get("text") or "").splitlines():
-            line = line.strip()
-            if not line:
-                continue
+    for seite, line, betrag_rechts in _summary_lines(pages, word_pages):
+        if not line:
+            continue
 
-            # Gruppentotal bzw. Gewerktotal ("Total BKP 24").
-            m = _GRUPPE_TOTAL.match(line)
-            if m:
-                nr, rest = m.group(1), m.group(2)
+        # Gruppentotal bzw. Gewerktotal ("Total BKP 24").
+        m = _GRUPPE_TOTAL.match(line)
+        if m:
+            nr, rest = m.group(1), m.group(2)
+            betrag = betrag_rechts
+            if betrag is None:
                 betrag_m = _BETRAG_ENDE.search(rest) or _BETRAG_ENDE.search(line)
                 betrag = parse_number(betrag_m.group(1)) if betrag_m else None
-                if betrag is None:
-                    continue
-                if len(nr) == 2:                       # Gewerktotal (BKP 24)
-                    trade_total = round(betrag, 2)
-                else:
-                    group_totals[nr] = {
-                        "bkp_group": nr, "amount": round(betrag, 2),
-                        "source_page": seite, "source_text": line[:200],
-                    }
+            if betrag is None:
                 continue
+            if len(nr) == 2:                       # Gewerktotal (BKP 24)
+                trade_total = round(betrag, 2)
+            else:
+                group_totals[nr] = {
+                    "bkp_group": nr, "amount": round(betrag, 2),
+                    "source_page": seite, "source_text": line[:200],
+                }
+            continue
 
-            # Einzelposition mit Betrag.
-            m = _POSITION.match(line)
-            if m:
-                nummer, rest = m.group(1), m.group(2)
-                betrag_m = _BETRAG_ENDE.search(rest)
-                if not betrag_m:
-                    continue
-                betrag = parse_number(betrag_m.group(1))
-                if betrag is None:
-                    continue
-                titel = rest[:betrag_m.start()].strip(" .·-—\t")
-                if not _HAT_WORT.search(titel):
-                    continue
-                gruppe = nummer.split(".")[0]
-                positions.append({
-                    "bkp_group": gruppe,
-                    "original_position": nummer,
-                    "original_title": titel,
-                    "canonical_key": canonical_key(titel, gruppe),
-                    "amount": round(betrag, 2),
-                    "source_page": seite,
-                    "source_text": line[:200],
-                })
+        # Einzelposition mit Betrag.
+        m = _POSITION.match(line)
+        if m:
+            nummer, rest = m.group(1), m.group(2)
+            betrag_m = _BETRAG_ENDE.search(rest)
+            # Räumlich erkannter Betrag hat Vorrang (rechteste Spalte).
+            betrag = betrag_rechts
+            if betrag is None:
+                betrag = parse_number(betrag_m.group(1)) if betrag_m else None
+            if betrag is None:
                 continue
+            titel = (rest[:betrag_m.start()] if betrag_m else rest).strip(" .·-—\t")
+            if not _HAT_WORT.search(titel):
+                continue
+            gruppe = nummer.split(".")[0]
+            # Zuordnung ins Norm-LV: geschlossene Liste, Titel entscheidet.
+            zuordnung = norm_lv.match_title(titel, gruppe)
+            positions.append({
+                "bkp_group": gruppe,
+                "original_position": nummer,
+                "original_title": titel,
+                "original_amount": round(betrag, 2),
+                "amount": round(betrag, 2),
+                "source_page": seite,
+                "source_text": line[:200],
+                **zuordnung,
+            })
+            continue
 
-            # Gruppenkopf ohne Betrag → nur den Namen merken.
-            m = _GRUPPE.match(line)
-            if m and not _BETRAG_ENDE.search(line):
-                group_names[m.group(1)] = m.group(2).strip()
+        # Gruppenkopf ohne Betrag → nur den Namen merken.
+        m = _GRUPPE.match(line)
+        if m and not _BETRAG_ENDE.search(line) and betrag_rechts is None:
+            group_names[m.group(1)] = m.group(2).strip()
 
     # Punkt 15 — Summenprüfung je Gruppe.
     for gruppe, info in group_totals.items():
@@ -279,9 +225,13 @@ def to_cost_rows(result: dict) -> list[dict]:
             "bkp_nr": p["bkp_group"],
             "original_position": p["original_position"],
             "original_title": p["original_title"],
-            "canonical_key": p["canonical_key"],
+            # Zuordnung + wie sie zustande kam (später messbar, Punkt: Metriken).
+            "canonical_key": p.get("canonical_key"),
+            "mapping_method": p.get("mapping_method"),
+            "mapping_confidence": p.get("mapping_confidence"),
+            "mapping_reason": p.get("mapping_reason"),
             "detected_amount": p["amount"],
-            "confidence": HIGH if p["canonical_key"] else MEDIUM,
+            "confidence": HIGH if p.get("canonical_key") else MEDIUM,
             "source_page": p["source_page"], "source_text": p["source_text"],
             "positionen": 1, "is_group_total": False,
             "source": "cost_summary",

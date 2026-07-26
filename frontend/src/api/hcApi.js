@@ -194,3 +194,5 @@ export const getBauindex = () => api.get(`${BASE}/bauindex`).then(r => r.data);
 export const addBauindex = (data) => api.post(`${BASE}/bauindex`, data).then(r => r.data);
 export const deleteBauindex = (id) => api.delete(`${BASE}/bauindex/${id}`);
 export const bauindexAutomatischAktualisieren = () => api.post(`${BASE}/bauindex/automatisch-aktualisieren`).then(r => r.data);
+// Norm-LV als geschlossene Auswahlliste für die manuelle Zuordnung.
+export const getNormLv = () => api.get(`${BASE}/lv-imports/norm-lv`).then(r => r.data);

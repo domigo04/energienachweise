@@ -10,9 +10,9 @@ from pathlib import Path
 import pytest
 
 from app.lv_import.cost_summary import (
-    parse_cost_summary, canonical_key, to_cost_rows, has_cost_summary,
-    VALID, MISMATCH,
+    parse_cost_summary, to_cost_rows, has_cost_summary, VALID, MISMATCH,
 )
+from app.lv_import import norm_lv
 from app.lv_import import page_classifier as pc
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -117,55 +117,99 @@ def test_originalnummer_und_titel_bleiben_erhalten(summary):
 
 def test_gleiche_leistung_unterschiedliche_nummer_gleicher_schluessel(summary):
     """Punkt 27 — 241.11 und 241.13 sind beide Primärkreis-Rohrleitungen und
-    müssen denselben kanonischen Schlüssel bekommen, obwohl die Nummer variiert."""
+    müssen dieselbe Norm-LV-Position bekommen, obwohl die Nummer variiert."""
     p11 = next(p for p in summary["positions"] if p["original_position"] == "241.11")
     p13 = next(p for p in summary["positions"] if p["original_position"] == "241.13")
-    assert p11["canonical_key"] == "source_pipework"
-    assert p13["canonical_key"] == "source_pipework"
+    assert p11["canonical_key"] == "241.11"      # Norm-LV: Rohrleitungen Primärkreis
+    assert p13["canonical_key"] == "241.11"
 
 
-def test_kanonische_schluessel_der_hauptpositionen(summary):
+def test_zuordnung_folgt_dem_titel_nicht_der_nummer(summary):
+    """Der wichtigste Fall: im Angebot ist 242.1 die Sole/Wasser-Wärmepumpe, im
+    Norm-LV ist 242.1 der Gasheizkessel — die WP ist 242.3. Wer nach Nummer
+    zuordnet, vertauscht Positionen."""
+    p = next(p for p in summary["positions"] if p["original_position"] == "242.1")
+    assert p["canonical_key"] == "242.3"
+    assert norm_lv.NORM_BY_KEY["242.3"]["bezeichnung"] == "Wärmepumpe Sole/Wasser"
+    assert norm_lv.NORM_BY_KEY["242.1"]["bezeichnung"] == "Gasheizkessel"
+
+
+def test_zuordnung_ueber_gruppengrenzen(summary):
+    """Auch die Gruppe taugt nicht als Filter: „Isolation Rohrleitungen" steht im
+    Angebot unter 247, im Norm-LV unter 248.2."""
+    p = next(p for p in summary["positions"] if p["original_position"] == "247.1")
+    assert p["canonical_key"] == "248.2"
+
+
+def test_norm_zuordnungen_der_hauptpositionen(summary):
     erwartet = {
-        "241.10": "source_expansion_safety",
-        "241.12": "source_equipment_valves",
-        "241.14": "boreholes",
-        "242.1": "heat_generator",
-        "242.2": "generation_expansion_safety",
-        "243.1": "distribution_pipework",
-        "243.2": "surface_heating",
-        "243.4": "heat_metering",
-        "247.1": "insulation_pipework",
-        "248.3": "commissioning",
+        "241.10": "241.10",   # Expansion und Sicherheit Primärkreis
+        "241.12": "241.12",   # Apparate / Armaturen Primärkreis
+        "241.14": "241.14",   # Erdsonden und Zubehör
+        "242.2": "242.6",     # Expansion und Sicherheit (Wärmeerzeugung)
+        "243.1": "243.1",     # Rohrleitungen
+        "243.2": "243.3a",    # Flächenheizung (Bodenheizung)
+        "243.4": "243.7",     # Wärmemessung
+        "243.5": "243.9",     # Montage / Transport Wärmeverteilung
+        "247.2": "248.3",     # Armaturen-Isolation Heizung
+        "249.1": "249.2",     # Unvorhergesehenes / Anpassungen
     }
     ist = {p["original_position"]: p["canonical_key"] for p in summary["positions"]}
     for nummer, key in erwartet.items():
         assert ist[nummer] == key, f"{nummer} → {ist[nummer]} statt {key}"
 
 
+def test_jede_zuordnung_ist_eine_echte_norm_position(summary):
+    """Es darf NIE ein Schlüssel entstehen, den das Norm-LV nicht kennt."""
+    for p in summary["positions"]:
+        if p["canonical_key"] is not None:
+            assert norm_lv.ist_norm_position(p["canonical_key"]), p
+
+
+def test_zuordnung_traegt_methode_und_begruendung(summary):
+    """mapping_method/confidence/reason machen später messbar, wie gut die
+    automatische Zuordnung ist."""
+    p = next(p for p in summary["positions"] if p["original_position"] == "242.1")
+    assert p["mapping_method"] in ("exact", "rule")
+    assert 0 < p["mapping_confidence"] <= 1.0
+    assert p["mapping_reason"]
+    assert p["original_amount"] == 50650.0
+
+
 def test_rohrleitungen_quelle_vs_verteilung_unterscheiden():
-    """Gleicher Begriff, andere Anlagenseite → anderer kanonischer Schlüssel."""
-    assert canonical_key("Rohrleitungen Primärkreis WP zu Erdsondensammler", "241") == "source_pipework"
-    assert canonical_key("Rohrleitungen Primaerkreis EWS", "241") == "source_pipework"
-    assert canonical_key("Rohrleitungen Verteilung", "243") == "distribution_pipework"
+    """Gleicher Begriff, andere Anlagenseite → andere Norm-LV-Position."""
+    assert norm_lv.match_title("Rohrleitungen Primärkreis WP zu Erdsondensammler", "241")["canonical_key"] == "241.11"
+    assert norm_lv.match_title("Rohrleitungen Primaerkreis EWS", "241")["canonical_key"] == "241.11"
+    assert norm_lv.match_title("Rohrleitungen Verteilung", "243")["canonical_key"] == "243.1"
 
 
 def test_umlautschreibweise_egal():
-    assert canonical_key("Flaechenheizung", "243") == "surface_heating"
-    assert canonical_key("Flächenheizung", "243") == "surface_heating"
+    assert norm_lv.match_title("Flaechenheizung", "243")["canonical_key"] == "243.3a"
+    assert norm_lv.match_title("Flächenheizung", "243")["canonical_key"] == "243.3a"
+
+
+def test_exakter_norm_titel_wird_als_exact_erkannt():
+    res = norm_lv.match_title("Wärmemessung", "243")
+    assert res["canonical_key"] == "243.7"
+    assert res["mapping_method"] == "exact"
+    assert res["mapping_confidence"] == 1.0
 
 
 # ── Punkt 18 — keine aggressive Fuzzy-Zuordnung ───────────────────────────
 
 def test_unbekannter_titel_bleibt_ohne_zuordnung():
     """Punkt 18 — lieber None als eine erfundene Zuordnung."""
-    assert canonical_key("Diverse Nebenarbeiten nach Aufwand", "249") is None
-    assert canonical_key("", "241") is None
-    assert canonical_key("Zulage für erschwerte Montage", None) is None
+    for titel in ("Diverse Nebenarbeiten nach Aufwand", "", "Zulage für erschwerte Montage"):
+        assert norm_lv.match_title(titel)["canonical_key"] is None
 
 
-def test_zuordnung_nur_mit_klarem_kontext():
-    """„Apparate und Armaturen" ohne Anlagenseite ist nicht eindeutig."""
-    assert canonical_key("Apparate und Armaturen", None) is None
+def test_elektroanschluesse_haben_keine_norm_position(summary):
+    """Ehrliches Ergebnis: das Norm-LV kennt keine Elektro-Position, also bleibt
+    die Zuordnung offen und der Nutzer entscheidet."""
+    p = next(p for p in summary["positions"] if p["original_position"] == "248.2")
+    assert "Elektro" in p["original_title"]
+    assert p["canonical_key"] is None
+    assert p["mapping_reason"]
 
 
 # ── Punkt 13 — Zusammenstellung ist die primäre Quelle ────────────────────

@@ -1,6 +1,23 @@
-# Sanitisierte Kostenzusammenstellung (Punkt 26) — Struktur und Beträge eines
-# echten Unternehmerangebots, ohne Namen, Adressen oder weitere Offertdaten.
-# Dient als Golden-LV-Regressionstest (Punkt 16).
+# Sanitisierte Kostenzusammenstellung (Punkt 26). Golden-LV-Regressionstest.
+#
+# HERKUNFT — bitte beim Ändern beachten:
+#
+# ECHT (aus Dominics Vorgabe, Punkt 16): alle Positionsnummern, alle Beträge,
+#   die Gruppentotale und das Gewerktotal 265'664. Diese Werte sind belastbar
+#   und dürfen nur mit neuer Vorgabe geändert werden.
+#
+# ECHT (Punkt 12/14/17): die Bezeichnungen von 241.10, 241.11, 241.13 und der
+#   Erzeuger 242.1.
+#
+# ERFUNDEN: alle übrigen Bezeichnungen. Die Vorgabe enthielt für diese
+#   Positionen nur Nummer und Betrag; die Titel sind plausibel nachgebildet,
+#   stammen aber NICHT aus dem Originaldokument.
+#
+#   Folge: Tests auf Beträge/Summen sind aussagekräftig. Tests auf die
+#   Norm-LV-Zuordnung dieser Positionen prüfen nur, dass die Regeln auf DIESE
+#   Formulierung greifen — nicht, wie das echte Angebot formuliert ist. Sobald
+#   die echten Bezeichnungen vorliegen, hier ersetzen und die Zuordnungs-
+#   erwartungen in test_lv_cost_summary.py nachziehen.
 KOSTENZUSAMMENSTELLUNG
 
 BKP     Bezeichnung                                                        CHF

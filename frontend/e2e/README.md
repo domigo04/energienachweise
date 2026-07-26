@@ -2,116 +2,103 @@
 
 Diese Tests fahren die Kerninteraktionen des Schemaeditors in einem echten
 Browser durch. Sie prüfen **Geometrie**, nicht das Vorhandensein von Elementen:
-gemessen werden Fangkoordinaten, gespeicherte Leitungspunkte und Portreferenzen
-aus dem Backend.
-
-Sie laufen **nicht** in CI — sie brauchen ein laufendes Backend mit Testdaten.
-Der reguläre Testlauf (`npm test`) bleibt davon unberührt.
-
-## Was geprüft wird
-
-`portsnap.mjs` — der Anschlussfang, Fall für Fall:
-
-- Fang auf einen Bauteilanschluss von aussen kommend
-- die Vierfach-Identität: **Marker == gewählter Fang == gesetzter Endpunkt ==
-  gespeicherte Portreferenz**
-- Anschluss schlägt Raster
-- kein Flackern beim langsamen Überfahren der Fanggrenze
-- Fang bei 25 %, 50 %, 100 %, 200 % und 400 % Zoom
-- Anschlusspositionen nach einer Drehung
-
-`geometrie.mjs` — Bearbeiten bestehender Geometrie:
-
-- Segment parallel verschieben (senkrecht und waagrecht), Nachbarsegmente
-  verlängern sich, keine neue Ecke, keine Diagonale
-- Portbindung übersteht einen Segment-Stretch
-- Bauteil verschieben: Verbindung bleibt, anderes Ende bleibt liegen
-- Undo nimmt Bauteilposition und Leitungsgeometrie gemeinsam zurück
-- Drehung: Anschlüsse wandern sichtbar, IDs bleiben, Leitung folgt geometrisch
-- Auswahlfenster
-- Abbrüche hinterlassen keine Anker, keine Kanten, keine NaN-Koordinaten
-- Speichern und Neuladen verändert die Geometrie nicht
-
-## Vorbereitung
-
-Die Tests brauchen ein Backend, ein Projekt mit Schema und ein Anmeldetoken.
-
-```bash
-# 1. Testdatenbank mit Benutzer, Projekt und Schema anlegen
-cd backend
-DATABASE_URL='sqlite:///./cadtest.db' python3 - <<'PY'
-import json
-from app.database import Base, engine, SessionLocal
-from app.models.auth import User
-from app.models.heizungscockpit import HcProject, HcSchema
-from passlib.context import CryptContext
-Base.metadata.create_all(bind=engine)
-db = SessionLocal(); pwd = CryptContext(schemes=['bcrypt'], deprecated='auto')
-u = db.query(User).filter(User.email=='cad@cad-demo.example.com').first()
-if not u:
-    u = User(tenant_id=1, email='cad@cad-demo.example.com',
-             password_hash=pwd.hash('CadTest2026'), name='CAD Test',
-             role='admin', firma_role='admin', is_verified=True, is_active=True)
-    db.add(u); db.commit(); db.refresh(u)
-p = db.query(HcProject).first() or HcProject(tenant_id=1, name='CAD Demo',
-                                            erstellt_von=u.id, status='aktiv')
-db.add(p); db.commit(); db.refresh(p)
-if not db.query(HcSchema).filter(HcSchema.project_id==p.id).first():
-    db.add(HcSchema(tenant_id=1, project_id=p.id, name='Schema',
-                    graph_json=json.dumps({'nodes':[],'edges':[]})))
-    db.commit()
-print('bereit: Projekt', p.id)
-PY
-
-# 2. Backend starten — der Vite-Port muss als Origin erlaubt sein
-DATABASE_URL='sqlite:///./cadtest.db' ALLOWED_ORIGINS='["http://127.0.0.1:5199"]' \
-  python3 -m uvicorn app.main:app --port 8011 &
-
-# 3. Frontend starten
-cd ../frontend
-VITE_API_BASE=http://127.0.0.1:8011 npx vite --port 5199 --host 127.0.0.1 &
-
-# 4. Token und Benutzer ablegen
-mkdir -p /tmp/cad
-curl -s -X POST http://127.0.0.1:8011/api/v1/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"cad@cad-demo.example.com","password":"CadTest2026"}' \
-  | python3 -c "import json,sys; d=json.load(sys.stdin); \
-      open('/tmp/cad/token.txt','w').write(d['access_token']); \
-      open('/tmp/cad/user.json','w').write(json.dumps(d['user']))"
-```
+gemessen werden Fangkoordinaten, gespeicherte Leitungspunkte, Anschlusslagen und
+Portreferenzen aus dem Backend.
 
 ## Ausführen
 
+Ein Kommando, wiederholbar, ohne manuelles Aufräumen:
+
 ```bash
 cd frontend
-npm run e2e:portsnap
-npm run e2e:geometrie
+npm run e2e:cad
 ```
 
-Über Umgebungsvariablen anpassbar: `CAD_OUT` (Ablage für Token und
-Bildschirmfotos, Standard `/tmp/cad`), `CAD_APP`, `CAD_API`.
+Das setzt eine isolierte Testumgebung auf (temporäre SQLite-Datei, Backend,
+Frontend), fährt alle Läufe und räumt danach auf. Der Rückgabewert ist 0, wenn
+alle Läufe grün sind.
 
-Die Zugangsdaten hier sind reine Testwerte für eine lokale SQLite-Datei. Es
-gehören **keine** echten Projekt- oder Benutzerdaten in diese Tests.
+Einzelne Läufe:
+
+```bash
+npm run e2e:cad -- portsnap        # nur einen Lauf
+npm run e2e:cad -- mirror copy     # eine Auswahl
+```
+
+Zum Nachschauen im Browser den Aufbau stehen lassen und einzeln starten:
+
+```bash
+npm run e2e:setup       # baut auf, schreibt e2e/.run.json
+npm run e2e:portsnap    # beliebig oft wiederholbar
+npm run e2e:stop        # beendet und räumt auf
+```
+
+`e2e/.run.json` enthält Adressen, Token und die **erzeugten** Projekt- und
+Schema-IDs. Kein Test nimmt an, dass ein Schema die ID 1 hat.
+
+Ports über `CAD_API_PORT` / `CAD_APP_PORT` verschiebbar. `CAD_KEEP_FILES=1`
+behält den Arbeitsordner samt Serverprotokollen und Bildschirmfotos.
+
+## Läufe
+
+| Lauf | Prüft |
+|---|---|
+| `portsnap` | Anschlussfang: Vierfach-Identität, Anschluss gegen Raster, kein Flackern, Zoom 25–400 %, Anschlüsse nach Drehung |
+| `geometrie` | Segment-Stretch waagrecht/senkrecht, Portbindung, Bauteil-Move, Undo/Redo, Drehung, Auswahlfenster, Abbrüche, Speichern/Neuladen |
+| `mirror` | Spiegeln: Anschlusslagen, ID-Stabilität, Fang danach, Portreferenzen, Persistenz — mit und ohne angeschlossene Leitungen |
+| `copy` | Kopieren: eigene ID, eigene Nummer, eigene Anschlüsse, **keine Geisterverbindung**, keine verwaisten Referenzen |
+| `underlay` | Dieselbe Messreihe mit und ohne Unterlage im Vergleich, Zeigerereignisse, Weltsystemtreue bei 25/100/400 % |
+
+Die zentrale Aussage von `portsnap` ist die Vierfach-Identität:
+
+    sichtbarer Marker == gewählter Fang == gesetzter Endpunkt
+                      == gespeicherte Portreferenz
+
+Die letzte Stufe wird gegen den Graphen im Backend geprüft, nicht gegen den
+Bildschirm.
 
 ## Die Prüfsonde
 
 Der Editor legt im Entwicklungsmodus die letzte Fangentscheidung unter
-`window.__hcSnap` ab (und die letzten Entscheidungen unter
-`window.__hcSnapVerlauf`). Nur dadurch lässt sich prüfen, dass der angezeigte
-Marker und der intern gewählte Fang dieselbe Koordinate haben — ohne das wäre
-nur „irgendein Marker ist sichtbar" prüfbar. In der Produktion existiert die
-Sonde nicht (`import.meta.env.DEV`).
+`window.__hcSnap` ab (Verlauf unter `window.__hcSnapVerlauf`). Nur dadurch lässt
+sich prüfen, dass der angezeigte Marker und der intern gewählte Fang dieselbe
+Koordinate haben — ohne das wäre nur „irgendein Marker ist sichtbar" prüfbar. In
+der Produktion existiert die Sonde nicht (`import.meta.env.DEV`).
+
+## Warum nicht in CI
+
+Der Lauf braucht Backend, Frontend und Chromium gleichzeitig und dauert einige
+Minuten. Er ist lokal stabil (mehrfach wiederholt), aber ein CI-Job müsste
+zusätzlich Python-Abhängigkeiten, Tesseract und den Browser bereitstellen und
+würde die Laufzeit jedes Pushes deutlich verlängern. Solange der Lauf nicht über
+mehrere Wochen als stabil belegt ist, ist ein rot blinkender CI-Job schlechter
+als ein verlässlicher lokaler Lauf. `npm test` (Unit) und `npm run build` bleiben
+das CI-Gate.
 
 ## Stolperfallen, die hier schon Zeit gekostet haben
 
-- Der Endpunkt `PUT /api/v1/schemas/{id}/graph` erwartet den Graphen **unter
-  `graph`**. Flach gesendet antwortet er 200 und löscht nichts.
-- `page.locator('text').allInnerTexts()` liefert für SVG-`<text>` leere Strings.
-  Über `textContent` auslesen.
-- Testgeometrie kompakt um die Bildmitte legen. Das Einpassen der Ansicht
-  berücksichtigt nur Bauteilgrenzen, und die Leitungsanker sind 1 px gross —
-  eine weit ausgreifende Leitung landet sonst unter dem Eigenschaften-Panel.
+- `PUT /api/v1/schemas/{id}/graph` erwartet den Graphen **unter `graph`**. Flach
+  gesendet antwortet er 200 und löscht nichts.
+- `PUT /api/v1/schemas/{id}/underlay` erwartet die Felder dagegen **flach**
+  (`mime`, `data`, `x`, `y`, `w`, `h`, `scale`, `opacity`, `locked`).
+- `allInnerTexts()` liefert für SVG-`<text>` leere Strings — über `textContent`
+  lesen (`w.svgTexte()`).
 - Bauteile nicht über `nodeIds().at(-1)` suchen: das trifft die unsichtbaren
-  Leitungsanker. `.react-flow__node-<typ>` verwenden.
+  Leitungsanker. `w.bauteilIds('<typ>')` verwenden.
+- Testgeometrie kompakt um die Bildmitte legen. Das Einpassen der Ansicht kennt
+  nur Bauteilgrenzen, und Leitungsanker sind 1 px gross — eine weit ausgreifende
+  Leitung landet sonst unter dem Eigenschaften-Panel.
+- Vor einer Geometriemessung `w.mausWeg()` aufrufen: ein überfahrenes Handle
+  wird grösser gerendert, sein gemessener Mittelpunkt wandert dadurch um einige
+  Pixel.
+- Über ein Neuladen hinweg nur **Weltkoordinaten** vergleichen
+  (`w.portsWeltVon`). Der Bildausschnitt ist danach nicht garantiert derselbe.
+- Portkoordinaten immer **nach** dem Zoomsetzen lesen.
+- Palettenbezeichnungen mit Klammern („Wärmeerzeuger (WE)") müssen für die
+  Suchregex maskiert werden — `w.palette()` macht das.
+
+## Testdaten
+
+Ausschliesslich Testwerte gegen eine temporäre SQLite-Datei, die am Ende
+gelöscht wird. Es gehören **keine** echten Projekt- oder Benutzerdaten in diese
+Tests.

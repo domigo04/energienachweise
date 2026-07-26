@@ -81,3 +81,32 @@ Regeln:
 - Nach Abschluss eines Befehls gilt wieder `modify`, ausser der Befehl wurde
   ausdrücklich als dauerhaft gewählt (`persistent`).
 - Der aktive Modus steht immer in der Statusleiste.
+
+## Fensterauswahl — bewusst eine Betriebsart (Sprint-Entscheid)
+
+Gewünscht war die CAD-Richtungslogik: links→rechts wählt nur vollständig
+umschlossene Elemente, rechts→links auch bloss berührte.
+
+Umgesetzt wurde sie zunächst über die React-Flow-Eigenschaft `selectionMode`,
+die während des Ziehens je nach Richtung umgeschaltet wurde. Im Browsertest
+funktionierte davon nur eine Richtung: React Flow übernimmt eine mitten im
+Ziehen geänderte Betriebsart nicht mehr für die laufende Auswahl. Die
+Umschaltung wurde darum zurückgebaut.
+
+**Aktueller Zustand:** `SelectionMode.Full` — es werden ausschliesslich
+vollständig umschlossene Elemente gewählt. Browser-verifiziert.
+
+**Warum nicht selbst gebaut:** Eine eigene Fensterauswahl bräuchte vier Teile —
+Unterdrücken der React-Flow-Auswahl, eigenes Gummiband, Geometrietests in
+Weltkoordinaten (Bauteil-Bounding-Box und Leitungspolylinie gegen Rechteck) und
+eigenes Setzen des Auswahlzustands für Knoten UND Kanten. Die ersten beiden und
+der letzte greifen in genau den Pfad ein, der jetzt geprüft grün ist. Für einen
+Sprint, dessen Leitsatz „Verlässlichkeit vor Funktionsumfang" lautet, ist das
+das falsche Risiko.
+
+**Verschoben, nicht verworfen.** Wenn es kommt, dann so: die Geometrieprüfungen
+zuerst als reines, getestetes Modul (`cadSelection.js`) neben `cadEdit.js`, mit
+`containment`/`crossing` als zwei Funktionen über Weltkoordinaten. Erst wenn
+diese für Bauteile und Polylinien belegt sind, die Anbindung an den Editor —
+und dann mit einem Browsertest, der beide Richtungen bei 25 %, 100 % und 200 %
+sowie mit Unterlage prüft.

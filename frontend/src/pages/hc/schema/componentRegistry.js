@@ -44,7 +44,9 @@ export const COMPONENTS = [
   { type: "checkvalve", label: "Rückschlagventil", category: "armaturen", inlineInsertable: true, orientationAware: true },
   // Messung
   { type: "waermezaehler", label: "Wärmezähler", category: "messung", inlineInsertable: true, orientationAware: true },
-  { type: "temperatur", label: "Temperaturfühler", category: "messung", inlineInsertable: true, orientationAware: true },
+  // Der Temperaturfühler ist ein ABGRIFF, kein Bauteil mit zwei Anschlüssen.
+  // Er kann eine Leitung darum nicht sinnvoll teilen und ist nicht inline.
+  { type: "temperatur", label: "Temperaturfühler", category: "messung" },
   // Sicherheit
   { type: "expansion", label: "Expansionsgefäss", category: "sicherheit" },
   { type: "sicherheitsventil", label: "Sicherheitsventil", category: "sicherheit" },

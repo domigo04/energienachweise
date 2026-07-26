@@ -48,6 +48,7 @@ import {
 } from '../../api/hcApi';
 import { api } from '../../api';
 import { dateiZuUnderlay } from './schema/underlay';
+import { isInlineInsertable } from './schema/componentRegistry';
 
 // ── Konstanten ────────────────────────────────────────────────
 const KVS_REIHE = [0.1, 0.16, 0.25, 0.4, 0.63, 1.0, 1.6, 2.5, 4.0, 6.3, 10, 16, 25, 40, 63];
@@ -68,11 +69,10 @@ const GENERATOR_TYPES = [
   { value:'sonstige',   label:'Sonstige' },
 ];
 
-// Bauteile, die beim Ablegen auf eine Leitung diese sauber trennen und mit ihren
-// beiden Achsenanschlüssen (top/bottom) dazwischenliegen (§3/§4). Nur Typen mit
-// einer klaren zweiseitigen Flussachse — der Temperaturfühler (Abgriff) und das
-// 3-Weg-Ventil (Verzweigung) gehören bewusst NICHT dazu.
-const INLINE_SPLIT_TYPES = new Set(['pump', 'valve2', 'stad', 'shutoff', 'checkvalve', 'waermezaehler']);
+// Welche Bauteile eine Leitung beim Einsetzen teilen dürfen, steht AUSSCHLIESSLICH
+// in `schema/componentRegistry.js` (`inlineInsertable`). Vorher stand hier ein
+// zweites, handgepflegtes Set — und die beiden Quellen wichen schon voneinander
+// ab. Die Eigenschaft gehört zum Bauteil, nicht zum Editor.
 
 const LEITUNGS_LAYER = [
   { id:'heizung_vl', label:'Heizung VL', kurz:'H VL', color:'#ef4444', role:'vl', dashed:false },
@@ -1459,6 +1459,9 @@ function EditorInner() {
   // landet, wo der Geist steht.
   const [platzierVorschau, setPlatzierVorschau] = useState(null);
   const platzierVorschauRef = useRef(null);
+  // Punkt 25 — der Leitungsabschnitt, der beim Klick geteilt würde. Treibt die
+  // Hervorhebung; `null` heisst „freies Platzieren".
+  const [inlineTreffer, setInlineTreffer] = useState(null);
   // Numerische Direkteingabe während des Zeichnens: Puffer der getippten Länge.
   // Solange er nicht null ist, dürfen KEINE Shortcuts feuern.
   const [laengenPuffer, setLaengenPuffer] = useState(null);
@@ -2148,7 +2151,11 @@ function EditorInner() {
         const mitte = { x:(a.x + b.x) / 2, y:(a.y + b.y) / 2 };
         const distanz = Math.hypot(point.x - mitte.x, point.y - mitte.y);
         if (distanz <= radius && (!best || distanz < best.distanz)) {
-          best = { ...mitte, distanz, edgeId:edge.id, position:mitte };
+          // `route`, `segmentIndex` und `t` sind das, was `leitungTeilen`
+          // braucht — dadurch ist ein Mittelpunktfang topologisch dasselbe wie
+          // ein Fang auf die Leitung, nur genauer benannt.
+          best = { ...mitte, distanz, edgeId:edge.id, position:mitte,
+                   edge, route, segmentIndex:i, t:0.5 };
         }
       }
     });
@@ -2185,6 +2192,11 @@ function EditorInner() {
     });
     return best;
   }, [getInternalNode]);
+
+  // Ein Fang „auf der Leitung" — dazu gehört auch der Mittelpunkt. Beide teilen
+  // die getroffene Leitung und erzeugen eine echte Verbindung. Der Unterschied
+  // liegt nur in der Beschriftung des Markers.
+  const istLeitungsfang = (hit) => hit?.type === 'line' || hit?.type === 'midpoint';
 
   const leitungTeilen = useCallback((hit, junctionId, layerId) => {
     const host = hit.edge;
@@ -2378,7 +2390,7 @@ function EditorInner() {
         style:{ ...(existing.style || {}), stroke:layer.color, strokeWidth:4.5 },
       };
 
-      if (snapHit?.type === 'line') {
+      if (istLeitungsfang(snapHit)) {
         const [first, second] = leitungTeilen(snapHit, finalAnchorId, layer.id);
         setEdges(items => [
           ...items.filter(item => item.id !== existing.id && item.id !== snapHit.edge.id),
@@ -2455,7 +2467,7 @@ function EditorInner() {
     if (createdNodes.length) setNodes(items => [...items, ...createdNodes]);
     const pairedEdges = returnPair ? [returnPair.returnEdge] : [];
 
-    if (snapHit?.type === 'line') {
+    if (istLeitungsfang(snapHit)) {
       const [first, second] = leitungTeilen(snapHit, targetAnchorId, layer.id);
       setEdges(items => [...items.filter(item => item.id !== snapHit.edge.id), first, second, edge, ...pairedEdges]);
     } else {
@@ -3133,6 +3145,7 @@ function EditorInner() {
           setLaengenPuffer(null);
           platzierVorschauRef.current = null;
           setPlatzierVorschau(null);
+          setInlineTreffer(null);
           setSpiegelAchse(null);
           setEndpointMenu(null);
           setEdgeMenu(null);
@@ -3407,7 +3420,7 @@ function EditorInner() {
     const pos = weltPosition;
     const p = STD_PALETTE.find(p => p.type === raw);
     const id = newId();
-    const lineHit = INLINE_SPLIT_TYPES.has(raw) ? naechsteSichtbareLeitung(pos, 30 / Math.max(getZoom(), 0.2)) : null;
+    const lineHit = isInlineInsertable(raw) ? naechsteSichtbareLeitung(pos, 30 / Math.max(getZoom(), 0.2)) : null;
     const nodePosition = lineHit ? { x:lineHit.x - 20, y:lineHit.y - 20 } : pos;
 
     // Ausrichtung des Bauteils an der Leitung (§5): die Flussachse (top/bottom)
@@ -3543,6 +3556,7 @@ function EditorInner() {
     const punkt = platzierVorschauRef.current
       || rasterPunkt(screenToFlowPosition({ x:event.clientX, y:event.clientY }), drawingConfig.grid_size);
     bauteilPlatzieren(typ, punkt, { x:event.clientX, y:event.clientY });
+    setInlineTreffer(null);
     setEditorMode(finishCommand(editorModeRef.current));
     return true;
   }, [bauteilPlatzieren, drawingConfig.grid_size, screenToFlowPosition]);
@@ -3568,6 +3582,10 @@ function EditorInner() {
     if (!leitungsEntwurfRef.current) setAuslegung(node);
   }, []);
   const onEdgeClick = useCallback((event, edge) => {
+    // Im Platzierungsbefehl setzt ein Klick auf eine Leitung das Bauteil — und
+    // teilt sie dabei. Ohne das würde die Leitung den Klick verschlucken,
+    // obwohl die Vorschau „in Leitung einsetzen" anzeigt.
+    if (istBefehl(editorModeRef.current, PLACE)) { platzierenKlick(event); return; }
     if (leitungsEntwurfRef.current) { cadKlick(event); return; }
     setEndpointMenu(null);
     setEdgeMenu(null);
@@ -3575,7 +3593,7 @@ function EditorInner() {
     setSelectedEdgeId(edge.id);
     setSelected(null);
     setInspectorOpen(true);
-  }, [cadKlick]);
+  }, [cadKlick, platzierenKlick]);
 
   const spiegelKopieErstellen = useCallback((edgeId, axisStart, axisEnd) => {
     const edge = edgesRef.current.find(item => item.id === edgeId);
@@ -3651,10 +3669,30 @@ function EditorInner() {
     if (istBefehl(editorModeRef.current, PLACE)) {
       const raw = screenToFlowPosition({ x:event.clientX, y:event.clientY });
       const zoom = Math.max(getZoom(), 0.2);
+      const typ = editorModeRef.current?.payload?.nodeType;
+      // Liegt der Cursor über einer Leitung UND darf dieses Bauteil eingesetzt
+      // werden, ist der Landepunkt der Leitungstreffer — nicht der Rasterpunkt.
+      const treffer = isInlineInsertable(typ)
+        ? naechsteSichtbareLeitung(raw, 30 / zoom)
+        : null;
+      if (treffer) {
+        const punkt = { x:treffer.x, y:treffer.y };
+        platzierVorschauRef.current = punkt;
+        setPlatzierVorschau(punkt);
+        setInlineTreffer({
+          punkt,
+          edgeId:treffer.edge.id,
+          a:treffer.route[treffer.segmentIndex],
+          b:treffer.route[treffer.segmentIndex + 1],
+        });
+        setLeitungsGuides([]);
+        return;
+      }
       const alignment = objektAusrichtung(raw, snapAnRef.current ? objektFangpunkte : [],
         drawingConfig.snap_tolerance / zoom, drawingConfig.grid_size);
       platzierVorschauRef.current = alignment.point;
       setPlatzierVorschau(alignment.point);
+      setInlineTreffer(null);
       setLeitungsGuides(alignment.guides);
       return;
     }
@@ -3664,7 +3702,7 @@ function EditorInner() {
     }
     cadCursorAktualisieren(event);
   }, [cadCursorAktualisieren, drawingConfig.grid_size, drawingConfig.snap_tolerance, getZoom,
-      objektFangpunkte, screenToFlowPosition, spiegelAchse?.start]);
+      naechsteSichtbareLeitung, objektFangpunkte, screenToFlowPosition, spiegelAchse?.start]);
   const onPaneContextMenu = useCallback((event) => {
     // Rechtsklick bricht jede aktive Zeichenaktion vollständig ab (kein
     // versehentliches Abschliessen einer Leitung) und beendet den Dauermodus.
@@ -4177,6 +4215,32 @@ function EditorInner() {
                 {/* Punkt 2 — Platzierungsvorschau. Kein echter Node: ein Geist mit
                     Handles würde React Flow durchscheinen lassen und könnte
                     versehentlich im Graphen landen. */}
+                {/* Punkt 25 — der Abschnitt, der beim Klick geteilt wird. Ohne
+                    diese Rückmeldung wüsste der Planer nicht, ob er ein Bauteil
+                    frei setzt oder in eine bestehende Leitung einbaut. */}
+                {platzierTyp && inlineTreffer && (
+                  <g pointerEvents="none">
+                    <line x1={inlineTreffer.a.x} y1={inlineTreffer.a.y}
+                      x2={inlineTreffer.b.x} y2={inlineTreffer.b.y}
+                      stroke="#4f46e5" strokeWidth={9 / zoomAnzeige} opacity="0.28"
+                      strokeLinecap="round" />
+                    {/* Die zwei künftigen Teilstücke bekommen eine Trennmarke am
+                        Einsetzpunkt. */}
+                    <line
+                      x1={inlineTreffer.punkt.x - (inlineTreffer.b.y - inlineTreffer.a.y === 0 ? 0 : 10 / zoomAnzeige)}
+                      y1={inlineTreffer.punkt.y - (inlineTreffer.b.y - inlineTreffer.a.y === 0 ? 10 / zoomAnzeige : 0)}
+                      x2={inlineTreffer.punkt.x + (inlineTreffer.b.y - inlineTreffer.a.y === 0 ? 0 : 10 / zoomAnzeige)}
+                      y2={inlineTreffer.punkt.y + (inlineTreffer.b.y - inlineTreffer.a.y === 0 ? 10 / zoomAnzeige : 0)}
+                      stroke="#4f46e5" strokeWidth={2 / zoomAnzeige} />
+                    <text x={inlineTreffer.punkt.x + 16 / zoomAnzeige}
+                      y={inlineTreffer.punkt.y - 14 / zoomAnzeige}
+                      fill="#4338ca" fontSize={11 / zoomAnzeige} fontWeight="700"
+                      stroke="#ffffff" strokeWidth={3 / zoomAnzeige}
+                      strokeLinejoin="round" paintOrder="stroke">
+                      in Leitung einsetzen
+                    </text>
+                  </g>
+                )}
                 {platzierTyp && platzierVorschau && (
                   <g pointerEvents="none" opacity="0.5">
                     <rect x={platzierVorschau.x - 20 / zoomAnzeige} y={platzierVorschau.y - 20 / zoomAnzeige}

@@ -1,4 +1,4 @@
-import { BaseEdge, EdgeLabelRenderer } from '@xyflow/react';
+import { BaseEdge, EdgeLabelRenderer, useStore } from '@xyflow/react';
 import { roundedPolylinePath } from './geometry';
 
 function halfwayPoint(points) {
@@ -52,6 +52,13 @@ export function FlowEdge({
       ? storedWaypoints
       : automatischeEckpunkte(sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition);
   const vertices = [{ x: sourceX, y: sourceY }, ...waypoints, { x: targetX, y: targetY }];
+  // Grips sollen auf dem Schirm immer gleich gross sein, egal wie stark gezoomt
+  // ist. Darum die Radien durch den Zoom teilen: r_welt = r_screen / zoom.
+  const zoom = Math.max(useStore((state) => state.transform[2]) || 1, 0.05);
+  const gripR = 5.5 / zoom;          // Eckpunkt
+  const endR = 6.5 / zoom;           // Endpunkt (etwas grösser, trägt die Hydraulik)
+  const gripStroke = 1.8 / zoom;
+  const endStroke = 2.4 / zoom;
   const cornerRadius = Math.max(0, Number(data.corner_radius ?? data._cornerRadius ?? 8) || 0);
   const edgePath = roundedPolylinePath(vertices, cornerRadius);
   const labelPoint = halfwayPoint(vertices);
@@ -63,11 +70,11 @@ export function FlowEdge({
       <BaseEdge id={id} path={edgePath}
         style={{ ...style, strokeWidth: 4.5, strokeDasharray: dash, strokeLinecap: 'round', strokeLinejoin: 'round', fill: 'none' }} />
 
-      {selected && <path d={edgePath} fill="none" stroke="#0f172a" strokeWidth={9} opacity={0.11} pointerEvents="none" />}
-      {data._groupSelected && !selected && <path d={edgePath} fill="none" stroke="#7c3aed" strokeWidth={9} opacity={0.18} pointerEvents="none" />}
+      {selected && <path d={edgePath} fill="none" stroke="#0f172a" strokeWidth={7 / zoom + 4.5} opacity={0.11} pointerEvents="none" />}
+      {data._groupSelected && !selected && <path d={edgePath} fill="none" stroke="#7c3aed" strokeWidth={7 / zoom + 4.5} opacity={0.18} pointerEvents="none" />}
 
       {/* Breiter unsichtbarer Klick-Bereich */}
-      <path d={edgePath} fill="none" stroke="transparent" strokeWidth={18}
+      <path d={edgePath} fill="none" stroke="transparent" strokeWidth={14 / zoom}
         style={{ cursor: selected ? 'grab' : 'pointer', pointerEvents: 'stroke' }}
         onPointerDown={(event) => {
           if (selected && event.button === 0) {
@@ -85,8 +92,8 @@ export function FlowEdge({
       {/* Echte CAD-Stützpunkte: Doppelklick auf die Leitung fügt einen ein.
           Beim Ziehen mit Shift übernimmt der Editor den 0°/45°/90°-Fang. */}
       {selected && waypoints.map((point, index) => (
-        <circle key={`${id}-point-${index}`} cx={point.x} cy={point.y} r={6.5}
-          fill="white" stroke={color} strokeWidth={2.5}
+        <circle key={`${id}-point-${index}`} cx={point.x} cy={point.y} r={gripR}
+          fill="white" stroke={color} strokeWidth={gripStroke}
           style={{ pointerEvents: 'all', cursor: 'move' }}
           onPointerDown={(event) => { event.stopPropagation(); data._onPointPointerDown?.(event, id, index); }}
           onDoubleClick={(event) => { event.stopPropagation(); data._onRemovePoint?.(id, index); }} />
@@ -98,8 +105,8 @@ export function FlowEdge({
         ['source', sourceX, sourceY],
         ['target', targetX, targetY],
       ].map(([side, x, y]) => (
-        <circle key={`${id}-${side}`} cx={x} cy={y} r={8}
-          fill="white" stroke={color} strokeWidth={3.5}
+        <circle key={`${id}-${side}`} cx={x} cy={y} r={endR}
+          fill="white" stroke={color} strokeWidth={endStroke}
           style={{ pointerEvents: 'all', cursor: 'crosshair' }}
           onPointerDown={(event) => {
             event.stopPropagation();
@@ -114,8 +121,8 @@ export function FlowEdge({
 
       {/* Nur echte T-Verbindungen erhalten einen kleinen Verbindungspunkt.
           Freie Enden erzeugen keine dauerhaft sichtbaren Junction-Symbole. */}
-      {data._sourceJunctionDegree >= 3 && <circle cx={sourceX} cy={sourceY} r={4.5} fill={color} pointerEvents="none" />}
-      {data._targetJunctionDegree >= 3 && <circle cx={targetX} cy={targetY} r={4.5} fill={color} pointerEvents="none" />}
+      {data._sourceJunctionDegree >= 3 && <circle cx={sourceX} cy={sourceY} r={3.5 / zoom} fill={color} pointerEvents="none" />}
+      {data._targetJunctionDegree >= 3 && <circle cx={targetX} cy={targetY} r={3.5 / zoom} fill={color} pointerEvents="none" />}
 
       {/* Leitungs-Label (DN + Massenstrom) — in der Streckenmitte */}
       {label && (

@@ -205,7 +205,7 @@ export async function starten() {
     /** Der gezeichnete Fangmarker: Beschriftung und Koordinate aus dem Element. */
     markerAusSvg: () => page.evaluate(() => {
       const alle = [...document.querySelectorAll('.react-flow__viewport text')];
-      const el = alle.find((t) => /^(Anschluss|Endpunkt|Schnittpunkt|Mittelpunkt|auf Leitung|Raster)$/
+      const el = alle.find((t) => /^(Anschluss|Endpunkt|Eckpunkt|Schnittpunkt|Mittelpunkt|auf Leitung|Raster)$/
         .test((t.textContent || '').trim()));
       if (!el) return null;
       const form = el.parentElement?.querySelector('circle, rect, polygon, polyline, line');

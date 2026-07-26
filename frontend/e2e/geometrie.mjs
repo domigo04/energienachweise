@@ -3,37 +3,12 @@
 //
 // Geprüft wird GEOMETRIE aus dem gespeicherten Graphen, nicht das Vorhandensein
 // von Elementen.
-import { chromium } from 'playwright';
-import fs from 'fs';
+import { protokoll, starten } from './lib.mjs';
 
-const OUT = process.env.CAD_OUT || '/tmp/cad';
-const APP = process.env.CAD_APP || 'http://127.0.0.1:5199';
-const API = process.env.CAD_API || 'http://127.0.0.1:8011';
-const token = fs.readFileSync(`${OUT}/token.txt`, 'utf8').trim();
-const userJson = fs.readFileSync(`${OUT}/user.json`, 'utf8');
-
-const ergebnisse = [];
-const pruefe = (id, was, ok, notiz = '') => {
-  ergebnisse.push({ id, was, ok: !!ok, notiz });
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${id}  ${was}${notiz ? '   → ' + notiz : ''}`);
-};
-
-const kopf = (t) => console.log(`\n── ${t} ${'─'.repeat(Math.max(0, 60 - t.length))}`);
-
-const graphSetzen = (graph) => fetch(`${API}/api/v1/schemas/1/graph`, {
-  method: 'PUT',
-  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-  body: JSON.stringify({ graph }),          // MUSS unter `graph` liegen
-});
-
-const graphLesen = async () => {
-  const r = await fetch(`${API}/api/v1/projects/1/schema-editor`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  const d = await r.json();
-  const g = d.schema?.graph ?? {};
-  return typeof g === 'string' ? JSON.parse(g) : g;
-};
+const { pruefe, kopf, bilanz } = protokoll('geometrie');
+const w = await starten();
+const { page } = w;
+const OUT = w.cfg.arbeitsordner;
 
 // ── Vorbereitete Testgeometrie ─────────────────────────────────────────────
 // Eine Treppe mit senkrechtem Mittelsegment, wie im Auftrag:
@@ -61,92 +36,17 @@ const treppe = () => ({
   layer_config: {},
 });
 
-const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
-const page = await browser.newPage({ viewport: { width: 1600, height: 950 } });
-const fehler = [];
-page.on('pageerror', (e) => fehler.push(e.message));
-page.on('console', (m) => { if (m.type() === 'error') fehler.push(m.text()); });
-await page.addInitScript(([t, u]) => {
-  localStorage.setItem('hc_token', t);
-  localStorage.setItem('hc_auth', u);
-}, [token, userJson]);
-
-const zoomJetzt = async () => Number((await page.locator('.hc-statusbar__zoom').innerText()).replace(/\D/g, ''));
-const zoomAuf = async (ziel) => {
-  const b = await page.locator('.hc-canvas-wrap').boundingBox();
-  await page.mouse.move(Math.round(b.x + b.width / 2), Math.round(b.y + b.height / 2));
-  for (let i = 0; i < 60; i += 1) {
-    const z = await zoomJetzt();
-    if (Math.abs(z - ziel) <= Math.max(6, ziel * 0.1)) return z;
-    await page.mouse.wheel(0, z > ziel ? 120 : -120);
-    await page.waitForTimeout(60);
-  }
-  return zoomJetzt();
-};
-
-/** Weltkoordinate → Bildschirmkoordinate über die echte Viewport-Transformation. */
-const weltZuScreen = (punkt) => page.evaluate(([wx, wy]) => {
-  const el = document.querySelector('.react-flow__viewport');
-  const m = new DOMMatrix(getComputedStyle(el).transform);
-  const r = document.querySelector('.react-flow').getBoundingClientRect();
-  return { x: Math.round(wx * m.a + m.e + r.left), y: Math.round(wy * m.d + m.f + r.top) };
-}, [punkt.x, punkt.y]);
-
 const punkteVon = async (edgeId = 'e1') => {
-  const g = await graphLesen();
+  const g = await w.graphLesen();
   return (g.edges || []).find((e) => e.id === edgeId)?.data?.points || null;
-};
-
-const laden = async () => {
-  await page.goto(`${APP}/projekte/1/schema`, { waitUntil: 'networkidle' });
-  await page.waitForTimeout(2200);
-  await zoomAuf(100);
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
 kopf('Segment-Stretch, senkrechtes Mittelsegment');
-await graphSetzen(treppe());
-await laden();
+await w.graphSetzen(treppe());
+await w.laden();
 
-/** Punkt AUF dem gerenderten Leitungspfad (Anteil 0..1) in Screenkoordinaten. */
-const punktAufPfad = (anteil) => page.evaluate((a) => {
-  const path = document.querySelector('.react-flow__edge path');
-  if (!path) return null;
-  const p = path.getPointAtLength(path.getTotalLength() * a);
-  const m = path.getScreenCTM();
-  return { x: Math.round(p.x * m.a + p.y * m.c + m.e), y: Math.round(p.x * m.b + p.y * m.d + m.f) };
-}, anteil);
-
-/** Liegt dieser Bildschirmpunkt frei auf der Zeichenfläche? */
-const istFrei = (pt) => page.evaluate(([x, y]) => {
-  const el = document.elementFromPoint(x, y);
-  return !!el && !!el.closest('.hc-canvas-wrap');
-}, [pt.x, pt.y]);
-
-/** Klick auf den Mittelpunkt eines bekannten Segments (Weltkoordinaten). */
-const segmentKlicken = async (a, b) => {
-  const mitte = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-  const s = await weltZuScreen(mitte);
-  if (!(await istFrei(s))) {
-    console.log(`  (Segmentmitte ${s.x},${s.y} nicht frei — Test übersprungen)`);
-    return null;
-  }
-  await page.mouse.click(s.x, s.y);
-  await page.waitForTimeout(500);
-  return s;
-};
-
-const gewaehlt = await segmentKlicken({ x: 640, y: 400 }, { x: 640, y: 700 });
-const diag = await page.evaluate(() => {
-  const e = document.querySelector('.react-flow__edge');
-  const paths = [...document.querySelectorAll('.react-flow__edge path')].map((pp) => ({
-    d: (pp.getAttribute('d') || '').slice(0, 70),
-    sw: pp.getAttribute('stroke-width'), stroke: pp.getAttribute('stroke'),
-  }));
-  return { klassen: e?.className?.baseVal ?? e?.getAttribute('class'), paths };
-});
-console.log('  DIAG Kante:', JSON.stringify(diag).slice(0, 420));
-console.log('  DIAG Klickpunkt:', JSON.stringify(gewaehlt));
+const gewaehlt = await w.segmentKlicken({ x: 640, y: 400 }, { x: 640, y: 700 });
 if (!gewaehlt) {
   pruefe('S0', 'Leitung auswählbar', false, 'Segmentmitte nicht erreichbar');
   fs.writeFileSync(`${OUT}/geometrie.json`, JSON.stringify(ergebnisse, null, 2));
@@ -181,7 +81,7 @@ pruefe('S3', 'Segment bleibt senkrecht (ORTHO erhalten)', !!beideX,
 pruefe('S4', 'Keine neue Ecke entstanden', nachher?.length === 2, `${nachher?.length} Punkte`);
 
 // Ankerpunkte (Leitungsenden) dürfen NICHT mitgewandert sein.
-const g1 = await graphLesen();
+const g1 = await w.graphLesen();
 const anker = (g1.nodes || []).filter((n) => n.type === 'junction');
 const ankerStabil = anker.length === 2
   && anker.every((n) => n.position.x === 400 && (n.position.y === 400 || n.position.y === 700));
@@ -198,21 +98,21 @@ pruefe('S6', 'Undo stellt die Ausgangsgeometrie wieder her',
 
 kopf('Speichern und neu laden (DoD G)');
 // Erneut ziehen, dann neu laden und Geometrie vergleichen.
-const s2 = await segmentKlicken({ x: 640, y: 400 }, { x: 640, y: 700 });
+const s2 = await w.segmentKlicken({ x: 640, y: 400 }, { x: 640, y: 700 });
 await page.mouse.move(s2.x, s2.y);
 await page.mouse.down();
 for (let i = 1; i <= 4; i += 1) { await page.mouse.move(s2.x - i * 40, s2.y); await page.waitForTimeout(50); }
 await page.mouse.up();
 await page.waitForTimeout(1500);
 const vorReload = await punkteVon();
-await laden();
+await w.laden();
 const nachReload = await punkteVon();
 pruefe('G1', 'Speichern + Neuladen verändert die Geometrie nicht',
   JSON.stringify(vorReload) === JSON.stringify(nachReload),
   `${JSON.stringify(vorReload)} vs ${JSON.stringify(nachReload)}`);
 
 kopf('Waagrechtes Segment');
-await graphSetzen({
+await w.graphSetzen({
   nodes: [
     { id: 'b1', type: 'junction', position: { x: 420, y: 400 }, data: { cad_anchor: true } },
     { id: 'b2', type: 'junction', position: { x: 420, y: 760 }, data: { cad_anchor: true } },
@@ -229,9 +129,9 @@ await graphSetzen({
   }],
   layer_config: {},
 });
-await laden();
+await w.laden();
 {
-  const sp = await segmentKlicken({ x: 520, y: 580 }, { x: 760, y: 580 });
+  const sp = await w.segmentKlicken({ x: 520, y: 580 }, { x: 760, y: 580 });
   const vor = await punkteVon();
   await page.mouse.move(sp.x, sp.y);
   await page.mouse.down();
@@ -251,7 +151,7 @@ await laden();
 
 kopf('Stretch an angeschlossener Leitung (Punkt 5)');
 // Pumpe mit angeschlossener Leitung: Mittelsegment ziehen, Portbindung muss halten.
-await graphSetzen({
+await w.graphSetzen({
   nodes: [
     { id: 'p1', type: 'pump', position: { x: 460, y: 400 }, data: { label: 'Pumpe', nr: 1 } },
     { id: 'c2', type: 'junction', position: { x: 460, y: 760 }, data: { cad_anchor: true } },
@@ -267,15 +167,15 @@ await graphSetzen({
   }],
   layer_config: {},
 });
-await laden();
+await w.laden();
 {
-  const sp = await segmentKlicken({ x: 640, y: 520 }, { x: 640, y: 700 });
+  const sp = await w.segmentKlicken({ x: 640, y: 520 }, { x: 640, y: 700 });
   await page.mouse.move(sp.x, sp.y);
   await page.mouse.down();
   for (let i = 1; i <= 5; i += 1) { await page.mouse.move(sp.x + i * 40, sp.y); await page.waitForTimeout(50); }
   await page.mouse.up();
   await page.waitForTimeout(1500);
-  const g = await graphLesen();
+  const g = await w.graphLesen();
   const e = (g.edges || []).find((x) => x.id === 'e1');
   pruefe('P1', 'Portbindung bleibt nach Stretch erhalten',
     e?.source === 'p1' && e?.sourceHandle === 'bottom',
@@ -286,7 +186,7 @@ await laden();
 }
 
 kopf('Bauteil verschieben mit angeschlossener Leitung (Punkt 6)');
-await graphSetzen({
+await w.graphSetzen({
   nodes: [
     { id: 'p1', type: 'pump', position: { x: 600, y: 400 }, data: { label: 'Pumpe', nr: 1 } },
     { id: 'd2', type: 'junction', position: { x: 200, y: 800 }, data: { cad_anchor: true } },
@@ -299,9 +199,9 @@ await graphSetzen({
   }],
   layer_config: {},
 });
-await laden();
+await w.laden();
 {
-  const vorG = await graphLesen();
+  const vorG = await w.graphLesen();
   const knoten = page.locator('.react-flow__node-pump').first();
   const bb = await knoten.boundingBox();
   await page.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2);
@@ -312,7 +212,7 @@ await laden();
   }
   await page.mouse.up();
   await page.waitForTimeout(1600);
-  const nachG = await graphLesen();
+  const nachG = await w.graphLesen();
   const vorPos = (vorG.nodes || []).find((n) => n.id === 'p1').position;
   const nachPos = (nachG.nodes || []).find((n) => n.id === 'p1').position;
   pruefe('M1', 'Bauteil ist verschoben', nachPos.x !== vorPos.x || nachPos.y !== vorPos.y,
@@ -328,15 +228,36 @@ await laden();
   // Undo muss Node UND Leitungsgeometrie gemeinsam zurücknehmen.
   await page.keyboard.press('Control+z');
   await page.waitForTimeout(1500);
-  const undoG = await graphLesen();
+  const undoG = await w.graphLesen();
   const undoPos = (undoG.nodes || []).find((n) => n.id === 'p1').position;
   pruefe('M4', 'Undo nimmt die Verschiebung zurück',
     undoPos.x === vorPos.x && undoPos.y === vorPos.y,
     `${JSON.stringify(undoPos)} (erwartet ${JSON.stringify(vorPos)})`);
+
+  // Wiederherstellen muss die Verschiebung erneut anwenden.
+  await page.keyboard.press('Control+Shift+z');
+  await page.waitForTimeout(1500);
+  const redoG = await w.graphLesen();
+  const redoPos = (redoG.nodes || []).find((n) => n.id === 'p1').position;
+  pruefe('M5', 'Redo wendet die Verschiebung wieder an',
+    redoPos.x === nachPos.x && redoPos.y === nachPos.y,
+    `${JSON.stringify(redoPos)} (erwartet ${JSON.stringify(nachPos)})`);
+  const redoKante = (redoG.edges || []).find((x) => x.id === 'e1');
+  pruefe('M6', 'Redo erhält die hydraulische Verbindung',
+    redoKante?.source === 'p1' && redoKante?.sourceHandle === 'bottom',
+    `${redoKante?.source}/${redoKante?.sourceHandle}`);
+
+  // Und noch einmal zurück — die Kette muss in beide Richtungen laufen.
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(1400);
+  const zurueck = (await w.graphLesen()).nodes.find((n) => n.id === 'p1').position;
+  pruefe('M7', 'Undo nach Redo führt wieder zum Ausgangspunkt',
+    zurueck.x === vorPos.x && zurueck.y === vorPos.y,
+    `${JSON.stringify(zurueck)} (erwartet ${JSON.stringify(vorPos)})`);
 }
 
 kopf('Rotation mit angeschlossener Leitung (Punkt 9/10)');
-await laden();
+await w.laden();
 {
   const knoten = page.locator('.react-flow__node-pump').first();
   await knoten.click({ force: true });
@@ -353,7 +274,7 @@ await laden();
   pruefe('R2', 'Anschluss-IDs bleiben stabil (Semantik erhalten)',
     portsVor.map((p) => p.id).join() === portsNach.map((p) => p.id).join(),
     `${portsVor.map((p) => p.id).join()} vs ${portsNach.map((p) => p.id).join()}`);
-  const g = await graphLesen();
+  const g = await w.graphLesen();
   const e = (g.edges || []).find((x) => x.id === 'e1');
   pruefe('R3', 'Angeschlossene Leitung hängt nach der Rotation am gleichen Port',
     e?.source === 'p1' && e?.sourceHandle === 'bottom',
@@ -374,7 +295,7 @@ await laden();
 }
 
 kopf('Fensterauswahl mit Richtungslogik (Punkt 15)');
-await graphSetzen({
+await w.graphSetzen({
   nodes: [
     { id: 'q1', type: 'pump', position: { x: 300, y: 300 }, data: { label: 'Pumpe', nr: 1 } },
     { id: 'q2', type: 'pump', position: { x: 900, y: 300 }, data: { label: 'Pumpe', nr: 2 } },
@@ -382,10 +303,10 @@ await graphSetzen({
   edges: [],
   layer_config: {},
 });
-await laden();
+await w.laden();
 {
-  const a = await weltZuScreen({ x: 250, y: 250 });
-  const b = await weltZuScreen({ x: 500, y: 450 });     // umschliesst nur q1
+  const a = await w.weltZuScreen({ x: 250, y: 250 });
+  const b = await w.weltZuScreen({ x: 500, y: 450 });     // umschliesst nur q1
   await page.mouse.move(a.x, a.y);
   await page.mouse.down();
   await page.mouse.move(b.x, b.y, { steps: 8 });
@@ -398,8 +319,8 @@ await laden();
   // Rechts→links: nur halb berühren, muss trotzdem greifen.
   await page.mouse.click(a.x - 40, a.y - 40);
   await page.waitForTimeout(250);
-  const c = await weltZuScreen({ x: 520, y: 460 });
-  const d = await weltZuScreen({ x: 380, y: 260 });     // berührt q1 nur teilweise
+  const c = await w.weltZuScreen({ x: 520, y: 460 });
+  const d = await w.weltZuScreen({ x: 380, y: 260 });     // berührt q1 nur teilweise
   await page.mouse.move(c.x, c.y);
   await page.mouse.down();
   await page.mouse.move(d.x, d.y, { steps: 8 });
@@ -415,8 +336,8 @@ await laden();
 }
 
 kopf('Keine Phantom-Objekte nach Abbrüchen (Punkt 16)');
-await graphSetzen({ nodes: [], edges: [], layer_config: {} });
-await laden();
+await w.graphSetzen({ nodes: [], edges: [], layer_config: {} });
+await w.laden();
 {
   const box = await page.locator('.hc-canvas-wrap').boundingBox();
   const frei = { x: Math.round(box.x + 200), y: Math.round(box.y + box.height - 220) };
@@ -434,7 +355,7 @@ await laden();
   await page.waitForTimeout(200);
   await page.keyboard.press('Escape');
   await page.waitForTimeout(900);
-  let g = await graphLesen();
+  let g = await w.graphLesen();
   pruefe('N1', 'Abgebrochenes Platzieren hinterlässt kein Bauteil',
     (g.nodes || []).length === 0, `${(g.nodes || []).length} Nodes`);
 
@@ -450,7 +371,7 @@ await laden();
   await page.waitForTimeout(250);
   await page.keyboard.press('Escape');
   await page.waitForTimeout(1100);
-  g = await graphLesen();
+  g = await w.graphLesen();
   pruefe('N2', 'Abgebrochene Leitung hinterlässt keinen Anker und keine Kante',
     (g.nodes || []).length === 0 && (g.edges || []).length === 0,
     `${(g.nodes || []).length} Nodes, ${(g.edges || []).length} Kanten`);
@@ -460,10 +381,8 @@ await laden();
   pruefe('N3', 'Keine NaN-Koordinaten im gespeicherten Graphen', kaputt.length === 0, `${kaputt.length}`);
 }
 
-pruefe('X', 'keine Konsolenfehler', fehler.length === 0, fehler.slice(0, 2).join(' || '));
+pruefe('X', 'keine Konsolenfehler', w.fehler.length === 0, w.fehler.slice(0, 2).join(' || '));
 await page.screenshot({ path: `${OUT}/geometrie.png` });
-fs.writeFileSync(`${OUT}/geometrie.json`, JSON.stringify(ergebnisse, null, 2));
-const fail = ergebnisse.filter((r) => !r.ok);
-console.log(`\n=== ${ergebnisse.length - fail.length}/${ergebnisse.length} ===`);
-if (fail.length) console.log('OFFEN:\n' + fail.map((f) => `  ${f.id} ${f.was} — ${f.notiz}`).join('\n'));
-await browser.close();
+const offen = bilanz(OUT);
+await w.browser.close();
+process.exit(offen ? 1 : 0);

@@ -32,3 +32,6 @@ venv/
 
 # Lokale Dev-Datenbank (SQLite)
 *.db
+
+# Laufzeitzustand der CAD-Browsertests (Adressen, Token, temporäre IDs)
+frontend/e2e/.run.json

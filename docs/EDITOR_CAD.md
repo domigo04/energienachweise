@@ -110,3 +110,49 @@ zuerst als reines, getestetes Modul (`cadSelection.js`) neben `cadEdit.js`, mit
 diese für Bauteile und Polylinien belegt sind, die Anbindung an den Editor —
 und dann mit einem Browsertest, der beide Richtungen bei 25 %, 100 % und 200 %
 sowie mit Unterlage prüft.
+
+## Bauteil in eine Leitung einsetzen
+
+Ein Bauteil mit zwei Anschlüssen (Pumpe, Ventil, Zähler …) wird nicht neben
+eine Leitung gesetzt, sondern **in** sie:
+
+```
+vorher:    A ──────────────── B
+nachher:   A ── Bauteil.top | Bauteil.bottom ── B
+```
+
+Die getroffene Leitung wird an der Klickstelle geteilt. Beide Teilstücke
+übernehmen Layer, Medium, DN und die übrigen Fachdaten; die Länge wird
+aufgeteilt, nicht verdoppelt. Es entsteht keine zusätzliche Junction — das
+Bauteil selbst ist der Knoten zwischen den Teilstücken.
+
+### Wer darf eingesetzt werden
+
+Ausschliesslich `inlineInsertable` in `schema/componentRegistry.js`. Die
+Eigenschaft gehört zum Bauteil, nicht zum Editor, und wird nie aus dem
+Symbolnamen erraten. Nicht inline sind:
+
+- Bauteile ohne zweiseitige Flussachse (Temperaturfühler ist ein Abgriff)
+- Verzweigungen (3-Weg-Ventil)
+- Anlagenteile mit eigener Anschlussgeometrie (Speicher, Wärmeerzeuger,
+  Verteiler, Erdsondenfeld, Verbrauchergruppe)
+
+### Rückmeldung vor dem Klick
+
+Schwebt ein einsetzbares Bauteil über einer Leitung, wird der betroffene
+Abschnitt hervorgehoben, der Einsetzpunkt markiert und „in Leitung einsetzen"
+angezeigt. Die Vorschau steht dabei auf dem **Leitungstreffer**, nicht auf dem
+Rasterpunkt — das Bauteil landet also dort, wo der Geist steht. Ohne geeignete
+Leitung gilt die normale freie Platzierung.
+
+### Verbindung entsteht nur bewusst
+
+Eine geometrische Kreuzung zweier Leitungen erzeugt **keine** Verbindung. Eine
+Verbindung entsteht nur, wenn eine Leitung ausdrücklich auf einer anderen endet
+oder ein Bauteil eingesetzt wird. Ein Fang auf den Mittelpunkt einer Leitung
+zählt dabei als Fang auf der Leitung: er erzeugt dieselbe T-Verbindung. Vorher
+entstand dort nur ein freier Anker auf derselben Koordinate — optisch
+angeschlossen, fachlich nicht.
+
+Das Einsetzen ist EINE Rückgängig-Aktion: der Schnappschuss entsteht vor der
+Erzeugung, und Bauteil wie Teilstücke liegen darin gemeinsam.

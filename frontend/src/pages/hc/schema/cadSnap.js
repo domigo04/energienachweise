@@ -73,6 +73,35 @@ export function fangErgebnis(kandidaten, fallback, { zeigeRaster = true } = {}) 
 }
 
 /**
+ * Kleine Hysterese gegen Flackern (Punkt 8).
+ *
+ * Liegen zwei Kandidaten fast gleich weit, springt der Fang sonst bei jeder
+ * Mausbewegung hin und her. Ein bereits gehaltener Fang darf darum etwas
+ * „zäher" sein: er wird nur abgelöst, wenn der neue Kandidat deutlich besser
+ * ist — höhere Priorität, oder merklich näher.
+ *
+ * `haltefaktor` 1.0 schaltet die Hysterese ab; 0.7 heisst „30 % näher nötig".
+ */
+export function fangMitHysterese(neu, gehalten, { haltefaktor = 0.7, radius = 0 } = {}) {
+  if (!neu) return gehalten || null;
+  if (!gehalten || !gehalten.treffer || !neu.treffer) return neu;
+  if (gehalten.typ === neu.typ
+    && gehalten.point.x === neu.point.x && gehalten.point.y === neu.point.y) return gehalten;
+
+  const pNeu = fangStil(neu.typ).prio;
+  const pAlt = fangStil(gehalten.typ).prio;
+  if (pNeu > pAlt) return neu;                     // wichtigerer Fangtyp gewinnt sofort
+  if (pNeu < pAlt) {
+    // Der gehaltene Fang bleibt, solange er überhaupt noch in Reichweite ist.
+    const dAlt = gehalten.treffer.distanz ?? Infinity;
+    return radius && dAlt <= radius ? gehalten : neu;
+  }
+  const dNeu = neu.treffer.distanz ?? Infinity;
+  const dAlt = gehalten.treffer.distanz ?? Infinity;
+  return dNeu <= dAlt * haltefaktor ? neu : gehalten;
+}
+
+/**
  * Prüfung der Fangtreue: liegt der gesetzte Punkt exakt auf dem angezeigten
  * Marker? Genau der Fall „UI zeigt Fangpunkt A, Klick landet 6 px daneben" darf
  * nicht auftreten.

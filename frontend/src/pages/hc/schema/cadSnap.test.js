@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   ENDPOINT, GRID, INTERSECTION, NEAREST, PORT,
-  fangErgebnis, fangStil, pruefeFangTreue, segmentSchnittpunkt,
+  fangErgebnis, fangMitHysterese, fangStil, pruefeFangTreue, segmentSchnittpunkt,
 } from './cadSnap';
 
 describe('Fangtypen', () => {
@@ -133,5 +133,50 @@ describe('Schnittpunkt', () => {
   it('liefert für parallele Segmente keinen Schnittpunkt', () => {
     expect(segmentSchnittpunkt({ x: 0, y: 0 }, { x: 100, y: 0 },
                                { x: 0, y: 50 }, { x: 100, y: 50 })).toBeNull();
+  });
+});
+
+describe('Hysterese gegen Fang-Flackern (Punkt 8)', () => {
+  const e = (typ, x, y, distanz) => fangErgebnis([{ typ, x, y, distanz }], { x: 0, y: 0 });
+
+  it('hält den bestehenden Fang, wenn der neue nur unwesentlich näher ist', () => {
+    const gehalten = e(ENDPOINT, 100, 100, 10);
+    const neu = e(ENDPOINT, 200, 200, 9);      // nur 10 % näher
+    expect(fangMitHysterese(neu, gehalten).point).toEqual({ x: 100, y: 100 });
+  });
+
+  it('wechselt, wenn der neue Fang deutlich näher ist', () => {
+    const gehalten = e(ENDPOINT, 100, 100, 10);
+    const neu = e(ENDPOINT, 200, 200, 3);
+    expect(fangMitHysterese(neu, gehalten).point).toEqual({ x: 200, y: 200 });
+  });
+
+  it('lässt einen wichtigeren Fangtyp sofort gewinnen', () => {
+    const gehalten = e(NEAREST, 100, 100, 2);
+    const neu = e(PORT, 300, 300, 12);
+    expect(fangMitHysterese(neu, gehalten).typ).toBe(PORT);
+  });
+
+  it('gibt einen wichtigeren gehaltenen Fang erst auf, wenn er ausser Reichweite ist', () => {
+    const gehalten = e(PORT, 100, 100, 8);
+    const schwaecher = e(NEAREST, 200, 200, 1);
+    // noch in Reichweite → Port bleibt
+    expect(fangMitHysterese(schwaecher, gehalten, { radius: 12 }).typ).toBe(PORT);
+    // ausser Reichweite → der schwächere übernimmt
+    expect(fangMitHysterese(schwaecher, e(PORT, 100, 100, 30), { radius: 12 }).typ).toBe(NEAREST);
+  });
+
+  it('behält Identität bei unverändertem Fang (kein Neu-Rendern)', () => {
+    const gehalten = e(PORT, 100, 100, 4);
+    const gleich = e(PORT, 100, 100, 4);
+    expect(fangMitHysterese(gleich, gehalten)).toBe(gehalten);
+  });
+
+  it('verträgt fehlende Werte', () => {
+    const gehalten = e(PORT, 10, 10, 1);
+    expect(fangMitHysterese(null, gehalten)).toBe(gehalten);
+    expect(fangMitHysterese(null, null)).toBeNull();
+    // Rasterfang hat keinen Treffer → immer der neue Zustand
+    expect(fangMitHysterese(e(PORT, 5, 5, 1), fangErgebnis([], { x: 0, y: 0 })).typ).toBe(PORT);
   });
 });

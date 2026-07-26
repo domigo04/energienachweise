@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   eckpunktEntfernen, eckpunktSetzen, gripsFuerRoute,
+  istKollinear, routeBereinigen, routeIstGueltig,
+  istKollinear, routeBereinigen, routeIstGueltig,
   segmentOrientierung, segmentVerschieben,
 } from './cadEdit';
 
@@ -121,5 +123,73 @@ describe('Eckpunkte bearbeiten', () => {
   it('entfernt einen Eckpunkt', () => {
     expect(eckpunktEntfernen(points, 1)).toEqual([{ x: 100, y: 100 }, { x: 300, y: 300 }]);
     expect(eckpunktEntfernen(points, 5)).toEqual(points);
+  });
+});
+
+describe('Route-Cleanup (Punkt 20)', () => {
+  const start = { x: 0, y: 0 };
+  const end = { x: 200, y: 0 };
+
+  it('entfernt den überflüssigen kollinearen Zwischenpunkt aus dem Auftrag', () => {
+    // (0,0) (100,0) (200,0) → (0,0) (200,0)
+    expect(routeBereinigen([{ x: 100, y: 0 }], { start, end })).toEqual([]);
+  });
+
+  it('behält eine echte Ecke', () => {
+    const ecke = [{ x: 200, y: 0 }];
+    expect(routeBereinigen(ecke, { start, end: { x: 200, y: 300 } })).toEqual(ecke);
+  });
+
+  it('entfernt einen Zwischenpunkt, der genau auf dem Nachbarn liegt', () => {
+    const bereinigt = routeBereinigen(
+      [{ x: 100, y: 100 }, { x: 100, y: 100 }, { x: 100, y: 300 }],
+      { start, end: { x: 400, y: 300 } });
+    expect(bereinigt).toEqual([{ x: 100, y: 100 }, { x: 100, y: 300 }]);
+  });
+
+  it('entfernt einen Zwischenpunkt, der auf dem Startpunkt klebt', () => {
+    expect(routeBereinigen([{ x: 0, y: 0 }, { x: 0, y: 200 }], { start, end: { x: 300, y: 200 } }))
+      .toEqual([{ x: 0, y: 200 }]);
+  });
+
+  it('entfernt NaN und Infinity', () => {
+    const bereinigt = routeBereinigen(
+      [{ x: Number.NaN, y: 5 }, { x: 100, y: 200 }, { x: 5, y: Infinity }],
+      { start, end: { x: 400, y: 200 } });
+    expect(bereinigt).toEqual([{ x: 100, y: 200 }]);
+  });
+
+  it('räumt eine Kette mehrerer kollinearer Punkte in einem Durchgang auf', () => {
+    const bereinigt = routeBereinigen(
+      [{ x: 50, y: 0 }, { x: 100, y: 0 }, { x: 150, y: 0 }],
+      { start, end });
+    expect(bereinigt).toEqual([]);
+  });
+
+  it('lässt eine bereits saubere Treppe unverändert', () => {
+    const treppe = [{ x: 100, y: 0 }, { x: 100, y: 100 }, { x: 200, y: 100 }];
+    expect(routeBereinigen(treppe, { start, end: { x: 200, y: 200 } })).toEqual(treppe);
+  });
+
+  it('funktioniert auch ohne bekannte Enden', () => {
+    expect(routeBereinigen([{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 200, y: 0 }]))
+      .toEqual([{ x: 0, y: 0 }, { x: 200, y: 0 }]);
+  });
+
+  it('verträgt leere und ungültige Eingaben', () => {
+    expect(routeBereinigen([])).toEqual([]);
+    expect(routeBereinigen(null)).toEqual([]);
+  });
+
+  it('erkennt Kollinearität mit Toleranz', () => {
+    expect(istKollinear({ x: 0, y: 0 }, { x: 100, y: 0.3 }, { x: 200, y: 0 })).toBe(true);
+    expect(istKollinear({ x: 0, y: 0 }, { x: 100, y: 40 }, { x: 200, y: 0 })).toBe(false);
+  });
+
+  it('prüft, ob eine Route überhaupt zeichenbar ist', () => {
+    expect(routeIstGueltig([{ x: 0, y: 0 }, { x: 1, y: 1 }])).toBe(true);
+    expect(routeIstGueltig([{ x: 0, y: 0 }])).toBe(false);
+    expect(routeIstGueltig([{ x: 0, y: 0 }, { x: Number.NaN, y: 1 }])).toBe(false);
+    expect(routeIstGueltig(null)).toBe(false);
   });
 });

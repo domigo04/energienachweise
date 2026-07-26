@@ -11,11 +11,15 @@ export const MODIFY = 'modify';        // neutraler Grundzustand
 export const DRAW_PIPE = 'draw-pipe';  // Leitung zeichnen
 export const PLACE = 'place';          // Bauteil aus der Bibliothek setzen
 export const MIRROR = 'mirror';        // Spiegelachse angeben
+// Ausrichten: erst das Referenzsegment wählen, dann das Segment, das parallel
+// bzw. auf dieselbe Flucht soll. Die Nutzlast trägt die Referenz zwischen den
+// beiden Klicks — der Befehl hat damit KEINEN eigenen Zustand ausserhalb.
+export const ALIGN = 'align';
 
 // Der Grundzustand. Nach dem Laden und nach jedem ESC gilt genau das.
 export const HOME = Object.freeze({ type: MODIFY, persistent: false, payload: null });
 
-const BEFEHLE = new Set([MODIFY, DRAW_PIPE, PLACE, MIRROR]);
+const BEFEHLE = new Set([MODIFY, DRAW_PIPE, PLACE, MIRROR, ALIGN]);
 
 /** Grundzustand. Absichtlich eine Funktion — nie eine gemeinsame Referenz teilen. */
 export function initialMode() {
@@ -74,6 +78,7 @@ export const MODE_LABEL = {
   [DRAW_PIPE]: 'Leitung',
   [PLACE]: 'Bauteil setzen',
   [MIRROR]: 'Spiegeln',
+  [ALIGN]: 'Ausrichten',
 };
 
 export function modeLabel(mode) {

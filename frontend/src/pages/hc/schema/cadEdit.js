@@ -79,6 +79,100 @@ export function segmentVerschieben(points, pointIndexes, orientation, delta, { g
 }
 
 /**
+ * Abzweig-Punkt für ein Branch-Bauteil (Sicherheitsventil, Expansionsgefäss):
+ * senkrecht zur getroffenen Leitung, auf der Seite, auf der der Cursor steht.
+ * Liegt der Cursor exakt auf der Leitung, wird nach oben abgezweigt — so wie ein
+ * Sicherheitsventil üblicherweise gezeichnet wird.
+ */
+export function abzweigPunkt(a, b, treffer, cursor, abstand = 70) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const laenge = Math.hypot(dx, dy) || 1;
+  let nx = -dy / laenge;
+  let ny = dx / laenge;
+  const seite = (cursor.x - treffer.x) * nx + (cursor.y - treffer.y) * ny;
+  if (seite < 0 || (seite === 0 && ny > 0)) {
+    nx = -nx;
+    ny = -ny;
+  }
+  return { x: treffer.x + nx * abstand, y: treffer.y + ny * abstand };
+}
+
+/**
+ * Ein Segment an einem Referenzsegment ausrichten (Punkt 35/36).
+ *
+ * Zwei Fälle, ein Befehl — wie im CAD:
+ *   nicht parallel → das Zielsegment bekommt die Richtung der Referenz
+ *                    (ein Endpunkt bleibt fix, die Länge bleibt möglichst gleich);
+ *   bereits parallel → das Zielsegment wandert auf dieselbe Flucht.
+ *
+ * `fest` markiert Enden, die an einem Bauteilanschluss hängen. Sie werden NIE
+ * bewegt: lieber verweigert der Befehl, als dass er die Hydraulik für die
+ * Geometrie opfert (Punkt 37).
+ *
+ * Rückgabe: { route } oder { fehler }.
+ */
+export function segmentAusrichten(route, segmentIndex, referenz, { fest = {}, klick = null, toleranz = 0.5 } = {}) {
+  if (!Array.isArray(route) || segmentIndex < 0 || segmentIndex >= route.length - 1) {
+    return { fehler: 'Kein gültiges Segment gewählt.' };
+  }
+  const a = route[segmentIndex];
+  const b = route[segmentIndex + 1];
+  const rdx = referenz.b.x - referenz.a.x;
+  const rdy = referenz.b.y - referenz.a.y;
+  const rlen = Math.hypot(rdx, rdy);
+  if (rlen < toleranz) return { fehler: 'Referenzsegment hat keine Richtung.' };
+  const ux = rdx / rlen;
+  const uy = rdy / rlen;
+  const nx = -uy;
+  const ny = ux;
+
+  const startFest = segmentIndex === 0 && Boolean(fest.start);
+  const endFest = segmentIndex === route.length - 2 && Boolean(fest.end);
+
+  const laenge = Math.hypot(b.x - a.x, b.y - a.y);
+  // Parallel heisst: das Segment hat keinen Anteil in Richtung der Normalen.
+  const parallel = laenge < toleranz
+    || Math.abs((b.x - a.x) * nx + (b.y - a.y) * ny) < toleranz;
+
+  const neueRoute = route.map(p => ({ x: p.x, y: p.y }));
+
+  if (parallel) {
+    // Auf dieselbe Flucht schieben — beide Punkte wandern senkrecht.
+    if (startFest || endFest) {
+      return { fehler: 'Segment ist an einen Bauteilanschluss gebunden.' };
+    }
+    const abstand = (referenz.a.x - a.x) * nx + (referenz.a.y - a.y) * ny;
+    if (Math.abs(abstand) < toleranz) return { fehler: 'Segment liegt bereits auf dieser Flucht.' };
+    neueRoute[segmentIndex] = { x: a.x + nx * abstand, y: a.y + ny * abstand };
+    neueRoute[segmentIndex + 1] = { x: b.x + nx * abstand, y: b.y + ny * abstand };
+    return { route: neueRoute };
+  }
+
+  // Parallel machen: ein Ende bleibt stehen, das andere wird auf die
+  // Referenzrichtung projiziert — der Winkel stimmt, die Länge bleibt möglichst.
+  if (startFest && endFest) {
+    return { fehler: 'Segment ist an beiden Enden an einen Bauteilanschluss gebunden.' };
+  }
+  let bewegeB = !endFest;
+  if (!startFest && !endFest && klick) {
+    // Der Endpunkt näher am Klick bleibt stehen — dort hat der Planer hingezeigt.
+    const dA = Math.hypot(klick.x - a.x, klick.y - a.y);
+    const dB = Math.hypot(klick.x - b.x, klick.y - b.y);
+    bewegeB = dB >= dA;
+  }
+  const fix = bewegeB ? a : b;
+  const beweglich = bewegeB ? b : a;
+  const proj = (beweglich.x - fix.x) * ux + (beweglich.y - fix.y) * uy;
+  const neu = { x: fix.x + ux * proj, y: fix.y + uy * proj };
+  if (Math.hypot(neu.x - fix.x, neu.y - fix.y) < toleranz) {
+    return { fehler: 'Ausrichten würde das Segment auf die Länge null bringen.' };
+  }
+  neueRoute[bewegeB ? segmentIndex + 1 : segmentIndex] = neu;
+  return { route: neueRoute };
+}
+
+/**
  * Einen einzelnen Eckpunkt setzen. Gibt eine neue Liste zurück (keine Mutation),
  * damit React die Änderung sieht.
  */

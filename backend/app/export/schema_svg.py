@@ -36,7 +36,7 @@ GROESSEN = {
     "valve3": (52, 40), "checkvalve": (48, 48), "shutoff": (19, 41),
     "erzeuger": (92, 72), "verbraucher": (68, 50), "speicher": (60, 104),
     "junction": (46, 46), "label": (120, 16),
-    "waermezaehler": (48, 48), "expansion": (76, 125), "bww": (60, 104),
+    "waermezaehler": (48, 48), "expansion": (76, 105), "bww": (60, 104),
     "anschluss": (60, 40), "stad": (18, 41), "temperatur": (52, 38),
     "sicherheitsventil": (80, 67), "pwt": (94, 68),
 }
@@ -154,10 +154,14 @@ def _handle_pos_base(node, handle: Optional[str]):
         return {"vl": (x, y + 28), "rl": (x + w, y + 28),
                 "top": (x + w / 2, y), "bottom": (x + w / 2, y + h)}.get(handle, (x + w / 2, y + h / 2))
     if t == "erzeuger":
-        # VL oben, RL unten (Dominic-Feedback Loop B)
+        # VL oben, RL unten (Dominic-Feedback Loop B); zusätzlich die semantischen
+        # Anschlüsse: Heizungsseite rechts, Quellenseite (Sole) links.
         return {"vl": (x + w / 2, y), "rl": (x + w / 2, y + h),
                 "top": (x + w / 2, y), "bottom": (x + w / 2, y + h),
-                "left": (x, y + h / 2), "right": (x + w, y + h / 2)}.get(handle, (x + w / 2, y + h / 2))
+                "left": (x, y + h / 2), "right": (x + w, y + h / 2),
+                "heating_flow": (x + w, y + h * 0.32), "heating_return": (x + w, y + h * 0.68),
+                "source_flow": (x, y + h * 0.32), "source_return": (x, y + h * 0.68),
+                }.get(handle, (x + w / 2, y + h / 2))
     if t == "junction":
         return {"left": (x, y + 30), "right": (x + w, y + 30), "top": (x + 23, y)}.get(handle, (x + 23, y + 30))
     if t in ("speicher", "bww"):
@@ -518,7 +522,9 @@ def zeichne_standard(parts, node, results):
         parts.append('<line x1="115" y1="158" x2="127" y2="158"/>')
         parts.append('<line x1="54" y1="300" x2="188" y2="300"/>')
         parts.append('</g>')
-        parts.append('<line x1="121" y1="329" x2="121" y2="400" stroke="#3b82f6" stroke-width="6" stroke-dasharray="10,8"/>')
+        # Kurzer runder Anschlussstutzen genau am Handle — keine dekorative
+        # blaue Leitung mehr, die wie eine gezeichnete Leitung aussah.
+        parts.append('<line x1="121" y1="329" x2="121" y2="341" stroke="#1e293b" stroke-width="7" stroke-linecap="round"/>')
         parts.append('</g>')
     elif t == "anschluss":
         # Anschluss-Marker (PHYSIK §9): roter Pfeil VL raus, blauer Pfeil RL rein,

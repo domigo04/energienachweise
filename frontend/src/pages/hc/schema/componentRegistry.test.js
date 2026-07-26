@@ -4,10 +4,14 @@ import {
   CATEGORIES,
   componentDef,
   isInlineInsertable,
+  isBranchInsertable,
   isOrientationAware,
   isAnnotation,
   componentsByCategory,
   inlineInsertableTypes,
+  placementBehavior,
+  branchAnschluss,
+  freierPort,
 } from "./componentRegistry";
 
 // §4/§8 — die Registry ist die eine Quelle für Bauteil-Eigenschaften.
@@ -19,13 +23,47 @@ describe("componentRegistry", () => {
   });
 
   it("MVP-Inline-Bauteile sind einsetzbar (§4)", () => {
-    for (const t of ["pump", "valve2", "stad", "shutoff", "checkvalve", "waermezaehler", "temperatur"]) {
+    for (const t of ["pump", "valve2", "stad", "shutoff", "checkvalve", "waermezaehler"]) {
       expect(isInlineInsertable(t)).toBe(true);
     }
   });
 
-  it("3-Weg-Ventil ist NICHT inline einsetzbar (Verzweigung ungelöst)", () => {
-    expect(isInlineInsertable("valve3")).toBe(false);
+  it("Temperaturfühler ist ein Abgriff und teilt keine Leitung", () => {
+    expect(placementBehavior("temperatur")).toBe("free");
+    expect(isInlineInsertable("temperatur")).toBe(false);
+    expect(isBranchInsertable("temperatur")).toBe(false);
+  });
+
+  it("3-Weg-Ventil ist inline mit freiem drittem Anschluss (§21)", () => {
+    expect(placementBehavior("valve3")).toBe("inline_threeway");
+    expect(isInlineInsertable("valve3")).toBe(true);
+    expect(freierPort("valve3")).toBe("right");
+  });
+
+  it("Sicherheitsventil und Expansionsgefäss sind Abzweige (§16/§18)", () => {
+    for (const t of ["sicherheitsventil", "expansion"]) {
+      expect(placementBehavior(t)).toBe("branch");
+      expect(isBranchInsertable(t)).toBe(true);
+      expect(isInlineInsertable(t)).toBe(false);
+      const b = branchAnschluss(t);
+      expect(typeof b.port).toBe("string");
+      expect(b.x).toBeGreaterThanOrEqual(0);
+      expect(b.y).toBeLessThanOrEqual(1);
+      expect(b.w).toBeGreaterThan(0);
+      expect(b.h).toBeGreaterThan(0);
+    }
+  });
+
+  it("Erzeuger, Speicher und Verteiler bleiben frei platzierbar (§16)", () => {
+    for (const t of ["erzeuger", "speicher", "verteiler"]) {
+      expect(placementBehavior(t)).toBe("free");
+      expect(isInlineInsertable(t)).toBe(false);
+      expect(isBranchInsertable(t)).toBe(false);
+    }
+  });
+
+  it("unbekannter Typ verhält sich wie free", () => {
+    expect(placementBehavior("gibtsnicht")).toBe("free");
   });
 
   it("inline-einsetzbare Bauteile übernehmen die Orientierung (§5)", () => {

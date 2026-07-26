@@ -7,9 +7,16 @@
 //   type              Node-Typ im Schema-Graphen (Bestand)
 //   label             Anzeigename in der Bauteilbox
 //   category          fachliche Gruppe (§8)
-//   inlineInsertable  darf per Drag auf eine bestehende Leitung gesetzt werden
-//                     und teilt diese dann (§3/§4)
+//   placement         Wie das Bauteil auf eine bestehende Leitung trifft:
+//                       free             frei platzieren, Leitung bleibt unberührt
+//                       inline           teilt die Leitung, zwei gegenüberliegende Ports
+//                       inline_threeway  wie inline, der dritte Port bleibt frei
+//                       branch           hängt mit EINEM Port als Abzweig an der Leitung
+//                     Verhalten hängt am Bauteil, nicht am deutschen Namen.
 //   orientationAware  übernimmt beim Inline-Einsetzen die Leitungsrichtung (§5)
+//   branch            Abzweig-Bauteile: { port, x, y, w, h } — Handle-ID und die
+//                     Lage dieses Anschlusses IM Symbol (0…1 der Symbolgrösse),
+//                     damit der Anschlusspunkt exakt am sichtbaren Anschluss sitzt
 //   annotation        reine Zeichnung ohne hydraulische Bedeutung (§9/§10)
 
 export const CATEGORIES = [
@@ -23,39 +30,46 @@ export const CATEGORIES = [
   { key: "annotation", label: "Annotation" },
 ];
 
+const INLINE = { placement: "inline", orientationAware: true };
+
 export const COMPONENTS = [
   // Erzeugung
-  { type: "erzeuger", label: "Wärmeerzeuger / WP", category: "erzeugung" },
-  { type: "erdsonden", label: "Erdsonden", category: "erzeugung" },
-  { type: "pwt", label: "Fernwärme / PWT", category: "erzeugung" },
+  { type: "erzeuger", label: "Wärmeerzeuger / WP", category: "erzeugung", placement: "free" },
+  { type: "erdsonden", label: "Erdsonden", category: "erzeugung", placement: "free" },
+  { type: "pwt", label: "Fernwärme / PWT", category: "erzeugung", placement: "free" },
   // Speicher
-  { type: "speicher", label: "Pufferspeicher", category: "speicher" },
-  { type: "bww", label: "BWW-Speicher", category: "speicher" },
+  { type: "speicher", label: "Pufferspeicher", category: "speicher", placement: "free" },
+  { type: "bww", label: "BWW-Speicher", category: "speicher", placement: "free" },
   // Verteilung
-  { type: "verteiler", label: "Verteiler", category: "verteilung" },
-  { type: "pump", label: "Pumpe", category: "verteilung", inlineInsertable: true, orientationAware: true },
-  { type: "gruppe", label: "Heizgruppe", category: "verteilung" },
+  { type: "verteiler", label: "Verteiler", category: "verteilung", placement: "free" },
+  { type: "pump", label: "Pumpe", category: "verteilung", ...INLINE },
+  { type: "gruppe", label: "Heizgruppe", category: "verteilung", placement: "free" },
   // Armaturen
-  { type: "valve2", label: "2-Weg-Ventil", category: "armaturen", inlineInsertable: true, orientationAware: true },
-  // 3-Weg bewusst NICHT inline: die Verzweigung ist noch nicht sauber gelöst (§4).
-  { type: "valve3", label: "3-Weg-Ventil", category: "armaturen" },
-  { type: "stad", label: "STAD", category: "armaturen", inlineInsertable: true, orientationAware: true },
-  { type: "shutoff", label: "Absperrung", category: "armaturen", inlineInsertable: true, orientationAware: true },
-  { type: "checkvalve", label: "Rückschlagventil", category: "armaturen", inlineInsertable: true, orientationAware: true },
+  { type: "valve2", label: "2-Weg-Ventil", category: "armaturen", ...INLINE },
+  // 3-Weg: die beiden gegenüberliegenden Hauptports (top/bottom) bilden den
+  // Inline-Weg, der dritte Port (right) bleibt für eine spätere Leitung frei.
+  { type: "valve3", label: "3-Weg-Ventil", category: "armaturen",
+    placement: "inline_threeway", orientationAware: true, freePort: "right" },
+  { type: "stad", label: "STAD", category: "armaturen", ...INLINE },
+  { type: "shutoff", label: "Absperrung", category: "armaturen", ...INLINE },
+  { type: "checkvalve", label: "Rückschlagventil", category: "armaturen", ...INLINE },
   // Messung
-  { type: "waermezaehler", label: "Wärmezähler", category: "messung", inlineInsertable: true, orientationAware: true },
+  { type: "waermezaehler", label: "Wärmezähler", category: "messung", ...INLINE },
   // Der Temperaturfühler ist ein ABGRIFF, kein Bauteil mit zwei Anschlüssen.
-  // Er kann eine Leitung darum nicht sinnvoll teilen und ist nicht inline.
-  { type: "temperatur", label: "Temperaturfühler", category: "messung" },
-  // Sicherheit
-  { type: "expansion", label: "Expansionsgefäss", category: "sicherheit" },
-  { type: "sicherheitsventil", label: "Sicherheitsventil", category: "sicherheit" },
+  // Er teilt keine Leitung und erzeugt auch keinen hydraulischen Abzweig
+  // (PHYSIK §7: nur Symbol) — deshalb frei platzierbar.
+  { type: "temperatur", label: "Temperaturfühler", category: "messung", placement: "free" },
+  // Sicherheit — beide hängen mit EINEM Anschluss an der Leitung (§15/§18).
+  { type: "expansion", label: "Expansionsgefäss", category: "sicherheit",
+    placement: "branch", branch: { port: "bottom", x: 0.488, y: 1, w: 76, h: 125 } },
+  { type: "sicherheitsventil", label: "Sicherheitsventil", category: "sicherheit",
+    placement: "branch", branch: { port: "an", x: 0.12, y: 0.61, w: 80, h: 67 } },
   // Verbraucher
-  { type: "verbraucher", label: "Verbraucher", category: "verbraucher" },
+  { type: "verbraucher", label: "Verbraucher", category: "verbraucher", placement: "free" },
   // Annotation — ohne hydraulische Bedeutung, nicht im ProjectContext (§9/§10)
-  { type: "label", label: "Textblock", category: "annotation", annotation: true },
-  { type: "concrete_area", label: "Betonfläche", category: "annotation", annotation: true },
-  { type: "interface_line", label: "Systemgrenze", category: "annotation", annotation: true },
+  { type: "label", label: "Textblock", category: "annotation", annotation: true, placement: "free" },
+  { type: "concrete_area", label: "Betonfläche", category: "annotation", annotation: true, placement: "free" },
+  { type: "interface_line", label: "Systemgrenze", category: "annotation", annotation: true, placement: "free" },
 ];
 
 const BY_TYPE = Object.fromEntries(COMPONENTS.map((c) => [c.type, c]));
@@ -64,8 +78,29 @@ export function componentDef(type) {
   return BY_TYPE[type] || null;
 }
 
+// Ein Bauteil ohne Eintrag verhält sich wie `free` — es fasst nie ungefragt
+// eine bestehende Leitung an.
+export function placementBehavior(type) {
+  return BY_TYPE[type]?.placement || "free";
+}
+
 export function isInlineInsertable(type) {
-  return Boolean(BY_TYPE[type]?.inlineInsertable);
+  return ["inline", "inline_threeway"].includes(placementBehavior(type));
+}
+
+// Abzweig-Bauteil: erzeugt an der Leitung eine echte Junction und hängt mit
+// seinem einzigen Anschluss daran (§18/§19).
+export function isBranchInsertable(type) {
+  return placementBehavior(type) === "branch" && Boolean(BY_TYPE[type]?.branch);
+}
+
+export function branchAnschluss(type) {
+  return BY_TYPE[type]?.branch || null;
+}
+
+// Der dritte, bewusst frei bleibende Anschluss eines Inline-3-Weg-Ventils.
+export function freierPort(type) {
+  return BY_TYPE[type]?.freePort || null;
 }
 
 export function isOrientationAware(type) {

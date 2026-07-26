@@ -189,6 +189,11 @@ export function PwtNode({ selected: sel }) {
 }
 
 // ── Wärmeerzeuger (WE): VL oben, RL unten ────────────────────
+// Vier fachlich unterscheidbare Anschlüsse: rechts die Heizungsseite, links die
+// Quellenseite (Sole). Die Bedeutung hängt am Anschluss, nicht an der Strichfarbe
+// — das Backend liest sie über die Handle-ID (hydraulik.py::WP_PORT_ROLLEN).
+// Die alten IDs vl/rl/left/right und die Anschlusszone bleiben unverändert
+// bestehen, damit kein gespeichertes Schema seine Leitungen verliert.
 export function ErzeugerNode({ data, selected: sel }) {
   return (
     <div style={wrap(sel)}>
@@ -197,6 +202,10 @@ export function ErzeugerNode({ data, selected: sel }) {
       {H(Position.Bottom, 'rl',    { bottom: -6, background: '#3b82f6' })}
       {H(Position.Left,   'left',  { left: -6 })}
       {H(Position.Right,  'right', { right: -6 })}
+      {H(Position.Right,  'heating_flow',   { right: -6, top: '32%', background: '#ef4444' })}
+      {H(Position.Right,  'heating_return', { right: -6, top: '68%', background: '#3b82f6' })}
+      {H(Position.Left,   'source_flow',    { left: -6,  top: '32%', background: '#8b5cf6' })}
+      {H(Position.Left,   'source_return',  { left: -6,  top: '68%', background: '#6d28d9' })}
       <SymWE />
       <Label text={data.label} />
     </div>
@@ -630,7 +639,12 @@ export function ExpansionNode({ data, selected: sel }) {
   return (
     <div style={wrap(sel)}>
       {H(Position.Bottom, 'bottom', { bottom: -6, left: '48.8%' })}
-      <svg viewBox="0 0 248 408" width="76" height="125">
+      {/* Die frühere blaue gestrichelte Leitung unter dem Behälter war reine
+          Dekoration und lag ausserdem unter dem echten Anschluss — das sah aus
+          wie eine Leitung, war aber keine. Stattdessen endet das Symbol jetzt
+          mit einem kurzen, runden Anschlussstutzen genau dort, wo der Handle
+          sitzt: Marker == Handle == Snapkoordinate (§14/§15). */}
+      <svg viewBox="0 0 248 344" width="76" height="105">
         <g fill="none" stroke="#1e293b" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
           <path fill="#d9d9d9" d="M54 33 C54 15 84 1 121 1 C158 1 188 15 188 33 L188 297 C188 315 158 329 121 329 C84 329 54 315 54 297 Z" />
           <line x1="54" y1="33" x2="188" y2="33" />
@@ -638,7 +652,7 @@ export function ExpansionNode({ data, selected: sel }) {
           <line x1="115" y1="158" x2="127" y2="158" />
           <line x1="54" y1="300" x2="188" y2="300" />
         </g>
-        <line x1="121" y1="329" x2="121" y2="400" stroke="#3b82f6" strokeWidth="6" strokeDasharray="10,8" />
+        <line x1="121" y1="329" x2="121" y2="341" stroke="#1e293b" strokeWidth="7" strokeLinecap="round" />
       </svg>
       <Label text={c.vorschlag_l ? `EGF ${c.vorschlag_l} l` : (data.label || 'EGF')} />
     </div>

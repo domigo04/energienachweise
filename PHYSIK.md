@@ -193,3 +193,58 @@ Dimensionierung), ohne dass eine lange Leitung quer durchs Schema gezeichnet wer
   Diese Nodes sind reine Topologie-Anker und weder im Editor noch im Export als Bauteile sichtbar.
   Bearbeitet werden sie ausschliesslich über die Endgriffe der Leitung. Nur eine echte
   T-Verbindung erhält einen kleinen Verbindungspunkt.
+
+## 14. Wärmepumpe — Erzeugerkreis und Quellenkreis (2026-07-26)
+Eine Wärmepumpe hat **zwei getrennte hydraulische Seiten**. Beide werden im Backend
+gerechnet (`calculations/waermepumpe.py`, Topologie in `hydraulik.py`).
+
+**Anschlusssemantik (nicht die Strichfarbe!)** — vier fachliche Anschlüsse:
+`heating_flow`, `heating_return`, `source_flow`, `source_return`. Die alten Handle-IDs
+bleiben gültig und werden abgebildet (`vl`→heating_flow, `rl`→heating_return,
+`sole-vl`→source_flow, `sole-rl`→source_return). Nur wenn ein Bestandsschema an einem
+generischen Anschluss (Anschlusszone, `left`/`right`) hängt, entscheidet ersatzweise der
+Medien-Layer; das Resultat weist das als `*_port_quelle: "layer"` aus — es ist eine
+Notzuordnung, keine gesicherte.
+
+**Heizseite:** `ΔT = VL − RL`, `V' = Q_heat / (1.163 · ΔT)` (§1).
+
+**Quellenseite:** `Q_source = Q_heat − P_el`. `P_el` kommt aus der expliziten Eingabe
+(hat Vorrang) oder aus `P_el = Q_heat / COP`. Fehlen COP **und** P_el, ist die
+Quellenleistung **nicht berechenbar** — sie wird nie der Heizleistung gleichgesetzt,
+sondern bleibt leer, mit Hinweis. Beispiel: 50 kW, COP 4 → P_el 12.5 kW,
+**Q_source 37.5 kW** (nicht 50).
+
+**Sole-Temperaturkonvention:** wie bei Wasser `ΔT = VL − RL` (§13). Sole-VL ist die
+wärmere Sole **zur** Wärmepumpe, Sole-RL die kältere **zurück zur Quelle**. Ein
+negatives ΔT ist ein Eingabefehler und wird gemeldet, nicht umgedreht.
+
+**Stoffwert Sole:** es gibt bewusst **keine erfundene Glykol-Stoffwerttabelle**. Ohne
+Eingabe wird mit der Wasserkonstante 1.163 kWh/(m³·K) gerechnet und das im Resultat
+ausgewiesen (`source_ce_quelle: "wasser"`) **plus Warnung**. Der Planer kann `c·ρ`
+seines Gemisches bei der Wärmepumpe eintragen (`source_ce_quelle: "eingabe"`).
+Keine versteckte Wasserannahme.
+
+**Kreisgrenzen:** Ein **Speicher trennt** Erzeuger- und Verbraucherkreis — beide Seiten
+dürfen unterschiedliche Volumenströme führen. Die WP-Traversierung endet an Speicher,
+Verteiler, Erdsondenfeld, Verbrauchern und weiteren Erzeugern; die Grenzleitung selbst
+gehört noch zum Kreis. Auch die Hauptstrang-Propagierung des Verteilers stoppt am
+Speicher. Reihenfolge: Verbraucher-/Verteilerkreise → WP-Erzeugerkreis →
+WP-Quellenkreis → freie Topologie. Keine Leitung wird von zwei Kreisen beschrieben.
+
+## 15. Anschlussverhalten der Bauteile (2026-07-26)
+`frontend/src/pages/hc/schema/componentRegistry.js` ist die einzige Quelle:
+- `free` — frei platzieren, bestehende Leitungen bleiben unberührt.
+- `inline` — teilt die Leitung, zwei gegenüberliegende Anschlüsse (Pumpe, Ventile,
+  STAD, Absperrung, Rückschlagventil, Wärmezähler).
+- `inline_threeway` — 3-Weg-Ventil: die Hauptachse liegt inline, der dritte Anschluss
+  bleibt bewusst frei.
+- `branch` — Sicherheitsventil und Expansionsgefäss hängen mit **einem** Anschluss an
+  der Leitung. Beim Setzen entsteht dort eine **echte Junction**
+  (`A → J`, `J → B`, `J → Bauteil`), nicht nur ein optischer Punkt.
+
+Ein Leitungsende, das bewusst auf einer Leitung, auf deren Mitte **oder auf einem
+bestehenden Polylinien-Eckpunkt** abgelegt wird, teilt die getroffene Leitung und
+erzeugt eine echte Junction. Beide Teilstücke behalten Layer, Medium, DN, Länge
+(anteilig) und übrige Metadaten. Existiert an der Zielposition bereits eine Junction,
+wird sie wiederverwendet. Eine reine **optische Kreuzung erzeugt weiterhin keine**
+Verbindung.

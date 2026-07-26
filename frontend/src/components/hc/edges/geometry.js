@@ -174,6 +174,22 @@ export function splitRouteAtPoint(route, segmentIndex, point) {
   return { before, after, firstShare };
 }
 
+// Eine Route an einem BESTEHENDEN Eckpunkt teilen (§24/§25). Ein Polylinien-
+// Eckpunkt liegt nur in `data.points` und ist damit kein Graph-Knoten — legt
+// jemand ein Leitungsende bewusst darauf, muss genau dort eine echte Junction
+// entstehen. Anders als `splitRouteAtPoint` ist der Teilungspunkt hier bereits
+// Teil der Route und darf danach in keinem der beiden Stücke doppelt vorkommen.
+export function splitRouteAtCorner(route, cornerIndex) {
+  const before = route.slice(1, cornerIndex);
+  const after = route.slice(cornerIndex + 1, -1);
+  const point = route[cornerIndex];
+  const firstRoute = [route[0], ...before, point];
+  const secondRoute = [point, ...after, route.at(-1)];
+  const total = streckenLaenge(firstRoute) + streckenLaenge(secondRoute);
+  const firstShare = total ? streckenLaenge(firstRoute) / total : 0.5;
+  return { before, after, firstShare };
+}
+
 // Zwei Routen, die sich einen Knoten teilen (A endet im Knoten, B beginnt dort),
 // beim Löschen eines Inline-Bauteils wieder zu EINER Route verbinden (§6). Der
 // Knotenpunkt wird zu einem gewöhnlichen Stützpunkt. Nur bei eindeutiger

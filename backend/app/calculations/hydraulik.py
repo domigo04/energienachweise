@@ -16,11 +16,20 @@ from typing import List, Optional
 from app.calculations.expansion import berechne_expansion
 from app.calculations.leitungsdimension import automatische_dimension
 from app.calculations.ventil import berechne_kvs
+from app.calculations.waermepumpe import berechne_waermepumpe, ist_waermepumpe
 
 VL_FARBE = "#ef4444"
 RL_FARBE = "#3b82f6"
 VERBRAUCHER_TYPEN = ("gruppe", "heizkreis")
 BLOCK_TYPEN = ("verteiler", "erzeuger")  # Ast-Suche stoppt hier (PHYSIK §2)
+# Hydraulische Trennstellen: ein Speicher entkoppelt Erzeuger- und
+# Verbraucherkreis (PHYSIK §4/§6 — beide Seiten dürfen unterschiedliche
+# Volumenströme führen). Deshalb endet jede Kreis-Traversierung hier.
+SPEICHER_TYPEN = ("speicher", "bww")
+# Kreisgrenzen der Wärmepumpen-Traversierung: die Leitung BIS zur Grenze gehört
+# noch zum Kreis, alles dahinter ist ein anderer Kreis.
+WP_KREIS_GRENZEN = (BLOCK_TYPEN + SPEICHER_TYPEN + VERBRAUCHER_TYPEN
+                    + ("erdsonden", "pwt", "verbraucher"))
 
 
 def _zahl(x) -> Optional[float]:
@@ -164,6 +173,163 @@ def _stroke(e: dict) -> Optional[str]:
     return e.get("stroke") or (e.get("style") or {}).get("stroke")
 
 
+# ── Semantische Anschlüsse der Wärmepumpe ───────────────────────────────────
+# Eine Wärmepumpe hat vier fachlich unterscheidbare Anschlüsse. Die Bedeutung
+# hängt am ANSCHLUSS, nicht an der Strichfarbe. Die alten, generischen Handle-IDs
+# bleiben gültig (kein Bestandsschema verliert seine Anschlüsse); sie werden auf
+# dieselbe Semantik abgebildet.
+WP_PORT_ROLLEN = {
+    # neu, ausdrücklich semantisch
+    "heating_flow": "heating_flow",
+    "heating_return": "heating_return",
+    "source_flow": "source_flow",
+    "source_return": "source_return",
+    # Bestand: 'vl' oben / 'rl' unten waren immer die Heizungsseite
+    "vl": "heating_flow",
+    "rl": "heating_return",
+    # Bestand am Erdsondenfeld — dieselben IDs gelten auch an der WP
+    "sole-vl": "source_flow",
+    "sole-rl": "source_return",
+}
+
+
+def _system_von_edge(e) -> Optional[str]:
+    """'source' (Sole) | 'heating' | None (neutral, gehört zu keinem System).
+
+    Nur der Medien-Layer der Leitung (PHYSIK §13), NICHT die Strichfarbe: die
+    Farbe unterscheidet VL/RL innerhalb eines Systems, nicht das System selbst.
+    """
+    layer_id = str((e.get("data") or {}).get("layer_id") or "")
+    if layer_id.startswith("sole"):
+        return "source"
+    if layer_id:
+        return "heating"
+    return None
+
+
+def _wp_port_system(e, wp_id) -> tuple:
+    """('heating'|'source'|None, 'port'|'layer'|None) für eine Leitung an der WP.
+
+    Zuerst der semantische Anschluss — er ist die Wahrheit. Nur wenn ein
+    Bestandsschema an einem generischen Anschluss (Anschlusszone, left/right)
+    hängt, entscheidet ersatzweise der Medien-Layer; das wird im Resultat als
+    `*_port_quelle: 'layer'` sichtbar gemacht, damit es nicht wie eine gesicherte
+    Zuordnung aussieht.
+    """
+    handle = e.get("sourceHandle") if e["source"] == wp_id else e.get("targetHandle")
+    rolle = WP_PORT_ROLLEN.get(str(handle or ""))
+    if rolle:
+        return ("source" if rolle.startswith("source") else "heating"), "port"
+    system = _system_von_edge(e)
+    if system:
+        return system, "layer"
+    return None, None
+
+
+def _wp_kreis(wp_id: str, system: str, edges: List[dict], node_by_id: dict) -> tuple:
+    """Leitungen EINES Kreises ab der Wärmepumpe bis zur Kreisgrenze.
+
+    Rückgabe: (edge_ids, quellen der Portzuordnung, erreichte Grenz-Typen).
+    Die Grenzleitung selbst gehört noch zum Kreis — was hinter Speicher,
+    Verteiler oder Erdsondenfeld liegt, gehört zu einem anderen Kreis (§6).
+    """
+    treffer, quellen, grenzen = set(), set(), set()
+    besucht = {wp_id}
+    queue = []
+    for e in edges:
+        if str(e.get("id", "")).startswith("virt_"):
+            continue
+        if e["source"] != wp_id and e["target"] != wp_id:
+            continue
+        sys_e, quelle = _wp_port_system(e, wp_id)
+        if sys_e != system:
+            continue
+        treffer.add(e["id"])
+        quellen.add(quelle)
+        other = e["target"] if e["source"] == wp_id else e["source"]
+        if other not in besucht:
+            besucht.add(other)
+            queue.append(other)
+
+    while queue:
+        cur = queue.pop(0)
+        typ = node_by_id.get(cur, {}).get("type")
+        if typ in WP_KREIS_GRENZEN:
+            grenzen.add(typ)
+            continue
+        for e in edges:
+            if str(e.get("id", "")).startswith("virt_"):
+                continue
+            if e["source"] != cur and e["target"] != cur:
+                continue
+            sys_e = _system_von_edge(e)
+            if sys_e is not None and sys_e != system:
+                continue
+            treffer.add(e["id"])
+            other = e["target"] if e["source"] == cur else e["source"]
+            if other not in besucht:
+                besucht.add(other)
+                queue.append(other)
+    return treffer, quellen, grenzen
+
+
+def _waermepumpen_kreise(nodes, edges, edge_flows, node_flows, calc_edges) -> dict:
+    """Erzeuger- und Quellenkreis jeder Wärmepumpe rechnen und propagieren.
+
+    Läuft NACH den Verteiler-/Verbraucherkreisen und VOR der freien Topologie:
+    so überschreibt kein Kreis die Leitungen eines anderen (§2 — jede Leitung
+    genau einmal). Bereits belegte Leitungen bleiben unangetastet.
+    """
+    node_by_id = {n["id"]: n for n in nodes}
+    results = {}
+    for wp in [n for n in nodes if n.get("type") == "erzeuger"]:
+        wid = wp["id"]
+        d = wp.get("data") or {}
+        heiz_edges, heiz_quellen, heiz_grenzen = _wp_kreis(wid, "heating", edges, node_by_id)
+        sole_edges, sole_quellen, _ = _wp_kreis(wid, "source", edges, node_by_id)
+        res = berechne_waermepumpe(d, hat_quellenseite=bool(sole_edges) or ist_waermepumpe(d))
+        res["heating_port_quelle"] = "port" if "port" in heiz_quellen else ("layer" if heiz_quellen else None)
+        res["source_port_quelle"] = "port" if "port" in sole_quellen else ("layer" if sole_quellen else None)
+
+        def belegen(edge_ids, fluss):
+            for eid in edge_ids:
+                if eid in calc_edges:
+                    continue  # gehört bereits einem anderen Kreis
+                edge_flows[eid] = fluss
+                calc_edges.add(eid)
+
+        v_heiz = res.get("heating_flow_m3h")
+        if v_heiz:
+            if heiz_edges:
+                belegen(heiz_edges, v_heiz)
+                node_flows[wid] = v_heiz
+                if not (set(heiz_grenzen) & set(SPEICHER_TYPEN + ("verteiler",))):
+                    res["warnings"].append(
+                        "Heizkreis der Wärmepumpe endet an keinem Speicher und keinem Verteiler — "
+                        "die Zuordnung des Erzeugerkreises ist nicht eindeutig"
+                    )
+            else:
+                res["warnings"].append(
+                    "Heizkreis nicht zuordenbar: an der Wärmepumpe ist keine Heizleitung angeschlossen"
+                )
+
+        v_sole = res.get("source_flow_m3h")
+        if v_sole:
+            if sole_edges:
+                belegen(sole_edges, v_sole)
+            else:
+                res["warnings"].append(
+                    "Quellenkreis nicht zuordenbar: an der Wärmepumpe ist keine Soleleitung angeschlossen"
+                )
+        elif sole_edges and res.get("q_source_kw") is None and res.get("ist_waermepumpe"):
+            res["warnings"].append(
+                "Quellenkreis gezeichnet, aber ohne Volumenstrom — die Soleleitungen bleiben undimensioniert"
+            )
+
+        results[wid] = res
+    return results
+
+
 def _parse_handle(h):
     """'vl-1' → ('vl', '1'), 'rl-main' → ('rl', 'main')."""
     if not h:
@@ -287,6 +453,31 @@ def _sammle_warnungen(nodes, verteiler_results, anschluss_warnungen, ventil_resu
     return alle
 
 
+def _wp_warnungen(nodes, heatpump_results) -> List[str]:
+    """WP-Warnungen mit dem Bauteilnamen davor — wie die übrigen Warnungen."""
+    node_by_id = {n["id"]: n for n in nodes}
+    alle = []
+    for nid, res in heatpump_results.items():
+        label = (node_by_id.get(nid, {}).get("data") or {}).get("label") or "Wärmepumpe"
+        alle += [f"{label}: {w}" for w in res.get("warnings", [])]
+    return alle
+
+
+def _leitungsdimensionen(edges, edge_flows) -> dict:
+    """Automatische Leitungsdimensionierung je Leitung (PHYSIK §10)."""
+    leitung_results = {}
+    for e in edges:
+        if str(e.get("id", "")).startswith("virt_"):
+            continue  # virtuelle Anschluss-Kanten sind keine echten Leitungen
+        fluss = edge_flows.get(e["id"])
+        dims = automatische_dimension(fluss) if fluss else None
+        if dims:
+            laenge = _zahl((e.get("data") or {}).get("laenge_m"))
+            dp_kpa = round(dims["pam"] * laenge / 1000, 2) if laenge else None
+            leitung_results[e["id"]] = {**dims, "v": fluss, "laenge_m": laenge, "dp_kpa": dp_kpa}
+    return leitung_results
+
+
 def _expansion_auto(nodes):
     """Automatik fürs Expansionsgefäss: höchste Verbraucher-VL (→ t_mittel) und
     die Leistung aus dem Schema (Erzeuger-Nennleistung, sonst Summe Verbraucher-Q)."""
@@ -399,15 +590,29 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
 
     leer = {"edge_flows": {}, "node_flows": {}, "verteiler_results": {}, "gruppe_results": {},
             "ventil_results": {}, "pumpen_results": {}, "expansion_results": {},
-            "leitung_results": {}, "anschluss_results": {}, "pwt_results": {}, "anschluss_warnings": anschluss_warnungen, "warnungen": []}
+            "leitung_results": {}, "anschluss_results": {}, "pwt_results": {}, "heatpump_results": {},
+            "anschluss_warnings": anschluss_warnungen, "warnungen": []}
     if not sek:
-        # Expansionsgefässe rechnen auch ohne Verbraucher (brauchen keine Flüsse)
+        # Ohne Verbraucher gibt es keine Verbraucherkreise — Wärmepumpenkreise
+        # und Expansionsgefässe rechnen trotzdem: ein Schema aus WP, Puffer und
+        # Erdsonden ist hydraulisch vollständig bestimmt.
+        leer["heatpump_results"] = _waermepumpen_kreise(
+            nodes, edges, leer["edge_flows"], leer["node_flows"], set())
         for n in nodes:
             if n.get("type") == "expansion":
                 r = berechne_expansion(n.get("data") or {}, *_expansion_auto(nodes))
                 if r is not None:
                     leer["expansion_results"][n["id"]] = r
-        leer["warnungen"] = _sammle_warnungen(nodes, {}, anschluss_warnungen, {}, leer["expansion_results"])
+        for n in nodes:  # Knoten ohne eigenen Wert: grösster Fluss ihrer Leitungen
+            nid = n["id"]
+            if nid in leer["node_flows"]:
+                continue
+            werte = [leer["edge_flows"].get(e["id"], 0.0) for e in edges
+                     if e["source"] == nid or e["target"] == nid]
+            leer["node_flows"][nid] = round(max(werte), 4) if werte else 0.0
+        leer["leitung_results"] = _leitungsdimensionen(edges, leer["edge_flows"])
+        leer["warnungen"] = (_sammle_warnungen(nodes, {}, anschluss_warnungen, {}, leer["expansion_results"])
+                             + _wp_warnungen(nodes, leer["heatpump_results"]))
         return leer
 
     edge_flows, node_flows = {}, {}
@@ -565,7 +770,10 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
             queue = [start_id]
             while queue:
                 cur = queue.pop(0)
-                if node_by_id.get(cur, {}).get("type") in BLOCK_TYPEN or cur in sek:
+                # Stopp an Erzeuger/Verteiler, Verbrauchern UND am Speicher: hinter
+                # dem Speicher liegt der Erzeugerkreis mit eigenem Volumenstrom (§6).
+                if (node_by_id.get(cur, {}).get("type") in BLOCK_TYPEN + SPEICHER_TYPEN
+                        or cur in sek):
                     continue
                 for e in edges:
                     if (_stroke(e) == RL_FARBE) != rl_seite:
@@ -595,6 +803,12 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
             "dp_max_ast_nr": dp_max["num"] if dp_max else None,
             "warnings": warnungen,
         }
+
+    # ── 2b. Wärmepumpen-Kreise (Erzeuger- und Quellenkreis) ──
+    # Reihenfolge bewusst zwischen Verteiler und freier Topologie: die
+    # Verbraucherkreise stehen bereits fest, die freie Rückwärts-Propagierung
+    # darf die WP-Leitungen danach nicht mehr überschreiben (§2/§6).
+    heatpump_results = _waermepumpen_kreise(nodes, edges, edge_flows, node_flows, calc_edges)
 
     # ── 3. Freie Topologie: Rückwärts-Propagierung VL/neutral ──
     rev_adj = {n["id"]: [] for n in nodes}
@@ -729,16 +943,9 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
         # Durchfluss seiner Leitung (node_flows) — PHYSIK §7 Bauteil-Klassen.
 
     # ── 7. Automatische Leitungsdimensionierung (PHYSIK §10, Dominics Tabelle) ──
-    leitung_results = {}
-    for e in edges:
-        if e["id"].startswith("virt_"):
-            continue  # virtuelle Anschluss-Kanten sind keine echten Leitungen
-        fluss = edge_flows.get(e["id"])
-        dims = automatische_dimension(fluss) if fluss else None
-        if dims:
-            laenge = _zahl((e.get("data") or {}).get("laenge_m"))
-            dp_kpa = round(dims["pam"] * laenge / 1000, 2) if laenge else None
-            leitung_results[e["id"]] = {**dims, "v": fluss, "laenge_m": laenge, "dp_kpa": dp_kpa}
+    # Sie liest ausschliesslich edge_flows — die WP-Kreise sind dort bereits
+    # eingetragen und werden damit automatisch mitdimensioniert.
+    leitung_results = _leitungsdimensionen(edges, edge_flows)
 
     return {
         "edge_flows": edge_flows,
@@ -751,7 +958,9 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
         "leitung_results": leitung_results,
         "anschluss_results": anschluss_results,
         "pwt_results": pwt_results,
+        "heatpump_results": heatpump_results,
         "anschluss_warnings": anschluss_warnungen,
         "warnungen": _sammle_warnungen(nodes, verteiler_results, anschluss_warnungen, ventil_results, expansion_results)
+                     + _wp_warnungen(nodes, heatpump_results)
                      + [f"Plattentauscher: {p['warnung']}" for p in pwt_results.values() if p.get("warnung")],
     }

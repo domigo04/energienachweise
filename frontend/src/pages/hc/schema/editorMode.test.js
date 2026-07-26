@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  DRAW_PIPE, MIRROR, MODIFY, PLACE,
+  ALIGN, DRAW_PIPE, MIRROR, MODIFY, PLACE,
   cursorFor, escape, finishCommand, initialMode, istModify,
   modeLabel, startCommand, toggleCommand, zeichnetLeitung,
 } from './editorMode';
@@ -71,5 +71,13 @@ describe('editorMode', () => {
     expect(modeLabel(undefined)).toBe('Modify');
     expect(cursorFor(initialMode())).toBe('default');
     expect(cursorFor(startCommand(DRAW_PIPE))).toBe('crosshair');
+  });
+
+  it('Ausrichten ist ein Befehl mit Referenz-Nutzlast', () => {
+    const mode = startCommand(ALIGN, { payload: { edgeId: 'e1', segmentIndex: 0 } });
+    expect(mode.type).toBe(ALIGN);
+    expect(mode.payload.edgeId).toBe('e1');
+    expect(modeLabel(mode)).toBe('Ausrichten');
+    expect(istModify(escape(mode))).toBe(true);
   });
 });

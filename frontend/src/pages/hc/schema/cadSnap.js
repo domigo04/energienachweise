@@ -12,6 +12,9 @@ export const INTERSECTION = 'intersection';
 export const NEAREST = 'nearest';
 // Vorbereitet, noch nicht gesucht — die Darstellung steht schon bereit.
 export const MIDPOINT = 'midpoint';
+// Bestehender Polylinien-Eckpunkt (§24) — der genaueste Punkt einer Leitung,
+// weil ihn jemand bewusst gesetzt hat.
+export const CORNER = 'corner';
 export const PERPENDICULAR = 'perpendicular';
 
 /**
@@ -23,6 +26,7 @@ export const FANG_STIL = {
   [PORT]:          { form: 'circle', label: 'Anschluss',    farbe: '#16a34a', prio: 100 },
   [ENDPOINT]:      { form: 'square', label: 'Endpunkt',     farbe: '#16a34a', prio: 90 },
   [INTERSECTION]:  { form: 'cross',  label: 'Schnittpunkt', farbe: '#7c3aed', prio: 80 },
+  [CORNER]:        { form: 'square', label: 'Eckpunkt',     farbe: '#16a34a', prio: 85 },
   [MIDPOINT]:      { form: 'triangle', label: 'Mittelpunkt', farbe: '#0ea5e9', prio: 70 },
   [PERPENDICULAR]: { form: 'angle',  label: 'Senkrecht',    farbe: '#0ea5e9', prio: 60 },
   [NEAREST]:       { form: 'hourglass', label: 'auf Leitung', farbe: '#7c3aed', prio: 50 },

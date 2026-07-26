@@ -15,10 +15,10 @@ import '@xyflow/react/dist/style.css';
 import './HydraulikEditor.css';
 import { NODE_TYPES, NUMMERIERT, ROTATABLE } from '../../components/hc/nodes/HydraulikNodes';
 import { EDGE_TYPES } from '../../components/hc/edges/FlowEdge';
-import { pairedHandleId, parallelWaypoints, roundedPolylinePath, splitRouteAtPoint, reconnectThroughNode, adaptivePolyline, segmentAchse, mitgezogeneWaypoints } from '../../components/hc/edges/geometry';
+import { pairedHandleId, parallelWaypoints, roundedPolylinePath, splitRouteAtCorner, splitRouteAtPoint, reconnectThroughNode, adaptivePolyline, segmentAchse, mitgezogeneWaypoints } from '../../components/hc/edges/geometry';
 import { createHydraulicEdge, canStartHydraulicLine } from './schema/edgeFactory';
 import {
-  DRAW_PIPE, HOME, PLACE, escape as escapeMode, finishCommand, initialMode,
+  ALIGN, DRAW_PIPE, HOME, PLACE, escape as escapeMode, finishCommand, initialMode,
   istBefehl, istModify, modeLabel, startCommand, toggleCommand, zeichnetLeitung,
 } from './schema/editorMode';
 import {
@@ -26,8 +26,8 @@ import {
   rasterPunkt as rasterAufGitter,
   punktAusLaenge,
 } from './schema/cadConstraints';
-import { ENDPOINT, GRID, MIDPOINT, NEAREST, PORT, fangStil } from './schema/cadSnap';
-import { routeBereinigen, segmentVerschieben } from './schema/cadEdit';
+import { CORNER, ENDPOINT, GRID, MIDPOINT, NEAREST, PORT, fangStil } from './schema/cadSnap';
+import { abzweigPunkt, routeBereinigen, segmentAusrichten, segmentVerschieben } from './schema/cadEdit';
 import {
   CAD_GRID, DEFAULT_DRAWING_CONFIG, GRID_OPTIONEN,
   graphFuerEditor, normalisiereDrawingConfig,
@@ -48,7 +48,7 @@ import {
 } from '../../api/hcApi';
 import { api } from '../../api';
 import { dateiZuUnderlay } from './schema/underlay';
-import { isInlineInsertable } from './schema/componentRegistry';
+import { branchAnschluss, isBranchInsertable, isInlineInsertable } from './schema/componentRegistry';
 
 // ── Konstanten ────────────────────────────────────────────────
 const KVS_REIHE = [0.1, 0.16, 0.25, 0.4, 0.63, 1.0, 1.6, 2.5, 4.0, 6.3, 10, 16, 25, 40, 63];
@@ -68,11 +68,21 @@ const GENERATOR_TYPES = [
   { value:'hybrid',     label:'Hybrid' },
   { value:'sonstige',   label:'Sonstige' },
 ];
+// Erzeuger mit Quellenseite. Muss zu backend/app/calculations/waermepumpe.py
+// (WP_TYPEN) passen — dort entscheidet dieselbe Liste über die Rechnung.
+const WP_GENERATOR_TYPES = ['ews_wp', 'lwwp', 'wasser_wp', 'co2_wp', 'hybrid'];
 
-// Welche Bauteile eine Leitung beim Einsetzen teilen dürfen, steht AUSSCHLIESSLICH
-// in `schema/componentRegistry.js` (`inlineInsertable`). Vorher stand hier ein
-// zweites, handgepflegtes Set — und die beiden Quellen wichen schon voneinander
-// ab. Die Eigenschaft gehört zum Bauteil, nicht zum Editor.
+// Wie ein Bauteil auf eine bestehende Leitung trifft (frei / inline / Abzweig),
+// steht AUSSCHLIESSLICH in `schema/componentRegistry.js` (`placement`). Vorher
+// stand hier ein zweites, handgepflegtes Set — und die beiden Quellen wichen
+// schon voneinander ab. Die Eigenschaft gehört zum Bauteil, nicht zum Editor.
+
+// Abstand des Abzweig-Bauteils von der Leitung (§18): weit genug, dass Symbol
+// und Leitung sich nicht überlagern, nah genug für einen kurzen Stich.
+const BRANCH_ABSTAND = 70;
+const branchAnschlussPunkt = (hit, cursor) => abzweigPunkt(
+  hit.route[hit.segmentIndex], hit.route[hit.segmentIndex + 1],
+  { x:hit.x, y:hit.y }, cursor, BRANCH_ABSTAND);
 
 const LEITUNGS_LAYER = [
   { id:'heizung_vl', label:'Heizung VL', kurz:'H VL', color:'#ef4444', role:'vl', dashed:false },
@@ -519,7 +529,7 @@ const ROHR_DIMS = [
 ];
 const ZUSATZ_NAMEN = ['Heizkessel', 'Vorschaltgefäss', 'WW-Erwärmer', 'Heizkörper', 'Plattentauscher', 'Lufterhitzer', 'Sonden', 'Verteiler EWS'];
 
-function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ventilResults, pumpenResults, expansionResults, anschlussWarnungen, anschlussResults, pwtResults, onUpdate, onDelete, onSetAbgaenge, navigate, drawingConfig, onDrawingConfig }) {
+function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ventilResults, pumpenResults, expansionResults, anschlussWarnungen, anschlussResults, pwtResults, heatpumpResults, onUpdate, onDelete, onSetAbgaenge, navigate, drawingConfig, onDrawingConfig }) {
   // Punkt 13 — nichts ausgewählt heisst nicht „nichts zu zeigen": dann gehören
   // hierher die Eigenschaften der ANSICHT, wie in Revit.
   if (!node) return (
@@ -786,8 +796,12 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
     );
   }
 
-  // ── ERZEUGER ──
+  // ── ERZEUGER / WÄRMEPUMPE ──
+  // Die Kennwerte beider Kreise rechnet das Backend (heatpump_results). Hier
+  // stehen nur Eingaben und Anzeige — nichts wird im Frontend gerechnet.
   if (node.type === 'erzeuger') {
+    const hp = heatpumpResults?.[node.id];
+    const wp = hp?.ist_waermepumpe;
     return (
       <div style={panelSt}>
         <PT>Wärmeerzeuger</PT>
@@ -796,6 +810,31 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         {fld('Nennleistung','leistung_kw','','kW')}
         {fld('VL Temperatur','vl_temp','','°C')}
         {fld('RL Temperatur','rl_temp','','°C')}
+        {wp && <>
+          <Div/>
+          <div style={{ fontSize:9, color:'#94a3b8', marginBottom:6 }}>
+            QUELLENSEITE — ohne COP oder elektrische Leistung bleibt die
+            Quellenleistung bewusst leer (sie ist nicht die Heizleistung).
+          </div>
+          {fld('COP','cop','z.B. 4.0','')}
+          {fld('Elektrische Leistung','p_el_kw','hat Vorrang vor COP','kW')}
+          {fld('Sole-VL (zur WP)','sole_vl','','°C')}
+          {fld('Sole-RL (zur Quelle)','sole_rl','','°C')}
+          {fld('c·ρ Sole','sole_ce','leer = Wasser 1.163','kWh/m³K')}
+        </>}
+        {hp && <>
+          <Div/>
+          {ro('Heizleistung', hp.q_heat_kw, 'kW')}
+          {ro('ΔT Heizkreis', hp.heating_dt, 'K')}
+          {ro("V' Heizkreis", hp.heating_flow_m3h, 'm³/h', true)}
+          {wp && <>
+            {ro('Elektrische Leistung', hp.p_el_kw, 'kW')}
+            {ro('Quellenleistung', hp.q_source_kw, 'kW')}
+            {ro('ΔT Solekreis', hp.source_dt, 'K')}
+            {ro("V' Solekreis", hp.source_flow_m3h, 'm³/h', true)}
+          </>}
+          {hp.warnings?.map((w,i)=><div key={i} style={warnSt}>⚠ {w}</div>)}
+        </>}
         <button style={btnBlue} onClick={()=>navigate('/rechner/ravel')}>→ RAVEL Wirtschaftlichkeit</button>
         <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
@@ -1259,6 +1298,19 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, onUpdate, onClose, navig
           <div><label style={lbl}>VL [°C]</label><input type="number" style={inp} value={d.vl_temp??''} onChange={e=>set('vl_temp',e.target.value)}/></div>
           <div><label style={lbl}>RL [°C]</label><input type="number" style={inp} value={d.rl_temp??''} onChange={e=>set('rl_temp',e.target.value)}/></div>
         </div>
+        {/* Quellenseite — nur bei Wärmepumpen. Q_source = Q_heat − P_el; ohne
+            COP/P_el bleibt sie leer statt der Heizleistung gleichgesetzt. */}
+        {WP_GENERATOR_TYPES.includes(String(d.generator_type || '')) && <>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+            <div><label style={lbl}>COP</label><input type="number" style={inp} value={d.cop??''} onChange={e=>set('cop',e.target.value)} placeholder="z.B. 4.0"/></div>
+            <div><label style={lbl}>P_el [kW]</label><input type="number" style={inp} value={d.p_el_kw??''} onChange={e=>set('p_el_kw',e.target.value)} placeholder="hat Vorrang"/></div>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
+            <div><label style={lbl}>Sole-VL [°C]</label><input type="number" style={inp} value={d.sole_vl??''} onChange={e=>set('sole_vl',e.target.value)}/></div>
+            <div><label style={lbl}>Sole-RL [°C]</label><input type="number" style={inp} value={d.sole_rl??''} onChange={e=>set('sole_rl',e.target.value)}/></div>
+            <div><label style={lbl}>c·ρ Sole</label><input type="number" style={inp} value={d.sole_ce??''} onChange={e=>set('sole_ce',e.target.value)} placeholder="1.163"/></div>
+          </div>
+        </>}
         <button style={btnBlue} onClick={()=>navigate('/rechner/ravel')}>→ RAVEL Wirtschaftlichkeit</button>
       </div>
     );
@@ -1462,6 +1514,8 @@ function EditorInner() {
   // Punkt 25 — der Leitungsabschnitt, der beim Klick geteilt würde. Treibt die
   // Hervorhebung; `null` heisst „freies Platzieren".
   const [inlineTreffer, setInlineTreffer] = useState(null);
+  // Rückmeldung des Ausrichten-Befehls (Schritt oder Verweigerungsgrund).
+  const [ausrichtenHinweis, setAusrichtenHinweis] = useState(null);
   // Numerische Direkteingabe während des Zeichnens: Puffer der getippten Länge.
   // Solange er nicht null ist, dürfen KEINE Shortcuts feuern.
   const [laengenPuffer, setLaengenPuffer] = useState(null);
@@ -1591,6 +1645,7 @@ function EditorInner() {
   const anschlussWarnungen = hydraulik.anschluss_warnings || EMPTY_ARRAY;
   const anschlussResults = hydraulik.anschluss_results || EMPTY_OBJECT;
   const pwtResults = hydraulik.pwt_results || EMPTY_OBJECT;
+  const heatpumpResults = hydraulik.heatpump_results || EMPTY_OBJECT;
   const alleWarnungen = hydraulik.warnungen || EMPTY_ARRAY;
 
   const editorGraphAnwenden = useCallback((graph) => {
@@ -2162,6 +2217,29 @@ function EditorInner() {
     return best;
   }, [layerVisibility, routePunkte]);
 
+  // Punkt 24/25 — bestehender Polylinien-Eckpunkt. Ein Eckpunkt ist heute nur
+  // ein Stützpunkt in `data.points` und kein Graph-Knoten. Wird ein Leitungsende
+  // bewusst darauf gelegt, muss die getroffene Leitung dort geteilt werden,
+  // damit eine echte hydraulische Junction entsteht statt zweier Linien, die
+  // sich nur optisch berühren.
+  const naechsterEckpunkt = useCallback((point, radius = 12, excludedEdgeIds = new Set()) => {
+    let best = null;
+    edgesRef.current.forEach(edge => {
+      if (excludedEdgeIds.has(edge.id)) return;
+      if (layerVisibility[layerVonEdge(edge).id] === false) return;
+      const route = routePunkte(edge);
+      for (let i = 1; i < route.length - 1; i += 1) {
+        const ecke = route[i];
+        const distanz = Math.hypot(point.x - ecke.x, point.y - ecke.y);
+        if (distanz <= radius && (!best || distanz < best.distanz)) {
+          best = { x:ecke.x, y:ecke.y, distanz, edgeId:edge.id, position:{ x:ecke.x, y:ecke.y },
+                   edge, route, cornerIndex:i, segmentIndex:i - 1, t:1 };
+        }
+      }
+    });
+    return best;
+  }, [layerVisibility, routePunkte]);
+
   const naechsterBauteilAnschluss = useCallback((point, excludedNodeId, role, radius = 24) => {
     let best = null;
     nodesRef.current.forEach(node => {
@@ -2196,14 +2274,18 @@ function EditorInner() {
   // Ein Fang „auf der Leitung" — dazu gehört auch der Mittelpunkt. Beide teilen
   // die getroffene Leitung und erzeugen eine echte Verbindung. Der Unterschied
   // liegt nur in der Beschriftung des Markers.
-  const istLeitungsfang = (hit) => hit?.type === 'line' || hit?.type === 'midpoint';
+  const istLeitungsfang = (hit) => ['line', 'midpoint', 'corner'].includes(hit?.type);
 
   const leitungTeilen = useCallback((hit, junctionId, layerId) => {
     const host = hit.edge;
     const junctionPoint = { x:hit.x, y:hit.y };
     // Geteilte, getestete Kernlogik (§3/§13): erhält bestehende Waypoints und
     // teilt die Länge proportional. Identisches Verhalten wie bisher.
-    const { before, after, firstShare } = splitRouteAtPoint(hit.route, hit.segmentIndex, junctionPoint);
+    // Ein Eckpunkt ist bereits Teil der Route — er darf danach nicht doppelt
+    // in einem der beiden Teilstücke stehen (§25).
+    const { before, after, firstShare } = Number.isInteger(hit.cornerIndex)
+      ? splitRouteAtCorner(hit.route, hit.cornerIndex)
+      : splitRouteAtPoint(hit.route, hit.segmentIndex, junctionPoint);
     const oldLength = Number.parseFloat(host.data?.laenge_m);
     const splitData = (points, share) => ({
       ...(host.data || {}), layer_id:layerId, cad_polyline:true, polyline_version:1, points,
@@ -2214,6 +2296,17 @@ function EditorInner() {
     }, {
       ...host, id:newId(), source:junctionId, sourceHandle:'center-source', data:splitData(after, 1 - firstShare), selected:false,
     }];
+  }, []);
+
+  // Punkt 28 — an derselben Stelle darf nur EIN Topologie-Anker liegen. Sonst
+  // entstehen zwei Junctions auf identischer Koordinate: optisch ein Punkt,
+  // hydraulisch zwei getrennte Netze.
+  const bestehendeJunction = useCallback((punkt, toleranz = 6) => {
+    if (!punkt) return null;
+    const treffer = nodesRef.current.find(node => node.type === 'junction'
+      && node.data?.cad_anchor
+      && Math.hypot((node.position?.x ?? 0) - punkt.x, (node.position?.y ?? 0) - punkt.y) <= toleranz);
+    return treffer?.id || null;
   }, []);
 
   const cadAnker = useCallback((id, point, layer) => ({
@@ -2426,10 +2519,14 @@ function EditorInner() {
     }
 
     const createdNodes = [];
-    const sourceAnchorId = draft.startEndpoint ? null : newId();
-    const targetAnchorId = snapHit?.type === 'port' ? null : newId();
-    if (sourceAnchorId) createdNodes.push(cadAnker(sourceAnchorId, startPoint, layer));
-    if (targetAnchorId) createdNodes.push(cadAnker(targetAnchorId, endPoint, layer));
+    // Liegt am Start- oder Endpunkt schon ein Anker, wird dieser benutzt statt
+    // ein zweiter daneben gelegt (§28).
+    const sourceVorhanden = draft.startEndpoint ? null : bestehendeJunction(startPoint);
+    const targetVorhanden = snapHit?.type === 'port' ? null : bestehendeJunction(endPoint);
+    const sourceAnchorId = draft.startEndpoint ? null : (sourceVorhanden || newId());
+    const targetAnchorId = snapHit?.type === 'port' ? null : (targetVorhanden || newId());
+    if (sourceAnchorId && !sourceVorhanden) createdNodes.push(cadAnker(sourceAnchorId, startPoint, layer));
+    if (targetAnchorId && !targetVorhanden) createdNodes.push(cadAnker(targetAnchorId, endPoint, layer));
 
     const edgeId = newId();
     const sourceSide = draft.startEndpoint
@@ -2483,7 +2580,7 @@ function EditorInner() {
     setSelectedEdgeId(edgeId);
     // Nach Abschluss beenden — ausser der dauerhafte Leitungsmodus ist aktiv.
     setEditorMode(finishCommand(editorModeRef.current));
-  }, [activeLayer, cadAnker, drawingConfig, handleAusrichtung, handlePosition, letzterEntwurfsPunkt, leitungTeilen, routePunkte, ruecklaufPaarErstellen, setEdges, setNodes, snap]);
+  }, [activeLayer, bestehendeJunction, cadAnker, drawingConfig, handleAusrichtung, handlePosition, letzterEntwurfsPunkt, leitungTeilen, routePunkte, ruecklaufPaarErstellen, setEdges, setNodes, snap]);
 
   const cadKlick = useCallback((event, nurBeiAnschluss = false) => {
     // Nur die linke Taste zeichnet. Mittlere Taste = Pan, rechte = abschliessen.
@@ -2519,6 +2616,13 @@ function EditorInner() {
     }
     if (nurBeiAnschluss) return true;
     const excludedEdges = draft.extendEdgeId ? new Set([draft.extendEdgeId]) : new Set();
+    // Eckpunkt vor Mittelpunkt und Leitung: er ist der genaueste Punkt und der
+    // einzige, den der Planer bewusst gesetzt hat.
+    const eckHit = fangAktiv ? naechsterEckpunkt(raw, 12 / zoom, excludedEdges) : null;
+    if (eckHit) {
+      leitungsEntwurfAbschliessen(eckHit.position, { ...eckHit, type:'corner' }, event.shiftKey || shiftPressed);
+      return true;
+    }
     const midHit = fangAktiv ? naechsterMittelpunkt(raw, 14 / zoom, excludedEdges) : null;
     if (midHit) {
       leitungsEntwurfAbschliessen(midHit.position, { ...midHit, type:'midpoint' }, event.shiftKey || shiftPressed);
@@ -2543,7 +2647,7 @@ function EditorInner() {
     leitungsEntwurfRef.current = next;
     setLeitungsEntwurf(next);
     return true;
-  }, [activeLayer, drawingConfig, getZoom, letzterEntwurfsPunkt, leitungsEntwurfAbschliessen, leitungsEntwurfStarten, naechsteLeitung, naechsterBauteilAnschluss, naechsterFreierLeitungsEndpunkt, naechsterMittelpunkt, objektFangpunkte, screenToFlowPosition, shiftPressed]);
+  }, [activeLayer, drawingConfig, getZoom, letzterEntwurfsPunkt, leitungsEntwurfAbschliessen, leitungsEntwurfStarten, naechsteLeitung, naechsterBauteilAnschluss, naechsterEckpunkt, naechsterFreierLeitungsEndpunkt, naechsterMittelpunkt, objektFangpunkte, screenToFlowPosition, shiftPressed]);
 
   const cadHandlePointerDown = useCallback((event) => {
     if (event.button !== 0 || spacePanRef.current) return;
@@ -2629,6 +2733,15 @@ function EditorInner() {
         return;
       }
       const excludedEdges = draft.extendEdgeId ? new Set([draft.extendEdgeId]) : new Set();
+      const eckHit = fangAktiv ? naechsterEckpunkt(raw, 12 / zoom, excludedEdges) : null;
+      if (eckHit) {
+        leitungsCursorRef.current = eckHit.position;
+        setLeitungsCursor(eckHit.position);
+        setLeitungsSnap({ ...eckHit, type:'corner' });
+        setLeitungsGuides([]);
+        fangProtokoll('cursor', 'corner', eckHit.position, { edgeId:eckHit.edgeId });
+        return;
+      }
       const midHit = fangAktiv ? naechsterMittelpunkt(raw, 14 / zoom, excludedEdges) : null;
       if (midHit) {
         leitungsCursorRef.current = midHit.position;
@@ -2663,7 +2776,7 @@ function EditorInner() {
       setLeitungsGuides(guidesAmPunkt(alignment.guides, point));
       fangProtokoll('cursor', lineHit ? 'nearest' : 'grid', point);
     });
-  }, [activeLayer, fangProtokoll, drawingConfig.grid_size, drawingConfig.snap_tolerance, getZoom, letzterEntwurfsPunkt, naechsteLeitung, naechsterBauteilAnschluss, naechsterFreierLeitungsEndpunkt, naechsterMittelpunkt, objektFangpunkte, screenToFlowPosition, shiftPressed]);
+  }, [activeLayer, fangProtokoll, drawingConfig.grid_size, drawingConfig.snap_tolerance, getZoom, letzterEntwurfsPunkt, naechsteLeitung, naechsterBauteilAnschluss, naechsterEckpunkt, naechsterFreierLeitungsEndpunkt, naechsterMittelpunkt, objektFangpunkte, screenToFlowPosition, shiftPressed]);
 
   const cadEntwurfRoute = (() => {
     if (!leitungsEntwurf) return [];
@@ -2725,11 +2838,13 @@ function EditorInner() {
         ? ENDPOINT
         : leitungsSnap.fangArt === 'port'
           ? PORT
-          : leitungsSnap.type === 'midpoint'
-            ? MIDPOINT
-            : leitungsSnap.type === 'line'
-              ? NEAREST
-              : ENDPOINT;
+          : leitungsSnap.type === 'corner'
+            ? CORNER
+            : leitungsSnap.type === 'midpoint'
+              ? MIDPOINT
+              : leitungsSnap.type === 'line'
+                ? NEAREST
+                : ENDPOINT;
       return { ...fangStil(typ), typ, x:leitungsSnap.x, y:leitungsSnap.y };
     }
     if (!snapAn || !leitungsCursor) return null;
@@ -3149,7 +3264,17 @@ function EditorInner() {
           setSpiegelAchse(null);
           setEndpointMenu(null);
           setEdgeMenu(null);
+          setAusrichtenHinweis(null);
           setEditorMode(escapeMode(editorModeRef.current));
+          return;
+        }
+        // Ausrichten (Punkt 33/34): dieselbe frei belegbare Taste wie bisher.
+        // Ohne Shift richtet sie LEITUNGSSEGMENTE aus, mit Shift wie bisher das
+        // gewählte Bauteil aufs Raster — ein Befehl, eine Taste.
+        if (key === drawingConfig.shortcut_align && !ev.shiftKey) {
+          ev.preventDefault();
+          setAusrichtenHinweis(null);
+          setEditorMode(toggleCommand(editorModeRef.current, ALIGN));
           return;
         }
         if (ev.key === 'Enter' && leitungsEntwurfRef.current && leitungsCursorRef.current) {
@@ -3174,7 +3299,7 @@ function EditorInner() {
         if (selected) {
           if (key === drawingConfig.shortcut_rotate && ROTATABLE.has(selected.type)) { ev.preventDefault(); rotateNode(selected.id); }
           else if (key === drawingConfig.shortcut_mirror && ROTATABLE.has(selected.type)) { ev.preventDefault(); mirrorNode(selected.id); }
-          else if (key === drawingConfig.shortcut_align) { ev.preventDefault(); alignNode(selected.id); }
+          else if (key === drawingConfig.shortcut_align && ev.shiftKey) { ev.preventDefault(); alignNode(selected.id); }
         }
         // Verschieben per Pfeiltaste (Shift = grosser Schritt).
         if (selected && ev.key.startsWith('Arrow')) {
@@ -3420,8 +3545,21 @@ function EditorInner() {
     const pos = weltPosition;
     const p = STD_PALETTE.find(p => p.type === raw);
     const id = newId();
-    const lineHit = isInlineInsertable(raw) ? naechsteSichtbareLeitung(pos, 30 / Math.max(getZoom(), 0.2)) : null;
-    const nodePosition = lineHit ? { x:lineHit.x - 20, y:lineHit.y - 20 } : pos;
+    const fangRadius = 30 / Math.max(getZoom(), 0.2);
+    const lineHit = isInlineInsertable(raw) ? naechsteSichtbareLeitung(pos, fangRadius) : null;
+    // Abzweig-Bauteil (§18): hängt mit EINEM Anschluss an der Leitung. Es liegt
+    // nicht im Hauptstrom, sondern an einer echten Junction daneben.
+    const branchDef = isBranchInsertable(raw) ? branchAnschluss(raw) : null;
+    const branchHit = branchDef ? naechsteSichtbareLeitung(pos, fangRadius) : null;
+    // Für die Seite des Abzweigs zählt der echte Cursor, nicht der bereits auf
+    // die Leitung gefangene Landepunkt — sonst zeigt der Stich immer nach oben.
+    const cursorWelt = screenPunkt ? screenToFlowPosition(screenPunkt) : pos;
+    const branchZiel = branchHit ? branchAnschlussPunkt(branchHit, cursorWelt) : null;
+    const branchLayer = branchHit ? layerVonEdge(branchHit.edge) : null;
+    const branchJunctionId = branchHit ? newId() : null;
+    const nodePosition = branchZiel
+      ? { x:branchZiel.x - branchDef.x * branchDef.w, y:branchZiel.y - branchDef.y * branchDef.h }
+      : lineHit ? { x:lineHit.x - 20, y:lineHit.y - 20 } : pos;
 
     // Ausrichtung des Bauteils an der Leitung (§5): die Flussachse (top/bottom)
     // soll mit der Leitung fluchten. Waagrechte Leitung → Bauteil 90° drehen.
@@ -3460,13 +3598,34 @@ function EditorInner() {
       const annoStyle = raw === 'concrete_area' ? { style: { width: 220, height: 130 }, zIndex: -1 }
         : raw === 'interface_line' ? { style: { width: 200, height: 24 } }
         : {};
-      return [...ns, {
+      const bauteil = {
         id, type: raw, position: nodePosition, ...annoStyle,
         data: { label: p?.label || raw, ...extra,
           ...(inlineRotation ? { rotation: inlineRotation } : {}),
           ...(NUMMERIERT.includes(raw) ? { nr: naechsteNr(ns) } : {}) },
-      }];
+      };
+      // Der Abzweigpunkt ist ein echter Topologie-Knoten, kein optischer Punkt.
+      return branchJunctionId
+        ? [...ns, cadAnker(branchJunctionId, { x:branchHit.x, y:branchHit.y }, branchLayer), bauteil]
+        : [...ns, bauteil];
     });
+
+    // ── Abzweig: A ─●─ B, darunter das Bauteil (§19) ──
+    if (branchJunctionId) {
+      const [first, second] = leitungTeilen(branchHit, branchJunctionId, branchLayer.id);
+      const stich = createHydraulicEdge({
+        id: newId(),
+        source: branchJunctionId, sourceHandle: 'center-source',
+        target: id, targetHandle: branchDef.port,
+        layerId: branchLayer.id, layerColor: branchLayer.color,
+        points: [], cornerRadius: drawingConfig.corner_radius,
+      }, edgesRef.current);
+      setEdges(items => [
+        ...items.filter(edge => edge.id !== branchHit.edge.id),
+        first, second, ...(stich ? [stich] : []),
+      ]);
+      return id;
+    }
     if (lineHit) {
       const host = lineHit.edge;
       const beforePoints = lineHit.route.slice(1, lineHit.segmentIndex + 1);
@@ -3518,7 +3677,7 @@ function EditorInner() {
     // Verbrauchergruppe: direkt nach dem Setzen die Schaltung wählen
     if (raw === 'gruppe' && screenPunkt) setSchaltungswahl({ nodeId: id, x: screenPunkt.x, y: screenPunkt.y });
     return id;
-  }, [getZoom, naechsteSichtbareLeitung, setEdges, setNodes, snap]);
+  }, [cadAnker, drawingConfig.corner_radius, getZoom, leitungTeilen, naechsteSichtbareLeitung, screenToFlowPosition, setEdges, setNodes, snap]);
 
   // Drag&Drop bleibt erhalten — es ist jetzt nur einer von zwei Wegen.
   const onDrop = useCallback((e) => {
@@ -3581,7 +3740,70 @@ function EditorInner() {
     if (node.type === 'label') return; // Textblock: Doppelklick editiert inline
     if (!leitungsEntwurfRef.current) setAuslegung(node);
   }, []);
+  // ── Ausrichten (Punkt 34–39) ──
+  // Zwei Klicks: erst die Referenz, dann das Segment, das parallel bzw. auf
+  // dieselbe Flucht soll. Die Geometrie rechnet `segmentAusrichten` (getestet);
+  // hier wird nur ausgewählt, geschützt und gespeichert.
+  const ausrichtenKlick = useCallback((event) => {
+    if (event.button != null && event.button !== 0) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    const welt = screenToFlowPosition({ x:event.clientX, y:event.clientY });
+    const treffer = naechsteSichtbareLeitung(welt, 24 / Math.max(getZoom(), 0.2));
+    if (!treffer) {
+      setAusrichtenHinweis('Kein Segment getroffen — direkt auf eine Leitung klicken.');
+      return true;
+    }
+    const referenz = editorModeRef.current?.payload;
+    if (!referenz) {
+      setEditorMode(startCommand(ALIGN, { payload:{
+        edgeId:treffer.edge.id, segmentIndex:treffer.segmentIndex,
+        a:treffer.route[treffer.segmentIndex], b:treffer.route[treffer.segmentIndex + 1],
+      } }));
+      setAusrichtenHinweis(null);
+      return true;
+    }
+    if (referenz.edgeId === treffer.edge.id && referenz.segmentIndex === treffer.segmentIndex) {
+      setAusrichtenHinweis('Referenz und Ziel sind dasselbe Segment.');
+      return true;
+    }
+    const ziel = edgesRef.current.find(item => item.id === treffer.edge.id);
+    if (!ziel) return true;
+    const route = routePunkte(ziel);
+    const knoten = (id) => nodesRef.current.find(node => node.id === id);
+    // Ein Ende an einem echten Bauteil ist fest; ein freies Ende hängt an einem
+    // CAD-Anker und darf mitwandern (Punkt 37).
+    const fest = {
+      start:knoten(ziel.source)?.type !== 'junction',
+      end:knoten(ziel.target)?.type !== 'junction',
+    };
+    const ergebnis = segmentAusrichten(route, treffer.segmentIndex,
+      { a:referenz.a, b:referenz.b }, { fest, klick:welt });
+    if (ergebnis.fehler) {
+      setAusrichtenHinweis(ergebnis.fehler);
+      return true;
+    }
+    snap();   // gesamte Ausrichtung = EINE Undo-Aktion
+    const neu = ergebnis.route;
+    const startBewegt = Math.hypot(neu[0].x - route[0].x, neu[0].y - route[0].y) > 0.01;
+    const endeBewegt = Math.hypot(neu.at(-1).x - route.at(-1).x, neu.at(-1).y - route.at(-1).y) > 0.01;
+    if (startBewegt || endeBewegt) {
+      setNodes(items => items.map(node => {
+        if (startBewegt && node.id === ziel.source && node.type === 'junction') return { ...node, position:{ x:neu[0].x, y:neu[0].y } };
+        if (endeBewegt && node.id === ziel.target && node.type === 'junction') return { ...node, position:{ x:neu.at(-1).x, y:neu.at(-1).y } };
+        return node;
+      }));
+    }
+    setEdges(items => items.map(item => item.id === ziel.id
+      ? { ...item, data:{ ...(item.data || {}), cad_polyline:true, points:neu.slice(1, -1) } }
+      : item));
+    setAusrichtenHinweis(null);
+    setEditorMode(finishCommand({ ...editorModeRef.current, payload:null }));
+    return true;
+  }, [getZoom, naechsteSichtbareLeitung, routePunkte, screenToFlowPosition, setEdges, setNodes, snap]);
+
   const onEdgeClick = useCallback((event, edge) => {
+    if (istBefehl(editorModeRef.current, ALIGN)) { ausrichtenKlick(event); return; }
     // Im Platzierungsbefehl setzt ein Klick auf eine Leitung das Bauteil — und
     // teilt sie dabei. Ohne das würde die Leitung den Klick verschlucken,
     // obwohl die Vorschau „in Leitung einsetzen" anzeigt.
@@ -3593,7 +3815,7 @@ function EditorInner() {
     setSelectedEdgeId(edge.id);
     setSelected(null);
     setInspectorOpen(true);
-  }, [cadKlick, platzierenKlick]);
+  }, [ausrichtenKlick, cadKlick, platzierenKlick]);
 
   const spiegelKopieErstellen = useCallback((edgeId, axisStart, axisEnd) => {
     const edge = edgesRef.current.find(item => item.id === edgeId);
@@ -3672,7 +3894,8 @@ function EditorInner() {
       const typ = editorModeRef.current?.payload?.nodeType;
       // Liegt der Cursor über einer Leitung UND darf dieses Bauteil eingesetzt
       // werden, ist der Landepunkt der Leitungstreffer — nicht der Rasterpunkt.
-      const treffer = isInlineInsertable(typ)
+      const abzweig = isBranchInsertable(typ);
+      const treffer = (isInlineInsertable(typ) || abzweig)
         ? naechsteSichtbareLeitung(raw, 30 / zoom)
         : null;
       if (treffer) {
@@ -3684,6 +3907,9 @@ function EditorInner() {
           edgeId:treffer.edge.id,
           a:treffer.route[treffer.segmentIndex],
           b:treffer.route[treffer.segmentIndex + 1],
+          // Abzweig statt Einsetzen: die Vorschau zeigt den Stich zum Bauteil,
+          // damit vor dem Klick sichtbar ist, was entsteht (§18).
+          abzweig: abzweig ? branchAnschlussPunkt(treffer, raw) : null,
         });
         setLeitungsGuides([]);
         return;
@@ -3979,7 +4205,7 @@ function EditorInner() {
                 ['shortcut_polyline', 'Polylinie starten'],
                 ['shortcut_rotate', 'Bauteil drehen'],
                 ['shortcut_mirror', 'Bauteil spiegeln'],
-                ['shortcut_align', 'Am Raster ausrichten'],
+                ['shortcut_align', 'Ausrichten (Shift: Bauteil aufs Raster)'],
               ].map(([feld, label]) => (
                 <React.Fragment key={feld}>
                   <label htmlFor={feld}>{label}</label>
@@ -4075,7 +4301,7 @@ function EditorInner() {
               {paletteOpen ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
             </button>
           </div>
-          {paletteOpen && PALETTE_GRUPPEN.map(group=>{
+          {paletteOpen && <div className="hc-palette-body">{PALETTE_GRUPPEN.map(group=>{
             const open = paletteGroupsOpen[group.titel] === true;
             return <div key={group.titel} className="hc-palette-group">
               <button onClick={()=>setPaletteGroupsOpen(current=>({ ...current, [group.titel]:!open }))}
@@ -4096,7 +4322,7 @@ function EditorInner() {
                 </div>)}
               </div>}
             </div>;
-          })}
+          })}</div>}
           {!paletteOpen && <button onClick={()=>setPaletteOpen(true)} title="Bauteilpalette öffnen" className="hc-collapsed-label">Bauteile</button>}
         </aside>
 
@@ -4176,6 +4402,18 @@ function EditorInner() {
             )}
             <Controls/>
             {showMiniMap && <MiniMap zoomable pannable nodeStrokeWidth={3}/>}
+            {istBefehl(editorMode, ALIGN) && (
+              <Panel position="top-center">
+                <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:8, padding:'7px 12px', borderRadius:18,
+                  background:ausrichtenHinweis ? '#b91c1c' : '#0f766e', color:'white', fontSize:10, fontWeight:700,
+                  boxShadow:'0 6px 16px rgba(15,118,110,.28)' }}>
+                  {ausrichtenHinweis
+                    || (editorMode.payload
+                      ? 'Ausrichten · Segment zum Ausrichten wählen'
+                      : 'Ausrichten · Referenzsegment wählen')}
+                </div>
+              </Panel>
+            )}
             {leitungsEntwurf && (
               <Panel position="top-center">
                 <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:8, padding:'7px 12px', borderRadius:18,
@@ -4184,7 +4422,9 @@ function EditorInner() {
                     ? 'Am Bauteil einrasten'
                     : leitungsSnap?.fangArt === 'endpoint'
                       ? 'An Leitungsende anschliessen'
-                    : leitungsSnap?.type === 'line'
+                    : leitungsSnap?.type === 'corner'
+                      ? 'T-Stück am Eckpunkt erstellen'
+                    : ['line', 'midpoint'].includes(leitungsSnap?.type)
                       ? 'T-Verbindung erstellen'
                       : leitungsEntwurf.extendEdgeId
                         ? 'Linie weiterziehen · Klick = neuer Eckpunkt · Enter = fertig'
@@ -4232,12 +4472,21 @@ function EditorInner() {
                       x2={inlineTreffer.punkt.x + (inlineTreffer.b.y - inlineTreffer.a.y === 0 ? 0 : 10 / zoomAnzeige)}
                       y2={inlineTreffer.punkt.y + (inlineTreffer.b.y - inlineTreffer.a.y === 0 ? 10 / zoomAnzeige : 0)}
                       stroke="#4f46e5" strokeWidth={2 / zoomAnzeige} />
+                    {inlineTreffer.abzweig && (
+                      <>
+                        <line x1={inlineTreffer.punkt.x} y1={inlineTreffer.punkt.y}
+                          x2={inlineTreffer.abzweig.x} y2={inlineTreffer.abzweig.y}
+                          stroke="#4f46e5" strokeWidth={3 / zoomAnzeige} strokeDasharray={`${6 / zoomAnzeige},${4 / zoomAnzeige}`} />
+                        <circle cx={inlineTreffer.punkt.x} cy={inlineTreffer.punkt.y}
+                          r={5 / zoomAnzeige} fill="#4f46e5" />
+                      </>
+                    )}
                     <text x={inlineTreffer.punkt.x + 16 / zoomAnzeige}
                       y={inlineTreffer.punkt.y - 14 / zoomAnzeige}
                       fill="#4338ca" fontSize={11 / zoomAnzeige} fontWeight="700"
                       stroke="#ffffff" strokeWidth={3 / zoomAnzeige}
                       strokeLinejoin="round" paintOrder="stroke">
-                      in Leitung einsetzen
+                      {inlineTreffer.abzweig ? 'Abzweig an Leitung' : 'in Leitung einsetzen'}
                     </text>
                   </g>
                 )}
@@ -4461,7 +4710,7 @@ function EditorInner() {
             {selectedEdge ? (
               <LeitungPanel edge={selectedEdge} leitungResults={leitungResults} onUpdateEdge={updateEdgeData} onUpdateLayer={updateEdgeLayer} onDelete={deleteEdge} />
             ) : (
-              <PropertiesPanel node={selectedNode} nodeFlows={nodeFlows} verteilerResults={verteilerResults} gruppeResults={gruppeResults} ventilResults={ventilResults} pumpenResults={pumpenResults} expansionResults={expansionResults} anschlussWarnungen={anschlussWarnungen} anschlussResults={anschlussResults} pwtResults={pwtResults} onUpdate={updateNode} onDelete={deleteNode} onSetAbgaenge={setAbgaenge} navigate={navigate}
+              <PropertiesPanel node={selectedNode} nodeFlows={nodeFlows} verteilerResults={verteilerResults} gruppeResults={gruppeResults} ventilResults={ventilResults} pumpenResults={pumpenResults} expansionResults={expansionResults} anschlussWarnungen={anschlussWarnungen} anschlussResults={anschlussResults} pwtResults={pwtResults} heatpumpResults={heatpumpResults} onUpdate={updateNode} onDelete={deleteNode} onSetAbgaenge={setAbgaenge} navigate={navigate}
                 drawingConfig={drawingConfig} onDrawingConfig={drawingConfigAktualisieren}/>
             )}
           </aside>

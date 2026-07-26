@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  abzweigPunkt,
   eckpunktEntfernen, eckpunktSetzen, gripsFuerRoute,
   istKollinear, routeBereinigen, routeIstGueltig,
-  istKollinear, routeBereinigen, routeIstGueltig,
-  segmentOrientierung, segmentVerschieben,
+  segmentAusrichten, segmentOrientierung, segmentVerschieben,
 } from './cadEdit';
 
 describe('Grips', () => {
@@ -191,5 +191,97 @@ describe('Route-Cleanup (Punkt 20)', () => {
     expect(routeIstGueltig([{ x: 0, y: 0 }])).toBe(false);
     expect(routeIstGueltig([{ x: 0, y: 0 }, { x: Number.NaN, y: 1 }])).toBe(false);
     expect(routeIstGueltig(null)).toBe(false);
+  });
+});
+
+// ── Abzweig-Punkt (§18) ─────────────────────────────────────────────────────
+describe("abzweigPunkt", () => {
+  const a = { x: 0, y: 100 };
+  const b = { x: 200, y: 100 };
+
+  it("zweigt auf die Cursorseite ab", () => {
+    const oben = abzweigPunkt(a, b, { x: 100, y: 100 }, { x: 100, y: 60 }, 70);
+    expect(oben).toEqual({ x: 100, y: 30 });
+    const unten = abzweigPunkt(a, b, { x: 100, y: 100 }, { x: 100, y: 140 }, 70);
+    expect(unten).toEqual({ x: 100, y: 170 });
+  });
+
+  it("zweigt bei Cursor exakt auf der Leitung nach oben ab", () => {
+    expect(abzweigPunkt(a, b, { x: 100, y: 100 }, { x: 100, y: 100 }, 70).y).toBe(30);
+  });
+
+  it("steht senkrecht auch auf einer senkrechten Leitung", () => {
+    const p = abzweigPunkt({ x: 50, y: 0 }, { x: 50, y: 200 }, { x: 50, y: 100 }, { x: 90, y: 100 }, 70);
+    expect(p).toEqual({ x: 120, y: 100 });
+  });
+});
+
+// ── Ausrichten / Parallel (§35–§37) ─────────────────────────────────────────
+describe("segmentAusrichten", () => {
+  const refH = { a: { x: 0, y: 1000 }, b: { x: 300, y: 1000 } };
+
+  it("macht ein schiefes Segment waagrecht und behält die Länge", () => {
+    const route = [{ x: 0, y: 0 }, { x: 100, y: 40 }];
+    const { route: neu, fehler } = segmentAusrichten(route, 0, refH, { klick: { x: 0, y: 0 } });
+    expect(fehler).toBeUndefined();
+    expect(neu[0]).toEqual({ x: 0, y: 0 });
+    expect(neu[1].y).toBe(0);
+    expect(neu[1].x).toBe(100);          // Projektion auf die Referenzrichtung
+  });
+
+  it("legt ein bereits paralleles Segment auf dieselbe Flucht", () => {
+    const route = [{ x: 0, y: 1060 }, { x: 200, y: 1060 }];
+    const { route: neu } = segmentAusrichten(route, 0, refH, {});
+    expect(neu[0].y).toBe(1000);
+    expect(neu[1].y).toBe(1000);
+    expect(neu[0].x).toBe(0);            // längs verschiebt sich nichts
+  });
+
+  it("verweigert das Fluchten, wenn ein Ende an einem Anschluss hängt", () => {
+    const route = [{ x: 0, y: 1060 }, { x: 200, y: 1060 }];
+    const { fehler, route: neu } = segmentAusrichten(route, 0, refH, { fest: { start: true } });
+    expect(neu).toBeUndefined();
+    expect(fehler).toMatch(/Bauteilanschluss/);
+  });
+
+  it("hält beim Parallelmachen den Endpunkt näher am Klick fest", () => {
+    const route = [{ x: 0, y: 0 }, { x: 100, y: 40 }];
+    const nahB = segmentAusrichten(route, 0, refH, { klick: { x: 100, y: 40 } }).route;
+    expect(nahB[1]).toEqual({ x: 100, y: 40 });   // b bleibt
+    expect(nahB[0].y).toBe(40);                   // a wandert auf b's Höhe
+  });
+
+  it("bewegt den festen Anschluss nicht, sondern das freie Ende", () => {
+    const route = [{ x: 0, y: 0 }, { x: 100, y: 40 }];
+    const { route: neu } = segmentAusrichten(route, 0, refH, { fest: { start: true } });
+    expect(neu[0]).toEqual({ x: 0, y: 0 });
+    expect(neu[1].y).toBe(0);
+  });
+
+  it("richtet ein Innensegment aus, Nachbarn bleiben stehen", () => {
+    const route = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 200 }, { x: 300, y: 200 }];
+    const refV = { a: { x: 500, y: 0 }, b: { x: 500, y: 100 } };
+    const { route: neu } = segmentAusrichten(route, 1, refV, { klick: { x: 100, y: 0 } });
+    expect(neu[0]).toEqual({ x: 0, y: 0 });
+    expect(neu[3]).toEqual({ x: 300, y: 200 });
+    expect(neu[1].x).toBe(neu[2].x);              // Segment steht senkrecht
+  });
+
+  it("meldet eine Referenz ohne Richtung", () => {
+    const route = [{ x: 0, y: 0 }, { x: 100, y: 40 }];
+    const { fehler } = segmentAusrichten(route, 0, { a: { x: 5, y: 5 }, b: { x: 5, y: 5 } }, {});
+    expect(fehler).toMatch(/Richtung/);
+  });
+
+  it("meldet, wenn ein paralleles Segment bereits auf der Flucht liegt", () => {
+    const route = [{ x: 0, y: 1000 }, { x: 200, y: 1000 }];
+    expect(segmentAusrichten(route, 0, refH, {}).fehler).toMatch(/bereits/);
+  });
+
+  it("richtet auch an einer 45°-Referenz aus", () => {
+    const ref45 = { a: { x: 0, y: 0 }, b: { x: 100, y: 100 } };
+    const route = [{ x: 0, y: 0 }, { x: 100, y: 0 }];
+    const { route: neu } = segmentAusrichten(route, 0, ref45, { klick: { x: 0, y: 0 } });
+    expect(Math.round(neu[1].x)).toBe(Math.round(neu[1].y));
   });
 });

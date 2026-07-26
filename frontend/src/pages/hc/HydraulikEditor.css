@@ -461,6 +461,22 @@
   color: #4338ca;
 }
 
+/* Punkt 30/31 — die Bauteilliste war in einem `overflow:hidden`-Container ohne
+   eigenen Scrollbereich: bei vielen Bauteilen waren die unteren schlicht nicht
+   erreichbar. Der Body bekommt `flex:1` UND `min-height:0` (sonst wächst er in
+   verschachtelten Flex-Containern über die Höhe hinaus statt zu scrollen).
+   `overscroll-behavior: contain` verhindert, dass das Mausrad am Listenende auf
+   den Canvas durchschlägt und dort zoomt. */
+.hc-palette-body {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .hc-palette-group {
   border-bottom: 1px solid #edf1f5;
 }

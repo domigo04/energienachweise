@@ -23,7 +23,8 @@ from app.lv_import.feature_extract import extract_features
 from app.lv_import.cost_extract import extract_costs
 from app.lv_import.cost_summary import parse_cost_summary, to_cost_rows, has_cost_summary
 from app.lv_import.project_extract import extract_project_data
-from app.lv_import import norm_lv, llm_mapper
+from app.lv_import import norm_lv
+from app.lv_import.llm import resolver as llm
 from app import fachwerte
 from app.lv_import.feature_keys import FEATURE_DEFS, FEATURE_KEYS, FEATURE_TO_CONTEXT
 from app.lv_import import page_classifier as pc
@@ -171,13 +172,13 @@ async def upload_lv(
         # keine gibt, werden die LV-Positionstotale ausgewertet.
         summary = parse_cost_summary(pipeline.cost_summary_pages,
                                      pipeline.cost_summary_word_pages)
-        llm_zugeordnet = 0
+        llm_stat = {"sent": 0, "mapped": 0}
         if has_cost_summary(summary):
             costs = to_cost_rows(summary)
             # Erst deterministisch, dann optional das LLM für die Positionen, die
             # keine eindeutige Norm-LV-Zuordnung haben. Ohne API-Zugang bleibt es
             # bei „Zuordnung prüfen" — der Import funktioniert trotzdem.
-            llm_zugeordnet = llm_mapper.apply_to_rows(costs)
+            llm_stat = llm.apply_to_rows(costs)
         else:
             costs = [dict(c, source="lv_positions") for c in extract_costs(pipeline.lv_pages)]
         # ALLE kanonischen Features anlegen (auch nicht erkannte) → der Nutzer
@@ -228,8 +229,9 @@ async def upload_lv(
             "kostenpositionen": len([c for c in costs if not c.get("is_group_total")]),
             "gruppentotale": len([c for c in costs if c.get("is_group_total")]),
             "kosten_ohne_zuordnung": len(pruefen),
-            "kosten_per_llm_zugeordnet": llm_zugeordnet,
-            "llm_verfuegbar": llm_mapper.verfuegbar(),
+            "llm_positions_sent": llm_stat["sent"],
+            "llm_positions_mapped": llm_stat["mapped"],
+            **llm.status(),
             "gruppen_validierung": {
                 g: i.get("validation_status")
                 for g, i in (summary.get("group_totals") or {}).items()},
@@ -268,7 +270,7 @@ def fachwerte_listen(user: User = Depends(get_current_user)):
 def norm_lv_positionen(user: User = Depends(get_current_user)):
     """Das Norm-LV als geschlossene Auswahlliste für die manuelle Zuordnung.
     Muss VOR `/{import_id}` stehen."""
-    return {**norm_lv.as_frontend(), "llm_verfuegbar": llm_mapper.verfuegbar()}
+    return {**norm_lv.as_frontend(), **llm.status()}
 
 
 @router.get("/ocr-status")
@@ -313,13 +315,56 @@ def debug_lv(import_id: int, user: User = Depends(get_current_user), db: Session
         "costs": [
             {"bkp_nr": c.bkp_nr, "original_position": c.original_position,
              "original_title": c.original_title, "canonical_key": c.canonical_key,
+             "canonical_label": norm_lv.norm_label(c.canonical_key) if c.canonical_key else None,
+             "mapping_method": c.mapping_method,
+             "mapping_confidence": c.mapping_confidence,
+             "mapping_reason": c.mapping_reason,
+             "mapping_confirmed": bool(c.mapping_confirmed),
              "is_group_total": bool(c.is_group_total),
              "validation_status": c.validation_status,
-             "detected_amount": c.detected_amount, "source_page": c.source_page}
+             "detected_amount": c.detected_amount,
+             "confirmed_amount": c.confirmed_amount, "source_page": c.source_page}
             for c in imp.costs
         ],
+        # Konfiguration des Resolvers — nie Schlüssel, nur Zustand.
+        "llm": {**llm.status(),
+                "llm_positions_sent": report.get("llm_positions_sent"),
+                "llm_positions_mapped": report.get("llm_positions_mapped")},
         "report": report,
     }
+
+
+@router.post("/{import_id}/map-costs")
+def map_costs(import_id: int, user: User = Depends(get_current_user),
+              db: Session = Depends(get_db)):
+    """KI-Zuordnung für noch offene Kostenpositionen erneut ausführen (Punkt 19).
+
+    Bearbeitet ausschliesslich Positionen mit mapping_confirmed = false und ohne
+    bestehende Zuordnung — bestätigte Entscheidungen des Nutzers werden nie
+    überschrieben. Ist die KI nicht verfügbar, ist das kein Fehler: die Antwort
+    sagt es, der Import bleibt unverändert nutzbar."""
+    imp = _get_import(db, user, import_id)
+    if imp.status == LvImportStatus.approved.value:
+        raise HTTPException(status_code=409, detail="Import ist bereits freigegeben")
+
+    offen = [c for c in imp.costs
+             if not c.is_group_total and not c.canonical_key
+             and not c.mapping_confirmed and (c.original_title or "")]
+    zeilen = [{"original_position": c.original_position, "bkp_nr": c.bkp_nr,
+               "original_title": c.original_title, "canonical_key": None,
+               "mapping_confirmed": False, "is_group_total": False}
+              for c in offen]
+    stat = llm.apply_to_rows(zeilen)
+    for c, z in zip(offen, zeilen):
+        if z.get("mapping_method") or z.get("mapping_reason"):
+            c.canonical_key = z.get("canonical_key")
+            c.mapping_method = z.get("mapping_method")
+            c.mapping_confidence = z.get("mapping_confidence")
+            c.mapping_reason = z.get("mapping_reason")
+            # mapping_confirmed bleibt bewusst unberührt — nur der Mensch bestätigt.
+    db.commit()
+    db.refresh(imp)
+    return {"import": _import_out(imp, detail=True), **stat, **llm.status()}
 
 
 @router.patch("/{import_id}/features/{feature_id}")
@@ -554,23 +599,30 @@ def approve_lv(import_id: int, user: User = Depends(get_current_user), db: Sessi
     # Referenzkosten enthalten AUSSCHLIESSLICH Positionen mit bestätigter
     # Norm-LV-Zuordnung. Damit sieht ein Import genauso aus wie ein normal nach
     # dem Norm-LV ausgewertetes Projekt — keine halbstandardisierten Gruppenzeilen
-    # wie "248" für Leistungen, die es im Norm-LV nicht gibt.
+    # für Leistungen, die es im Norm-LV nicht gibt.
     #
-    # Der Betrag einer nicht zugeordneten Position verschwindet nicht: er bleibt
-    # in LvImportCost samt Originalnummer, Originaltitel und Begründung
-    # dokumentiert und ist im Review jederzeit einsehbar. Er fliesst nur nicht in
-    # die standardisierte Kostendatenbasis.
+    # Punkt 14 — mehrere Originalpositionen auf derselben Norm-Position werden zu
+    # EINER Zeile summiert. Eine manuelle Projektauswertung erfasst je Norm-
+    # Position ebenfalls einen Gesamtbetrag; drei Zeilen „243.5" wären ein anderes
+    # Datenformat als der Bestand. Die Originalzeilen bleiben unverändert in
+    # LvImportCost erhalten.
+    aggregiert: dict[str, dict] = {}
     for c in imp.costs:
         if c.is_group_total or not c.canonical_key or not c.mapping_confirmed:
             continue
         betrag = _cost_effective(c)
         if betrag is None:
             continue
+        eintrag = aggregiert.setdefault(c.canonical_key, {"betrag": 0.0, "quellen": []})
+        eintrag["betrag"] += float(betrag)
+        eintrag["quellen"].append(c.original_position or c.bkp_nr)
+
+    for key, eintrag in sorted(aggregiert.items()):
         db.add(RefKostenzeile(
             tenant_id=user.tenant_id, ref_projekt_id=ref.id, gewerk="heizung",
-            bkp_nr=c.canonical_key,
-            bkp_name=norm_lv.NORM_BY_KEY[c.canonical_key]["bezeichnung"],
-            betrag_chf=float(betrag),
+            bkp_nr=key,
+            bkp_name=norm_lv.NORM_BY_KEY[key]["bezeichnung"],
+            betrag_chf=round(eintrag["betrag"], 2),
         ))
 
     imp.status = LvImportStatus.approved.value

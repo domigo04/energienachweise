@@ -17,6 +17,21 @@ import { NODE_TYPES, NUMMERIERT, ROTATABLE } from '../../components/hc/nodes/Hyd
 import { EDGE_TYPES } from '../../components/hc/edges/FlowEdge';
 import { pairedHandleId, parallelWaypoints, roundedPolylinePath, splitRouteAtPoint, reconnectThroughNode, adaptivePolyline, segmentAchse, mitgezogeneWaypoints } from '../../components/hc/edges/geometry';
 import { createHydraulicEdge, canStartHydraulicLine } from './schema/edgeFactory';
+import {
+  DRAW_PIPE, HOME, escape as escapeMode, finishCommand, initialMode, istModify,
+  modeLabel, startCommand, toggleCommand, zeichnetLeitung,
+} from './schema/editorMode';
+import {
+  constrainPoint, laengeAusBuffer, laengeTaste, massAnker, massLabel,
+  rasterPunkt as rasterAufGitter,
+  punktAusLaenge,
+} from './schema/cadConstraints';
+import { ENDPOINT, GRID, NEAREST, PORT, fangStil } from './schema/cadSnap';
+import { segmentVerschieben } from './schema/cadEdit';
+import {
+  CAD_GRID, DEFAULT_DRAWING_CONFIG, GRID_OPTIONEN,
+  graphFuerEditor, normalisiereDrawingConfig,
+} from './schema/graphMigration';
 import { SCHALTUNGEN } from '../../components/hc/nodes/schaltungen';
 import {
   createSchema,
@@ -70,35 +85,12 @@ const LEITUNGS_LAYER = [
   { id:'neutral', label:'Allgemein', kurz:'Allg.', color:'#334155', role:null, dashed:false },
 ];
 const DEFAULT_LAYER_VISIBILITY = Object.fromEntries(LEITUNGS_LAYER.map(layer => [layer.id, true]));
-const CAD_GRID = 10;
 const EMPTY_OBJECT = Object.freeze({});
 const EMPTY_ARRAY = Object.freeze([]);
-const GRID_OPTIONEN = [2, 5, 10, 20, 25, 50];   // mm-Raster (Block A #2)
 const TOLERANZ_OPTIONEN = [4, 8, 12, 20];        // Fangtoleranz in mm
-const DEFAULT_DRAWING_CONFIG = {
-  corner_radius:8,
-  grid_size:CAD_GRID,
-  // Objektfang-Toleranz in mm (Block A #2). Wird beim Zeichnen durch den Zoom
-  // geteilt, damit die gefühlte Fangdistanz auf dem Schirm konstant bleibt.
-  snap_tolerance:10,
-  shortcut_polyline:'p',
-  shortcut_line:'l',
-  // Bauteil-Befehle auf frei belegbaren Tasten (Feedback Dominic). Verschieben
-  // läuft über die Pfeiltasten (Shift = grosser Schritt) und ist nicht belegbar.
-  shortcut_rotate:'d',
-  shortcut_mirror:'s',
-  shortcut_align:'a',
-  // Auto-Rücklauf standardmässig AUS: eine hydraulische Leitung entsteht nur
-  // durch eine bewusste Nutzeraktion. Bleibt als optionale Funktion einschaltbar.
-  auto_return:false,
-};
 
-const rasterPunkt = (point, grid = CAD_GRID) => ({
-  x:Math.round(point.x / grid) * grid,
-  y:Math.round(point.y / grid) * grid,
-});
-
-const shortcutTaste = (value, fallback) => String(value || fallback).trim().slice(-1).toLowerCase();
+// Rasterfang kommt aus dem Constraint-Modul — eine Quelle, nicht zwei.
+const rasterPunkt = (point, grid = CAD_GRID) => rasterAufGitter(point, grid);
 
 function graphFuerSpeicherung(nodes, edges, layerConfig, drawingConfig) {
   const saubereNodes = nodes.map(node => {
@@ -121,50 +113,6 @@ function graphFuerSpeicherung(nodes, edges, layerConfig, drawingConfig) {
   };
 }
 
-const normalisiereDrawingConfig = (config = {}) => ({
-  corner_radius:Math.max(0, Math.min(40, Number(config.corner_radius ?? DEFAULT_DRAWING_CONFIG.corner_radius) || 0)),
-  grid_size:GRID_OPTIONEN.includes(Number(config.grid_size)) ? Number(config.grid_size) : DEFAULT_DRAWING_CONFIG.grid_size,
-  snap_tolerance:Math.max(2, Math.min(40, Number(config.snap_tolerance ?? DEFAULT_DRAWING_CONFIG.snap_tolerance) || DEFAULT_DRAWING_CONFIG.snap_tolerance)),
-  shortcut_polyline:shortcutTaste(config.shortcut_polyline, DEFAULT_DRAWING_CONFIG.shortcut_polyline),
-  shortcut_line:shortcutTaste(config.shortcut_line, DEFAULT_DRAWING_CONFIG.shortcut_line),
-  shortcut_rotate:shortcutTaste(config.shortcut_rotate, DEFAULT_DRAWING_CONFIG.shortcut_rotate),
-  shortcut_mirror:shortcutTaste(config.shortcut_mirror, DEFAULT_DRAWING_CONFIG.shortcut_mirror),
-  shortcut_align:shortcutTaste(config.shortcut_align, DEFAULT_DRAWING_CONFIG.shortcut_align),
-  // Nur AN, wenn ein Schema Auto-RL ausdrücklich aktiviert hat. Fehlt der Wert
-  // (neues Schema oder Altbestand ohne Flag), gilt der neue Default AUS. Die
-  // bereits gezeichneten Leitungen bleiben unverändert — nur künftiges Zeichnen
-  // erzeugt keinen automatischen Rücklauf mehr.
-  auto_return:config.auto_return === true,
-});
-
-function graphFuerEditor(graph = {}) {
-  let nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
-  let maxNr = nodes.reduce((max, node) => Math.max(max, parseInt(node.data?.nr) || 0), 0);
-  nodes = nodes.map(node => {
-    if (node.type === 'junction' && !node.data?.cad_anchor) {
-      return {
-        ...node,
-        position:{ x:(node.position?.x || 0) + 6, y:(node.position?.y || 0) + 6 },
-        data:{ ...(node.data || {}), cad_anchor:true },
-      };
-    }
-    return (NUMMERIERT.includes(node.type) && node.data?.nr == null)
-      ? { ...node, data:{ ...node.data, nr:++maxNr } }
-      : node;
-  });
-  const drawingConfig = normalisiereDrawingConfig(graph.drawing_config);
-  const edges = (Array.isArray(graph.edges) ? graph.edges : []).map(edge => ({
-    ...edge,
-    data:{
-      ...(edge.data || {}),
-      cad_polyline:true,
-      polyline_version:1,
-      corner_radius:edge.data?.corner_radius ?? drawingConfig.corner_radius,
-    },
-  }));
-  return { nodes, edges, drawingConfig, layerConfig:graph.layer_config || {} };
-}
-
 const ruecklaufLayerVon = (layer) => {
   if (layer?.role !== 'vl' || !layer.id.endsWith('_vl')) return null;
   return LEITUNGS_LAYER.find(item => item.id === layer.id.replace(/_vl$/, '_rl')) || null;
@@ -177,33 +125,6 @@ const layerVonEdge = (edge) => {
   if (edge.style?.stroke === '#3b82f6') return LEITUNGS_LAYER[1];
   return LEITUNGS_LAYER.find(layer => layer.id === 'neutral');
 };
-
-// Exakter Richtungsfang wie im CAD-Lab: horizontal, vertikal oder diagonal.
-// Die Shift-Taste wird sowohl beim freien Leitungsende als auch beim Verschieben
-// eines Stützpunkts ausgewertet.
-function auf45GradFangen(origin, point, grid = 10) {
-  if (!origin) return point;
-  const dx = point.x - origin.x;
-  const dy = point.y - origin.y;
-  const sx = Math.sign(dx) || 1;
-  const sy = Math.sign(dy) || 1;
-  const angle = Math.round(Math.atan2(Math.abs(dy), Math.abs(dx)) / (Math.PI / 4));
-  if (angle <= 0) return { x: Math.round(point.x / grid) * grid, y: origin.y };
-  if (angle >= 2) return { x: origin.x, y: Math.round(point.y / grid) * grid };
-  const distance = Math.round(Math.max(Math.abs(dx), Math.abs(dy)) / grid) * grid;
-  return { x: origin.x + sx * distance, y: origin.y + sy * distance };
-}
-
-// Standard im Schema ist bewusst orthogonal. 45° entsteht nur über Shift;
-// ohne Shift gewinnt die Achse, in deren Richtung der Cursor weiter entfernt
-// liegt. Dadurch kann kein zufälliger flacher Winkel gespeichert werden.
-function orthogonalerSegmentfang(origin, point, grid = CAD_GRID) {
-  if (!origin) return rasterPunkt(point, grid);
-  const raster = rasterPunkt(point, grid);
-  return Math.abs(point.x - origin.x) >= Math.abs(point.y - origin.y)
-    ? { x:raster.x, y:origin.y }
-    : { x:origin.x, y:raster.y };
-}
 
 function erlaubterLeitungswinkel(a, b) {
   const dx = Math.abs(b.x - a.x);
@@ -347,15 +268,43 @@ function punktAnAchseSpiegeln(point, a, b) {
 const streckenLaenge = (points) => points.slice(1)
   .reduce((sum, point, index) => sum + Math.hypot(point.x - points[index].x, point.y - points[index].y), 0);
 
-function ConstrainedConnectionLine({ fromX, fromY, toX, toY, fromPosition, connectionLineStyle = {}, shift = false }) {
+function ConstrainedConnectionLine({ fromX, fromY, toX, toY, fromPosition, connectionLineStyle = {}, shift = false, ortho = true }) {
   const start = { x:fromX, y:fromY };
-  const target = shift
-    ? auf45GradFangen(start, { x:toX, y:toY }, 1)
-    : orthogonalerSegmentfang(start, { x:toX, y:toY }, 1);
+  const target = constrainPoint(start, { x:toX, y:toY }, { ortho, shift, grid:1 });
   const route = adaptivePolyline(start, target, [], String(fromPosition || '').toLowerCase(), null);
   return <path d={roundedPolylinePath(route, 8)} fill="none"
     stroke={connectionLineStyle.stroke || '#64748b'} strokeWidth={2.5} strokeDasharray="8 5" />;
 }
+// Punkt 5 — der Fangmarker. Jeder Fangtyp hat eine eigene Form, damit man ohne
+// Lesen erkennt, woran man fängt; der Kurztext benennt ihn zusätzlich.
+// Die Koordinate kommt aus demselben Objekt, das den Punkt setzt — dadurch kann
+// die Anzeige nie neben dem Klick liegen.
+function SnapMarker({ marker }) {
+  if (!marker) return null;
+  const { x, y, form, farbe, label } = marker;
+  const r = 7;
+  const glyph = {
+    circle:    <circle cx={x} cy={y} r={r} fill="none" stroke={farbe} strokeWidth="2.2" />,
+    square:    <rect x={x - r} y={y - r} width={r * 2} height={r * 2} fill="none" stroke={farbe} strokeWidth="2.2" />,
+    cross:     <g stroke={farbe} strokeWidth="2.2" strokeLinecap="round">
+                 <line x1={x - r} y1={y - r} x2={x + r} y2={y + r} />
+                 <line x1={x - r} y1={y + r} x2={x + r} y2={y - r} />
+               </g>,
+    triangle:  <polygon points={`${x},${y - r} ${x + r},${y + r} ${x - r},${y + r}`} fill="none" stroke={farbe} strokeWidth="2.2" />,
+    angle:     <polyline points={`${x - r},${y - r} ${x - r},${y + r} ${x + r},${y + r}`} fill="none" stroke={farbe} strokeWidth="2.2" />,
+    hourglass: <polygon points={`${x - r},${y - r} ${x + r},${y - r} ${x - r},${y + r} ${x + r},${y + r}`} fill="none" stroke={farbe} strokeWidth="2.2" />,
+    dot:       <circle cx={x} cy={y} r="2.6" fill={farbe} />,
+  }[form] || <circle cx={x} cy={y} r={r} fill="none" stroke={farbe} strokeWidth="2.2" />;
+  return (
+    <g pointerEvents="none">
+      {glyph}
+      {label && (
+        <text x={x + r + 5} y={y - r - 3} fill={farbe} fontSize="11" fontWeight="700">{label}</text>
+      )}
+    </g>
+  );
+}
+
 const WAERMEABGABE = [
   { label: 'Fussbodenheizung (FBH)',  vl: 35, rl: 28 },
   { label: 'Heizkörper modern (HK)', vl: 50, rl: 40 },
@@ -1365,6 +1314,8 @@ function EditorInner() {
     });
     return signature;
   });
+  // Zoom für die Statusleiste (Punkt 15) — live aus dem Viewport, nicht gemerkt.
+  const zoomAnzeige = useStore(state => state.transform[2]);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selected, setSelected]     = useState(null);
@@ -1382,15 +1333,28 @@ function EditorInner() {
   const [shiftPressed, setShiftPressed] = useState(false);
   const [drawingConfig, setDrawingConfig] = useState(DEFAULT_DRAWING_CONFIG);
   const [leitungsEntwurf, setLeitungsEntwurf] = useState(null);
-  // Expliziter Zeichenmodus: NUR wenn aktiv (oder eine Leitung im Entwurf ist),
-  // erzeugt ein Klick eine hydraulische Leitung. Sonst kein Edge-Erzeugen.
-  const [zeichenModus, setZeichenModus] = useState(false);
+  // EIN zentraler Befehlszustand (`schema/editorMode.js`). `modify` ist der
+  // Grundzustand; ESC führt aus jedem Befehl dorthin zurück. Die beiden Booleans
+  // `zeichenModus`/`dauerLeitung` werden daraus ABGELEITET und bleiben nur als
+  // Lesehilfe für den bestehenden Code — die Wahrheit steht im Modus.
+  const [editorMode, setEditorMode] = useState(initialMode);
+  const editorModeRef = useRef(HOME);
+  const zeichenModus = zeichnetLeitung(editorMode);
+  const dauerLeitung = zeichenModus && editorMode.persistent;
+  const istGrundzustand = istModify(editorMode);
   const zeichenModusRef = useRef(false);
-  // Dauerhafter Leitungsmodus (Block A #3): bleibt nach dem Abschluss einer
-  // Leitung aktiv, damit mehrere Leitungen ohne erneutes Einschalten gezeichnet
-  // werden können. Esc/Rechtsklick beenden ihn bewusst.
-  const [dauerLeitung, setDauerLeitung] = useState(false);
   const dauerLeitungRef = useRef(false);
+  // ORTHO wie im CAD: umschaltbarer Zustand, kein fest verdrahtetes Verhalten.
+  // Shift kehrt ihn temporär um (siehe `cadConstraints.aktiverConstraint`).
+  const [orthoAn, setOrthoAn] = useState(true);
+  const orthoAnRef = useRef(true);
+  // Objektfang gesamthaft abschaltbar (CAD-Statusleiste). Das Raster bleibt.
+  const [snapAn, setSnapAn] = useState(true);
+  const snapAnRef = useRef(true);
+  // Numerische Direkteingabe während des Zeichnens: Puffer der getippten Länge.
+  // Solange er nicht null ist, dürfen KEINE Shortcuts feuern.
+  const [laengenPuffer, setLaengenPuffer] = useState(null);
+  const laengenPufferRef = useRef(null);
   // Underlay: Hintergrund-Plan zum Nachzeichnen (§ Editor #5). Firmenweit im
   // Projekt gespeichert, aber getrennt vom Autosave des Graphen geladen.
   const [underlay, setUnderlay] = useState(null);
@@ -1437,8 +1401,14 @@ function EditorInner() {
   const leitungsCursorFrame = useRef(null);
 
   useEffect(() => { leitungsEntwurfRef.current = leitungsEntwurf; }, [leitungsEntwurf]);
-  useEffect(() => { zeichenModusRef.current = zeichenModus; }, [zeichenModus]);
-  useEffect(() => { dauerLeitungRef.current = dauerLeitung; }, [dauerLeitung]);
+  useEffect(() => {
+    editorModeRef.current = editorMode;
+    zeichenModusRef.current = zeichnetLeitung(editorMode);
+    dauerLeitungRef.current = zeichnetLeitung(editorMode) && editorMode.persistent;
+  }, [editorMode]);
+  useEffect(() => { orthoAnRef.current = orthoAn; }, [orthoAn]);
+  useEffect(() => { snapAnRef.current = snapAn; }, [snapAn]);
+  useEffect(() => { laengenPufferRef.current = laengenPuffer; }, [laengenPuffer]);
   useEffect(() => { leitungsCursorRef.current = leitungsCursor; }, [leitungsCursor]);
 
   useEffect(() => {
@@ -1513,6 +1483,8 @@ function EditorInner() {
   const editorGraphAnwenden = useCallback((graph) => {
     const geladen = graphFuerEditor(graph);
     setDrawingConfig(geladen.drawingConfig);
+    setOrthoAn(geladen.drawingConfig.ortho !== false);
+    setSnapAn(geladen.drawingConfig.object_snap !== false);
     setNodes(geladen.nodes);
     setEdges(geladen.edges);
     const active = LEITUNGS_LAYER.find(layer => layer.id === geladen.layerConfig?.active_layer_id);
@@ -1767,7 +1739,7 @@ function EditorInner() {
   edgesRef.current = edges;
 
   const activeLayer = LEITUNGS_LAYER.find(layer => layer.id === activeLayerId) || LEITUNGS_LAYER[0];
-  const connectionLineRenderer = useCallback((props) => <ConstrainedConnectionLine {...props} shift={shiftPressed} />, [shiftPressed]);
+  const connectionLineRenderer = useCallback((props) => <ConstrainedConnectionLine {...props} shift={shiftPressed} ortho={orthoAn} />, [shiftPressed, orthoAn]);
   const layerWaehlen = useCallback((layerId) => {
     const layer = LEITUNGS_LAYER.find(item => item.id === layerId);
     if (!layer) return;
@@ -2155,7 +2127,7 @@ function EditorInner() {
     const anchor = letzterEntwurfsPunkt(draft) || startPoint;
     const endPoint = snapHit
       ? { x:snapHit.x, y:snapHit.y }
-      : shift ? auf45GradFangen(anchor, rawPoint, drawingConfig.grid_size) : orthogonalerSegmentfang(anchor, rawPoint, drawingConfig.grid_size);
+      : constrainPoint(anchor, rawPoint, { ortho:orthoAnRef.current, shift, grid:drawingConfig.grid_size });
     if (!startPoint || Math.hypot(endPoint.x - startPoint.x, endPoint.y - startPoint.y) < 2) return;
     const finalPoints = [...(draft.points || [])];
     const connectionCorner = snapHit?.type === 'port'
@@ -2227,7 +2199,8 @@ function EditorInner() {
       leitungsCursorRef.current = null;
       setLeitungsGuides([]);
       setSelectedEdgeId(existing.id);
-      setZeichenModus(dauerLeitungRef.current);   // im Dauermodus aktiv bleiben
+      // Befehl fertig: Dauerbefehl bleibt aktiv, sonst zurück nach modify.
+      setEditorMode(finishCommand(editorModeRef.current));
       return;
     }
 
@@ -2275,7 +2248,7 @@ function EditorInner() {
       setLeitungsCursor(null);
       setLeitungsSnap(null);
       setLeitungsGuides([]);
-      setZeichenModus(dauerLeitungRef.current);
+      setEditorMode(finishCommand(editorModeRef.current));
       return;
     }
     const returnPair = ruecklaufPaarErstellen(edge, startPoint, endPoint);
@@ -2301,7 +2274,7 @@ function EditorInner() {
     setLeitungsGuides([]);
     setSelectedEdgeId(edgeId);
     // Nach Abschluss beenden — ausser der dauerhafte Leitungsmodus ist aktiv.
-    setZeichenModus(dauerLeitungRef.current);
+    setEditorMode(finishCommand(editorModeRef.current));
   }, [activeLayer, cadAnker, drawingConfig, handleAusrichtung, handlePosition, letzterEntwurfsPunkt, leitungTeilen, routePunkte, ruecklaufPaarErstellen, setEdges, setNodes, snap]);
 
   const cadKlick = useCallback((event, nurBeiAnschluss = false) => {
@@ -2313,8 +2286,10 @@ function EditorInner() {
       ? LEITUNGS_LAYER.find(item => item.id === draft.layerId) || activeLayer
       : activeLayer;
     const zoom = Math.max(getZoom(), 0.2);
-    const portHit = naechsterBauteilAnschluss(raw, null, layer.role, 28 / zoom);
-    const endpointHit = portHit ? null : naechsterFreierLeitungsEndpunkt(raw, layer.id, 16 / zoom, draft?.extendEdgeId);
+    // SNAP aus (Statusleiste): nur Raster und Richtungs-Constraint, kein Objektfang.
+    const fangAktiv = snapAnRef.current;
+    const portHit = fangAktiv ? naechsterBauteilAnschluss(raw, null, layer.role, 28 / zoom) : null;
+    const endpointHit = (!fangAktiv || portHit) ? null : naechsterFreierLeitungsEndpunkt(raw, layer.id, 16 / zoom, draft?.extendEdgeId);
 
     if (!draft) {
       if (nurBeiAnschluss && !portHit && !endpointHit) return true;
@@ -2333,19 +2308,21 @@ function EditorInner() {
     }
     if (nurBeiAnschluss) return true;
     const excludedEdges = draft.extendEdgeId ? new Set([draft.extendEdgeId]) : new Set();
-    const lineHit = naechsteLeitung(raw, layer.id, 22 / zoom, excludedEdges);
+    const lineHit = fangAktiv ? naechsteLeitung(raw, layer.id, 22 / zoom, excludedEdges) : null;
     if (lineHit) {
       leitungsEntwurfAbschliessen(lineHit, { ...lineHit, type:'line' }, event.shiftKey || shiftPressed);
       return true;
     }
     const previous = letzterEntwurfsPunkt(draft);
-    const alignment = objektAusrichtung(raw, [
+    const alignment = objektAusrichtung(raw, fangAktiv ? [
         ...objektFangpunkte,
         ...(previous ? [{ ...previous, kind:'draft', priority:1000 }] : []),
-      ], drawingConfig.snap_tolerance / zoom, drawingConfig.grid_size);
-    const point = event.shiftKey || shiftPressed
-      ? auf45GradFangen(previous, alignment.point, drawingConfig.grid_size)
-      : orthogonalerSegmentfang(previous, alignment.point, drawingConfig.grid_size);
+      ] : [], drawingConfig.snap_tolerance / zoom, drawingConfig.grid_size);
+    const point = constrainPoint(previous, alignment.point, {
+      ortho:orthoAnRef.current,
+      shift:event.shiftKey || shiftPressed,
+      grid:drawingConfig.grid_size,
+    });
     const next = { ...draft, points:[...(draft.points || []), point] };
     leitungsEntwurfRef.current = next;
     setLeitungsEntwurf(next);
@@ -2394,7 +2371,8 @@ function EditorInner() {
     leitungsCursorFrame.current = requestAnimationFrame(() => {
       const layer = LEITUNGS_LAYER.find(item => item.id === draft.layerId) || activeLayer;
       const zoom = Math.max(getZoom(), 0.2);
-      const portHit = naechsterBauteilAnschluss(raw, null, layer.role, 28 / zoom);
+      const fangAktiv = snapAnRef.current;
+      const portHit = fangAktiv ? naechsterBauteilAnschluss(raw, null, layer.role, 28 / zoom) : null;
       if (portHit) {
         leitungsCursorRef.current = portHit.position;
         setLeitungsCursor(portHit.position);
@@ -2410,7 +2388,7 @@ function EditorInner() {
         }] : []);
         return;
       }
-      const endpointHit = naechsterFreierLeitungsEndpunkt(raw, layer.id, 16 / zoom, draft.extendEdgeId);
+      const endpointHit = fangAktiv ? naechsterFreierLeitungsEndpunkt(raw, layer.id, 16 / zoom, draft.extendEdgeId) : null;
       if (endpointHit) {
         leitungsCursorRef.current = endpointHit.position;
         setLeitungsCursor(endpointHit.position);
@@ -2419,7 +2397,7 @@ function EditorInner() {
         return;
       }
       const excludedEdges = draft.extendEdgeId ? new Set([draft.extendEdgeId]) : new Set();
-      const lineHit = naechsteLeitung(raw, layer.id, 22 / zoom, excludedEdges);
+      const lineHit = fangAktiv ? naechsteLeitung(raw, layer.id, 22 / zoom, excludedEdges) : null;
       if (lineHit) {
         leitungsCursorRef.current = { x:lineHit.x, y:lineHit.y };
         setLeitungsCursor({ x:lineHit.x, y:lineHit.y });
@@ -2428,13 +2406,15 @@ function EditorInner() {
         return;
       }
       const previous = letzterEntwurfsPunkt(draft);
-      const alignment = objektAusrichtung(raw, [
+      const alignment = objektAusrichtung(raw, fangAktiv ? [
           ...objektFangpunkte,
           ...(previous ? [{ ...previous, kind:'draft', priority:1000 }] : []),
-        ], drawingConfig.snap_tolerance / zoom, drawingConfig.grid_size);
-      const point = event.shiftKey || shiftPressed
-        ? auf45GradFangen(previous, alignment.point, drawingConfig.grid_size)
-        : orthogonalerSegmentfang(previous, alignment.point, drawingConfig.grid_size);
+        ] : [], drawingConfig.snap_tolerance / zoom, drawingConfig.grid_size);
+      const point = constrainPoint(previous, alignment.point, {
+        ortho:orthoAnRef.current,
+        shift:event.shiftKey || shiftPressed,
+        grid:drawingConfig.grid_size,
+      });
       leitungsCursorRef.current = point;
       setLeitungsCursor(point);
       setLeitungsSnap(null);
@@ -2470,6 +2450,61 @@ function EditorInner() {
     );
   })();
 
+  // Punkt 7 — temporäres Mass des laufenden Segments. Kommt aus GENAU der
+  // Vorschauroute, die auch gezeichnet wird; es kann also nie eine andere Länge
+  // anzeigen als die, die beim Klick entsteht.
+  const cadMass = useMemo(() => {
+    if (cadEntwurfRoute.length < 2) return null;
+    const a = cadEntwurfRoute.at(-2);
+    const b = cadEntwurfRoute.at(-1);
+    const anker = massAnker(a, b, Math.max(10, drawingConfig.grid_size * 1.4));
+    if (!anker?.laenge) return null;
+    return { ...anker, label:massLabel(anker.laenge) };
+  }, [cadEntwurfRoute, drawingConfig.grid_size]);
+
+  // Punkt 5 — den intern gefundenen Fang auf einen CAD-Fangtyp abbilden. Das ist
+  // die EINZIGE Stelle, an der die Darstellung entsteht; Koordinate und Marker
+  // stammen aus demselben `leitungsSnap`/`leitungsCursor`.
+  const snapMarker = useMemo(() => {
+    if (!leitungsEntwurf) return null;
+    if (leitungsSnap) {
+      // Ein Port-Treffer mit Bauteil ist ein Anschluss, einer ohne (freier
+      // Leitungsanfang) ein Endpunkt. Auf einer Leitung liegt der Fang zwischen
+      // zwei Punkten — im CAD „Nearest".
+      const typ = leitungsSnap.type === 'line'
+        ? NEAREST
+        : leitungsSnap.handleId ? PORT : ENDPOINT;
+      return { ...fangStil(typ), typ, x:leitungsSnap.x, y:leitungsSnap.y };
+    }
+    if (!snapAn || !leitungsCursor) return null;
+    const stil = fangStil(GRID);
+    return { ...stil, typ:GRID, label:null, x:leitungsCursor.x, y:leitungsCursor.y };
+  }, [leitungsCursor, leitungsEntwurf, leitungsSnap, snapAn]);
+
+  // Punkt 8 — getippte Länge übernehmen. Die Richtung kommt aus der aktuellen
+  // Vorschau, die Länge aus der Tastatur: exakt wie in Revit/AutoCAD.
+  const laengeAnwenden = useCallback((buffer) => {
+    const laenge = laengeAusBuffer(buffer);
+    const draft = leitungsEntwurfRef.current;
+    setLaengenPuffer(null);
+    if (!laenge || !draft) return;
+    const origin = letzterEntwurfsPunkt(draft);
+    const richtung = leitungsCursorRef.current;
+    const ziel = punktAusLaenge(origin, richtung, laenge, {
+      ortho:orthoAnRef.current,
+      shift:shiftPressed,
+    });
+    // Ohne brauchbare Richtung wird nichts erfunden — der Entwurf bleibt offen.
+    if (!ziel) return;
+    const next = { ...draft, points:[...(draft.points || []), ziel] };
+    leitungsEntwurfRef.current = next;
+    setLeitungsEntwurf(next);
+    leitungsCursorRef.current = ziel;
+    setLeitungsCursor(ziel);
+    setLeitungsSnap(null);
+    setLeitungsGuides([]);
+  }, [letzterEntwurfsPunkt, shiftPressed]);
+
   const punktHinzufuegen = useCallback((event, edgeId) => {
     event.preventDefault();
     const edge = edgesRef.current.find(item => item.id === edgeId);
@@ -2489,11 +2524,9 @@ function EditorInner() {
     const basePoints = route.slice(1, -1);
     const origin = route[best.segmentIndex];
     const raster = rasterPunkt(best, drawingConfig.grid_size);
-    const point = event.shiftKey
-      ? auf45GradFangen(origin, best, drawingConfig.grid_size)
-      : erlaubterLeitungswinkel(origin, raster)
-        ? raster
-        : orthogonalerSegmentfang(origin, best, drawingConfig.grid_size);
+    const point = (!event.shiftKey && erlaubterLeitungswinkel(origin, raster))
+      ? raster
+      : constrainPoint(origin, best, { ortho:orthoAnRef.current, shift:event.shiftKey, grid:drawingConfig.grid_size });
     basePoints.splice(best.segmentIndex, 0, point);
     setEdges(items => items.map(item => item.id === edgeId
       ? { ...item, data:{ ...(item.data || {}), cad_polyline:true, points:basePoints } }
@@ -2572,25 +2605,13 @@ function EditorInner() {
       const drag = edgeSegmentDrag.current;
       if (!drag) return;
       const raw = screenToFlowPosition({ x:event.clientX, y:event.clientY });
-      let moveX = raw.x - drag.pointer.x;
-      let moveY = raw.y - drag.pointer.y;
-      if (drag.orientation === 'vertical') {
-        moveX = Math.round(moveX / drawingConfig.grid_size) * drawingConfig.grid_size;
-        moveY = 0;
-      } else if (drag.orientation === 'horizontal') {
-        moveX = 0;
-        moveY = Math.round(moveY / drawingConfig.grid_size) * drawingConfig.grid_size;
-      } else {
-        const length = Math.hypot(drag.direction.x, drag.direction.y) || 1;
-        const nx = -drag.direction.y / length;
-        const ny = drag.direction.x / length;
-        const distance = Math.round((moveX * nx + moveY * ny) / drawingConfig.grid_size) * drawingConfig.grid_size;
-        moveX = nx * distance;
-        moveY = ny * distance;
-      }
-      const nextPoints = drag.points.map((point, index) => drag.pointIndexes.includes(index)
-        ? { x:point.x + moveX, y:point.y + moveY }
-        : point);
+      // Punkt 11 — Segment parallel verschieben; die Nachbarsegmente verlängern
+      // sich dadurch von selbst. Rechnung in `schema/cadEdit.js` (getestet).
+      const nextPoints = segmentVerschieben(
+        drag.points, drag.pointIndexes, drag.orientation,
+        { x:raw.x - drag.pointer.x, y:raw.y - drag.pointer.y },
+        { grid:drawingConfig.grid_size, direction:drag.direction },
+      );
       if (edgePointFrame.current) cancelAnimationFrame(edgePointFrame.current);
       edgePointFrame.current = requestAnimationFrame(() => {
         setEdges(items => items.map(item => item.id === drag.edgeId
@@ -2618,9 +2639,9 @@ function EditorInner() {
         ? points[drag.pointIndex - 1]
         : handlePosition(edge.source, edge.sourceHandle);
       const raw = screenToFlowPosition({ x:event.clientX, y:event.clientY });
-      const point = event.shiftKey
-        ? auf45GradFangen(origin, raw, drawingConfig.grid_size)
-        : orthogonalerSegmentfang(origin, raw, drawingConfig.grid_size);
+      const point = constrainPoint(origin, raw, {
+        ortho:orthoAnRef.current, shift:event.shiftKey, grid:drawingConfig.grid_size,
+      });
       if (edgePointFrame.current) cancelAnimationFrame(edgePointFrame.current);
       edgePointFrame.current = requestAnimationFrame(() => {
         setEdges(items => items.map(item => {
@@ -2697,9 +2718,9 @@ function EditorInner() {
   useEffect(() => {
     const punktFuerEvent = (event, drag) => {
       const raw = screenToFlowPosition({ x:event.clientX, y:event.clientY });
-      return event.shiftKey
-        ? auf45GradFangen(drag.otherPoint, raw, drawingConfig.grid_size)
-        : orthogonalerSegmentfang(drag.otherPoint, raw, drawingConfig.grid_size);
+      return constrainPoint(drag.otherPoint, raw, {
+        ortho:orthoAnRef.current, shift:event.shiftKey, grid:drawingConfig.grid_size,
+      });
     };
     const move = (event) => {
       const drag = edgeEndpointDrag.current;
@@ -2769,6 +2790,26 @@ function EditorInner() {
     const handler = (ev) => {
       const tag = document.activeElement?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (document.activeElement?.isContentEditable) return;
+
+      // ── Numerische Direkteingabe (Punkt 8) ──────────────────────────────
+      // Läuft eine Längeneingabe, gehört die Tastatur AUSSCHLIESSLICH ihr.
+      // Sonst würde eine getippte Zahl nebenbei einen Befehl auslösen.
+      if (laengenPufferRef.current !== null && !ev.metaKey && !ev.ctrlKey) {
+        ev.preventDefault();
+        const { buffer, action } = laengeTaste(laengenPufferRef.current, ev.key);
+        if (action === 'abbrechen') { setLaengenPuffer(null); return; }
+        if (action === 'anwenden') { laengeAnwenden(buffer); return; }
+        setLaengenPuffer(buffer);
+        return;
+      }
+      // Eine Ziffer während des Zeichnens ERÖFFNET die Längeneingabe.
+      if (leitungsEntwurfRef.current && !ev.metaKey && !ev.ctrlKey && /^[0-9]$/.test(ev.key)) {
+        ev.preventDefault();
+        setLaengenPuffer(ev.key);
+        return;
+      }
+
       if ((ev.metaKey || ev.ctrlKey) && ev.key === 'z') {
         ev.preventDefault(); undo();
       }
@@ -2790,29 +2831,26 @@ function EditorInner() {
           setSelected(null);
           setSelectedEdgeId(null);
           setEndpointMenu(null);
-          setZeichenModus(true);   // expliziten Zeichenmodus aktivieren
+          setEditorMode(startCommand(DRAW_PIPE));   // Leitungsbefehl starten
           return;
         }
-        if (ev.key === 'Escape' && spiegelAchse) {
-          setSpiegelAchse(null);
-          return;
-        }
-        if (ev.key === 'Escape' && (endpointMenu || edgeMenu)) {
-          setEndpointMenu(null);
-          setEdgeMenu(null);
-          return;
-        }
-        // Esc bricht jede aktive Zeichenaktion vollständig ab UND verlässt den
-        // Zeichenmodus — auch den dauerhaften Leitungsmodus.
-        if (ev.key === 'Escape' && (leitungsEntwurfRef.current || zeichenModusRef.current || dauerLeitungRef.current)) {
+        // ── ESC (Punkt 1) ─────────────────────────────────────────────────
+        // EIN Zweig, ohne Bedingung: ESC bricht jede laufende Aktion ab und
+        // endet IMMER im Grundzustand `modify`. Es darf keinen Zustand geben,
+        // aus dem ESC nicht herausführt — auch nicht den Dauerbefehl.
+        if (ev.key === 'Escape') {
+          ev.preventDefault();
           leitungsEntwurfRef.current = null;
           leitungsCursorRef.current = null;
           setLeitungsEntwurf(null);
           setLeitungsCursor(null);
           setLeitungsSnap(null);
           setLeitungsGuides([]);
-          setZeichenModus(false);
-          setDauerLeitung(false);
+          setLaengenPuffer(null);
+          setSpiegelAchse(null);
+          setEndpointMenu(null);
+          setEdgeMenu(null);
+          setEditorMode(escapeMode(editorModeRef.current));
           return;
         }
         if (ev.key === 'Enter' && leitungsEntwurfRef.current && leitungsCursorRef.current) {
@@ -2855,7 +2893,7 @@ function EditorInner() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [undo, selected, selectedEdgeId, snap, rotateNode, mirrorNode, alignNode, nudgeNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, spiegelAchse, drawingConfig, setNodes]);
+  }, [undo, selected, selectedEdgeId, snap, rotateNode, mirrorNode, alignNode, nudgeNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, spiegelAchse, drawingConfig, setNodes, laengeAnwenden]);
 
   // Berechnete Werte (Backend) in die Node-Daten spiegeln — nur für die Anzeige.
   // Verteiler-Rahmen: nur die Balken sind greifbar (dragHandle), die Lücke
@@ -3286,8 +3324,8 @@ function EditorInner() {
     setLeitungsCursor(null);
     setLeitungsSnap(null);
     setLeitungsGuides([]);
-    setZeichenModus(false);
-    setDauerLeitung(false);
+    setEditorMode(escapeMode(editorModeRef.current));
+    setLaengenPuffer(null);
   }, []);
   const selectedNode  = selected  ? nodes.find(n => n.id === selected.id)  || null : null;
   const selectedEdge  = selectedEdgeId ? edges.find(e => e.id === selectedEdgeId) || null : null;
@@ -3502,10 +3540,14 @@ function EditorInner() {
       </header>
 
       <nav className="hc-editor-toolbar" aria-label="Schema-Werkzeuge">
-        <div className={`hc-drawing-state${leitungsEntwurf ? ' is-active' : ''}`}
-          title="Bauteil auswählen oder auf Fangpunkt beziehungsweise freie Fläche klicken">
-          <span className="hc-drawing-state__icon">{leitungsEntwurf ? '⌁' : <Check size={13} />}</span>
-          <span>{leitungsEntwurf ? 'Leitung wird gezeichnet' : 'Direktes Zeichnen aktiv'}</span>
+        <div className={`hc-drawing-state${istGrundzustand ? '' : ' is-active'}`}
+          title={istGrundzustand
+            ? 'Grundzustand: auswählen und bearbeiten. L startet den Leitungsbefehl.'
+            : 'Befehl aktiv — Esc führt zurück in den Grundzustand.'}>
+          <span className="hc-drawing-state__icon">{istGrundzustand ? <Check size={13} /> : '⌁'}</span>
+          <span>{istGrundzustand
+            ? 'Modify — auswählen'
+            : leitungsEntwurf ? 'Leitung wird gezeichnet' : `${modeLabel(editorMode)} — Klick setzt Punkt`}</span>
         </div>
 
         <ToolbarMenu label="Vorlagen" icon={LayoutTemplate}>
@@ -3591,13 +3633,13 @@ function EditorInner() {
 
         <div style={{ display:'inline-flex', gap:4 }}>
           <button
-            onClick={() => setZeichenModus(v => !v)}
+            onClick={() => setEditorMode(m => toggleCommand(m, DRAW_PIPE, { persistent:m.persistent }))}
             className={`hc-auto-return${zeichenModus ? ' is-active' : ''}`}
             title="Leitung zeichnen (Taste L/P) · Esc oder Rechtsklick bricht ab">
             ✏ Leitung {zeichenModus ? 'zeichnen …' : 'zeichnen'}
           </button>
           <button
-            onClick={() => setDauerLeitung(v => { const next = !v; if (next) setZeichenModus(true); return next; })}
+            onClick={() => setEditorMode(m => startCommand(DRAW_PIPE, { persistent:!(zeichnetLeitung(m) && m.persistent) }))}
             className={`hc-auto-return${dauerLeitung ? ' is-active' : ''}`}
             title="Dauerhafter Leitungsmodus: bleibt nach jeder Leitung aktiv, bis Esc oder Rechtsklick">
             ⤾ Dauer {dauerLeitung ? 'an' : 'aus'}
@@ -3757,9 +3799,19 @@ function EditorInner() {
                     <circle cx={guide.x1} cy={guide.y1} r="4" fill="#f0fdf4" stroke="#16a34a" strokeWidth="1.5" />
                   </g>
                 ))}
-                {leitungsSnap && (
-                  <circle cx={leitungsSnap.x} cy={leitungsSnap.y} r="12" fill="none"
-                    stroke={leitungsSnap.type === 'line' ? '#7c3aed' : '#16a34a'} strokeWidth="3" strokeDasharray="5 3" />
+                {/* Punkt 5 — sichtbarer Fang. Form UND Text sagen, woran gefangen
+                    wird; die Koordinate ist dieselbe, die der Klick setzt. */}
+                {snapMarker && <SnapMarker marker={snapMarker} />}
+                {/* Punkt 7 — temporäres Mass des laufenden Segments. */}
+                {cadMass && (
+                  <g pointerEvents="none">
+                    <rect x={cadMass.x - 30} y={cadMass.y - 11} width="60" height="22" rx="5"
+                      fill="#0f172aee" />
+                    <text x={cadMass.x} y={cadMass.y + 5} textAnchor="middle"
+                      fill="#f8fafc" fontSize="13" fontWeight="700" fontFamily="ui-monospace, monospace">
+                      {cadMass.label}
+                    </text>
+                  </g>
                 )}
                 {spiegelAchse?.start && spiegelAchse?.cursor && (
                   <line x1={spiegelAchse.start.x} y1={spiegelAchse.start.y}
@@ -3887,6 +3939,45 @@ function EditorInner() {
               )}
             </div>
           )}
+
+          {/* Punkt 8 — numerische Direkteingabe als Canvas-Overlay, nicht als
+              Formularfeld rechts. Erscheint nur, während tatsächlich getippt wird. */}
+          {laengenPuffer !== null && (
+            <div className="hc-cad-eingabe" role="status">
+              <span className="hc-cad-eingabe__label">Länge</span>
+              <span className="hc-cad-eingabe__wert">{laengenPuffer || '0'}</span>
+              <span className="hc-cad-eingabe__einheit">mm</span>
+              <span className="hc-cad-eingabe__hinweis">Enter = setzen · Esc = abbrechen</span>
+            </div>
+          )}
+
+          {/* Punkt 15 — Statusleiste. Der aktive Modus steht immer hier. */}
+          <div className="hc-statusbar">
+            <span className={`hc-statusbar__mode${istGrundzustand ? '' : ' is-command'}`}>
+              {modeLabel(editorMode)}
+              {dauerLeitung ? ' · Dauer' : ''}
+            </span>
+            <button type="button"
+              onClick={() => setOrthoAn(v => { setDrawingConfig(c => ({ ...c, ortho:!v })); return !v; })}
+              className={`hc-statusbar__toggle${orthoAn ? ' is-on' : ''}`}
+              title="Orthogonal zeichnen (Shift kehrt es kurz um)">ORTHO</button>
+            <button type="button"
+              onClick={() => setSnapAn(v => { setDrawingConfig(c => ({ ...c, object_snap:!v })); return !v; })}
+              className={`hc-statusbar__toggle${snapAn ? ' is-on' : ''}`}
+              title="Objektfang auf Anschlüsse, Endpunkte und Leitungen">SNAP</button>
+            <label className="hc-statusbar__raster">
+              Raster
+              <select value={drawingConfig.grid_size} aria-label="Rasterweite"
+                onChange={e => setDrawingConfig(c => ({ ...c, grid_size:Number(e.target.value) }))}>
+                {GRID_OPTIONEN.map(size => <option key={size} value={size}>{size} mm</option>)}
+              </select>
+            </label>
+            <span className="hc-statusbar__system" style={{ color:activeLayer.color }}>
+              ● {activeLayer.label}
+            </span>
+            {cadMass && <span className="hc-statusbar__mass">{cadMass.label}</span>}
+            <span className="hc-statusbar__zoom">{Math.round(zoomAnzeige * 100)} %</span>
+          </div>
         </main>
 
         {/* Properties */}

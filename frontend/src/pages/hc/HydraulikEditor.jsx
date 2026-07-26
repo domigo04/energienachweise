@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   AlertTriangle, ArrowLeft, Check, ChevronDown, Download, Eye, History,
   Image as ImageIcon, Layers3, LayoutTemplate, Lock, Unlock, PanelLeftClose, PanelLeftOpen, RotateCcw,
-  PanelRightClose, PanelRightOpen, Save as SaveIcon, Settings2, Trash2, Undo2, X,
+  PanelRightClose, PanelRightOpen, Redo2, Save as SaveIcon, Settings2, Trash2, Undo2, X,
 } from 'lucide-react';
 import {
   ReactFlow, Background, BackgroundVariant, Controls, MiniMap,
@@ -1731,11 +1731,15 @@ function EditorInner() {
 
   // Undo-History
   const snapshots = useRef([]);
+  // Gegenstapel für das Wiederherstellen. Jede neue Änderung verwirft ihn — sonst
+  // würde ein Wiederherstellen auf einen Ast führen, den es nicht mehr gibt.
+  const wiederStapel = useRef([]);
   const snap = useCallback(() => {
     snapshots.current = [...snapshots.current.slice(-30), {
       n: JSON.parse(JSON.stringify(nodes)),
       e: JSON.parse(JSON.stringify(edges)),
     }];
+    wiederStapel.current = [];
   }, [nodes, edges]);
   // BEFUND aus dem Browsertest: eine Bauteilverschiebung liess sich nicht
   // zurücknehmen. `snap()` legt VOR jeder Änderung den Zustand ab, wie er vorher
@@ -1750,8 +1754,30 @@ function EditorInner() {
   const undo = useCallback(() => {
     const vorher = snapshots.current.pop();
     if (!vorher) return;
+    // Den aktuellen Stand auf den Gegenstapel legen, damit er wiederherstellbar
+    // bleibt. `snap()` darf hier NICHT verwendet werden — es würde den
+    // Gegenstapel gleich wieder leeren.
+    wiederStapel.current = [...wiederStapel.current.slice(-30), {
+      n: JSON.parse(JSON.stringify(nodesRef.current)),
+      e: JSON.parse(JSON.stringify(edgesRef.current)),
+    }];
     setNodes(vorher.n);
     setEdges(vorher.e);
+    setSelected(null);
+    setSelectedEdgeId(null);
+  }, [setNodes, setEdges]);
+
+  // Wiederherstellen (Strg/Cmd + Shift + Z). Spiegelbildlich zum Zurücknehmen:
+  // der wiederhergestellte Stand wird selbst wieder rücknehmbar.
+  const redo = useCallback(() => {
+    const naechster = wiederStapel.current.pop();
+    if (!naechster) return;
+    snapshots.current = [...snapshots.current.slice(-30), {
+      n: JSON.parse(JSON.stringify(nodesRef.current)),
+      e: JSON.parse(JSON.stringify(edgesRef.current)),
+    }];
+    setNodes(naechster.n);
+    setEdges(naechster.e);
     setSelected(null);
     setSelectedEdgeId(null);
   }, [setNodes, setEdges]);
@@ -3063,8 +3089,13 @@ function EditorInner() {
         return;
       }
 
-      if ((ev.metaKey || ev.ctrlKey) && ev.key === 'z') {
-        ev.preventDefault(); undo();
+      if ((ev.metaKey || ev.ctrlKey) && (ev.key === 'z' || ev.key === 'Z')) {
+        ev.preventDefault();
+        // Shift kehrt die Richtung um — dieselbe Gewohnheit wie in Revit/CAD.
+        if (ev.shiftKey) redo(); else undo();
+      }
+      if ((ev.metaKey || ev.ctrlKey) && (ev.key === 'y' || ev.key === 'Y')) {
+        ev.preventDefault(); redo();
       }
       if ((ev.metaKey || ev.ctrlKey) && (ev.key === 'c' || ev.key === 'C')) {
         if (selected) { const n = nodesRef.current.find(x => x.id === selected.id); if (n) clipboard.current = n; }
@@ -3148,7 +3179,7 @@ function EditorInner() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [undo, selected, selectedEdgeId, snap, rotateNode, mirrorNode, alignNode, nudgeNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, spiegelAchse, drawingConfig, setNodes, laengeAnwenden]);
+  }, [undo, redo, selected, selectedEdgeId, snap, rotateNode, mirrorNode, alignNode, nudgeNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, spiegelAchse, drawingConfig, setNodes, laengeAnwenden]);
 
   // Berechnete Werte (Backend) in die Node-Daten spiegeln — nur für die Anzeige.
   // Verteiler-Rahmen: nur die Balken sind greifbar (dragHandle), die Lücke
@@ -3840,6 +3871,9 @@ function EditorInner() {
         <div className="hc-editor-header__actions">
           <button onClick={undo} className="hc-icon-button" title="Rückgängig (⌘/Ctrl + Z)">
             <Undo2 size={17} />
+          </button>
+          <button onClick={redo} className="hc-icon-button" title="Wiederherstellen (⌘/Ctrl + Shift + Z)">
+            <Redo2 size={17} />
           </button>
           <button onClick={()=>{ setStandFehler(''); setStandDialogOpen(true); }}
             disabled={!schemaId} className="hc-stand-save-button" title="Unveränderlichen Schema-Stand speichern">

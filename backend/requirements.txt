@@ -22,3 +22,5 @@ numpy  # Potenzfunktion-Regression (Grobkostenschätzung BKP)
 pytesseract  # OCR gescannter LVs (P0 #1) — braucht das Tesseract-Binary (nixpacks.toml)
 pdf2image  # rendert Bild-PDF-Seiten für OCR — braucht poppler-utils (nixpacks.toml)
 pdfplumber  # Wortkoordinaten für die räumliche LV-Tabellenerkennung (Punkt 3/4)
+anthropic  # KI-Zuordnung offener LV-Kostenpositionen (COST_MAPPING_LLM_PROVIDER=anthropic)
+openai  # dito für COST_MAPPING_LLM_PROVIDER=openai

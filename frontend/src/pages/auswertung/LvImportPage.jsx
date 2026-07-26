@@ -58,14 +58,21 @@ const METHODE = {
 // Alt-Importe ohne gespeicherte Methode aus is_searchable herleiten.
 const methodeOf = (imp) => METHODE[imp.extract_method] ? imp.extract_method : (imp.is_searchable ? "text" : "image");
 
-// Wie eine Kostenposition dem Norm-LV zugeordnet wurde. Sichtbar, damit
-// nachvollziehbar bleibt, was automatisch und was per LLM entschieden wurde.
+// Punkt 17 — WIE die Norm-LV-Zuordnung entstanden ist. Für die Prüfung zählt
+// die Methode (deterministisch oder Vorschlag), nicht der Anbieter dahinter;
+// welches Modell geantwortet hat, gehört in den Debug-Bereich, nicht hierher.
 const MAPPING = {
-  exact: { label: "exakt", style: "bg-green-100 text-green-700" },
-  rule: { label: "Regel", style: "bg-green-100 text-green-700" },
-  llm: { label: "KI-Vorschlag", style: "bg-violet-100 text-violet-700" },
-  manual: { label: "manuell", style: "bg-slate-100 text-slate-600" },
+  exact: { label: "Exakt", style: "bg-green-100 text-green-700",
+    hilfe: "Titel stimmt wörtlich mit der Norm-LV-Position überein." },
+  rule: { label: "Regel", style: "bg-green-100 text-green-700",
+    hilfe: "Feste Zuordnungsregel im Backend — kein Modell beteiligt." },
+  llm: { label: "KI", style: "bg-violet-100 text-violet-700",
+    hilfe: "Vorschlag einer KI. Bitte prüfen — er gilt erst, wenn du ihn bestätigst." },
+  manual: { label: "Manuell", style: "bg-slate-100 text-slate-600",
+    hilfe: "Von Hand zugeordnet." },
 };
+const NICHT_ZUGEORDNET = { label: "Nicht zugeordnet", style: "bg-amber-100 text-amber-700",
+  hilfe: "Keine passende Norm-LV-Position gefunden." };
 
 // Punkt 21 — vier klare Schritte statt einer langen Seite.
 const SCHRITTE = [
@@ -383,6 +390,9 @@ function ReviewAnsicht({ id }) {
       ? g.positionen.reduce((x, c) => x + (c.effective_amount ?? 0), 0)
       : (g.total?.effective_amount ?? 0)
   ), 0);
+  // Punkt 15 — dritte Summe: was gelesen wurde, aber nicht in die Referenz geht.
+  // Als Rest definiert, damit Summe 2 + Summe 3 immer genau Summe 1 ergibt.
+  const ausserhalbTotal = Math.max(0, kostenTotal - referenzTotal);
   const alleGeprueft = featTotal > 0 && featGeprueft === featTotal
     && kostenOffen === 0 && zuordnungOffen === 0;
   const grunddatenGesetzt = ["ebf_m2", "anzahl_einheiten", "gebaeudetyp", "projektart",
@@ -637,84 +647,104 @@ function ReviewAnsicht({ id }) {
             </div>
             <div className="divide-y divide-slate-100">
               {positionen.map((c) => (
-                <div key={c.id} className="grid gap-2 px-4 py-2.5 sm:grid-cols-[1fr_auto] sm:items-center sm:px-5">
-                  <div className="min-w-0">
-                    <span className="text-sm font-medium text-slate-900">
-                      {c.original_position || `BKP ${c.bkp_nr}`}
-                      {c.original_title ? ` ${c.original_title}` : ""}
-                    </span>
-                    {c.positionen > 1 && !c.original_position && (
-                      <span className="ml-1 text-[11px] text-slate-400">({c.positionen} Positionen aggregiert)</span>
-                    )}
-                    {c.manual && <span className="ml-1 rounded bg-slate-100 px-1 text-[10px] font-semibold text-slate-500">manuell</span>}
-                    {c.mapping_method && MAPPING[c.mapping_method] && (
-                      <span className={`ml-1 rounded px-1 text-[10px] font-semibold ${MAPPING[c.mapping_method].style}`}
-                        title={c.mapping_reason || ""}>
-                        {MAPPING[c.mapping_method].label}
-                        {c.mapping_confidence != null && c.mapping_method === "llm"
-                          ? ` ${Math.round(c.mapping_confidence * 100)}%` : ""}
-                      </span>
-                    )}
-                    {!c.canonical_key && !c.manual && (
-                      <span className={`ml-1 rounded px-1 text-[10px] font-semibold ${c.mapping_confirmed ? "bg-slate-100 text-slate-500" : "bg-amber-100 text-amber-700"}`}
-                        title={c.mapping_reason || "Keine passende Norm-LV-Position"}>
-                        {c.mapping_confirmed ? "von Referenz ausgeschlossen" : "keine passende Position"}
-                      </span>
-                    )}
-                    {!c.is_group_total && normLv && (
-                      <div className="mt-1 flex flex-wrap items-center gap-2">
-                        <select className="input h-7 min-w-0 flex-1 py-0 text-[11px]" disabled={gesperrt}
-                          value={c.canonical_key || ""}
-                          onChange={(e) => setCost(c, { canonical_key: e.target.value })}>
-                          <option value="">— keine passende Norm-LV-Position —</option>
-                          {Object.entries(normLv.gruppen || {}).map(([g, name]) => (
-                            <optgroup key={g} label={`${g} ${name}`}>
-                              {(normLv.positionen || []).filter((p) => p.gruppe === g).map((p) => (
-                                <option key={p.key} value={p.key}>{p.key} {p.bezeichnung}</option>
-                              ))}
-                            </optgroup>
-                          ))}
-                        </select>
-                        {c.canonical_key ? (
-                          <label className={`inline-flex shrink-0 items-center gap-1 text-[11px] font-semibold ${c.mapping_confirmed ? "text-green-600" : "text-amber-600"}`}
-                            title="Norm-LV-Zuordnung geprüft (unabhängig vom Betrag)">
-                            <input type="checkbox" disabled={gesperrt} checked={!!c.mapping_confirmed}
-                              onChange={(e) => setCost(c, { mapping_confirmed: e.target.checked })} />
-                            Zuordnung ok
-                          </label>
-                        ) : (
-                          <button type="button" disabled={gesperrt}
-                            onClick={() => setCost(c, { mapping_confirmed: !c.mapping_confirmed })}
-                            className={`shrink-0 rounded-lg border px-2 py-1 text-[11px] font-semibold transition ${c.mapping_confirmed ? "border-slate-300 bg-slate-100 text-slate-600" : "border-amber-300 text-amber-700 hover:bg-amber-50"}`}
-                            title="Diese Leistung hat keine Norm-LV-Position. Der Betrag bleibt im Import dokumentiert, fliesst aber nicht in die Referenzkosten.">
-                            {c.mapping_confirmed ? "ausgeschlossen ✓" : "Von Referenz ausschliessen"}
-                          </button>
-                        )}
-                      </div>
-                    )}
-                    {c.source_text && (
-                      <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">
-                        <span className={`rounded px-1 py-0.5 text-[10px] font-semibold ${M.tagStyle}`}>{M.tag}</span>
-                        <span className="truncate">{c.source_page != null ? `Seite ${c.source_page}` : ""}</span>
-                      </div>
-                    )}
+                <div key={c.id} className="px-4 py-3 sm:px-5">
+                  {/* Punkt 16 — Block 1: WAS IM LV STEHT. Nummer, Titel, Betrag,
+                      Betrag geprüft. Diese Zeile bleibt immer so wie im PDF. */}
+                  <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-start">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Original-LV</p>
+                      <p className="text-sm font-medium text-slate-900">
+                        {c.original_position || `BKP ${c.bkp_nr}`}
+                        {c.original_title ? ` ${c.original_title}` : ""}
+                        {c.manual && <span className="ml-1 rounded bg-slate-100 px-1 text-[10px] font-semibold text-slate-500">manuell erfasst</span>}
+                      </p>
+                      {c.positionen > 1 && !c.original_position && (
+                        <p className="text-[11px] text-slate-400">({c.positionen} Positionen aggregiert)</p>
+                      )}
+                      {c.source_text && (
+                        <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">
+                          <span className={`rounded px-1 py-0.5 text-[10px] font-semibold ${M.tagStyle}`}>{M.tag}</span>
+                          <span className="truncate">{c.source_page != null ? `Seite ${c.source_page}` : ""}</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 sm:justify-end">
+                      <span className="text-xs text-slate-400">CHF</span>
+                      <input className="input w-28" disabled={gesperrt}
+                        defaultValue={c.confirmed_amount ?? (c.detected_amount ?? "")}
+                        placeholder={c.detected_amount != null ? String(c.detected_amount) : "—"}
+                        onBlur={(e) => setCost(c, { confirmed_amount: e.target.value, confirmed: true })} />
+                      <label className={`inline-flex items-center gap-1 whitespace-nowrap text-[11px] font-semibold ${c.confirmed ? "text-green-600" : "text-amber-600"}`}
+                        title="Betrag geprüft — sagt nichts über die Norm-LV-Zuordnung aus.">
+                        <input type="checkbox" disabled={gesperrt} checked={!!c.confirmed}
+                          onChange={(e) => setCost(c, { confirmed: e.target.checked })} />
+                        Betrag geprüft
+                      </label>
+                      {!gesperrt && (
+                        <button onClick={() => entferneKost(c)} className="btn-ghost min-h-8 min-w-8 text-slate-400 hover:text-red-500" title="Position entfernen">
+                          <Trash2 className="size-4" />
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 sm:justify-end">
-                    <span className="text-xs text-slate-400">CHF</span>
-                    <input className="input w-28" disabled={gesperrt}
-                      defaultValue={c.confirmed_amount ?? (c.detected_amount ?? "")}
-                      placeholder={c.detected_amount != null ? String(c.detected_amount) : "—"}
-                      onBlur={(e) => setCost(c, { confirmed_amount: e.target.value, confirmed: true })} />
-                    <label className={`inline-flex items-center gap-1 text-[11px] font-semibold ${c.confirmed ? "text-green-600" : "text-slate-400"}`}>
-                      <input type="checkbox" disabled={gesperrt} checked={!!c.confirmed}
-                        onChange={(e) => setCost(c, { confirmed: e.target.checked })} /> ok
-                    </label>
-                    {!gesperrt && (
-                      <button onClick={() => entferneKost(c)} className="btn-ghost min-h-8 min-w-8 text-slate-400 hover:text-red-500" title="Position entfernen">
-                        <Trash2 className="size-4" />
-                      </button>
-                    )}
-                  </div>
+
+                  {/* Punkt 16 — Block 2: WOHIN SIE IM NORM-LV GEHÖRT. Getrennter
+                      Entscheid mit eigener Bestätigung. */}
+                  {!c.is_group_total && (
+                    <div className="mt-2 border-l-2 border-slate-200 pl-3">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Norm-LV</span>
+                        {(() => {
+                          const b = c.canonical_key ? MAPPING[c.mapping_method] : NICHT_ZUGEORDNET;
+                          if (!b) return null;
+                          return (
+                            <span className={`rounded px-1 text-[10px] font-semibold ${b.style}`}
+                              title={c.mapping_reason || b.hilfe}>
+                              {b.label}
+                              {c.mapping_method === "llm" && c.mapping_confidence != null
+                                ? ` ${Math.round(c.mapping_confidence * 100)} %` : ""}
+                            </span>
+                          );
+                        })()}
+                        <span className="min-w-0 truncate text-[11px] text-slate-500">
+                          {c.canonical_key
+                            ? `${c.canonical_key} ${c.canonical_label || ""}`
+                            : (c.mapping_confirmed ? "bewusst von der Referenz ausgeschlossen" : "noch nicht entschieden")}
+                        </span>
+                      </div>
+                      {normLv && (
+                        <div className="mt-1 flex flex-wrap items-center gap-2">
+                          <select className="input h-7 min-w-0 flex-1 py-0 text-[11px]" disabled={gesperrt}
+                            value={c.canonical_key || ""}
+                            onChange={(e) => setCost(c, { canonical_key: e.target.value })}>
+                            <option value="">— keine passende Norm-LV-Position —</option>
+                            {Object.entries(normLv.gruppen || {}).map(([g, name]) => (
+                              <optgroup key={g} label={`${g} ${name}`}>
+                                {(normLv.positionen || []).filter((p) => p.gruppe === g).map((p) => (
+                                  <option key={p.key} value={p.key}>{p.key} {p.bezeichnung}</option>
+                                ))}
+                              </optgroup>
+                            ))}
+                          </select>
+                          {c.canonical_key ? (
+                            <label className={`inline-flex shrink-0 items-center gap-1 text-[11px] font-semibold ${c.mapping_confirmed ? "text-green-600" : "text-amber-600"}`}
+                              title="Norm-LV-Zuordnung geprüft — unabhängig vom Betrag.">
+                              <input type="checkbox" disabled={gesperrt} checked={!!c.mapping_confirmed}
+                                onChange={(e) => setCost(c, { mapping_confirmed: e.target.checked })} />
+                              Zuordnung geprüft
+                            </label>
+                          ) : (
+                            <button type="button" disabled={gesperrt}
+                              onClick={() => setCost(c, { mapping_confirmed: !c.mapping_confirmed })}
+                              className={`shrink-0 rounded-lg border px-2 py-1 text-[11px] font-semibold transition ${c.mapping_confirmed ? "border-slate-300 bg-slate-100 text-slate-600" : "border-amber-300 text-amber-700 hover:bg-amber-50"}`}
+                              title="Diese Leistung hat keine Norm-LV-Position. Der Betrag bleibt im Import dokumentiert, fliesst aber nicht in die Referenzkosten.">
+                              {c.mapping_confirmed ? "ausgeschlossen ✓" : "Von Referenz ausschliessen"}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
               {total && (
@@ -735,20 +765,31 @@ function ReviewAnsicht({ id }) {
             {kostenOffen > 0 && <span className="text-[11px] font-semibold text-amber-600">{kostenOffen} Betrag / {zuordnungOffen} Zuordnung offen</span>}
           </div>
           {!gesperrt && <NeueKostZeile onAdd={kostHinzufuegen} />}
+          {/* Punkt 15 — drei Summen, immer sichtbar. Wer die Zahlen prüft, muss
+              sehen, wie viel gelesen wurde, wie viel in die Referenz geht und
+              wie viel bewusst draussen bleibt. Summe 2 + 3 = Summe 1. */}
           <div className="space-y-1 px-4 py-3 text-sm sm:px-5">
             <div className="flex items-center justify-between">
-              <span className="text-slate-500">Im LV gelesen</span>
+              <span className="text-slate-500">1. Im Original-LV gelesen</span>
               <span className="text-slate-600">CHF {kostenTotal.toLocaleString("de-CH")}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="font-bold text-slate-700">Davon in die Referenzkosten</span>
+              <span className="font-bold text-slate-700">2. Davon in die Norm-LV-Referenz</span>
               <span className="font-bold text-slate-900">CHF {referenzTotal.toLocaleString("de-CH")}</span>
             </div>
-            {referenzTotal < kostenTotal && (
-              <p className="text-[11px] text-amber-600">
-                CHF {(kostenTotal - referenzTotal).toLocaleString("de-CH")} sind keiner
-                Norm-LV-Position zugeordnet und fliessen nicht in die Referenz. Sie
-                bleiben in diesem Import dokumentiert.
+            <div className="flex items-center justify-between">
+              <span className={ausserhalbTotal > 0 ? "text-amber-700" : "text-slate-500"}>
+                3. Nicht im Norm-LV / ausgeschlossen
+              </span>
+              <span className={ausserhalbTotal > 0 ? "font-medium text-amber-700" : "text-slate-600"}>
+                CHF {ausserhalbTotal.toLocaleString("de-CH")}
+              </span>
+            </div>
+            {ausserhalbTotal > 0 && (
+              <p className="text-[11px] text-slate-500">
+                Diese Beträge bleiben in diesem Import dokumentiert und nachvollziehbar,
+                fliessen aber nicht in die Referenzkosten — dort steht nur, was es im
+                Norm-LV wirklich gibt.
               </p>
             )}
           </div>
@@ -783,6 +824,7 @@ function ReviewAnsicht({ id }) {
                   {zuordnungOffen === 0 ? <CheckCircle2 className="size-4 text-green-600" /> : <AlertTriangle className="size-4 text-amber-500" />}
                   Norm-LV-Zuordnung: {zuordnungOffen === 0
                     ? `geprüft · CHF ${referenzTotal.toLocaleString("de-CH")} gehen in die Referenz`
+                    + (ausserhalbTotal > 0 ? `, CHF ${ausserhalbTotal.toLocaleString("de-CH")} nicht` : "")
                     : `${zuordnungOffen} offen`}
                 </li>
                 <li className="flex items-center gap-2 text-slate-500">

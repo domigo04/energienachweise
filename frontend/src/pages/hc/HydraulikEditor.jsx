@@ -1448,10 +1448,12 @@ function EditorInner() {
   // darf kein Punkt gesetzt und nichts ausgewählt werden.
   const [spacePan, setSpacePan] = useState(false);
   const spacePanRef = useRef(false);
-  // Punkt 11 — Fensterauswahl mit Richtungslogik wie in Revit/AutoCAD:
-  // links→rechts fängt nur vollständig umschlossene Elemente ('full'),
-  // rechts→links auch bloss berührte ('partial').
-  const [selectionMode, setSelectionMode] = useState(SelectionMode.Full);
+  // Auswahlfenster: EINE Betriebsart — nur vollständig umschlossene Elemente.
+  // Die aus dem CAD bekannte Richtungslogik (rechts→links wählt auch berührte)
+  // liess sich nicht verlässlich umsetzen: React Flow übernimmt eine mitten im
+  // Ziehen geänderte Betriebsart nicht mehr für die laufende Auswahl. Halb
+  // funktionierend wäre schlimmer als eingeschränkt, darum bewusst fest.
+  const selectionMode = SelectionMode.Full;
   // Punkt 2 — Weltkoordinate der Platzierungsvorschau. Sie ist die EINZIGE
   // Quelle für die Anzeige UND für den Klick, damit das Bauteil genau dort
   // landet, wo der Geist steht.
@@ -1735,11 +1737,23 @@ function EditorInner() {
       e: JSON.parse(JSON.stringify(edges)),
     }];
   }, [nodes, edges]);
+  // BEFUND aus dem Browsertest: eine Bauteilverschiebung liess sich nicht
+  // zurücknehmen. `snap()` legt VOR jeder Änderung den Zustand ab, wie er vorher
+  // war. Das Rückgängigmachen muss also genau diesen abgelegten Zustand
+  // wiederherstellen. Vorher wurde er verworfen (`pop`) und stattdessen der
+  // Eintrag DAVOR gesetzt — also ein Schritt zu weit — und bei nur einem
+  // Eintrag brach die Funktion ganz ab. Dadurch war die erste Änderung nach dem
+  // Laden nie rücknehmbar.
+  //
+  // Nodes und Kanten liegen im selben Schnappschuss; eine Verschiebung samt
+  // mitgezogener Leitungsgeometrie ist damit EINE Undo-Operation.
   const undo = useCallback(() => {
-    if (snapshots.current.length < 2) return;
-    snapshots.current.pop();
-    const prev = snapshots.current[snapshots.current.length - 1];
-    if (prev) { setNodes(prev.n); setEdges(prev.e); setSelected(null); }
+    const vorher = snapshots.current.pop();
+    if (!vorher) return;
+    setNodes(vorher.n);
+    setEdges(vorher.e);
+    setSelected(null);
+    setSelectedEdgeId(null);
   }, [setNodes, setEdges]);
 
   const drawingConfigAktualisieren = useCallback((key, value) => {
@@ -2458,11 +2472,11 @@ function EditorInner() {
       return true;
     }
     if (portHit) {
-      leitungsEntwurfAbschliessen(portHit.position, { ...portHit, ...portHit.position, type:'port' }, event.shiftKey || shiftPressed);
+      leitungsEntwurfAbschliessen(portHit.position, { ...portHit, ...portHit.position, type:'port', fangArt:'port' }, event.shiftKey || shiftPressed);
       return true;
     }
     if (endpointHit) {
-      leitungsEntwurfAbschliessen(endpointHit.position, { ...endpointHit, ...endpointHit.position, type:'port' }, event.shiftKey || shiftPressed);
+      leitungsEntwurfAbschliessen(endpointHit.position, { ...endpointHit, ...endpointHit.position, type:'port', fangArt:'endpoint' }, event.shiftKey || shiftPressed);
       return true;
     }
     if (nurBeiAnschluss) return true;
@@ -2528,6 +2542,18 @@ function EditorInner() {
     }, event.shiftKey || shiftPressed);
   }, [activeLayer, handleAusrichtung, handlePosition, leitungsEntwurfAbschliessen, leitungsEntwurfStarten, shiftPressed]);
 
+  // Punkt 17/18 — Prüfsonde für Browsertests. Hält die letzte Fangentscheidung
+  // fest, damit ein Test „Marker == gewählter Fang == gesetzter Punkt == Port"
+  // wirklich vergleichen kann statt nur die Existenz eines Elements zu sehen.
+  // Nur im Entwicklungsmodus; in der Produktion existiert sie nicht.
+  const fangProtokoll = useCallback((quelle, typ, punkt, extra = {}) => {
+    if (!import.meta.env.DEV) return;
+    const eintrag = { quelle, typ, x:punkt?.x ?? null, y:punkt?.y ?? null, ...extra, t:Date.now() };
+    window.__hcSnap = eintrag;
+    (window.__hcSnapVerlauf ||= []).push(eintrag);
+    if (window.__hcSnapVerlauf.length > 400) window.__hcSnapVerlauf.shift();
+  }, []);
+
   const cadCursorAktualisieren = useCallback((event) => {
     const draft = leitungsEntwurfRef.current;
     if (!draft) return;
@@ -2541,7 +2567,9 @@ function EditorInner() {
       if (portHit) {
         leitungsCursorRef.current = portHit.position;
         setLeitungsCursor(portHit.position);
-        setLeitungsSnap({ ...portHit, ...portHit.position, type:'port' });
+        setLeitungsSnap({ ...portHit, ...portHit.position, type:'port', fangArt:'port' });
+        fangProtokoll('cursor', 'port', portHit.position,
+          { nodeId:portHit.nodeId, handleId:portHit.handleId, distanz:portHit.distance });
         const previous = letzterEntwurfsPunkt(draft);
         const corner = orthogonalerAnschlussEckpunkt(previous, portHit.position, portHit.handlePosition);
         setLeitungsGuides(corner ? [{
@@ -2557,8 +2585,9 @@ function EditorInner() {
       if (endpointHit) {
         leitungsCursorRef.current = endpointHit.position;
         setLeitungsCursor(endpointHit.position);
-        setLeitungsSnap({ ...endpointHit, ...endpointHit.position, type:'port' });
+        setLeitungsSnap({ ...endpointHit, ...endpointHit.position, type:'port', fangArt:'endpoint' });
         setLeitungsGuides([]);
+        fangProtokoll('cursor', 'endpoint', endpointHit.position, { edgeId:endpointHit.edgeId });
         return;
       }
       const excludedEdges = draft.extendEdgeId ? new Set([draft.extendEdgeId]) : new Set();
@@ -2568,6 +2597,7 @@ function EditorInner() {
         setLeitungsCursor(midHit.position);
         setLeitungsSnap({ ...midHit, type:'midpoint' });
         setLeitungsGuides([]);
+        fangProtokoll('cursor', 'midpoint', midHit.position, { edgeId:midHit.edgeId });
         return;
       }
       const lineHit = fangAktiv ? naechsteLeitung(raw, layer.id, 22 / zoom, excludedEdges) : null;
@@ -2576,6 +2606,7 @@ function EditorInner() {
         setLeitungsCursor({ x:lineHit.x, y:lineHit.y });
         setLeitungsSnap({ ...lineHit, type:'line' });
         setLeitungsGuides([]);
+        fangProtokoll('cursor', 'nearest', { x:lineHit.x, y:lineHit.y }, { edgeId:lineHit.edge?.id });
         return;
       }
       const previous = letzterEntwurfsPunkt(draft);
@@ -2592,8 +2623,9 @@ function EditorInner() {
       setLeitungsCursor(point);
       setLeitungsSnap(null);
       setLeitungsGuides(guidesAmPunkt(alignment.guides, point));
+      fangProtokoll('cursor', lineHit ? 'nearest' : 'grid', point);
     });
-  }, [activeLayer, drawingConfig.grid_size, drawingConfig.snap_tolerance, getZoom, letzterEntwurfsPunkt, naechsteLeitung, naechsterBauteilAnschluss, naechsterFreierLeitungsEndpunkt, naechsterMittelpunkt, objektFangpunkte, screenToFlowPosition, shiftPressed]);
+  }, [activeLayer, fangProtokoll, drawingConfig.grid_size, drawingConfig.snap_tolerance, getZoom, letzterEntwurfsPunkt, naechsteLeitung, naechsterBauteilAnschluss, naechsterFreierLeitungsEndpunkt, naechsterMittelpunkt, objektFangpunkte, screenToFlowPosition, shiftPressed]);
 
   const cadEntwurfRoute = (() => {
     if (!leitungsEntwurf) return [];
@@ -2647,11 +2679,19 @@ function EditorInner() {
       // Ein Port-Treffer mit Bauteil ist ein Anschluss, einer ohne (freier
       // Leitungsanfang) ein Endpunkt. Auf einer Leitung liegt der Fang zwischen
       // zwei Punkten — im CAD „Nearest".
-      const typ = leitungsSnap.type === 'midpoint'
-        ? MIDPOINT
-        : leitungsSnap.type === 'line'
-          ? NEAREST
-          : leitungsSnap.handleId ? PORT : ENDPOINT;
+      // `fangArt` wird an der Fangquelle gesetzt. Vorher wurde hier aus
+      // `handleId` geraten — ein freies Leitungsende trägt aber ebenfalls eine
+      // handleId (die seines Ankers) und wurde dadurch als „Anschluss"
+      // beschriftet, obwohl intern ein Endpunkt gefangen war.
+      const typ = leitungsSnap.fangArt === 'endpoint'
+        ? ENDPOINT
+        : leitungsSnap.fangArt === 'port'
+          ? PORT
+          : leitungsSnap.type === 'midpoint'
+            ? MIDPOINT
+            : leitungsSnap.type === 'line'
+              ? NEAREST
+              : ENDPOINT;
       return { ...fangStil(typ), typ, x:leitungsSnap.x, y:leitungsSnap.y };
     }
     if (!snapAn || !leitungsCursor) return null;
@@ -2996,33 +3036,6 @@ function EditorInner() {
       window.removeEventListener('blur', verlassen);
     };
   }, []);
-
-  // Punkt 11 — Richtung des Auswahlrechtecks bestimmt die Auswahlart. Die
-  // Richtung steht erst beim Ziehen fest, darum am pointerdown die Startposition
-  // merken und beim Bewegen umschalten.
-  const auswahlStart = useRef(null);
-  useEffect(() => {
-    if (!istGrundzustand) return undefined;
-    const down = (ev) => {
-      if (ev.button !== 0 || spacePanRef.current) return;
-      auswahlStart.current = ev.clientX;
-    };
-    const move = (ev) => {
-      if (auswahlStart.current == null) return;
-      const dx = ev.clientX - auswahlStart.current;
-      if (Math.abs(dx) < 4) return;                 // noch keine klare Richtung
-      setSelectionMode(dx >= 0 ? SelectionMode.Full : SelectionMode.Partial);
-    };
-    const up = () => { auswahlStart.current = null; };
-    window.addEventListener('pointerdown', down, true);
-    window.addEventListener('pointermove', move, { passive:true });
-    window.addEventListener('pointerup', up);
-    return () => {
-      window.removeEventListener('pointerdown', down, true);
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-    };
-  }, [istGrundzustand]);
 
   // Keyboard-Shortcuts: Zeichenwerkzeuge sind konfigurierbar; V/R wechseln
   // weiterhin schnell den Heizungs-Layer, D dreht ein Bauteil.
@@ -4095,8 +4108,10 @@ function EditorInner() {
               <Panel position="top-center">
                 <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:8, padding:'7px 12px', borderRadius:18,
                   background:'#4f46e5', color:'white', fontSize:10, fontWeight:700, boxShadow:'0 6px 16px rgba(79,70,229,.28)' }}>
-                  {leitungsSnap?.type === 'port'
+                  {leitungsSnap?.fangArt === 'port'
                     ? 'Am Bauteil einrasten'
+                    : leitungsSnap?.fangArt === 'endpoint'
+                      ? 'An Leitungsende anschliessen'
                     : leitungsSnap?.type === 'line'
                       ? 'T-Verbindung erstellen'
                       : leitungsEntwurf.extendEdgeId

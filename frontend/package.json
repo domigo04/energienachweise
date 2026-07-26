@@ -11,7 +11,9 @@
     "build": "vite build",
     "preview": "vite preview --host --port ${PORT}",
     "start": "vite preview --host --port ${PORT}",
-    "test": "vitest run"
+    "test": "vitest run",
+    "e2e:portsnap": "node e2e/portsnap.mjs",
+    "e2e:geometrie": "node e2e/geometrie.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.11",
@@ -35,6 +37,7 @@
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^16.3.0",
+    "playwright": "^1.62.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.12",
     "vite": "^7.1.0",

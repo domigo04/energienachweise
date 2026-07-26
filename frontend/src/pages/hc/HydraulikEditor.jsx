@@ -467,14 +467,53 @@ const ROHR_DIMS = [
 ];
 const ZUSATZ_NAMEN = ['Heizkessel', 'Vorschaltgefäss', 'WW-Erwärmer', 'Heizkörper', 'Plattentauscher', 'Lufterhitzer', 'Sonden', 'Verteiler EWS'];
 
-function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ventilResults, pumpenResults, expansionResults, anschlussWarnungen, anschlussResults, pwtResults, onUpdate, onDelete, onSetAbgaenge, navigate }) {
+function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ventilResults, pumpenResults, expansionResults, anschlussWarnungen, anschlussResults, pwtResults, onUpdate, onDelete, onSetAbgaenge, navigate, drawingConfig, onDrawingConfig }) {
+  // Punkt 13 — nichts ausgewählt heisst nicht „nichts zu zeigen": dann gehören
+  // hierher die Eigenschaften der ANSICHT, wie in Revit.
   if (!node) return (
-    <div style={{ padding: 14, fontSize: 11, color: '#94a3b8', lineHeight: 1.7 }}>
-      <div style={{ fontWeight: 700, color: '#64748b', marginBottom: 8 }}>Eigenschaften</div>
-      Einfachklick = ansehen · <b>Doppelklick = Auslegung öffnen</b>.
-      <div style={{ marginTop: 14, fontSize: 10, borderTop: '1px solid #e2e8f0', paddingTop: 10 }}>
-        <b>Verbrauchergruppe (roter Block):</b> auf die Leinwand ziehen, VL/RL unten an die Verteiler-Stutzen anschliessen — die Einspritzung wird im Block gerechnet.<br /><br />
-        <b>Verteiler:</b> Anzahl Abgänge hier im Panel wählbar. Die Summen stehen links am Balken.
+    <div style={{ padding: 14, fontSize: 11, color: '#64748b', lineHeight: 1.7 }}>
+      <PT>Zeichenansicht</PT>
+      {drawingConfig && onDrawingConfig && (
+        <div style={{ display:'grid', gap:9 }}>
+          <div>
+            <label style={lbl}>Raster</label>
+            <select style={inp} value={drawingConfig.grid_size}
+              onChange={e => onDrawingConfig('grid_size', Number(e.target.value))}>
+              {GRID_OPTIONEN.map(size => <option key={size} value={size}>{size} mm</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={lbl}>Fangtoleranz</label>
+            <select style={inp} value={drawingConfig.snap_tolerance}
+              onChange={e => onDrawingConfig('snap_tolerance', Number(e.target.value))}>
+              {TOLERANZ_OPTIONEN.map(t => <option key={t} value={t}>{t} mm</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={lbl}>Eckenradius</label>
+            <input type="number" min="0" max="40" style={inp} value={drawingConfig.corner_radius}
+              onChange={e => onDrawingConfig('corner_radius', Number(e.target.value))} />
+          </div>
+          <label style={{ display:'flex', alignItems:'center', gap:7, fontSize:11 }}>
+            <input type="checkbox" checked={drawingConfig.ortho !== false}
+              onChange={e => onDrawingConfig('ortho', e.target.checked)} />
+            Orthogonal zeichnen (ORTHO)
+          </label>
+          <label style={{ display:'flex', alignItems:'center', gap:7, fontSize:11 }}>
+            <input type="checkbox" checked={drawingConfig.object_snap !== false}
+              onChange={e => onDrawingConfig('object_snap', e.target.checked)} />
+            Objektfang (SNAP)
+          </label>
+          <label style={{ display:'flex', alignItems:'center', gap:7, fontSize:11 }}>
+            <input type="checkbox" checked={drawingConfig.auto_return === true}
+              onChange={e => onDrawingConfig('auto_return', e.target.checked)} />
+            Rücklauf automatisch mitzeichnen
+          </label>
+        </div>
+      )}
+      <div style={{ marginTop: 14, fontSize: 10, color:'#94a3b8', borderTop: '1px solid #e2e8f0', paddingTop: 10 }}>
+        Ein Bauteil oder eine Leitung auswählen, um deren Eigenschaften hier zu
+        bearbeiten. <b>Doppelklick</b> auf ein Bauteil öffnet die Auslegung.
       </div>
     </div>
   );
@@ -3995,7 +4034,8 @@ function EditorInner() {
             {selectedEdge ? (
               <LeitungPanel edge={selectedEdge} leitungResults={leitungResults} onUpdateEdge={updateEdgeData} onUpdateLayer={updateEdgeLayer} onDelete={deleteEdge} />
             ) : (
-              <PropertiesPanel node={selectedNode} nodeFlows={nodeFlows} verteilerResults={verteilerResults} gruppeResults={gruppeResults} ventilResults={ventilResults} pumpenResults={pumpenResults} expansionResults={expansionResults} anschlussWarnungen={anschlussWarnungen} anschlussResults={anschlussResults} pwtResults={pwtResults} onUpdate={updateNode} onDelete={deleteNode} onSetAbgaenge={setAbgaenge} navigate={navigate}/>
+              <PropertiesPanel node={selectedNode} nodeFlows={nodeFlows} verteilerResults={verteilerResults} gruppeResults={gruppeResults} ventilResults={ventilResults} pumpenResults={pumpenResults} expansionResults={expansionResults} anschlussWarnungen={anschlussWarnungen} anschlussResults={anschlussResults} pwtResults={pwtResults} onUpdate={updateNode} onDelete={deleteNode} onSetAbgaenge={setAbgaenge} navigate={navigate}
+                drawingConfig={drawingConfig} onDrawingConfig={drawingConfigAktualisieren}/>
             )}
           </aside>
         )}

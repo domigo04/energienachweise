@@ -108,6 +108,12 @@ class LvImportCost(Base):
     mapping_method = Column(String, nullable=True)
     mapping_confidence = Column(Float, nullable=True)
     mapping_reason = Column(String, nullable=True)
+    # Zwei getrennte Prüfungen — sie beantworten verschiedene Fragen:
+    #   confirmed          → „CHF 2'407 stimmt"
+    #   mapping_confirmed  → „die Norm-LV-Zuordnung 241.11 stimmt"
+    # Bei einer Position ohne Norm-Entsprechung bedeutet mapping_confirmed:
+    # „geprüft, es gibt keine passende Position — bewusst nicht in die Referenz".
+    mapping_confirmed = Column(Boolean, nullable=False, default=False)
     # Punkt 15 — Gruppentotal als eigene Kontrollzeile inkl. Summenprüfung.
     is_group_total = Column(Boolean, nullable=False, default=False)
     validation_status = Column(String, nullable=True)    # valid | mismatch | unchecked

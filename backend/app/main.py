@@ -135,6 +135,8 @@ def _ensure_columns():
             ("original_position", "VARCHAR"), ("original_title", "VARCHAR"),
             ("canonical_key", "VARCHAR"), ("is_group_total", "BOOLEAN"),
             ("validation_status", "VARCHAR"), ("source", "VARCHAR"),
+            ("original_amount", "FLOAT"), ("mapping_method", "VARCHAR"),
+            ("mapping_confidence", "FLOAT"), ("mapping_reason", "VARCHAR"),
         ],
     }
     is_sqlite = engine.url.get_backend_name().startswith("sqlite")

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Upload, FileText, CheckCircle2, AlertTriangle, Trash2, Plus, ChevronDown, Loader2 } from "lucide-react";
 import {
-  uploadLvImport, listLvImports, getLvImport, getFachwerte,
+  uploadLvImport, listLvImports, getLvImport, getFachwerte, getNormLv,
   updateLvFeature, updateLvCost, addLvCost, deleteLvCost, updateLvImport, approveLvImport,
 } from "../../api/hcApi";
 
@@ -57,6 +57,15 @@ const METHODE = {
 };
 // Alt-Importe ohne gespeicherte Methode aus is_searchable herleiten.
 const methodeOf = (imp) => METHODE[imp.extract_method] ? imp.extract_method : (imp.is_searchable ? "text" : "image");
+
+// Wie eine Kostenposition dem Norm-LV zugeordnet wurde. Sichtbar, damit
+// nachvollziehbar bleibt, was automatisch und was per LLM entschieden wurde.
+const MAPPING = {
+  exact: { label: "exakt", style: "bg-green-100 text-green-700" },
+  rule: { label: "Regel", style: "bg-green-100 text-green-700" },
+  llm: { label: "KI-Vorschlag", style: "bg-violet-100 text-violet-700" },
+  manual: { label: "manuell", style: "bg-slate-100 text-slate-600" },
+};
 
 // Punkt 21 — vier klare Schritte statt einer langen Seite.
 const SCHRITTE = [
@@ -306,11 +315,13 @@ function ReviewAnsicht({ id }) {
   const [schritt, setSchritt] = useState(0);
 
   const [listen, setListen] = useState(null);
+  const [normLv, setNormLv] = useState(null);
 
   useEffect(() => {
     getLvImport(id).then(setImp).catch(() => setError("Import konnte nicht geladen werden")).finally(() => setLoading(false));
     // Punkt 5/20 — Auswahllisten zentral holen, keine Kopie im Frontend.
     getFachwerte().then((f) => setListen(f.listen)).catch(() => {});
+    getNormLv().then(setNormLv).catch(() => {});
   }, [id]);
 
   // ACHTUNG: alle Hooks MÜSSEN vor den frühen `return`s stehen. React verlangt
@@ -628,10 +639,34 @@ function ReviewAnsicht({ id }) {
                       <span className="ml-1 text-[11px] text-slate-400">({c.positionen} Positionen aggregiert)</span>
                     )}
                     {c.manual && <span className="ml-1 rounded bg-slate-100 px-1 text-[10px] font-semibold text-slate-500">manuell</span>}
+                    {c.mapping_method && MAPPING[c.mapping_method] && (
+                      <span className={`ml-1 rounded px-1 text-[10px] font-semibold ${MAPPING[c.mapping_method].style}`}
+                        title={c.mapping_reason || ""}>
+                        {MAPPING[c.mapping_method].label}
+                        {c.mapping_confidence != null && c.mapping_method === "llm"
+                          ? ` ${Math.round(c.mapping_confidence * 100)}%` : ""}
+                      </span>
+                    )}
                     {!c.canonical_key && !c.manual && (
-                      <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-700" title="Konnte keiner Standardposition zugeordnet werden">
+                      <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-700" title={c.mapping_reason || "Keiner Norm-LV-Position zugeordnet"}>
                         Zuordnung prüfen
                       </span>
+                    )}
+                    {!c.is_group_total && normLv && (
+                      <div className="mt-1">
+                        <select className="input h-7 max-w-full py-0 text-[11px]" disabled={gesperrt}
+                          value={c.canonical_key || ""}
+                          onChange={(e) => setCost(c, { canonical_key: e.target.value })}>
+                          <option value="">— Norm-LV-Position wählen —</option>
+                          {Object.entries(normLv.gruppen || {}).map(([g, name]) => (
+                            <optgroup key={g} label={`${g} ${name}`}>
+                              {(normLv.positionen || []).filter((p) => p.gruppe === g).map((p) => (
+                                <option key={p.key} value={p.key}>{p.key} {p.bezeichnung}</option>
+                              ))}
+                            </optgroup>
+                          ))}
+                        </select>
+                      </div>
                     )}
                     {c.source_text && (
                       <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">

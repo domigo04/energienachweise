@@ -368,6 +368,133 @@ def test_freigabe_blockiert_bei_ungepruefter_kostenposition():
         assert "242" in e.detail["unconfirmed_costs"]
 
 
+def test_freigabe_blockiert_bei_ungepruefter_zuordnung():
+    """Punkt 12/13 — „Betrag stimmt" ist nicht „Zuordnung stimmt". Solange die
+    Norm-LV-Zuordnung einer Position ungeprüft ist, blockiert die Freigabe."""
+    from app.routers.hc_lv_import import approve_lv
+    from types import SimpleNamespace
+    from fastapi import HTTPException
+
+    db = _db()
+    imp = LvImport(tenant_id=1, filename="m.pdf", file_hash="hm", status=LvImportStatus.review.value)
+    db.add(imp)
+    db.flush()
+    db.add(LvImportFeature(lv_import_id=imp.id, key="pump_count", value="4", confirmed=True))
+    # Betrag geprüft, Zuordnung offen.
+    db.add(LvImportCost(lv_import_id=imp.id, bkp_nr="243", original_position="243.7",
+                        original_title="Sicherheitsarmaturen",
+                        detected_amount=1200.0, confirmed=True, mapping_confirmed=False))
+    db.commit()
+
+    user = SimpleNamespace(id=1, tenant_id=1, name="D", email="d@x.ch")
+    try:
+        approve_lv(imp.id, user=user, db=db)
+        assert False, "hätte blockieren müssen"
+    except HTTPException as e:
+        assert e.status_code == 422
+        assert "243.7" in e.detail["unconfirmed_mappings"]
+    assert db.query(RefProjekt).count() == 0
+
+
+def test_freigabe_summiert_mehrere_originalpositionen_auf_eine_normposition():
+    """Punkt 14 — drei Unternehmerzeilen auf derselben Norm-Position ergeben EINE
+    Referenzkostenzeile mit der Summe. So sieht ein Import aus wie ein manuell
+    nach dem Norm-LV ausgewertetes Projekt."""
+    from app.routers.hc_lv_import import approve_lv
+    from types import SimpleNamespace
+
+    db = _db()
+    imp = LvImport(tenant_id=1, filename="agg.pdf", file_hash="ha", status=LvImportStatus.review.value)
+    db.add(imp)
+    db.flush()
+    db.add(LvImportFeature(lv_import_id=imp.id, key="pump_count", value="2", confirmed=True))
+    for pos, titel, betrag in (
+        ("243.1", "Rohrleitungen Stahl", 12000.0),
+        ("243.2", "Rohrleitungen Kupfer", 8000.0),
+        ("243.9", "Rohrleitungen Verteilung Zusatz", 1500.0),
+    ):
+        db.add(LvImportCost(lv_import_id=imp.id, bkp_nr="243", original_position=pos,
+                            original_title=titel, canonical_key="243.1",
+                            mapping_method="rule", mapping_confirmed=True,
+                            detected_amount=betrag, confirmed=True))
+    # Gruppentotalzeile darf NICHT mitsummiert werden (sonst doppelt).
+    db.add(LvImportCost(lv_import_id=imp.id, bkp_nr="243", original_position="243",
+                        original_title="Total Verteilung", is_group_total=True,
+                        detected_amount=21500.0, confirmed=True, mapping_confirmed=True))
+    db.commit()
+
+    user = SimpleNamespace(id=1, tenant_id=1, name="D", email="d@x.ch")
+    approve_lv(imp.id, user=user, db=db)
+
+    zeilen = db.query(RefKostenzeile).all()
+    assert len(zeilen) == 1, [(z.bkp_nr, z.betrag_chf) for z in zeilen]
+    assert zeilen[0].bkp_nr == "243.1"
+    assert zeilen[0].betrag_chf == 21500.0
+    # Die Originalzeilen bleiben einzeln erhalten (Nachvollziehbarkeit).
+    assert db.query(LvImportCost).count() == 4
+
+
+def test_nicht_zugeordnete_position_kommt_nicht_in_die_referenz():
+    """Punkt 13 — eine Leistung ohne Norm-LV-Entsprechung wird bewusst
+    ausgeschlossen (mapping_confirmed ohne canonical_key) und erzeugt keine
+    halbstandardisierte Referenzzeile."""
+    from app.routers.hc_lv_import import approve_lv
+    from types import SimpleNamespace
+
+    db = _db()
+    imp = LvImport(tenant_id=1, filename="aus.pdf", file_hash="hx", status=LvImportStatus.review.value)
+    db.add(imp)
+    db.flush()
+    db.add(LvImportFeature(lv_import_id=imp.id, key="pump_count", value="1", confirmed=True))
+    db.add(LvImportCost(lv_import_id=imp.id, bkp_nr="241", original_position="241.11",
+                        original_title="Rohrleitungen Primärkreis",
+                        canonical_key="241.11", mapping_confirmed=True,
+                        detected_amount=45000.0, confirmed=True))
+    # Bewusst ausgeschlossen: geprüft, aber ohne Norm-Position.
+    db.add(LvImportCost(lv_import_id=imp.id, bkp_nr="248", original_position="248.2",
+                        original_title="Elektroanschlüsse durch Elektriker",
+                        canonical_key=None, mapping_confirmed=True,
+                        detected_amount=9000.0, confirmed=True))
+    db.commit()
+
+    user = SimpleNamespace(id=1, tenant_id=1, name="D", email="d@x.ch")
+    approve_lv(imp.id, user=user, db=db)
+
+    zeilen = {z.bkp_nr: z.betrag_chf for z in db.query(RefKostenzeile).all()}
+    assert zeilen == {"241.11": 45000.0}
+
+
+def test_manuelle_zuordnung_gilt_als_geprueft():
+    """Punkt 11 — wer selbst eine Norm-Position wählt, hat die Zuordnung geprüft.
+    Ein erfundener Schlüssel wird abgelehnt."""
+    from app.routers.hc_lv_import import update_cost
+    from types import SimpleNamespace
+    from fastapi import HTTPException
+
+    db = _db()
+    imp = LvImport(tenant_id=1, filename="man.pdf", file_hash="hmn", status=LvImportStatus.review.value)
+    db.add(imp)
+    db.flush()
+    c = LvImportCost(lv_import_id=imp.id, bkp_nr="247", original_position="247.1",
+                     original_title="Isolation Rohrleitungen", detected_amount=3000.0)
+    db.add(c)
+    db.commit()
+    user = SimpleNamespace(id=1, tenant_id=1, name="D", email="d@x.ch")
+
+    out = update_cost(imp.id, c.id, {"canonical_key": "248.2"}, user=user, db=db)
+    assert out["canonical_key"] == "248.2"
+    assert out["mapping_method"] == "manual"
+    assert out["mapping_confirmed"] is True
+
+    try:
+        update_cost(imp.id, c.id, {"canonical_key": "999.9"}, user=user, db=db)
+        assert False, "erfundener Schlüssel hätte 422 liefern müssen"
+    except HTTPException as e:
+        assert e.status_code == 422
+    # Die gültige Zuordnung bleibt unverändert.
+    assert db.get(LvImportCost, c.id).canonical_key == "248.2"
+
+
 def test_grunddaten_fliessen_ins_refprojekt():
     from app.routers.hc_lv_import import approve_lv, update_import
     from types import SimpleNamespace

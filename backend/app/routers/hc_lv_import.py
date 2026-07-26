@@ -538,11 +538,23 @@ def approve_lv(import_id: int, user: User = Depends(get_current_user), db: Sessi
             continue
         if c.is_group_total and c.bkp_nr in gruppen_mit_positionen:
             continue
+        # Referenzkosten beziehen sich auf das Norm-LV:
+        #   zugeordnet → NORM-Nummer. Sonst landete „Isolation Rohrleitungen"
+        #     unter der Angebotsnummer 247, obwohl es im Norm-LV 248.2 ist, und
+        #     die nach BKP-Gruppe vergleichende Schätzung bekäme eine verschobene
+        #     Verteilung.
+        #   nicht zugeordnet → nur die GRUPPE (z.B. "248"). Der Betrag zählt in
+        #     seiner Gruppe weiter mit (kein Geld verschwindet), kann aber keine
+        #     Norm-Position vortäuschen. Wichtig, weil sich Nummern überschneiden:
+        #     „Elektroanschlüsse" heisst im Angebot 248.2, während Norm 248.2 die
+        #     Rohrisolation ist — beides unter 248.2 zu schreiben würde zwei
+        #     verschiedene Leistungen vermischen.
         db.add(RefKostenzeile(
             tenant_id=user.tenant_id, ref_projekt_id=ref.id, gewerk="heizung",
-            # Originalnummer erhalten, wenn vorhanden (Punkt 14).
-            bkp_nr=c.original_position or c.bkp_nr,
-            bkp_name=c.original_title, betrag_chf=float(betrag),
+            bkp_nr=c.canonical_key or c.bkp_nr,
+            bkp_name=(norm_lv.NORM_BY_KEY[c.canonical_key]["bezeichnung"]
+                      if c.canonical_key else c.original_title),
+            betrag_chf=float(betrag),
         ))
 
     imp.status = LvImportStatus.approved.value

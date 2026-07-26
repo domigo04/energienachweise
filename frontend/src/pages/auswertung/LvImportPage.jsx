@@ -178,6 +178,7 @@ function ImportZusammenfassung({ report, imp, offen }) {
     [`${typen.cost_summary || 0} Kostenzusammenstellungs-Seiten erkannt`, (typen.cost_summary || 0) > 0],
     [`${report.features_erkannt ?? 0} technische Werte erkannt`, (report.features_erkannt ?? 0) > 0],
     [`${report.kostenpositionen ?? 0} Kostenpositionen erkannt`, (report.kostenpositionen ?? 0) > 0],
+    [`${(report.kostenpositionen ?? 0) - (report.kosten_ohne_zuordnung ?? 0)} davon dem Norm-LV zugeordnet`, true],
   ];
   return (
     <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
@@ -648,8 +649,9 @@ function ReviewAnsicht({ id }) {
                       </span>
                     )}
                     {!c.canonical_key && !c.manual && (
-                      <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-700" title={c.mapping_reason || "Keiner Norm-LV-Position zugeordnet"}>
-                        Zuordnung prüfen
+                      <span className="ml-1 rounded bg-slate-100 px-1 text-[10px] font-semibold text-slate-500"
+                        title={c.mapping_reason || "Im Norm-LV nicht enthalten — der Betrag zählt trotzdem in seiner BKP-Gruppe"}>
+                        nicht im Norm-LV
                       </span>
                     )}
                     {!c.is_group_total && normLv && (

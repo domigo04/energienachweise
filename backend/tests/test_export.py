@@ -173,8 +173,9 @@ def test_svg_uebernimmt_cad_stuetzpunkte_und_medien_layer():
         "data": {"layer_id": "kaelte_rl", "corner_radius": 12, "points": [{"x": -300, "y": 200}, {"x": 200, "y": 200}]},
     }]
     svg = erzeuge_svg(nodes, edges, {})
-    assert "Q -300 200" in svg
-    assert "Q 200 200" in svg
+    # Nicht-rechtwinklige CAD-Stützpunkte bleiben exakt und werden nicht durch
+    # eine Bezier-Rundung vom Editorpfad abweichend nachgezeichnet.
+    assert 'd="M 52 0 L -300 200 L 200 200 L 352 0"' in svg
     assert 'stroke="#0e7490"' in svg
     assert 'stroke-dasharray="10,7"' in svg
     # Ein Stützpunkt ausserhalb der Bauteile muss den PDF/SVG-Ausschnitt erweitern.

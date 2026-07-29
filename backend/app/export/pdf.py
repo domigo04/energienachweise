@@ -3,12 +3,14 @@
 
 3 Optionen: inhalt = "schema" | "berechnungen" | "beides".
 """
+import base64
 import io
 from datetime import date
 
 from reportlab.graphics import renderPDF
 from reportlab.lib.pagesizes import A3, A4, landscape
 from reportlab.pdfgen import canvas as pdfcanvas
+from reportlab.lib.utils import ImageReader
 from svglib.svglib import svg2rlg
 
 from app.export.schema_svg import erzeuge_svg
@@ -330,35 +332,81 @@ def _deckblatt(c, projekt_name, schema_name, inhalt, plankopf=None):
     c.showPage()
 
 
+def _logo(c, data_url, x, y, breite, hoehe):
+    if not data_url or "," not in data_url:
+        return
+    try:
+        header, encoded = data_url.split(",", 1)
+        raw = base64.b64decode(encoded, validate=True)
+        if "image/svg+xml" in header:
+            drawing = svg2rlg(io.BytesIO(raw))
+            if not drawing or not drawing.width or not drawing.height:
+                return
+            scale = min(breite / drawing.width, hoehe / drawing.height)
+            drawing.scale(scale, scale)
+            renderPDF.draw(drawing, c, x, y)
+            return
+        image = ImageReader(io.BytesIO(raw))
+        c.drawImage(image, x, y, width=breite, height=hoehe,
+                    preserveAspectRatio=True, anchor="c", mask="auto")
+    except Exception:
+        return
+
+
 def _plankopf(c, seite, projekt_name, schema_name, plankopf=None):
     daten = plankopf or {}
-    x, y, breite, hoehe = seite[0] - 420, 18, 390, 76
+    x, y, breite, hoehe = seite[0] - 600, 18, 570, 104
+    spalte_projekt, spalte_detail = 250, 405
     c.setStrokeColorRGB(0.2, 0.24, 0.3)
     c.setLineWidth(0.7)
     c.rect(x, y, breite, hoehe, stroke=1, fill=0)
-    c.line(x + 235, y, x + 235, y + hoehe)
-    c.line(x, y + 25, x + breite, y + 25)
-    c.line(x, y + 50, x + breite, y + 50)
+    c.line(x + spalte_projekt, y, x + spalte_projekt, y + hoehe)
+    c.line(x + spalte_detail, y, x + spalte_detail, y + hoehe)
+    c.line(x, y + 28, x + spalte_detail, y + 28)
+    c.line(x, y + 54, x + spalte_projekt, y + 54)
     c.setFillColorRGB(0.1, 0.12, 0.2)
     c.setFont("Helvetica-Bold", 10)
-    c.drawString(x + 8, y + 58, projekt_name or "Projekt")
+    c.drawString(x + 8, y + 86, projekt_name or "Projekt")
     c.setFont("Helvetica", 7)
-    c.drawString(x + 8, y + 42, f"Bauherr: {daten.get('bauherr') or '—'}")
-    c.drawString(x + 8, y + 30, f"Standort: {daten.get('standort') or '—'}")
+    c.drawString(x + 8, y + 69, f"Projekt-Nr.: {daten.get('projektnummer') or '—'}")
+    c.drawString(x + 8, y + 57, f"Bauherr: {daten.get('bauherr') or '—'}")
+    c.drawString(x + 8, y + 40, f"Adresse: {daten.get('standort') or '—'}")
     c.setFont("Helvetica-Bold", 9)
     c.drawString(x + 8, y + 12, daten.get("planbezeichnung") or schema_name or "Anlagenschema")
     c.setFont("Helvetica", 7)
-    c.drawString(x + 243, y + 59, f"Plan-Nr. {daten.get('dokumentnummer') or '—'}")
-    c.drawString(x + 243, y + 42, f"Revision {daten.get('revision') or '0'} · {daten.get('status') or 'Entwurf'}")
-    c.drawString(x + 243, y + 30, f"{daten.get('planformat') or 'A3 quer'} · Schema ohne Massstab")
-    c.drawString(x + 243, y + 12, f"{date.today().strftime('%d.%m.%Y')} · {daten.get('bearbeiter') or PLANER}")
+    _logo(c, daten.get("logo_data_url"), x + 258, y + 59, 139, 38)
+    c.drawString(x + 258, y + 48, f"Plan-Nr. {daten.get('dokumentnummer') or '—'}")
+    c.drawString(x + 258, y + 37, f"Revision {daten.get('revision') or '0'} · {daten.get('status') or 'Entwurf'}")
+    c.drawString(x + 258, y + 12, f"{daten.get('planformat') or 'A3 quer'} · Schema ohne Massstab · {date.today().strftime('%d.%m.%Y')}")
+
+    # Systemlegende direkt im Plankopf: gleiche Farben und Stricharten wie
+    # Editor und SVG-Plot.
+    c.setFont("Helvetica-Bold", 7)
+    c.drawString(x + 413, y + 91, "SYSTEMLEGENDE")
+    legend = [
+        ("Heizung VL", (0.94, 0.27, 0.27), None),
+        ("Heizung RL", (0.23, 0.51, 0.96), [5, 3]),
+        ("Sole VL", (0.92, 0.70, 0.03), None),
+        ("Sole RL", (0.09, 0.64, 0.29), [5, 3]),
+        ("Kälte VL/RL", (0.02, 0.71, 0.83), None),
+    ]
+    c.setFont("Helvetica", 6.5)
+    for index, (label, color, dash) in enumerate(legend):
+        ly = y + 75 - index * 14
+        c.setStrokeColorRGB(*color)
+        c.setLineWidth(2)
+        c.setDash(dash or [])
+        c.line(x + 413, ly, x + 448, ly)
+        c.setDash([])
+        c.setFillColorRGB(0.18, 0.23, 0.31)
+        c.drawString(x + 454, ly - 2.5, label)
 
 
 def _schema_seite(c, svg_string, projekt_name, schema_name, plankopf=None):
     seite = landscape(A3)
     c.setPageSize(seite)
     rand = 30
-    plankopf_hoehe = 92
+    plankopf_hoehe = 122
     nutz_b, nutz_h = seite[0] - 2 * rand, seite[1] - 2 * rand - plankopf_hoehe
     # Ausschliesslich serverseitiger Vektorpfad: unabhängig von Browserzoom,
     # Auswahlzustand, Raster und sichtbarem Canvas-Ausschnitt.

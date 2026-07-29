@@ -8,7 +8,7 @@ Tabellen (`users`) kollidieren.
 from datetime import datetime
 import enum
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Enum as SAEnum
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, Enum as SAEnum
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -23,6 +23,7 @@ class Firma(Base):
     # Platzhalter fürs künftige Abomodell (z.B. Tarif nach Anzahl auswertbarer
     # Projekte) — noch keine Durchsetzung/Zahlungslogik, nur die Spalte.
     abo_plan = Column(String, default="kostenlos")
+    logo_data_url = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     users = relationship("User", back_populates="firma", cascade="all, delete-orphan")

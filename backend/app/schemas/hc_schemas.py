@@ -51,6 +51,14 @@ class ProjectCreate(BaseModel):
     name: str
     standort: Optional[str] = None
     kunde: Optional[str] = None
+    projektnummer: Optional[str] = None
+    strasse: Optional[str] = None
+    plz: Optional[str] = None
+    ort: Optional[str] = None
+    bauherr: Optional[str] = None
+    sia_phase: Optional[str] = None
+    projektfortschritt_pct: int = Field(default=0, ge=0, le=100)
+    planbezeichnung: Optional[str] = "Prinzipschema"
     beschreibung: Optional[str] = None
     base_data: Optional[ProjectBaseDataIn] = None
 
@@ -59,6 +67,14 @@ class ProjectUpdate(BaseModel):
     name: Optional[str] = None
     standort: Optional[str] = None
     kunde: Optional[str] = None
+    projektnummer: Optional[str] = None
+    strasse: Optional[str] = None
+    plz: Optional[str] = None
+    ort: Optional[str] = None
+    bauherr: Optional[str] = None
+    sia_phase: Optional[str] = None
+    projektfortschritt_pct: Optional[int] = Field(default=None, ge=0, le=100)
+    planbezeichnung: Optional[str] = None
     beschreibung: Optional[str] = None
     status: Optional[ProjectStatus] = None
     base_data: Optional[ProjectBaseDataIn] = None
@@ -138,6 +154,14 @@ class ProjectOut(BaseModel):
     name: str
     standort: Optional[str]
     kunde: Optional[str]
+    projektnummer: Optional[str] = None
+    strasse: Optional[str] = None
+    plz: Optional[str] = None
+    ort: Optional[str] = None
+    bauherr: Optional[str] = None
+    sia_phase: Optional[str] = None
+    projektfortschritt_pct: int = 0
+    planbezeichnung: Optional[str] = None
     beschreibung: Optional[str]
     verantwortlicher_id: Optional[int] = None
     verantwortlicher_name: Optional[str] = None

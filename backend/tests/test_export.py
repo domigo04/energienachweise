@@ -200,6 +200,19 @@ def test_svg_cad_anker_sind_unsichtbar_und_polylinie_startet_exakt_am_punkt():
     assert 'stroke="#1e293b" stroke-width="6"' not in svg
 
 
+def test_svg_exportiert_beton_skalierung_und_bauteilbeschriftung():
+    nodes = [
+        {"id": "beton", "type": "concrete_area", "position": {"x": 0, "y": 0},
+         "style": {"width": 210, "height": 120}, "data": {"hatch_scale": 17}},
+        {"id": "p1", "type": "pump", "position": {"x": 260, "y": 20},
+         "data": {"nr": 1, "label": "Pumpe Heizkreis", "caption_offset_x": 12}},
+    ]
+    svg = erzeuge_svg(nodes, [], {})
+    assert 'width="17.0" height="17.0"' in svg
+    assert "Pumpe Heizkreis" in svg
+    assert 'width="210.0" height="120.0"' in svg
+
+
 # ── Legende + Berechnungen ──────────────────────────────────────────────────
 def test_legende(daten):
     nodes, edges, results = daten

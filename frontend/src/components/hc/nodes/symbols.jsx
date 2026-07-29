@@ -251,6 +251,16 @@ function SymWaermepumpe({ generatorType }) {
 }
 
 function SymKessel({ generatorType }) {
+  if (generatorType === 'holz') {
+    return (
+      <svg viewBox="0 0 200 220" width="104" height="114" role="img"
+        aria-label={generatorAria.holz}>
+        <rect x="8" y="8" width="184" height="204" fill="white" stroke="#111827" strokeWidth="3"/>
+        {/* SIA-Kennzeichen Holz: ausgefülltes Quadrat unten mittig. */}
+        <rect x="84" y="164" width="32" height="32" fill="#111827"/>
+      </svg>
+    );
+  }
   const fuel = { gas:'GAS', oel:'ÖL', holz:'HOLZ' }[generatorType] || 'KESSEL';
   return (
     <svg viewBox="0 0 200 220" width="104" height="114" role="img"
@@ -260,11 +270,6 @@ function SymKessel({ generatorType }) {
       <text x="100" y="55" textAnchor="middle" fontFamily="Arial, sans-serif" fontSize="16" fontWeight="700" fill="#111827">{fuel}</text>
       <path d="M101 177 C67 164 65 134 89 111 C88 130 101 130 107 103 C135 127 143 158 119 177 C114 160 101 151 92 164 C90 170 94 175 101 177Z"
         fill="#fb923c" stroke="#9a3412" strokeWidth="2.5"/>
-      {generatorType === 'holz' && (
-        <g stroke="#78350f" strokeWidth="4" strokeLinecap="round">
-          <line x1="65" y1="188" x2="104" y2="180"/><line x1="96" y1="181" x2="137" y2="190"/>
-        </g>
-      )}
     </svg>
   );
 }

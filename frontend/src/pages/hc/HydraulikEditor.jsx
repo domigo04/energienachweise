@@ -76,8 +76,8 @@ const LEITUNGS_LAYER = [
   { id:'heizung_rl', label:'Heizung RL', kurz:'H RL', color:'#3b82f6', role:'rl', dashed:true },
   { id:'kaelte_vl', label:'Kälte VL', kurz:'K VL', color:'#06b6d4', role:'vl', dashed:false },
   { id:'kaelte_rl', label:'Kälte RL', kurz:'K RL', color:'#0e7490', role:'rl', dashed:true },
-  { id:'sole_vl', label:'Sole VL', kurz:'S VL', color:'#8b5cf6', role:'vl', dashed:false },
-  { id:'sole_rl', label:'Sole RL', kurz:'S RL', color:'#6d28d9', role:'rl', dashed:true },
+  { id:'sole_vl', label:'Sole VL', kurz:'S VL', color:'#eab308', role:'vl', dashed:false },
+  { id:'sole_rl', label:'Sole RL', kurz:'S RL', color:'#16a34a', role:'rl', dashed:true },
   { id:'bww', label:'Brauchwarmwasser', kurz:'BWW', color:'#16a34a', role:null, dashed:false },
   { id:'neutral', label:'Allgemein', kurz:'Allg.', color:'#334155', role:null, dashed:false },
 ];
@@ -368,7 +368,15 @@ const WAERMEABGABE = [
 // Palette nach Bauteil-Klassen sortiert (Dominic-Feedback 2026-07-06)
 const PALETTE_GRUPPEN = [
   { titel: 'Erzeugung & Speicher', items: [
-    { type: 'erzeuger',   label: 'Wärmeerzeuger (WE)',  desc: '→ M10 RAVEL' },
+    { paletteId:'erzeuger-sole-wasser', type:'erzeuger', label:'Sole/Wasser-WP', desc:'Quellen- und Abgabekreis', preset:{ generator_type:'ews_wp' } },
+    { paletteId:'erzeuger-luft-wasser-aussen', type:'erzeuger', label:'Luft/Wasser-WP – aussen', desc:'Aussenluft / Fortluft', preset:{ generator_type:'lwwp', lwwp_bauart:'aussenaufstellung' } },
+    { paletteId:'erzeuger-luft-wasser-innen', type:'erzeuger', label:'Luft/Wasser-WP – innen', desc:'Innenaufstellung mit AUL/FOL', preset:{ generator_type:'lwwp', lwwp_bauart:'innenaufstellung' } },
+    { paletteId:'erzeuger-luft-wasser-split', type:'erzeuger', label:'Luft/Wasser-WP – Splitgerät', desc:'Eigenes Split-Bauteil', preset:{ generator_type:'lwwp', lwwp_bauart:'split' } },
+    { paletteId:'erzeuger-wasser-wasser', type:'erzeuger', label:'Wasser/Wasser-WP', desc:'Quellen- und Abgabekreis', preset:{ generator_type:'wasser_wp' } },
+    { paletteId:'erzeuger-co2', type:'erzeuger', label:'CO₂-Wärmepumpe', desc:'Wärmepumpe', preset:{ generator_type:'co2_wp' } },
+    { paletteId:'erzeuger-fernwaerme', type:'erzeuger', label:'Fernwärme', desc:'Wärmeübergabe', preset:{ generator_type:'fernwaerme' } },
+    { paletteId:'erzeuger-holz', type:'erzeuger', label:'Holz-/Pelletheizung', desc:'SIA-Symbol mit Solid-Quadrat', preset:{ generator_type:'holz' } },
+    { paletteId:'erzeuger-elektro', type:'erzeuger', label:'Elektroheizung', desc:'Elektrischer Wärmeerzeuger', preset:{ generator_type:'elektro' } },
     { type: 'erdsonden',  label: 'Erdsondenfeld',       desc: 'Dynamischer Soleverteiler mit Duplexsonden' },
     { type: 'speicher',   label: 'Speicher',            desc: 'Inhalt wird direkt im Symbol angezeigt' },
     { type: 'bww',        label: 'BWW-Speicher',        desc: 'Brauchwarmwasser (grün) — SIA 385 folgt' },
@@ -403,6 +411,8 @@ const PALETTE_GRUPPEN = [
   ]},
 ];
 const STD_PALETTE = PALETTE_GRUPPEN.flatMap(g => g.items);
+const paletteItem = kennung => STD_PALETTE.find(item => (item.paletteId || item.type) === kennung);
+const paletteNodeType = kennung => paletteItem(kennung)?.type || kennung;
 
 const newId = () => `n_${Date.now()}_${Math.floor(Math.random() * 9999)}`;
 
@@ -539,10 +549,12 @@ function ErzeugerTypFelder({ data, onSet }) {
       {data.generator_type === 'lwwp' && (
         <>
           <label style={lbl}>Bauart Luft/Wasser-WP</label>
-          <select style={{ ...inp, cursor:'pointer' }} value={data.lwwp_bauart || 'aussenaufstellung'}
-            onChange={event => onSet('lwwp_bauart', event.target.value)}>
-            {LWWP_BAUARTEN.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
-          </select>
+          <div style={{ ...inp, background:'#f8fafc', color:'#334155' }}>
+            {LWWP_BAUARTEN.find(item => item.value === (data.lwwp_bauart || 'aussenaufstellung'))?.label}
+          </div>
+          <div style={{ marginTop:3, fontSize:9, color:'#64748b' }}>
+            Die Bauart wird als eigenes Bauteil in der Palette gewählt.
+          </div>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6 }}>
             <div><label style={lbl}>Aussenluft [°C]</label>
               <input type="number" style={inp} value={data.aussenluft_temp ?? ''}
@@ -1027,6 +1039,26 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
     );
   }
 
+  if (node.type === 'concrete_area') {
+    return (
+      <div style={panelSt}>
+        <PT>Betonfläche</PT>
+        <label style={lbl}>Schraffur-Skalierung</label>
+        <input type="range" min="3" max="60" step="1"
+          value={Math.max(3, Math.min(60, Number(d.hatch_scale) || 8))}
+          onChange={event => set('hatch_scale', Number(event.target.value))}
+          style={{ width:'100%', accentColor:'#64748b' }} />
+        <input type="number" min="3" max="60" step="1" style={inp}
+          value={Math.max(3, Math.min(60, Number(d.hatch_scale) || 8))}
+          onChange={event => set('hatch_scale', Math.max(3, Math.min(60, Number(event.target.value) || 8)))} />
+        <div style={{ marginTop:5, fontSize:9, color:'#64748b' }}>
+          Kleiner Wert = dichtere Schraffur. Die Einstellung wird identisch in den Vektorplot übernommen.
+        </div>
+        <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
+      </div>
+    );
+  }
+
   // ── DEFAULT ──
   return (
     <div style={panelSt}>
@@ -1499,6 +1531,7 @@ function EditorInner() {
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selected, setSelected]     = useState(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState(null);
+  const [selectedEdgePoint, setSelectedEdgePoint] = useState(null);
   const [activeLayerId, setActiveLayerId] = useState('heizung_vl');
   const [layerVisibility, setLayerVisibility] = useState(DEFAULT_LAYER_VISIBILITY);
   const [showLayers, setShowLayers] = useState(false);
@@ -1645,7 +1678,13 @@ function EditorInner() {
             id:e.id, source:e.source, target:e.target,
             sourceHandle:e.sourceHandle || null, targetHandle:e.targetHandle || null,
             stroke:layer.role === 'vl' ? '#ef4444' : layer.role === 'rl' ? '#3b82f6' : (e.style?.stroke || null),
-            data:e.data ? { laenge_m:e.data.laenge_m } : null,
+            // Die Systemklasse ist Teil der Hydraulik, nicht nur Darstellung:
+            // Bei freien Anschlusszonen erkennt das Backend darüber, ob eine
+            // WP-Leitung Quellen- oder Abgabekreis ist.
+            data:e.data ? {
+              laenge_m:e.data.laenge_m,
+              layer_id:e.data.layer_id || layer.id,
+            } : { layer_id:layer.id },
           };
         }),
       };
@@ -2936,6 +2975,7 @@ function EditorInner() {
       ? raster
       : constrainPoint(origin, best, { ortho:orthoAnRef.current, shift:event.shiftKey, grid:drawingConfig.grid_size });
     basePoints.splice(best.segmentIndex, 0, point);
+    setSelectedEdgePoint({ edgeId, pointIndex:best.segmentIndex });
     setEdges(items => items.map(item => item.id === edgeId
       ? { ...item, data:{ ...(item.data || {}), cad_polyline:true, points:basePoints } }
       : item));
@@ -2943,6 +2983,7 @@ function EditorInner() {
 
   const punktEntfernen = useCallback((edgeId, pointIndex) => {
     snap();
+    setSelectedEdgePoint(null);
     setEdges(items => items.map(item => {
       if (item.id !== edgeId) return item;
       const points = routePunkte(item).slice(1, -1).filter((_, index) => index !== pointIndex);
@@ -2953,6 +2994,7 @@ function EditorInner() {
   const punktDragStart = useCallback((event, edgeId, pointIndex) => {
     event.preventDefault();
     snap();
+    setSelectedEdgePoint({ edgeId, pointIndex });
     const edge = edgesRef.current.find(item => item.id === edgeId);
     if (!edge) return;
     const points = routePunkte(edge).slice(1, -1);
@@ -3288,6 +3330,7 @@ function EditorInner() {
         // aus dem ESC nicht herausführt — auch nicht den Dauerbefehl.
         if (ev.key === 'Escape') {
           ev.preventDefault();
+          ev.stopPropagation();
           leitungsEntwurfRef.current = null;
           leitungsCursorRef.current = null;
           setLeitungsEntwurf(null);
@@ -3347,14 +3390,18 @@ function EditorInner() {
           if (dx || dy) nudgeNode(selected.id, dx, dy);
         }
         if (ev.key === 'Delete' || ev.key === 'Backspace') {
-          if (selected) { snap(); deleteNodeRef.current?.(selected.id); }
+          if (selectedEdgePoint) {
+            ev.preventDefault();
+            punktEntfernen(selectedEdgePoint.edgeId, selectedEdgePoint.pointIndex);
+          }
+          else if (selected) { snap(); deleteNodeRef.current?.(selected.id); }
           else if (selectedEdgeId) { deleteEdgeRef.current?.(selectedEdgeId); }
         }
       }
     };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [undo, redo, selected, selectedEdgeId, snap, rotateNode, mirrorNode, alignNode, nudgeNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, spiegelAchse, drawingConfig, setNodes, laengeAnwenden]);
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
+  }, [undo, redo, selected, selectedEdgeId, selectedEdgePoint, punktEntfernen, snap, rotateNode, mirrorNode, alignNode, nudgeNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, spiegelAchse, drawingConfig, setNodes, laengeAnwenden]);
 
   // Berechnete Werte (Backend) in die Node-Daten spiegeln — nur für die Anzeige.
   // Verteiler-Rahmen: nur die Balken sind greifbar (dragHandle), die Lücke
@@ -3481,6 +3528,8 @@ function EditorInner() {
         _dashed:layer.dashed,
         _onAddPoint:punktHinzufuegen,
         _onRemovePoint:punktEntfernen,
+        _onSelectPoint:(edgeId, pointIndex) => setSelectedEdgePoint({ edgeId, pointIndex }),
+        _selectedPointIndex:selectedEdgePoint?.edgeId === edge.id ? selectedEdgePoint.pointIndex : null,
         _onPointPointerDown:punktDragStart,
         _onSegmentPointerDown:segmentDragStart,
         _onEndpointPointerDown:endpointDragStart,
@@ -3496,7 +3545,7 @@ function EditorInner() {
       style: { ...edge.style, stroke:color },
       };
     });
-  }, [edges, edgeContextMenu, edgeFlows, endpointContextMenu, endpointDragStart, junctionDegrees, layerVisibility, leitungResults, markierteEdgeIds, nodeGeometryVersion, punktDragStart, punktEntfernen, punktHinzufuegen, routePunkte, segmentDragStart, selectedEdgeId]);
+  }, [edges, edgeContextMenu, edgeFlows, endpointContextMenu, endpointDragStart, junctionDegrees, layerVisibility, leitungResults, markierteEdgeIds, nodeGeometryVersion, punktDragStart, punktEntfernen, punktHinzufuegen, routePunkte, segmentDragStart, selectedEdgeId, selectedEdgePoint]);
 
   const loadSchema = (key) => {
     const s = SCHALTUNGEN[key];
@@ -3512,9 +3561,19 @@ function EditorInner() {
     if (!schemaId) return;
     setExportState('loading');
     try {
+      // Der Plot erhält exakt die im Editor sichtbare, bereits aufgelöste
+      // Polylinie. So zeichnet das Backend keine abweichende Ersatzroute.
+      const exportEdges = edges.map(edge => ({
+        ...edge,
+        data:{
+          ...(edge.data || {}),
+          cad_polyline:true,
+          points:routePunkte(edge).slice(1, -1),
+        },
+      }));
       const graph = graphFuerSpeicherung(
         nodes,
-        edges,
+        exportEdges,
         { active_layer_id:activeLayerId, visibility:layerVisibility },
         drawingConfig,
       );
@@ -3558,13 +3617,14 @@ function EditorInner() {
     if (!raw) return null;
     snap();
     const pos = weltPosition;
-    const p = STD_PALETTE.find(p => p.type === raw);
+    const p = paletteItem(raw);
+    const nodeType = p?.type || raw;
     const id = newId();
     const fangRadius = 30 / Math.max(getZoom(), 0.2);
-    const lineHit = isInlineInsertable(raw) ? naechsteSichtbareLeitung(pos, fangRadius) : null;
+    const lineHit = isInlineInsertable(nodeType) ? naechsteSichtbareLeitung(pos, fangRadius) : null;
     // Abzweig-Bauteil (§18): hängt mit EINEM Anschluss an der Leitung. Es liegt
     // nicht im Hauptstrom, sondern an einer echten Junction daneben.
-    const branchDef = isBranchInsertable(raw) ? branchAnschluss(raw) : null;
+    const branchDef = isBranchInsertable(nodeType) ? branchAnschluss(nodeType) : null;
     const branchHit = branchDef ? naechsteSichtbareLeitung(pos, fangRadius) : null;
     // Für die Seite des Abzweigs zählt der echte Cursor, nicht der bereits auf
     // die Leitung gefangene Landepunkt — sonst zeigt der Stich immer nach oben.
@@ -3600,24 +3660,24 @@ function EditorInner() {
     }
 
     setNodes(ns => {
-      const extra = raw === 'verteiler' ? { abgaenge: 4 }
-        : raw === 'erdsonden' ? { sonden_anzahl: 5, sonden_laenge_m: 180 }
-        : raw === 'gruppe' ? { schaltung: 'einspritz' }
-        : raw === 'anschluss' ? { buchstabe: naechsterBuchstabe(ns) }
-        : raw === 'label' ? { label: 'Text', fontSize: 12 }
-        : raw === 'concrete_area' ? { label: '' }
-        : raw === 'interface_line' ? { label: 'SYSTEMGRENZE', dashed: false }
+      const extra = nodeType === 'verteiler' ? { abgaenge: 4 }
+        : nodeType === 'erdsonden' ? { sonden_anzahl: 5, sonden_laenge_m: 180 }
+        : nodeType === 'gruppe' ? { schaltung: 'einspritz' }
+        : nodeType === 'anschluss' ? { buchstabe: naechsterBuchstabe(ns) }
+        : nodeType === 'label' ? { label: 'Text', fontSize: 12 }
+        : nodeType === 'concrete_area' ? { label: '', hatch_scale:8 }
+        : nodeType === 'interface_line' ? { label: 'SYSTEMGRENZE', dashed: false }
         : {};
       // Skalierbare Annotationen brauchen eine Startgrösse; die Betonfläche liegt
       // hinter den Bauteilen (niedriger zIndex).
-      const annoStyle = raw === 'concrete_area' ? { style: { width: 220, height: 130 }, zIndex: -1 }
-        : raw === 'interface_line' ? { style: { width: 200, height: 24 } }
+      const annoStyle = nodeType === 'concrete_area' ? { style: { width: 220, height: 130 }, zIndex: -1 }
+        : nodeType === 'interface_line' ? { style: { width: 200, height: 24 } }
         : {};
       const bauteil = {
-        id, type: raw, position: nodePosition, ...annoStyle,
-        data: { label: p?.label || raw, ...extra,
+        id, type: nodeType, position: nodePosition, ...annoStyle,
+        data: { label: p?.label || nodeType, ...extra, ...(p?.preset || {}),
           ...(inlineRotation ? { rotation: inlineRotation } : {}),
-          ...(NUMMERIERT.includes(raw) ? { nr: naechsteNr(ns) } : {}) },
+          ...(NUMMERIERT.includes(nodeType) ? { nr: naechsteNr(ns) } : {}) },
       };
       // Der Abzweigpunkt ist ein echter Topologie-Knoten, kein optischer Punkt.
       return branchJunctionId
@@ -3690,7 +3750,7 @@ function EditorInner() {
       });
     }
     // Verbrauchergruppe: direkt nach dem Setzen die Schaltung wählen
-    if (raw === 'gruppe' && screenPunkt) setSchaltungswahl({ nodeId: id, x: screenPunkt.x, y: screenPunkt.y });
+    if (nodeType === 'gruppe' && screenPunkt) setSchaltungswahl({ nodeId: id, x: screenPunkt.x, y: screenPunkt.y });
     return id;
   }, [cadAnker, drawingConfig.corner_radius, getZoom, leitungTeilen, naechsteSichtbareLeitung, screenToFlowPosition, setEdges, setNodes, snap]);
 
@@ -3707,6 +3767,7 @@ function EditorInner() {
   const platzierenStarten = useCallback((typ, { persistent = false } = {}) => {
     setSelected(null);
     setSelectedEdgeId(null);
+    setSelectedEdgePoint(null);
     setEndpointMenu(null);
     setEdgeMenu(null);
     // Ein laufender Leitungsentwurf wird verworfen — zwei Befehle gleichzeitig
@@ -3749,6 +3810,7 @@ function EditorInner() {
     setEndpointMenu(null);
     setSelected(node);
     setSelectedEdgeId(null);
+    setSelectedEdgePoint(null);
     setInspectorOpen(true);
   }, [cadKlick, platzierenKlick]);
   const onNodeDoubleClick = useCallback((_, node) => {
@@ -3828,6 +3890,7 @@ function EditorInner() {
     setEdgeMenu(null);
     setMarkierteEdgeIds([]);
     setSelectedEdgeId(edge.id);
+    setSelectedEdgePoint(current => current?.edgeId === edge.id ? current : null);
     setSelected(null);
     setInspectorOpen(true);
   }, [ausrichtenKlick, cadKlick, platzierenKlick]);
@@ -3898,6 +3961,7 @@ function EditorInner() {
     }
     setSelected(null);
     setSelectedEdgeId(null);
+    setSelectedEdgePoint(null);
     setMarkierteEdgeIds([]);
   }, [cadKlick, drawingConfig.grid_size, screenToFlowPosition, selected, selectedEdgeId, spiegelAchse, spiegelKopieErstellen, platzierenKlick]);
 
@@ -3906,7 +3970,7 @@ function EditorInner() {
     if (istBefehl(editorModeRef.current, PLACE)) {
       const raw = screenToFlowPosition({ x:event.clientX, y:event.clientY });
       const zoom = Math.max(getZoom(), 0.2);
-      const typ = editorModeRef.current?.payload?.nodeType;
+      const typ = paletteNodeType(editorModeRef.current?.payload?.nodeType);
       // Liegt der Cursor über einer Leitung UND darf dieses Bauteil eingesetzt
       // werden, ist der Landepunkt der Leitungstreffer — nicht der Rasterpunkt.
       const abzweig = isBranchInsertable(typ);
@@ -4324,17 +4388,17 @@ function EditorInner() {
                 {group.titel}<ChevronDown size={14} />
               </button>
               {open && <div className="hc-palette-group__items">
-                {group.items.map(item=><div key={item.type} draggable
-                  onDragStart={event=>{ event.dataTransfer.setData('application/reactflow',item.type); event.dataTransfer.effectAllowed='move'; }}
-                  onClick={event=>platzierenStarten(item.type, { persistent:event.shiftKey })}
+                {group.items.map(item=>{ const kennung = item.paletteId || item.type; return <div key={kennung} draggable
+                  onDragStart={event=>{ event.dataTransfer.setData('application/reactflow',kennung); event.dataTransfer.effectAllowed='move'; }}
+                  onClick={event=>platzierenStarten(kennung, { persistent:event.shiftKey })}
                   title={`${item.label} — klicken, dann auf die Zeichenfläche klicken. Shift-Klick: mehrere setzen.`}
-                  className={`hc-palette-item${platzierTyp === item.type ? ' is-armed' : ''}`}>
+                  className={`hc-palette-item${platzierTyp === kennung ? ' is-armed' : ''}`}>
                   <span className="hc-palette-item__grip">⠿</span>
                   <span>
                     <strong>{item.label}</strong>
                     {item.desc && <small>{item.desc}</small>}
                   </span>
-                </div>)}
+                </div>;})}
               </div>}
             </div>;
           })}</div>}
@@ -4681,7 +4745,7 @@ function EditorInner() {
                 ? 'Grundzustand: auswählen und bearbeiten'
                 : 'Befehl aktiv — Esc führt zurück'}>
               {modeLabel(editorMode)}
-              {platzierTyp ? `: ${STD_PALETTE.find(x => x.type === platzierTyp)?.label || platzierTyp}` : ''}
+              {platzierTyp ? `: ${paletteItem(platzierTyp)?.label || platzierTyp}` : ''}
               {editorMode.persistent ? ' · Dauer' : ''}
             </span>
             <button type="button"

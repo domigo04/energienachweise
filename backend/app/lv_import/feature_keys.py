@@ -30,6 +30,9 @@ FEATURE_DEFS = {
     "balancing_valve_count": {"typ": "int", "einheit": None, "label": "Abgleichventile (STAD)"},
     "radiator_count": {"typ": "int", "einheit": None, "label": "Heizkörper"},
     "heat_meter_count": {"typ": "int", "einheit": None, "label": "Wärmezähler"},
+    "floor_heating_manifold_count": {
+        "typ": "int", "einheit": None, "label": "Fussbodenheizungsverteiler",
+    },
     # Rohrmeter getrennt nach Seite (Punkt 11): Quelle = Primärkreis/Erdsonden-
     # sammler, Verteilung = Heizungsverteilung. pipe_length_m ist die Summe und
     # bleibt der Kostentreiber für die bestehende Ähnlichkeit.
@@ -54,6 +57,7 @@ FEATURE_TO_CONTEXT = {
     "valve_2way_count": "anzahl_ventile_2weg",
     "valve_3way_count": "anzahl_ventile_3weg",
     "heat_meter_count": "anzahl_waermezaehler",
+    "floor_heating_manifold_count": "anzahl_fbh_verteiler",
     "pipe_length_m": "rohrmeter",
 }
 

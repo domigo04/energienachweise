@@ -93,9 +93,18 @@ export function FlowEdge({
           Beim Ziehen mit Shift übernimmt der Editor den 0°/45°/90°-Fang. */}
       {selected && waypoints.map((point, index) => (
         <circle key={`${id}-point-${index}`} cx={point.x} cy={point.y} r={gripR}
-          fill="white" stroke={color} strokeWidth={gripStroke}
+          fill={data._selectedPointIndex === index ? color : 'white'}
+          stroke={data._selectedPointIndex === index ? '#0f172a' : color} strokeWidth={gripStroke}
           style={{ pointerEvents: 'all', cursor: 'move' }}
-          onPointerDown={(event) => { event.stopPropagation(); data._onPointPointerDown?.(event, id, index); }}
+          onPointerDown={(event) => {
+            event.stopPropagation();
+            data._onSelectPoint?.(id, index);
+            data._onPointPointerDown?.(event, id, index);
+          }}
+          onClick={(event) => {
+            event.stopPropagation();
+            data._onSelectPoint?.(id, index);
+          }}
           onDoubleClick={(event) => { event.stopPropagation(); data._onRemovePoint?.(id, index); }} />
       ))}
 

@@ -16,8 +16,8 @@ from app.data.generator_types import generator_type_label
 
 VL_FARBE = "#ef4444"
 RL_FARBE = "#3b82f6"
-SOLE_VL_FARBE = "#4f46e5"
-SOLE_RL_FARBE = "#7c3aed"
+SOLE_VL_FARBE = "#eab308"
+SOLE_RL_FARBE = "#16a34a"
 
 # Verteiler-Rahmen (VL-Balken oben, RL-Balken unten, Stränge dazwischen)
 VT_S = 170          # Abstand zwischen den Abgängen
@@ -41,6 +41,7 @@ GROESSEN = {
     "waermezaehler": (48, 48), "expansion": (76, 105), "bww": (60, 104),
     "anschluss": (60, 40), "stad": (18, 41), "temperatur": (52, 38),
     "sicherheitsventil": (80, 67), "pwt": (94, 68),
+    "concrete_area": (180, 120), "interface_line": (180, 40),
 }
 
 
@@ -102,6 +103,12 @@ def node_groesse(node):
         return (GR_W, GR_H)
     if node.get("type") == "erdsonden":
         return (ews_breite(node), EWS_H)
+    if node.get("type") in ("concrete_area", "interface_line"):
+        style = node.get("style") or {}
+        w = _f(style.get("width"))
+        h = _f(style.get("height"))
+        fallback = GROESSEN[node.get("type")]
+        return (w or fallback[0], h or fallback[1])
     return GROESSEN.get(node.get("type"), (60, 60))
 
 
@@ -284,16 +291,19 @@ def _zeichne_erzeuger(parts, node):
             '<text x="129" y="99" text-anchor="middle" font-size="18" font-weight="700" fill="#2563eb">-</text>',
             '<text x="100" y="191" text-anchor="middle" font-family="Arial" font-size="14" font-weight="700" fill="#111827">FERNWÄRME</text>',
         ])
-    elif gt in {"gas", "oel", "holz"}:
-        fuel = {"gas": "GAS", "oel": "ÖL", "holz": "HOLZ"}[gt]
+    elif gt == "holz":
+        parts.extend([
+            '<rect x="8" y="8" width="184" height="204" fill="white" stroke="#111827" stroke-width="3"/>',
+            '<rect x="84" y="164" width="32" height="32" fill="#111827"/>',
+        ])
+    elif gt in {"gas", "oel"}:
+        fuel = {"gas": "GAS", "oel": "ÖL"}[gt]
         parts.extend([
             '<rect x="22" y="14" width="156" height="192" rx="8" fill="#fff7ed" stroke="#111827" stroke-width="3"/>',
             '<rect x="39" y="32" width="122" height="34" rx="3" fill="#f8fafc" stroke="#111827" stroke-width="2"/>',
             f'<text x="100" y="55" text-anchor="middle" font-family="Arial" font-size="16" font-weight="700" fill="#111827">{fuel}</text>',
             '<path d="M101 177 C67 164 65 134 89 111 C88 130 101 130 107 103 C135 127 143 158 119 177 C114 160 101 151 92 164 C90 170 94 175 101 177Z" fill="#fb923c" stroke="#9a3412" stroke-width="2.5"/>',
         ])
-        if gt == "holz":
-            parts.append('<g stroke="#78350f" stroke-width="4" stroke-linecap="round"><line x1="65" y1="188" x2="104" y2="180"/><line x1="96" y1="181" x2="137" y2="190"/></g>')
     elif gt == "elektro":
         parts.extend([
             '<rect x="22" y="14" width="156" height="192" rx="8" fill="#fefce8" stroke="#111827" stroke-width="3"/>',
@@ -658,12 +668,62 @@ def zeichne_standard(parts, node, results):
     elif t == "label":
         parts.append(f'<text x="{x}" y="{y + 11}" font-size="10" fill="#64748b">{_esc(label)}</text>')
         return
+    elif t == "concrete_area":
+        scale = max(3, min(60, _f(d.get("hatch_scale")) or 8))
+        pattern_id = "hatch-" + re.sub(r"[^a-zA-Z0-9_-]", "-", str(node.get("id") or "area"))
+        parts.append(
+            f'<defs><pattern id="{pattern_id}" width="{scale}" height="{scale}" '
+            'patternUnits="userSpaceOnUse">'
+            f'<path d="M0 0 L{scale} {scale} M{scale} 0 L0 {scale}" '
+            'stroke="#94a3b8" stroke-width="0.6" opacity="0.55"/>'
+            '</pattern></defs>'
+        )
+        parts.append(
+            f'<rect x="{x}" y="{y}" width="{w}" height="{h}" '
+            f'fill="url(#{pattern_id})" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4,3"/>'
+        )
+        return
+    elif t == "interface_line":
+        dash = ' stroke-dasharray="8,5"' if d.get("dashed") else ""
+        line_y = y + h / 2
+        if label:
+            parts.append(
+                f'<text x="{cx}" y="{line_y - 7}" text-anchor="middle" font-size="10" '
+                f'font-weight="700" letter-spacing="0.8" fill="#0f172a">{_esc(label).upper()}</text>'
+            )
+        parts.append(
+            f'<line x1="{x}" y1="{line_y}" x2="{x + w}" y2="{line_y}" '
+            f'stroke="#0f172a" stroke-width="2"{dash}/>'
+        )
+        return
     # Drehung um 90° (data.rotation): nur das Symbol dreht — Nr-Badge bleibt aufrecht.
     rot = int(_f(d.get("rotation")) or 0) % 360
     if rot:
         parts.insert(sym_start, f'<g transform="rotate({rot} {cx:.2f} {cy:.2f})">')
         parts.append("</g>")
     _nr_badge(parts, x + w, y, d.get("nr"))
+    if d.get("nr") is not None:
+        caption = label or {
+            "erzeuger": "Wärmeerzeuger", "erdsonden": "Erdsondenfeld",
+            "speicher": "Speicher", "bww": "BWW-Speicher", "verteiler": "Verteiler",
+            "gruppe": "Verbrauchergruppe", "heizkreis": "Heizkreis", "pump": "Pumpe",
+            "valve2": "2-Weg-Ventil", "valve3": "3-Weg-Ventil", "shutoff": "Absperrventil",
+            "stad": "STAD", "checkvalve": "Rückschlagventil", "waermezaehler": "Wärmezähler",
+            "expansion": "Expansionsgefäss", "sicherheitsventil": "Sicherheitsventil",
+            "pwt": "Plattentauscher",
+        }.get(t, t)
+        offset_x = _f(d.get("caption_offset_x")) or 0
+        offset_y = max(0, _f(d.get("caption_offset_y")) or 0)
+        cap_x, cap_y = cx + offset_x, y + h + 10 + offset_y
+        cap_w = max(54, min(160, len(str(caption)) * 5.7 + 14))
+        parts.append(
+            f'<rect x="{cap_x - cap_w / 2}" y="{cap_y}" width="{cap_w}" height="18" '
+            'rx="2" fill="white" stroke="#94a3b8" stroke-width="0.8"/>'
+        )
+        parts.append(
+            f'<text x="{cap_x}" y="{cap_y + 12}" text-anchor="middle" font-size="9" '
+            f'fill="#334155">{_esc(caption)}</text>'
+        )
 
 
 def _svg_num(value):
@@ -692,7 +752,9 @@ def _gerundeter_polylinien_pfad(punkte, radius=8):
         in_laenge = math.hypot(in_dx, in_dy)
         out_laenge = math.hypot(out_dx, out_dy)
         richtung = ((in_dx * out_dx + in_dy * out_dy) / (in_laenge * out_laenge)) if in_laenge and out_laenge else 1
-        if not r or not in_laenge or not out_laenge or abs(richtung) > 0.999:
+        # FlowEdge rundet nur echte annähernd rechtwinklige Ecken. Flache oder
+        # 45°-Knicke bleiben auch im PDF exakt gerade/scharf.
+        if not r or not in_laenge or not out_laenge or abs(richtung) > 0.25:
             pfad += f" L {_svg_num(ecke[0])} {_svg_num(ecke[1])}"
             continue
         schnitt = min(r, in_laenge / 2, out_laenge / 2)
@@ -789,6 +851,12 @@ def erzeuge_svg(nodes: list, edges: list, results: dict) -> str:
         py = (n.get("position") or {}).get("y", 0)
         xs += [px, px + w]
         ys += [py, py + h]
+        if (n.get("data") or {}).get("nr") is not None:
+            d = n.get("data") or {}
+            cap_x = px + w / 2 + (_f(d.get("caption_offset_x")) or 0)
+            cap_y = py + h + 10 + max(0, _f(d.get("caption_offset_y")) or 0)
+            xs += [cap_x - 85, cap_x + 85]
+            ys += [cap_y, cap_y + 18]
     for edge in edges:
         for point in (edge.get("data") or {}).get("points") or []:
             xs.append(_f(point.get("x")))

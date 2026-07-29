@@ -106,6 +106,12 @@ def test_heizkoerper_werden_gezaehlt():
     assert res["radiator"]["value"] == 14
 
 
+def test_fussbodenheizungsverteiler_werden_gezaehlt():
+    res = q.component_counts(_rows("Bodenheizungsverteiler Edelstahl\nStk. 3"))
+    assert res["floor_heating_manifold"]["value"] == 3
+    assert res["floor_heating_manifold"]["confidence"] == "high"
+
+
 def test_umschaltkugelhahn_zaehlt_als_3weg():
     res = q.component_counts(_rows("Umschaltkugelhahn DN32 Stk. 1"))
     assert res["valve_3way"]["value"] == 1

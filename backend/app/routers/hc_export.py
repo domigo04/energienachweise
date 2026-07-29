@@ -48,16 +48,23 @@ def _schema_pdf_response(schema_id: int, inhalt: str, user: User, db: Session,
         p.name if p else "Projekt", s.name or "Schema", inhalt,
         nodes, edges, results,
         plankopf={
-            "projektnummer": str(p.id) if p else "—",
-            "bauherr": p.kunde if p and p.kunde else "—",
-            "standort": p.standort if p and p.standort else "—",
+            "projektnummer": p.projektnummer if p and p.projektnummer else (str(p.id) if p else "—"),
+            "bauherr": (p.bauherr or p.kunde) if p else "—",
+            "standort": (
+                ", ".join(filter(None, [p.strasse, " ".join(filter(None, [p.plz, p.ort]))]))
+                or p.standort or "—"
+            ) if p else "—",
             "planer": user.name or user.email,
             "bearbeiter": user.name or user.email,
-            "planbezeichnung": s.name or "Anlagenschema",
+            "planbezeichnung": (p.planbezeichnung if p and p.planbezeichnung else None) or s.name or "Prinzipschema",
             "dokumentnummer": f"HC-{p.id if p else 'P'}-{s.id}",
             "revision": str(max((revision.version_nr for revision in s.revisions), default=0)),
-            "status": getattr(p.status, "value", p.status) if p else "Entwurf",
+            "status": (
+                f"SIA {p.sia_phase or '—'} · {p.projektfortschritt_pct or 0}%"
+                if p else "Entwurf"
+            ),
             "planformat": "A3 quer",
+            "logo_data_url": user.firma.logo_data_url if user.firma else None,
         },
     )
     sicher = re.sub(r"[^A-Za-z0-9_-]+", "_", (p.name if p else "Projekt")).strip("_") or "Projekt"

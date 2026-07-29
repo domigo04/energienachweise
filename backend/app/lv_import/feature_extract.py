@@ -240,7 +240,8 @@ def extract_features(pages, word_pages=None) -> dict:
                         ("valve_3way", "valve_3way_count"),
                         ("balancing_valve", "balancing_valve_count"),
                         ("radiator", "radiator_count"),
-                        ("heat_meter", "heat_meter_count")):
+                        ("heat_meter", "heat_meter_count"),
+                        ("floor_heating_manifold", "floor_heating_manifold_count")):
         if family in bauteile:
             streng[key] = bauteile[family]
     streng.update(q.boreholes(rows))
@@ -252,6 +253,7 @@ def extract_features(pages, word_pages=None) -> dict:
     # ── 2) Alte Heuristik nur für noch fehlende Werte ──────────────────────
     for family, key in (("pump", "pump_count"), ("valve_2way", "valve_2way_count"),
                         ("valve_3way", "valve_3way_count"), ("heat_meter", "heat_meter_count"),
+                        ("floor_heating_manifold", "floor_heating_manifold_count"),
                         ("buffer", "buffer_count"), ("heat_generator", "generator_count")):
         if _fehlt(result, key):
             f = _count_feature(zeilen, family)
@@ -305,6 +307,7 @@ def _bauteilmengen_ergaenzen(pages, result: dict) -> None:
     familie_zu_key = {
         "pump": "pump_count", "valve_2way": "valve_2way_count",
         "valve_3way": "valve_3way_count", "heat_meter": "heat_meter_count",
+        "floor_heating_manifold": "floor_heating_manifold_count",
         "buffer": "buffer_count",
     }
     for family, key in familie_zu_key.items():

@@ -148,7 +148,10 @@ def parse_positions(pages) -> list[dict]:
 # Feature-Familien, deren Menge sich sinnvoll als Stück-/Meter-Menge summieren
 # lässt (Block C #11 — Bauteilmengen). „borehole"/„heat_generator" laufen über
 # eigene, präzisere Extraktoren und bleiben hier bewusst aussen vor.
-_MENGEN_FAMILIEN = ("pump", "valve_2way", "valve_3way", "heat_meter", "buffer", "pipe")
+_MENGEN_FAMILIEN = (
+    "pump", "valve_2way", "valve_3way", "heat_meter",
+    "floor_heating_manifold", "buffer", "pipe",
+)
 
 
 def component_quantities(pages) -> dict:

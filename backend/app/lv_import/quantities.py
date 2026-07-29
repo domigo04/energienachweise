@@ -129,7 +129,7 @@ def _menge_meter(row) -> Optional[float]:
 # „gestohlen" werden).
 _ALLE_BAUTEIL_TERMS = tuple(
     t for f in ("pump", "valve_2way", "valve_3way", "balancing_valve", "radiator",
-                "heat_meter", "buffer", "borehole", "heat_generator")
+                "heat_meter", "floor_heating_manifold", "buffer", "borehole", "heat_generator")
     for t in FEATURE_TERMS[f]
 ) + PIPE_INCLUDE_TERMS
 
@@ -207,7 +207,7 @@ def component_counts(rows) -> dict:
     Zählt nur Zeilen, die einen Bauteilbegriff UND eine Stück-Menge enthalten.
     `Pumpe / Leistung 570 W` liefert damit nichts."""
     familien = ("pump", "valve_2way", "valve_3way", "balancing_valve",
-                "radiator", "heat_meter")
+                "radiator", "heat_meter", "floor_heating_manifold")
     result: dict[str, dict] = {}
     for family in familien:
         terms = FEATURE_TERMS[family]

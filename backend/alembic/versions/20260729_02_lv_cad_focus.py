@@ -16,6 +16,11 @@ depends_on = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    project_columns = {
+        column["name"] for column in inspector.get_columns("hc_projects")
+    }
     for name, column_type in (
         ("projektnummer", sa.String()),
         ("strasse", sa.String()),
@@ -26,8 +31,15 @@ def upgrade() -> None:
         ("projektfortschritt_pct", sa.Integer()),
         ("planbezeichnung", sa.String()),
     ):
-        op.add_column("hc_projects", sa.Column(name, column_type, nullable=True))
-    op.add_column("hc_firmen", sa.Column("logo_data_url", sa.Text(), nullable=True))
+        if name not in project_columns:
+            op.add_column("hc_projects", sa.Column(name, column_type, nullable=True))
+
+    company_columns = {
+        column["name"] for column in inspector.get_columns("hc_firmen")
+    }
+    if "logo_data_url" not in company_columns:
+        op.add_column("hc_firmen", sa.Column("logo_data_url", sa.Text(), nullable=True))
+
     op.execute("UPDATE hc_projects SET projektfortschritt_pct = 0 WHERE projektfortschritt_pct IS NULL")
     op.execute("UPDATE hc_projects SET planbezeichnung = 'Prinzipschema' WHERE planbezeichnung IS NULL")
 

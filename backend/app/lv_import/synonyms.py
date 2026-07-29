@@ -36,6 +36,12 @@ FEATURE_TERMS: dict[str, list[str]] = {
         "wärmezähler", "waermezaehler", "wärmemengenzähler", "waermemengenzaehler",
         "wmz", "energiezähler heizung",
     ],
+    "floor_heating_manifold": [
+        "bodenheizungsverteiler", "bodenheizungsverteilerkasten",
+        "fussbodenheizungsverteiler", "fußbodenheizungsverteiler",
+        "fbh-verteiler", "fbh verteiler", "heizkreisverteiler fbh",
+        "flächenheizungsverteiler", "flaechenheizungsverteiler",
+    ],
     "buffer": [
         "pufferspeicher", "puffer", "technikspeicher", "heizungspufferspeicher",
         "kombispeicher", "technischer speicher", "heizungsspeicher",

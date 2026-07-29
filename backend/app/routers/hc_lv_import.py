@@ -28,6 +28,7 @@ from app.lv_import.llm import resolver as llm
 from app import fachwerte
 from app.lv_import.feature_keys import FEATURE_DEFS, FEATURE_KEYS, FEATURE_TO_CONTEXT
 from app.lv_import import page_classifier as pc
+from app.lv_import.review_packet import build_review_packet
 
 router = APIRouter(prefix="/api/v1/lv-imports", tags=["KV – LV-Import"])
 
@@ -220,6 +221,7 @@ async def upload_lv(
         erkannte = [k for k, f in features.items() if f.get("value") is not None]
         pruefen = [c["bkp_nr"] for c in costs if not c.get("canonical_key")
                    and not c.get("is_group_total")]
+        review = build_review_packet(features, costs)
         imp.debug_json = json.dumps({
             **pipeline.debug_dump(),
             "cost_source": "cost_summary" if has_cost_summary(summary) else "lv_positions",
@@ -231,6 +233,10 @@ async def upload_lv(
             "kosten_ohne_zuordnung": len(pruefen),
             "llm_positions_sent": llm_stat["sent"],
             "llm_positions_mapped": llm_stat["mapped"],
+            "parser_first": True,
+            "llm_review_characters": review["characters"],
+            "llm_review_estimated_tokens": review["estimated_tokens"],
+            "deterministic_checks": review["deterministic_checks"],
             **llm.status(),
             "gruppen_validierung": {
                 g: i.get("validation_status")

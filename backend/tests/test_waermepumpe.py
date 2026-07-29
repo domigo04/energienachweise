@@ -180,6 +180,31 @@ def test_heiz_und_solekreis_bleiben_getrennt():
     assert wp["source_flow_m3h"] > wp["heating_flow_m3h"]
 
 
+def test_freie_wp_anschlusszone_erkennt_kreise_ueber_leitungslayer():
+    """Neutrale Zonen-Handles tragen absichtlich keine Semantik. Sole/Heizung
+    müssen deshalb aus layer_id erkannt werden, egal wo am WP-Rand angedockt."""
+    nodes = [
+        WP,
+        {"id": "sp", "type": "speicher", "data": {}},
+        {"id": "ews", "type": "erdsonden", "data": {}},
+    ]
+    edges = [
+        _leitung("h1", "wp", "sp", "heizung_vl"),
+        _leitung("h2", "sp", "wp", "heizung_rl"),
+        _leitung("s1", "wp", "ews", "sole_vl"),
+        _leitung("s2", "ews", "wp", "sole_rl"),
+    ]
+    edges[0]["sourceHandle"] = "wz-r-28"
+    edges[1]["targetHandle"] = "wz-b-63"
+    edges[2]["sourceHandle"] = "wz-l-41"
+    edges[3]["targetHandle"] = "wz-t-72"
+    result = berechne_schema(nodes, edges)
+    wp = result["heatpump_results"]["wp"]
+    assert result["edge_flows"]["h1"] == wp["heating_flow_m3h"]
+    assert result["edge_flows"]["s1"] == wp["source_flow_m3h"]
+    assert wp["source_flow_m3h"] != wp["heating_flow_m3h"]
+
+
 def test_speicher_trennt_erzeuger_und_verbraucherkreis():
     """§47: Der Puffer ist die Kreisgrenze — beide Seiten dürfen unterschiedliche
     Volumenströme führen. Verbraucher: 20 kW bei 40/30 (ΔT 10) → deutlich mehr

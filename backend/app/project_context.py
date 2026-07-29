@@ -84,6 +84,7 @@ PARAMETER: list[ParamDef] = [
              combine=COMBINE_SCHEMA_FIRST),
     ParamDef("anzahl_pumpen", "Pumpen", "verteilung", "ganzzahl", schema_key="anzahl_pumpen",
              combine=COMBINE_SCHEMA_FIRST),
+    ParamDef("anzahl_fbh_verteiler", "Fussbodenheizungsverteiler", "verteilung", "ganzzahl"),
     ParamDef("anzahl_ventile_2weg", "2-Weg-Ventile", "verteilung", "ganzzahl", schema_key="anzahl_ventile_2weg",
              combine=COMBINE_SCHEMA_FIRST),
     ParamDef("anzahl_ventile_3weg", "3-Weg-Ventile", "verteilung", "ganzzahl", schema_key="anzahl_ventile_3weg",

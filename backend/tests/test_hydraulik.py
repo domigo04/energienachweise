@@ -17,7 +17,7 @@ RL = "#3b82f6"
 def test_medien_layer_werden_fachlich_als_vl_rl_erkannt():
     assert _stroke({"style": {"stroke": "#06b6d4"}, "data": {"layer_id": "kaelte_vl"}}) == VL
     assert _stroke({"style": {"stroke": "#0e7490"}, "data": {"layer_id": "kaelte_rl"}}) == RL
-    assert _stroke({"style": {"stroke": "#8b5cf6"}, "data": {"layer_id": "sole_vl"}}) == VL
+    assert _stroke({"style": {"stroke": "#eab308"}, "data": {"layer_id": "sole_vl"}}) == VL
 
 
 # ── §1 Volumenstrom ──────────────────────────────────────────────────────────

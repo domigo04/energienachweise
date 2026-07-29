@@ -14,7 +14,9 @@ describe('Erzeugerarten', () => {
     expect(new Set(codes).size).toBe(codes.length);
     expect(codes).toContain('lwwp');
     expect(codes).toContain('fernwaerme');
-    expect(codes).toContain('gas');
+    expect(codes).toContain('holz');
+    expect(codes).not.toContain('gas');
+    expect(codes).not.toContain('oel');
   });
 
   it('klassiert die Luft/Wasser-WP als Wärmepumpe ohne hydraulischen Quellenkreis', () => {

@@ -13,6 +13,15 @@ const HEIZUNGSSYSTEME = [
   { value: "FBH", label: "Fussbodenheizung" },
   { value: "HK", label: "Heizkörper" },
 ];
+const SIA_PHASEN = [
+  ["31", "31 Vorprojekt"],
+  ["32", "32 Bauprojekt"],
+  ["33", "33 Bewilligungsverfahren"],
+  ["41", "41 Ausschreibung"],
+  ["51", "51 Ausführungsprojekt"],
+  ["52", "52 Ausführung"],
+  ["53", "53 Inbetriebnahme / Abschluss"],
+];
 
 const numOrNull = (v) => (v === "" || v == null ? null : Number(v));
 
@@ -20,6 +29,10 @@ function formFromProject(p) {
   const bd = p.base_data || {};
   return {
     name: p.name || "", standort: p.standort || "", kunde: p.kunde || "", beschreibung: p.beschreibung || "",
+    projektnummer: p.projektnummer || "", strasse: p.strasse || "", plz: p.plz || "",
+    ort: p.ort || "", bauherr: p.bauherr || "", sia_phase: p.sia_phase || "",
+    projektfortschritt_pct: p.projektfortschritt_pct ?? 0,
+    planbezeichnung: p.planbezeichnung || "Prinzipschema",
     gebaeudekategorie: bd.gebaeudekategorie || "",
     ebf_m2: bd.ebf_m2 ?? "",
     anzahl_nutzungseinheiten: bd.anzahl_nutzungseinheiten ?? "",
@@ -58,6 +71,10 @@ export default function ProjektInfoPage() {
     try {
       const payload = {
         name: form.name, standort: form.standort, kunde: form.kunde, beschreibung: form.beschreibung,
+        projektnummer: form.projektnummer, strasse: form.strasse, plz: form.plz,
+        ort: form.ort, bauherr: form.bauherr, sia_phase: form.sia_phase,
+        projektfortschritt_pct: Number(form.projektfortschritt_pct) || 0,
+        planbezeichnung: form.planbezeichnung || "Prinzipschema",
         base_data: {
           t_aussen: numOrNull(form.t_aussen) ?? -8.0,
           t_innen: numOrNull(form.t_innen) ?? 20.0,
@@ -113,9 +130,30 @@ export default function ProjektInfoPage() {
           <h2 className="mb-4 text-sm font-bold text-slate-800">Allgemein</h2>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div><label className="label">Projektname *</label><input className="input" value={form.name} onChange={(e) => set("name", e.target.value)} /></div>
-            <div><label className="label">Kunde</label><input className="input" value={form.kunde} onChange={(e) => set("kunde", e.target.value)} /></div>
-            <div><label className="label">Standort</label><input className="input" value={form.standort} onChange={(e) => set("standort", e.target.value)} /></div>
+            <div><label className="label">Projektnummer</label><input className="input" value={form.projektnummer} onChange={(e) => set("projektnummer", e.target.value)} /></div>
+            <div><label className="label">Bauherr</label><input className="input" value={form.bauherr} onChange={(e) => set("bauherr", e.target.value)} /></div>
+            <div><label className="label">Kunde / Auftraggeber</label><input className="input" value={form.kunde} onChange={(e) => set("kunde", e.target.value)} /></div>
+            <div className="md:col-span-2"><label className="label">Strasse</label><input className="input" value={form.strasse} onChange={(e) => set("strasse", e.target.value)} /></div>
+            <div><label className="label">PLZ</label><input className="input" value={form.plz} onChange={(e) => set("plz", e.target.value)} /></div>
+            <div><label className="label">Ort</label><input className="input" value={form.ort} onChange={(e) => set("ort", e.target.value)} /></div>
+            <div><label className="label">Planbezeichnung</label><input className="input" value={form.planbezeichnung} onChange={(e) => set("planbezeichnung", e.target.value)} placeholder="Prinzipschema" /></div>
             <div><label className="label">Beschreibung</label><input className="input" value={form.beschreibung} onChange={(e) => set("beschreibung", e.target.value)} /></div>
+          </div>
+        </section>
+
+        <section className="card p-5">
+          <h2 className="mb-4 text-sm font-bold text-slate-800">Projektphase</h2>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div><label className="label">SIA-Phase</label>
+              <select className="input" value={form.sia_phase} onChange={(e) => set("sia_phase", e.target.value)}>
+                <option value="">— wählen —</option>
+                {SIA_PHASEN.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </div>
+            <div><label className="label">Projektfortschritt: {form.projektfortschritt_pct} %</label>
+              <input type="range" min="0" max="100" step="5" className="w-full accent-brand-600"
+                value={form.projektfortschritt_pct} onChange={(e) => set("projektfortschritt_pct", e.target.value)} />
+            </div>
           </div>
         </section>
 

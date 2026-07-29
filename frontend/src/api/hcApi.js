@@ -113,6 +113,8 @@ export const updateFirma = (id, data) => api.patch(`${BASE}/auth/admin/firmen/${
 
 // --- Firmenverwaltung ---
 export const getFirmaAdminOverview = () => api.get(`${BASE}/firma-admin/overview`).then(r => r.data);
+export const updateFirmenLogo = (dataUrl) =>
+  api.patch(`${BASE}/firma-admin/logo`, { data_url: dataUrl }).then(r => r.data);
 export const updateFirmaMember = (id, data) =>
   api.patch(`${BASE}/firma-admin/mitglieder/${id}`, data).then(r => r.data);
 export const updateProjektVerantwortlicher = (projectId, verantwortlicherId) =>

@@ -173,8 +173,9 @@ def test_svg_uebernimmt_cad_stuetzpunkte_und_medien_layer():
         "data": {"layer_id": "kaelte_rl", "corner_radius": 12, "points": [{"x": -300, "y": 200}, {"x": 200, "y": 200}]},
     }]
     svg = erzeuge_svg(nodes, edges, {})
-    assert "Q -300 200" in svg
-    assert "Q 200 200" in svg
+    # Nicht-rechtwinklige CAD-Stützpunkte bleiben exakt und werden nicht durch
+    # eine Bezier-Rundung vom Editorpfad abweichend nachgezeichnet.
+    assert 'd="M 52 0 L -300 200 L 200 200 L 352 0"' in svg
     assert 'stroke="#0e7490"' in svg
     assert 'stroke-dasharray="10,7"' in svg
     # Ein Stützpunkt ausserhalb der Bauteile muss den PDF/SVG-Ausschnitt erweitern.
@@ -198,6 +199,19 @@ def test_svg_cad_anker_sind_unsichtbar_und_polylinie_startet_exakt_am_punkt():
     # Alte Junction-Bauteile zeichneten ein schwarzes T-Symbol. CAD-Anker
     # gehören nur zur Topologie und dürfen im Export nicht auftauchen.
     assert 'stroke="#1e293b" stroke-width="6"' not in svg
+
+
+def test_svg_exportiert_beton_skalierung_und_bauteilbeschriftung():
+    nodes = [
+        {"id": "beton", "type": "concrete_area", "position": {"x": 0, "y": 0},
+         "style": {"width": 210, "height": 120}, "data": {"hatch_scale": 17}},
+        {"id": "p1", "type": "pump", "position": {"x": 260, "y": 20},
+         "data": {"nr": 1, "label": "Pumpe Heizkreis", "caption_offset_x": 12}},
+    ]
+    svg = erzeuge_svg(nodes, [], {})
+    assert 'width="17.0" height="17.0"' in svg
+    assert "Pumpe Heizkreis" in svg
+    assert 'width="210.0" height="120.0"' in svg
 
 
 # ── Legende + Berechnungen ──────────────────────────────────────────────────

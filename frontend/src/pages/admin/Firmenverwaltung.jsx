@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import {
   getFirmaAdminOverview,
+  updateFirmenLogo,
   updateFirmaMember,
   updateProjektVerantwortlicher,
 } from "../../api/hcApi";
@@ -32,6 +33,7 @@ const ACTION_LABELS = {
   firmenmitglied_aktualisiert: "Firmenmitglied geändert",
   plattformadmin_benutzer_aktualisiert: "Benutzer durch Plattformadmin geändert",
   firma_aktualisiert: "Firma geändert",
+  firmenlogo_aktualisiert: "Firmenlogo geändert",
   firmenadmin_beantragt: "Firmenadmin beantragt",
   eigenes_profil_aktualisiert: "Eigenes Profil geändert",
   kostenschaetzung_gespeichert: "Kostenschätzung gespeichert",
@@ -215,6 +217,28 @@ export default function Firmenverwaltung() {
     }
   };
 
+  const uploadLogo = (file) => {
+    if (!file) return;
+    if (file.size > 1_000_000) {
+      setError("Das Logo darf maximal 1 MB gross sein.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = async () => {
+      setBusy("logo");
+      setError("");
+      try {
+        const result = await updateFirmenLogo(reader.result);
+        setData(current => ({ ...current, firma:{ ...current.firma, logo_data_url:result.logo_data_url } }));
+      } catch (err) {
+        setError(err?.response?.data?.detail || "Logo konnte nicht gespeichert werden.");
+      } finally {
+        setBusy(null);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   if (loading) return <div className="p-8 text-sm text-slate-400">Firmenverwaltung wird geladen…</div>;
   if (!data) return <div className="mx-auto max-w-6xl p-8 text-sm text-red-700">{error}</div>;
 
@@ -258,6 +282,37 @@ export default function Firmenverwaltung() {
             <StatCard icon={UserRoundCheck} label="Freigaben offen" value={data.kennzahlen.offene_registrierungen} tone="amber" />
             <StatCard icon={FolderKanban} label="Aktive Projekte" value={data.kennzahlen.aktive_projekte} tone="blue" />
             <StatCard icon={FolderKanban} label="Archiviert" value={data.kennzahlen.archivierte_projekte} />
+          </section>
+
+          <section className="card flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-4">
+              <div className="flex h-16 w-28 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-white p-2">
+                {data.firma.logo_data_url
+                  ? <img src={data.firma.logo_data_url} alt={`${data.firma.name} Logo`} className="max-h-full max-w-full object-contain" />
+                  : <span className="text-xs text-slate-400">Kein Logo</span>}
+              </div>
+              <div>
+                <h2 className="font-semibold text-slate-900">Firmenlogo im Plankopf</h2>
+                <p className="mt-0.5 text-xs text-slate-500">PNG, JPEG oder SVG, maximal 1 MB.</p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <label className="btn-secondary cursor-pointer">
+                {busy === "logo" ? "Speichere…" : "Logo hochladen"}
+                <input type="file" accept="image/png,image/jpeg,image/svg+xml" className="hidden"
+                  disabled={busy === "logo"} onChange={event => { uploadLogo(event.target.files?.[0]); event.target.value = ""; }} />
+              </label>
+              {data.firma.logo_data_url && (
+                <button type="button" className="btn-ghost text-red-600" disabled={busy === "logo"}
+                  onClick={async () => {
+                    setBusy("logo");
+                    try {
+                      await updateFirmenLogo(null);
+                      setData(current => ({ ...current, firma:{ ...current.firma, logo_data_url:null } }));
+                    } finally { setBusy(null); }
+                  }}>Entfernen</button>
+              )}
+            </div>
           </section>
 
           <section className="grid gap-5 lg:grid-cols-[1.15fr_.85fr]">

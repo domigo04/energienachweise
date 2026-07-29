@@ -28,6 +28,10 @@ class ProjektVerantwortlicherPatch(BaseModel):
     verantwortlicher_id: Optional[int] = None
 
 
+class FirmenLogoPatch(BaseModel):
+    data_url: Optional[str] = None
+
+
 def _member_out(user: User) -> dict:
     return {
         "id": user.id,
@@ -97,6 +101,7 @@ def firma_overview(
             "name": admin.firma.name,
             "abo_plan": admin.firma.abo_plan,
             "is_active": admin.firma.is_active,
+            "logo_data_url": admin.firma.logo_data_url,
             "created_at": admin.firma.created_at,
         },
         "kennzahlen": {
@@ -121,6 +126,32 @@ def firma_overview(
             "created_at": event.created_at,
         } for event in events],
     }
+
+
+@router.patch("/logo")
+def update_firmenlogo(
+    body: FirmenLogoPatch,
+    admin: User = Depends(require_firma_admin),
+    db: Session = Depends(get_db),
+):
+    """Firmenlogo für den Plankopf; PNG/JPEG/SVG als begrenzte Data-URL."""
+    value = body.data_url
+    if value:
+        if not value.startswith(("data:image/png;base64,", "data:image/jpeg;base64,", "data:image/svg+xml;base64,")):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Nur PNG, JPEG oder SVG erlaubt")
+        if len(value) > 1_500_000:
+            raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Logo ist zu gross (max. ca. 1 MB)")
+    admin.firma.logo_data_url = value or None
+    add_audit_event(
+        db,
+        user=admin,
+        action="firmenlogo_aktualisiert",
+        entity_type="firma",
+        entity_id=admin.firma.id,
+        details={"vorhanden": bool(value)},
+    )
+    db.commit()
+    return {"logo_data_url": admin.firma.logo_data_url}
 
 
 @router.patch("/mitglieder/{user_id}")

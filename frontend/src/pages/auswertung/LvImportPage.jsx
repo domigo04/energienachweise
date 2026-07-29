@@ -23,6 +23,7 @@ const KATEGORIEN = [
   {
     titel: "Wärmeverteilung",
     keys: ["pump_count", "valve_2way_count", "valve_3way_count", "balancing_valve_count",
+           "floor_heating_manifold_count",
            "pipe_length_source_m", "pipe_length_distribution_m", "pipe_length_m"],
   },
   { titel: "Wärmemessung", keys: ["heat_meter_count"] },
@@ -192,7 +193,15 @@ function ImportZusammenfassung({ report, imp, offen }) {
         {offen > 0 && (
           <li className="font-semibold text-amber-600">· {offen} Angaben müssen geprüft werden</li>
         )}
+        {report.parser_first && (
+          <li>· Parser-First: kompaktes KI-Prüfpaket ca. {report.llm_review_estimated_tokens ?? "—"} Tokens</li>
+        )}
       </ul>
+      {(report.deterministic_checks || []).map(check => (
+        <p key={check.code} className="mt-1 text-[11px] font-medium text-amber-700">
+          Plausibilitätsprüfung: {check.message}
+        </p>
+      ))}
       {report.cost_source && (
         <p className="mt-1.5 text-[11px] text-slate-400">
           Kostenquelle: {report.cost_source === "cost_summary"
@@ -832,7 +841,7 @@ function ReviewAnsicht({ id }) {
                   <button onClick={alleBestaetigen} className="btn-secondary">Alle als geprüft markieren</button>
                 )}
                 <button onClick={freigeben} disabled={approving || !alleGeprueft} className="btn-primary" title={!alleGeprueft ? "Zuerst alle Werte prüfen" : ""}>
-                  <CheckCircle2 className="size-4" /> {approving ? "Gebe frei…" : "Referenzdaten freigeben"}
+                  <CheckCircle2 className="size-4" /> {approving ? "Werte aus…" : "Als ausgewertet freigeben"}
                 </button>
               </div>
               {!alleGeprueft && (

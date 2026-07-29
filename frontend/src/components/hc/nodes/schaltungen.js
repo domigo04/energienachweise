@@ -2,8 +2,8 @@
 
 const VL  = { stroke: '#ef4444', strokeWidth: 2.5 };
 const RL  = { stroke: '#3b82f6', strokeWidth: 2.5 };
-const SOLE_VL = { stroke: '#8b5cf6', strokeWidth: 2.5 };
-const SOLE_RL = { stroke: '#6d28d9', strokeWidth: 2.5, strokeDasharray: '8 5' };
+const SOLE_VL = { stroke: '#eab308', strokeWidth: 2.5 };
+const SOLE_RL = { stroke: '#16a34a', strokeWidth: 2.5, strokeDasharray: '8 5' };
 const E   = { type: 'step' };
 
 export const SCHALTUNGEN = {

@@ -106,6 +106,14 @@ def create_project(body: ProjectCreate, user: User = Depends(get_current_user), 
         name=body.name,
         standort=body.standort,
         kunde=body.kunde,
+        projektnummer=body.projektnummer,
+        strasse=body.strasse,
+        plz=body.plz,
+        ort=body.ort,
+        bauherr=body.bauherr,
+        sia_phase=body.sia_phase,
+        projektfortschritt_pct=body.projektfortschritt_pct,
+        planbezeichnung=body.planbezeichnung or "Prinzipschema",
         beschreibung=body.beschreibung,
     )
     db.add(project)
@@ -286,7 +294,11 @@ def update_project(project_id: int, body: ProjectUpdate, user: User = Depends(ge
 
     before = {}
     after = {}
-    for field in ("name", "standort", "kunde", "beschreibung", "status"):
+    for field in (
+        "name", "standort", "kunde", "projektnummer", "strasse", "plz", "ort",
+        "bauherr", "sia_phase", "projektfortschritt_pct", "planbezeichnung",
+        "beschreibung", "status",
+    ):
         val = getattr(body, field, None)
         if val is not None:
             old = getattr(project, field)

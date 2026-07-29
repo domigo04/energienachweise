@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Handle, Position, useReactFlow, NodeResizer } from '@xyflow/react';
 import {
   SymPump, SymValve2V, SymValve3, SymCheckValve,
@@ -204,8 +204,8 @@ export function ErzeugerNode({ data, selected: sel }) {
       {H(Position.Right,  'right', { right: -6 })}
       {H(Position.Right,  'heating_flow',   { right: -6, top: '32%', background: '#ef4444' })}
       {H(Position.Right,  'heating_return', { right: -6, top: '68%', background: '#3b82f6' })}
-      {H(Position.Left,   'source_flow',    { left: -6,  top: '32%', background: '#8b5cf6' })}
-      {H(Position.Left,   'source_return',  { left: -6,  top: '68%', background: '#6d28d9' })}
+      {H(Position.Left,   'source_flow',    { left: -6,  top: '32%', background: '#eab308' })}
+      {H(Position.Left,   'source_return',  { left: -6,  top: '68%', background: '#16a34a' })}
       <SymWE generatorType={data.generator_type} lwwpBauart={data.lwwp_bauart} />
       <Label text={data.label} />
     </div>
@@ -304,8 +304,8 @@ export function ErdsondenNode({ data, selected: sel }) {
   const laengeText = Number.isFinite(laenge) && laenge > 0
     ? ` à ${Math.round(laenge).toLocaleString('de-CH')} m`
     : '';
-  const sole = '#4f46e5';
-  const farbe = (dashed) => dashed ? '#7c3aed' : sole;
+  const sole = '#eab308';
+  const farbe = (dashed) => dashed ? '#16a34a' : sole;
   const rightHandle = (top, id, dashed = false) => (
     <Handle
       type="source"
@@ -367,7 +367,7 @@ export function ErdsondenNode({ data, selected: sel }) {
         <rect x="22" y="48" width={W - 44} height="14" fill="white"
           stroke={sole} strokeWidth="1.8" />
         <rect x="34" y="78" width={W - 68} height="14" fill="white"
-          stroke="#7c3aed" strokeWidth="1.7" strokeDasharray="7 4" />
+          stroke="#16a34a" strokeWidth="1.7" strokeDasharray="7 4" />
 
         {xs.map((x, index) => (
           <g key={index}>
@@ -383,7 +383,7 @@ export function ErdsondenNode({ data, selected: sel }) {
             <path d={`M ${x + 9} 92 V 122 H ${x + 3} V 258
               Q ${x + 3} 274 ${x + 9} 274
               Q ${x + 15} 274 ${x + 15} 258 V 122 H ${x + 9}`}
-              fill="none" stroke="#7c3aed" strokeWidth="1.9"
+              fill="none" stroke="#16a34a" strokeWidth="1.9"
               strokeDasharray="7 4" strokeLinejoin="round" />
           </g>
         ))}
@@ -780,18 +780,20 @@ export function LabelNode({ id, data, selected: sel }) {
 
 // Betonfläche: frei skalierbares Rechteck mit Kreuzschraffur, transparente
 // Grundfläche, liegt hinter den Bauteilen. Nur Darstellung.
-export function ConcreteAreaNode({ selected: sel }) {
+export function ConcreteAreaNode({ id, data, selected: sel }) {
+  const scale = Math.max(3, Math.min(60, Number(data?.hatch_scale) || 8));
+  const patternId = `hc-crosshatch-${String(id || 'area').replace(/[^a-zA-Z0-9_-]/g, '-')}`;
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', boxSizing: 'border-box',
       border: `1px ${sel ? 'solid #3b82f6' : 'dashed #94a3b8'}` }}>
       <NodeResizer isVisible={sel} minWidth={40} minHeight={40} color="#3b82f6" />
       <svg width="100%" height="100%" style={{ display: 'block' }}>
         <defs>
-          <pattern id="hc-crosshatch" width="8" height="8" patternUnits="userSpaceOnUse">
-            <path d="M0 0 L8 8 M8 0 L0 8" stroke="#94a3b8" strokeWidth="0.6" opacity="0.55" />
+          <pattern id={patternId} width={scale} height={scale} patternUnits="userSpaceOnUse">
+            <path d={`M0 0 L${scale} ${scale} M${scale} 0 L0 ${scale}`} stroke="#94a3b8" strokeWidth="0.6" opacity="0.55" />
           </pattern>
         </defs>
-        <rect width="100%" height="100%" fill="url(#hc-crosshatch)" />
+        <rect width="100%" height="100%" fill={`url(#${patternId})`} />
       </svg>
     </div>
   );
@@ -844,6 +846,44 @@ export const NUMMERIERT = ['gruppe', 'heizkreis', 'pump', 'valve2', 'valve3', 'c
 function mitNr(Comp) {
   function MitNr(props) {
     const nr = props.data?.nr;
+    const { setNodes, getZoom } = useReactFlow();
+    const captionDrag = useRef(null);
+    const caption = props.data?.label || {
+      erzeuger:'Wärmeerzeuger', erdsonden:'Erdsondenfeld', speicher:'Speicher',
+      bww:'BWW-Speicher', verteiler:'Verteiler', gruppe:'Verbrauchergruppe',
+      heizkreis:'Heizkreis', pump:'Pumpe', valve2:'2-Weg-Ventil',
+      valve3:'3-Weg-Ventil', checkvalve:'Rückschlagventil', shutoff:'Absperrventil',
+      stad:'STAD', waermezaehler:'Wärmezähler', expansion:'Expansionsgefäss',
+      sicherheitsventil:'Sicherheitsventil', pwt:'Plattentauscher',
+    }[props.type] || 'Bauteil';
+    const captionPointerDown = (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      captionDrag.current = {
+        x:event.clientX,
+        y:event.clientY,
+        offsetX:Number(props.data?.caption_offset_x) || 0,
+        offsetY:Number(props.data?.caption_offset_y) || 0,
+      };
+      const move = (moveEvent) => {
+        const drag = captionDrag.current;
+        if (!drag) return;
+        const zoom = Math.max(getZoom(), 0.05);
+        const nextX = drag.offsetX + (moveEvent.clientX - drag.x) / zoom;
+        const nextY = Math.max(0, drag.offsetY + (moveEvent.clientY - drag.y) / zoom);
+        setNodes(nodes => nodes.map(node => node.id === props.id
+          ? { ...node, data:{ ...node.data, caption_offset_x:nextX, caption_offset_y:nextY } }
+          : node));
+      };
+      const up = () => {
+        captionDrag.current = null;
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+    };
     return (
       <div style={{ position: 'relative', display: 'inline-block' }}>
         <Comp {...props} />
@@ -855,6 +895,21 @@ function mitNr(Comp) {
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             padding: '0 4px', zIndex: 20, pointerEvents: 'none',
           }}>{nr}</div>
+        )}
+        {nr != null && (
+          <div className="nodrag nopan"
+            onPointerDown={captionPointerDown}
+            title="Beschriftung verschieben"
+            style={{
+              position:'absolute', top:'100%', left:'50%',
+              transform:`translate(calc(-50% + ${Number(props.data?.caption_offset_x) || 0}px), ${10 + Math.max(0, Number(props.data?.caption_offset_y) || 0)}px)`,
+              minWidth:54, maxWidth:160, padding:'3px 7px',
+              border:'1px solid #94a3b8', borderRadius:3, background:'white',
+              color:'#334155', fontSize:9, lineHeight:1.2, textAlign:'center',
+              whiteSpace:'nowrap', cursor:'move', zIndex:18,
+            }}>
+            {caption}
+          </div>
         )}
       </div>
     );

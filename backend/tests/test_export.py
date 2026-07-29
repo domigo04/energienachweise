@@ -1,5 +1,4 @@
 """PDF-Export + Schema-SVG — Zahlen im Dokument müssen stimmen (Abnahme F4)."""
-import base64
 import io
 
 import pytest
@@ -57,6 +56,54 @@ def test_svg_enthaelt_verteiler_summen(daten):
     assert "23.00 kW" in svg            # Σ Leistung
     assert "1.166 m³/h" in svg          # Σ Primärfluss
     assert "Δp Ast 2: 20.0 kPa" in svg  # ungünstigster Ast
+
+
+def test_erzeugersymbole_werden_typabhaengig_exportiert():
+    basis = {
+        "id": "we", "type": "erzeuger", "position": {"x": 40, "y": 70},
+        "data": {"label": "WE"},
+    }
+    lwwp = {
+        **basis,
+        "data": {
+            "label": "Luft/Wasser-WP",
+            "generator_type": "lwwp",
+            "lwwp_bauart": "split",
+        },
+    }
+    luft_svg = erzeuge_svg([lwwp], [], {})
+    assert "AUL" in luft_svg
+    assert "FOL" in luft_svg
+    assert "L/W-WP" in luft_svg
+    assert "SPLIT" in luft_svg
+    assert handle_pos(lwwp, "wz-l-28") == pytest.approx((40, 70 + 114 * 0.28))
+    abschnitt = berechnungs_abschnitte(
+        [lwwp],
+        berechne_schema([{
+            **lwwp,
+            "data": {
+                **lwwp["data"],
+                "leistung_kw": "50",
+                "vl_temp": "50",
+                "rl_temp": "30",
+                "cop": "4",
+                "aussenluft_temp": "-8",
+                "fortluft_temp": "-12",
+            },
+        }], []),
+    )[0]
+    eingabe_labels = [zeile[0] for zeile in abschnitt["eingaben"]]
+    resultat_labels = [zeile[0] for zeile in abschnitt["resultate"]]
+    assert "Aussenluft / Fortluft" in eingabe_labels
+    assert "VL / RL Sole" not in eingabe_labels
+    assert "Quellenleistung" in resultat_labels
+    assert "V' Solekreis" not in resultat_labels
+
+    gas_svg = erzeuge_svg([
+        {**basis, "data": {"label": "Gaskessel", "generator_type": "gas"}},
+    ], [], {})
+    assert "GAS" in gas_svg
+    assert "AUL" not in gas_svg
 
 
 def test_svg_strang_und_einspritz(daten):
@@ -202,16 +249,23 @@ def test_pdf_nur_schema_und_nur_berechnungen(daten):
     assert "Berechnungen —" in text_berech and "Legende" not in text_berech
 
 
-def test_pdf_verwendet_browser_momentaufnahme_fuer_identische_zeichnung(daten):
-    """Der exakte Exportpfad akzeptiert den Screenshot derselben React-Flow-DOM."""
+def test_pdf_ist_vektorbasiert_und_enthaelt_echten_plankopf(daten):
     nodes, edges, results = daten
-    png = base64.b64decode(
-        "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFUlEQVR4nGP8////fwYGBgYmBigAAD34BADaOyqcAAAAAElFTkSuQmCC"
+    pdf = erzeuge_pdf(
+        "P", "S", "schema", nodes, edges, results,
+        plankopf={
+            "projektnummer": "4711", "bauherr": "Test AG", "standort": "Winterthur",
+            "dokumentnummer": "HC-4711-1", "revision": "2", "status": "Entwurf",
+            "planformat": "A3 quer", "bearbeiter": "Planer",
+        },
     )
-    pdf = erzeuge_pdf("P", "S", "schema", nodes, edges, results, schema_png=png)
     reader = PdfReader(io.BytesIO(pdf))
     assert pdf.startswith(b"%PDF")
-    assert len(reader.pages) == 3  # Deckblatt + identische Zeichnung + Legende
+    assert len(reader.pages) == 3  # Deckblatt + Vektorzeichnung + Legende
+    text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    assert "HC-4711-1" in text
+    assert "Schema ohne Massstab" in text
+    assert "Test AG" in text
 
 
 # ── Leitungsdimensionierung im SVG (PHYSIK §10) ─────────────────────────────

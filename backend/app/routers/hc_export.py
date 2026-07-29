@@ -1,5 +1,3 @@
-import base64
-import binascii
 import json
 import re
 
@@ -20,29 +18,10 @@ router = APIRouter(prefix="/api/v1", tags=["Heizungscockpit – Export"])
 class SchemaPdfRequest(BaseModel):
     inhalt: str = "beides"
     graph: dict | None = None
-    schema_png: str | None = None
-
-
-def _png_bytes(data_url: str | None) -> bytes | None:
-    if not data_url:
-        return None
-    prefix = "data:image/png;base64,"
-    if not data_url.startswith(prefix):
-        raise HTTPException(status_code=422, detail="schema_png muss eine PNG-Data-URL sein")
-    try:
-        raw = base64.b64decode(data_url[len(prefix):], validate=True)
-    except (binascii.Error, ValueError) as exc:
-        raise HTTPException(status_code=422, detail="schema_png ist ungültig") from exc
-    if len(raw) > 20 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Schema-Abbildung ist zu gross")
-    if not raw.startswith(b"\x89PNG\r\n\x1a\n"):
-        raise HTTPException(status_code=422, detail="schema_png enthält kein PNG")
-    return raw
 
 
 def _schema_pdf_response(schema_id: int, inhalt: str, user: User, db: Session,
-                         graph_override: dict | None = None,
-                         schema_png: bytes | None = None):
+                         graph_override: dict | None = None):
     if inhalt not in ("schema", "berechnungen", "beides"):
         raise HTTPException(status_code=422, detail="inhalt muss schema, berechnungen oder beides sein")
     s = (db.query(HcSchema)
@@ -67,7 +46,19 @@ def _schema_pdf_response(schema_id: int, inhalt: str, user: User, db: Session,
 
     pdf = erzeuge_pdf(
         p.name if p else "Projekt", s.name or "Schema", inhalt,
-        nodes, edges, results, schema_png=schema_png,
+        nodes, edges, results,
+        plankopf={
+            "projektnummer": str(p.id) if p else "—",
+            "bauherr": p.kunde if p and p.kunde else "—",
+            "standort": p.standort if p and p.standort else "—",
+            "planer": user.name or user.email,
+            "bearbeiter": user.name or user.email,
+            "planbezeichnung": s.name or "Anlagenschema",
+            "dokumentnummer": f"HC-{p.id if p else 'P'}-{s.id}",
+            "revision": str(max((revision.version_nr for revision in s.revisions), default=0)),
+            "status": getattr(p.status, "value", p.status) if p else "Entwurf",
+            "planformat": "A3 quer",
+        },
     )
     sicher = re.sub(r"[^A-Za-z0-9_-]+", "_", (p.name if p else "Projekt")).strip("_") or "Projekt"
     dateiname = f"{sicher}_{inhalt}.pdf"
@@ -94,9 +85,8 @@ def schema_pdf(schema_id: int, inhalt: str = "beides", user: User = Depends(get_
 @router.post("/schemas/{schema_id}/pdf")
 def schema_pdf_exakt(schema_id: int, body: SchemaPdfRequest,
                      user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """PDF aus dem aktuellen Graph und der tatsächlichen Browser-Zeichenfläche."""
+    """Planbasierter Vektorexport aus dem aktuellen, noch nicht gespeicherten Graph."""
     return _schema_pdf_response(
         schema_id, body.inhalt, user, db,
         graph_override=body.graph,
-        schema_png=_png_bytes(body.schema_png),
     )

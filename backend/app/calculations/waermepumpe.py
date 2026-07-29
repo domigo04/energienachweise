@@ -22,12 +22,14 @@ bewusst nicht gesetzt (nie Q_source = Q_heat) — Physik vor Bequemlichkeit.
 """
 from typing import Optional
 
+from app.data.generator_types import HEAT_PUMP_TYPES
+
 # c·ρ Wasser in kWh/(m³·K) — PHYSIK §1.
 CE_WASSER = 1.163
 
 # Erzeugertypen mit Quellenseite. Andere Erzeuger (Gas, Öl, Holz …) haben keine
 # und werden deshalb auch nicht nach COP oder Solewerten gefragt.
-WP_TYPEN = ("ews_wp", "lwwp", "wasser_wp", "co2_wp", "hybrid")
+WP_TYPEN = tuple(sorted(HEAT_PUMP_TYPES))
 
 
 def _zahl(x) -> Optional[float]:
@@ -155,6 +157,7 @@ def berechne_waermepumpe(d: dict, hat_quellenseite: bool = False) -> dict:
         "source_ce": ce if v_sole is not None else None,
         "source_ce_quelle": ce_quelle if v_sole is not None else None,
 
-        "ist_waermepumpe": hat_quellenseite,
+        "ist_waermepumpe": ist_waermepumpe(d),
+        "hat_hydraulischen_quellenkreis": hat_quellenseite,
         "warnings": warnungen,
     }

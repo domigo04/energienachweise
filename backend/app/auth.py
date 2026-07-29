@@ -16,13 +16,15 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.auth import Role, User
+from app.runtime import assert_safe_runtime_configuration
 
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-me")
+assert_safe_runtime_configuration(secret_key=SECRET_KEY)
 if SECRET_KEY == "dev-secret-change-me":
     # Sicherheits-Review 2026-07-19: ohne eigene SECRET_KEY sind alle Login-
     # Tokens mit einem öffentlich bekannten Schlüssel signiert und fälschbar.
-    # Sichtbar im Log statt einer stillen Schwachstelle — kein harter Abbruch,
-    # damit ein Server ohne gesetzte Variable nicht überraschend down geht.
+    # Lokal sichtbar, in Produktion verhindert assert_safe_runtime_configuration
+    # den Start vollständig.
     print("[WARNUNG] SECRET_KEY nicht gesetzt — unsicherer Code-Default aktiv. "
           "Für Produktion zwingend eine eigene, geheime Umgebungsvariable setzen.")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")

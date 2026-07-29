@@ -1,7 +1,7 @@
 # app/main.py
-import hashlib, os, json, traceback
+import hashlib, os, json
 from fastapi import Depends, FastAPI
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="Heizungscockpit")
@@ -70,7 +70,7 @@ app.include_router(hc_grobkostenschaetzung_router, dependencies=_auth)
 app.include_router(hc_company_admin_router, dependencies=_auth)
 app.include_router(hc_lv_import_router, dependencies=_auth)
 
-# PDF-Export wird per window.open() geöffnet (kann kein Bearer-Token mitgeben) → offen.
+# Die Exportrouten prüfen den Bearer-Token und die Firma zusätzlich selbst.
 app.include_router(hc_export_router)
 
 # ---------- DB-Init & Seed ----------
@@ -84,6 +84,7 @@ from app.models.kv import RefProjekt, RefKostenzeile, RefProjektGewerk, RefProje
 from app.models.grobkostenschaetzung import Korrekturfaktor  # noqa: F401
 from app.models.lv_import import LvImport, LvImportFeature, LvImportCost  # noqa: F401
 from app.auth import hash_password
+from app.runtime import is_production
 
 
 def _ensure_columns():
@@ -141,14 +142,6 @@ def _ensure_columns():
         ],
     }
     is_sqlite = engine.url.get_backend_name().startswith("sqlite")
-    # Einmalige Dev-Migration (2026-07-14): die kurzlebige parallele
-    # Referenzprojekt-Datenbank der Grobkostenschätzung ist abgeschafft —
-    # die Schätzung liest jetzt direkt die Auswertung (ref_projekte). Die
-    # verwaisten Tabellen enthielten nur Demo-Daten und waren nie deployed.
-    with engine.connect() as conn:
-        conn.execute(text("DROP TABLE IF EXISTS bkp_betraege"))
-        conn.execute(text("DROP TABLE IF EXISTS referenz_projekte"))
-        conn.commit()
     with engine.connect() as conn:
         for table, cols in to_add.items():
             if is_sqlite:
@@ -288,45 +281,50 @@ def _seed_admin(db):
 
 @app.on_event("startup")
 def init_db_and_seed():
+    if is_production():
+        # Produktion wird ausschliesslich über Alembic migriert. Ein App-Start
+        # darf weder Tabellen/Spalten verändern noch Benutzer oder Demoobjekte
+        # anlegen. Fehlende Migrationen stoppen den Deploy klar und früh.
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        tables = set(inspect(engine).get_table_names())
+        required = {"alembic_version", "hc_users", "hc_firmen", "hc_projects", "hc_schemas"}
+        missing = sorted(required - tables)
+        if missing:
+            raise RuntimeError(
+                "Produktionsdatenbank ist nicht migriert. Fehlende Tabellen: "
+                + ", ".join(missing)
+                + ". Vor dem Start `python -m alembic -c alembic.ini upgrade head` ausführen."
+            )
+        return
+
+    # Nur lokale Entwicklung: eine leere SQLite-Datenbank bequem aufbauen und
+    # historische lokale DBs nicht-destruktiv ergänzen.
     try:
         Base.metadata.create_all(bind=engine)
-    except Exception:
-        print("DB init error:")
-        traceback.print_exc()
-
-    try:
         _ensure_columns()
-    except Exception:
-        print("Column migration error:")
-        traceback.print_exc()
-
-    try:
         _ensure_indexes()
-    except Exception:
-        print("Index migration error:")
-        traceback.print_exc()
+    except Exception as exc:
+        raise RuntimeError("Lokale Datenbank konnte nicht initialisiert werden") from exc
 
     db = SessionLocal()
     try:
         try:
             _seed_group_templates(db)
-        except Exception:
+        except Exception as exc:
             db.rollback()
-            print("Seed error (group templates):")
-            traceback.print_exc()
+            raise RuntimeError("Lokale Gruppen-Vorlagen konnten nicht angelegt werden") from exc
         try:
             admin_email = _seed_admin(db)
             if admin_email:
                 print(f"[INIT] Admin-Konto sichergestellt: {admin_email}")
-        except Exception:
+        except Exception as exc:
             db.rollback()
-            print("Seed error (admin):")
-            traceback.print_exc()
+            raise RuntimeError("Lokales Admin-Konto konnte nicht angelegt werden") from exc
         try:
             _seed_korrekturfaktoren(db)
-        except Exception:
+        except Exception as exc:
             db.rollback()
-            print("Seed error (korrekturfaktoren):")
-            traceback.print_exc()
+            raise RuntimeError("Lokale Korrekturfaktoren konnten nicht angelegt werden") from exc
     finally:
         db.close()

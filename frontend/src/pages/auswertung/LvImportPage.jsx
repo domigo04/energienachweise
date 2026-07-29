@@ -5,6 +5,7 @@ import {
   uploadLvImport, listLvImports, getLvImport, getFachwerte, getNormLv,
   updateLvFeature, updateLvCost, addLvCost, deleteLvCost, updateLvImport, approveLvImport,
 } from "../../api/hcApi";
+import { GENERATOR_TYPE_LABELS } from "../../components/hc/nodes/generatorTypes";
 
 // B9 — Review-Seite des LV-Imports. Ohne :id ist es die Upload-Ansicht.
 // Aus einem Unternehmer-LV entsteht ein geprüfter technischer Fingerprint +
@@ -26,12 +27,6 @@ const KATEGORIEN = [
   },
   { titel: "Wärmemessung", keys: ["heat_meter_count"] },
 ];
-
-const GENERATOR_TYPE_LABELS = {
-  ews_wp: "Sole/Wasser-WP (Erdsonden)", lwwp: "Luft/Wasser-WP", wasser_wp: "Wasser/Wasser-WP",
-  co2_wp: "CO₂-Wärmepumpe", fernwaerme: "Fernwärme", gas: "Gas", oel: "Öl", holz: "Holz",
-  elektro: "Elektro", hybrid: "Hybrid", sonstige: "Sonstige",
-};
 
 const CONF_STYLE = {
   high: "bg-green-100 text-green-700", medium: "bg-amber-100 text-amber-800", low: "bg-slate-100 text-slate-500",

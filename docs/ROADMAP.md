@@ -145,15 +145,40 @@ gewandert. `[x]` = im Code vorhanden und durch Test/Build abgesichert;
 
 ### 20 Datenbank absichern
 
-- [ ] Alembic-Migrationen wiederherstellen
-- [ ] Startup-Migrationen (`_ensure_columns`/`_ensure_indexes`) und `DROP TABLE`
+- [x] Alembic-Migrationen wiederherstellen
+- [x] Startup-Migrationen (`_ensure_columns`/`_ensure_indexes`) und `DROP TABLE`
       aus der App entfernen
 - [ ] PostgreSQL-Persistenz auf Railway verifizieren
 - [ ] Backup und Restore-Test
-- [ ] CI für Backendtests und Frontend-Build
+  - [x] leere sowie bestehende lokale Datenbank verlustfrei migrieren
+  - [ ] Railway-Volume-Snapshot erstellen und Restore separat prüfen
+- [x] CI für Backendtests und Frontend-Build
 - [x] Projektzugriff firmenweit, Rollen Plattform-/Firmenadmin/Mitglied,
       Antrag+Bestätigung protokolliert, direkte Routen firmenbegrenzt (aus der
       alten P0-Grundlage bereits erledigt)
+
+## P7 – Markteintritt und Google-Sichtbarkeit
+
+Dieser Meilenstein startet bewusst erst, wenn beide Voraussetzungen erfüllt sind:
+
+- [ ] der Proof of Concept erfüllt die Pilot-Erfolgskriterien;
+- [ ] Produktname und passende öffentliche Domain sind festgelegt.
+
+Erst danach:
+
+- [ ] öffentliche, indexierbare Produktseite mit klarem Nutzenversprechen
+      erstellen
+- [ ] Seitenstruktur und Inhalte an reale Suchintentionen der Schweizer
+      Heizungsplanung ausrichten
+- [ ] technische SEO-Grundlage umsetzen: Seitentitel, Beschreibungen,
+      Canonicals, Sitemap, `robots.txt`, strukturierte Daten und Social Previews
+- [ ] Domain in Google Search Console anbinden und Indexierung überwachen
+- [ ] Fachinhalte und belastbare Anwendungsfälle aus dem validierten PoC
+      veröffentlichen
+- [ ] Erfolg über qualifizierte Demoanfragen und Pilotkunden messen
+
+Die Fachanwendung bleibt geschützt und wird nicht indexiert. Vor dem
+Domainentscheid werden keine SEO-Landingpages oder Kampagnen gebaut.
 
 ## Reihenfolge für die Umsetzung
 

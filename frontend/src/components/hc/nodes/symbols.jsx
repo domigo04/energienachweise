@@ -172,43 +172,20 @@ const generatorAria = {
 };
 
 function SymLuftWasserWP({ bauart }) {
-  const split = bauart === 'split';
-  const innen = bauart === 'innenaufstellung';
+  if (bauart !== 'split') return <SymWaermepumpe generatorType="lwwp"/>;
   return (
     <svg viewBox="0 0 200 220" width="104" height="114" role="img"
       aria-label={generatorAria.lwwp}>
-      <rect x="8" y="22" width="184" height="178" rx="3" fill="#ecfeff" stroke="#111827" strokeWidth="3"/>
-
-      {/* Luftwege sind cyan und bewusst keine hydraulischen Anschlüsse. */}
-      <g fill="none" stroke="#0891b2" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M18 63 H53"/><path d="M43 53 L55 63 L43 73"/>
-        <path d="M53 103 H18"/><path d="M28 93 L16 103 L28 113"/>
-      </g>
-      <g fill="#0e7490" fontFamily="Arial, sans-serif" fontSize="13" fontWeight="700">
-        <text x="15" y="48">AUL</text>
-        <text x="15" y="129">FOL</text>
-      </g>
-
-      {/* Ventilator der Ausseneinheit. */}
-      <circle cx="75" cy="83" r="29" fill="white" stroke="#164e63" strokeWidth="2.5"/>
-      <circle cx="75" cy="83" r="5" fill="#164e63"/>
-      <g fill="#a5f3fc" stroke="#164e63" strokeWidth="1.3">
-        <path d="M75 78 C57 55 58 48 70 52 C82 56 81 68 75 78Z"/>
-        <path d="M80 83 C103 65 110 68 105 79 C100 90 89 89 80 83Z"/>
-        <path d="M75 88 C93 111 90 118 79 113 C68 108 69 97 75 88Z"/>
-        <path d="M70 83 C47 101 40 98 45 87 C50 76 61 77 70 83Z"/>
-      </g>
-
-      {/* Innen-/Hydraulikmodul; bei Split mit Kältemittelleitung getrennt. */}
-      <rect x="119" y="48" width="56" height="91" rx="3" fill="#f8fafc" stroke="#111827" strokeWidth="2.3"/>
-      <circle cx="147" cy="78" r="15" fill="#e2e8f0" stroke="#111827" strokeWidth="2"/>
-      <path d="M135 85 Q142 78 147 75 M147 81 Q153 77 159 70" fill="none" stroke="#111827" strokeWidth="1.8"/>
-      <path d="M132 119 H163 M132 112 L147 126 L163 112" fill="none" stroke="#dc2626" strokeWidth="2"/>
-      {split && <path d="M104 62 V126" fill="none" stroke="#f97316" strokeWidth="2.5" strokeDasharray="7 5"/>}
-      <text x="147" y="157" textAnchor="middle" fontFamily="Arial, sans-serif" fontSize="12" fontWeight="700" fill="#334155">
-        {split ? 'SPLIT' : innen ? 'INNEN' : 'AUSSEN'}
-      </text>
-      <text x="100" y="190" textAnchor="middle" fontFamily="Arial, sans-serif" fontSize="14" fontWeight="700" fill="#111827">L/W-WP</text>
+      <rect x="8" y="30" width="78" height="142" fill="#e5e7eb" stroke="#111827" strokeWidth="3"/>
+      <rect x="114" y="30" width="78" height="142" fill="#e5e7eb" stroke="#111827" strokeWidth="3"/>
+      <circle cx="47" cy="77" r="23" fill="white" stroke="#111827" strokeWidth="2"/>
+      <path d="M47 55 L53 74 L71 77 L53 82 L47 101 L42 82 L24 77 L42 72 Z"
+        fill="#bae6fd" stroke="#111827" strokeWidth="1.4"/>
+      <path d="M86 101 H114" fill="none" stroke="#f97316" strokeWidth="3" strokeDasharray="7 5"/>
+      <text x="47" y="137" textAnchor="middle" fontSize="11" fontWeight="700">VERFL.</text>
+      <text x="153" y="90" textAnchor="middle" fontSize="11" fontWeight="700">VERD.</text>
+      <text x="153" y="110" textAnchor="middle" fontSize="10">INNEN</text>
+      <text x="100" y="202" textAnchor="middle" fontFamily="Arial, sans-serif" fontSize="14" fontWeight="700">L/W-WP SPLIT</text>
     </svg>
   );
 }
@@ -216,6 +193,7 @@ function SymLuftWasserWP({ bauart }) {
 function SymWaermepumpe({ generatorType }) {
   const code = {
     ews_wp:'S/W-WP',
+    lwwp:'L/W-WP',
     wasser_wp:'W/W-WP',
     co2_wp:'CO₂-WP',
   }[generatorType] || 'WP';
@@ -373,6 +351,31 @@ export function SymSpeicher({ liter }) {
           <path d="M-13 13 L14 -14 M14 -14 L7 -12 M14 -14 L12 -7" />
         </g>
       </g>
+    </svg>
+  );
+}
+
+export function SymBwwSpeicher({ liter }) {
+  const wert = Number(liter);
+  const literText = Number.isFinite(wert) && wert > 0
+    ? `${Math.round(wert).toLocaleString('de-CH')} L`
+    : '… L';
+  return (
+    <svg viewBox="0 0 140 290" width="72" height="149" role="img" aria-label={`BWW-Speicher ${literText}`}>
+      <path d="M65 4 L75 14 M75 4 L65 14" fill="none" stroke="#111827" strokeWidth="2" />
+      <path d="M20 45 A50 25 0 0 1 120 45 L120 245 A50 25 0 0 1 20 245 Z"
+        fill="#e5e7eb" stroke="#111827" strokeWidth="3" />
+      <line x1="20" y1="45" x2="120" y2="45" stroke="#111827" strokeWidth="3" />
+      <text x="70" y="78" textAnchor="middle" fontSize="16" fontWeight="700">{literText}</text>
+      <text x="70" y="151" textAnchor="middle" fontSize="15" fontWeight="700">BWW</text>
+      <g fill="none" stroke="#111827" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <g transform="translate(65 116)"><circle r="7" /><path d="M-13 13 L14 -14 M14 -14 L7 -12 M14 -14 L12 -7" /></g>
+        <g transform="translate(65 196)"><circle r="7" /><path d="M-13 13 L14 -14 M14 -14 L7 -12 M14 -14 L12 -7" /></g>
+      </g>
+      {/* Trinkwarmwasser oben rot; Trinkkaltwasser unten grün gestrichelt. */}
+      <path d="M70 45 V2 M65 9 L70 2 L75 9" fill="none" stroke="#ef4444" strokeWidth="3" />
+      <path d="M70 245 V288 M65 281 L70 288 L75 281" fill="none" stroke="#16a34a"
+        strokeWidth="3" strokeDasharray="7 5" />
     </svg>
   );
 }

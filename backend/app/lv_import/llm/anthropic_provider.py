@@ -12,22 +12,22 @@ from app.lv_import.llm.base import (
     CostMappingLLM, RESPONSE_SCHEMA, SYSTEM_PROMPT, build_user_prompt, parse_mappings,
 )
 
-# Modell aus der Umgebung; dieser Default ist eine gültige, aktuelle Modell-ID.
-# Jederzeit über COST_MAPPING_LLM_MODEL überschreibbar.
-DEFAULT_MODEL = "claude-opus-5"
-
-
 class AnthropicCostMapper(CostMappingLLM):
     name = "anthropic"
 
     def __init__(self, model: Optional[str] = None, client=None):
-        super().__init__(model or os.getenv("COST_MAPPING_LLM_MODEL") or DEFAULT_MODEL, client)
+        super().__init__(
+            model or os.getenv("COST_MAPPING_LLM_MODEL") or os.getenv("LV_REVIEW_LLM_MODEL"),
+            client,
+        )
 
     def available(self) -> tuple[bool, str]:
         if self._client is not None:
             return True, "Client injiziert"
         if not (os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN")):
             return False, "ANTHROPIC_API_KEY fehlt"
+        if not self.model:
+            return False, "COST_MAPPING_LLM_MODEL oder LV_REVIEW_LLM_MODEL fehlt"
         try:
             import anthropic  # noqa: F401
         except ImportError:
@@ -41,6 +41,8 @@ class AnthropicCostMapper(CostMappingLLM):
         return self._client
 
     def resolve(self, positions, allowed_positions) -> list[dict]:
+        if not self.model:
+            return []
         try:
             antwort = self._get_client().messages.create(
                 model=self.model,

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from app.lv_import.feature_extract import HIGH, MEDIUM
 from app.lv_import.positions import parse_positions
+from app.lv_import import norm_lv
 
 
 def extract_costs(pages) -> list[dict]:
@@ -46,3 +47,30 @@ def extract_costs(pages) -> list[dict]:
             "source_text": e["source_text"],
         })
     return out
+
+
+def cost_rows_from_positions(positions: list[dict]) -> list[dict]:
+    """Nicht aggregierte Review-Zeilen: Preis, Menge und Originaltitel bleiben
+    pro LV-Position sichtbar. Das ist die Grundlage für «hochladen, kurz
+    kontrollieren, freigeben»; Gruppensummen können später weiterhin separat
+    geprüft werden."""
+    rows = []
+    for position in positions or []:
+        bkp_nr = position.get("bkp_nr")
+        if not bkp_nr:
+            continue
+        title = position.get("beschreibung") or ""
+        mapping = norm_lv.match_title(title, bkp_nr)
+        rows.append({
+            "bkp_nr": bkp_nr,
+            "original_position": position.get("pos_nr"),
+            "original_title": title,
+            "detected_amount": position.get("betrag"),
+            "positionen": 1,
+            "confidence": HIGH if position.get("betrag") is not None else MEDIUM,
+            "source_page": position.get("source_page"),
+            "source_text": position.get("source_text"),
+            "source": "lv_positions",
+            **mapping,
+        })
+    return rows

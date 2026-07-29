@@ -34,7 +34,6 @@ import {
 } from './schema/graphMigration';
 import { SCHALTUNGEN } from '../../components/hc/nodes/schaltungen';
 import {
-  GENERATOR_TYPES,
   LWWP_BAUARTEN,
   generatorType,
   hatSoleOderWasserkreis,
@@ -78,7 +77,8 @@ const LEITUNGS_LAYER = [
   { id:'kaelte_rl', label:'Kälte RL', kurz:'K RL', color:'#0e7490', role:'rl', dashed:true },
   { id:'sole_vl', label:'Sole VL', kurz:'S VL', color:'#eab308', role:'vl', dashed:false },
   { id:'sole_rl', label:'Sole RL', kurz:'S RL', color:'#16a34a', role:'rl', dashed:true },
-  { id:'bww', label:'Brauchwarmwasser', kurz:'BWW', color:'#16a34a', role:null, dashed:false },
+  { id:'bww', label:'Trinkwarmwasser', kurz:'TWW', color:'#ef4444', role:null, dashed:false },
+  { id:'trinkkaltwasser', label:'Trinkkaltwasser', kurz:'TKW', color:'#16a34a', role:null, dashed:true },
   { id:'neutral', label:'Allgemein', kurz:'Allg.', color:'#334155', role:null, dashed:false },
 ];
 const DEFAULT_LAYER_VISIBILITY = Object.fromEntries(LEITUNGS_LAYER.map(layer => [layer.id, true]));
@@ -369,9 +369,9 @@ const WAERMEABGABE = [
 const PALETTE_GRUPPEN = [
   { titel: 'Erzeugung & Speicher', items: [
     { paletteId:'erzeuger-sole-wasser', type:'erzeuger', label:'Sole/Wasser-WP', desc:'Quellen- und Abgabekreis', preset:{ generator_type:'ews_wp' } },
-    { paletteId:'erzeuger-luft-wasser-aussen', type:'erzeuger', label:'Luft/Wasser-WP – aussen', desc:'Aussenluft / Fortluft', preset:{ generator_type:'lwwp', lwwp_bauart:'aussenaufstellung' } },
-    { paletteId:'erzeuger-luft-wasser-innen', type:'erzeuger', label:'Luft/Wasser-WP – innen', desc:'Innenaufstellung mit AUL/FOL', preset:{ generator_type:'lwwp', lwwp_bauart:'innenaufstellung' } },
-    { paletteId:'erzeuger-luft-wasser-split', type:'erzeuger', label:'Luft/Wasser-WP – Splitgerät', desc:'Eigenes Split-Bauteil', preset:{ generator_type:'lwwp', lwwp_bauart:'split' } },
+    { paletteId:'erzeuger-luft-wasser-aussen', type:'erzeuger', label:'Luft/Wasser-WP – aussen', desc:'Monoblock, Standard-WP-Symbol', preset:{ generator_type:'lwwp', lwwp_bauart:'aussenaufstellung' } },
+    { paletteId:'erzeuger-luft-wasser-innen', type:'erzeuger', label:'Luft/Wasser-WP – innen', desc:'Monoblock, Standard-WP-Symbol', preset:{ generator_type:'lwwp', lwwp_bauart:'innenaufstellung' } },
+    { paletteId:'erzeuger-luft-wasser-split', type:'erzeuger', label:'Luft/Wasser-WP – Splitgerät', desc:'Aussen Verflüssiger · innen Verdampfer', preset:{ generator_type:'lwwp', lwwp_bauart:'split' } },
     { paletteId:'erzeuger-wasser-wasser', type:'erzeuger', label:'Wasser/Wasser-WP', desc:'Quellen- und Abgabekreis', preset:{ generator_type:'wasser_wp' } },
     { paletteId:'erzeuger-co2', type:'erzeuger', label:'CO₂-Wärmepumpe', desc:'Wärmepumpe', preset:{ generator_type:'co2_wp' } },
     { paletteId:'erzeuger-fernwaerme', type:'erzeuger', label:'Fernwärme', desc:'Wärmeübergabe', preset:{ generator_type:'fernwaerme' } },
@@ -379,7 +379,7 @@ const PALETTE_GRUPPEN = [
     { paletteId:'erzeuger-elektro', type:'erzeuger', label:'Elektroheizung', desc:'Elektrischer Wärmeerzeuger', preset:{ generator_type:'elektro' } },
     { type: 'erdsonden',  label: 'Erdsondenfeld',       desc: 'Dynamischer Soleverteiler mit Duplexsonden' },
     { type: 'speicher',   label: 'Speicher',            desc: 'Inhalt wird direkt im Symbol angezeigt' },
-    { type: 'bww',        label: 'BWW-Speicher',        desc: 'Brauchwarmwasser (grün) — SIA 385 folgt' },
+    { type: 'bww',        label: 'BWW-Speicher',        desc: 'Warmwasser rot · Kaltwasser grün gestrichelt' },
     { type: 'pwt',        label: 'Plattentauscher (PWT)', desc: 'Wärmetauscher, 2 Kreise' },
   ]},
   { titel: 'Verteilung', items: [
@@ -528,24 +528,15 @@ const ZUSATZ_NAMEN = ['Heizkessel', 'Vorschaltgefäss', 'WW-Erwärmer', 'Heizkö
 
 function ErzeugerTypFelder({ data, onSet }) {
   const aktuell = generatorType(data.generator_type);
-  const waehlen = (value) => {
-    const vorherigesStandardlabel = aktuell?.label;
-    const next = generatorType(value);
-    onSet('generator_type', value || null);
-    if (!data.typ || data.typ === vorherigesStandardlabel) onSet('typ', next?.label || '');
-    if (!data.label || data.label === 'WE' || data.label === vorherigesStandardlabel) {
-      onSet('label', next?.label || 'Wärmeerzeuger');
-    }
-    if (value === 'lwwp' && !data.lwwp_bauart) onSet('lwwp_bauart', 'aussenaufstellung');
-  };
   return (
     <>
       <label style={lbl}>Erzeugerart</label>
-      <select style={{ ...inp, cursor:'pointer' }} value={data.generator_type ?? ''}
-        onChange={event => waehlen(event.target.value)}>
-        <option value="">— Erzeugerart wählen —</option>
-        {GENERATOR_TYPES.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
-      </select>
+      <div style={{ ...inp, background:'#f8fafc', color:'#334155', fontWeight:600 }}>
+        {aktuell?.label || data.typ || 'Wärmeerzeuger'}
+      </div>
+      <div style={{ marginTop:3, fontSize:9, color:'#64748b' }}>
+        Die Erzeugerart wird durch das gewählte Bauteil festgelegt. Zum Ersetzen ein anderes Erzeuger-Bauteil einsetzen.
+      </div>
       {data.generator_type === 'lwwp' && (
         <>
           <label style={lbl}>Bauart Luft/Wasser-WP</label>
@@ -562,9 +553,6 @@ function ErzeugerTypFelder({ data, onSet }) {
             <div><label style={lbl}>Fortluft [°C]</label>
               <input type="number" style={inp} value={data.fortluft_temp ?? ''}
                 onChange={event => onSet('fortluft_temp', event.target.value)} placeholder="-12"/></div>
-          </div>
-          <div style={{ marginTop:4, padding:'5px 7px', borderRadius:6, background:'#ecfeff', color:'#0e7490', fontSize:9, lineHeight:1.45 }}>
-            AUL und FOL sind Luftströme im Erzeugersymbol und keine hydraulischen Leitungen.
           </div>
         </>
       )}
@@ -891,11 +879,11 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
   }
 
   // ── SPEICHER ──
-  if (node.type === 'speicher') {
+  if (node.type === 'speicher' || node.type === 'bww') {
     return (
       <div style={panelSt}>
-        <PT>Speicher</PT>
-        {fld('Bezeichnung','label','Speicher','','text')}
+        <PT>{node.type === 'bww' ? 'BWW-Speicher' : 'Speicher'}</PT>
+        {fld('Bezeichnung','label',node.type === 'bww' ? 'BWW' : 'Speicher','','text')}
         {fld('Speicherinhalt','speicher_liter','z.B. 800','L')}
         <div style={{ fontSize:9, lineHeight:1.5, color:'#64748b', background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:6, padding:'6px 7px' }}>
           Der Inhalt erscheint direkt im Speicher-Symbol. Die Anzahl und Lage der Anschlüsse bleibt davon unabhängig.
@@ -1382,7 +1370,7 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, onUpdate, onClose, navig
         <button style={btnBlue} onClick={()=>navigate('/rechner/ravel')}>→ RAVEL Wirtschaftlichkeit</button>
       </div>
     );
-  } else if (node.type === 'speicher') {
+  } else if (node.type === 'speicher' || node.type === 'bww') {
     body = (
       <div style={{ display:'grid', gap:10 }}>
         <div><label style={lbl}>Speicherinhalt [L]</label>
@@ -2007,14 +1995,6 @@ function EditorInner() {
       : x));
   }, [setNodes, snap, drawingConfig.grid_size]);
 
-  // Bauteil per Pfeiltaste verschieben (Shift = grosser Schritt).
-  const nudgeNode = useCallback((id, dx, dy) => {
-    snap();
-    setNodes(ns => ns.map(x => x.id === id
-      ? { ...x, position: { x:(x.position?.x || 0) + dx, y:(x.position?.y || 0) + dy } }
-      : x));
-  }, [setNodes, snap]);
-
   const clipboard = useRef(null);
   const nodesRef = useRef([]);
   const edgesRef = useRef([]);
@@ -2109,6 +2089,52 @@ function EditorInner() {
     const targetSide = targetNode?.type === 'junction' ? null : handleAusrichtung(edge.target, edge.targetHandle);
     return adaptivePolyline(start, end, edge.data?.points || [], sourceSide, targetSide);
   }, [handleAusrichtung, handlePosition]);
+
+  // Bauteil per Pfeiltaste verschieben (Shift = grosser Schritt). Das ist
+  // geometrisch dieselbe Operation wie Drag-and-drop: endpunktnahe Waypoints
+  // werden auf ihrer bisherigen Achse mitgeführt, damit kein schräges
+  // Anschlusssegment entsteht.
+  const nudgeNode = useCallback((id, dx, dy) => {
+    snap();
+    const achsen = {};
+    edgesRef.current.forEach(edge => {
+      const wp = edge.data?.points;
+      if (!Array.isArray(wp) || !wp.length) return;
+      const sourceBewegt = edge.source === id;
+      const targetBewegt = edge.target === id;
+      if (!sourceBewegt && !targetBewegt) return;
+      const eintrag = {};
+      if (sourceBewegt) {
+        const start = handlePosition(edge.source, edge.sourceHandle);
+        const startAchse = segmentAchse(start, wp[0]);
+        if (start && startAchse) {
+          eintrag.startAchse = startAchse;
+          eintrag.start = { x:start.x + dx, y:start.y + dy };
+        }
+      }
+      if (targetBewegt) {
+        const end = handlePosition(edge.target, edge.targetHandle);
+        const endAchse = segmentAchse(wp[wp.length - 1], end);
+        if (end && endAchse) {
+          eintrag.endAchse = endAchse;
+          eintrag.end = { x:end.x + dx, y:end.y + dy };
+        }
+      }
+      if (eintrag.startAchse || eintrag.endAchse) achsen[edge.id] = eintrag;
+    });
+    if (Object.keys(achsen).length) {
+      setEdges(items => items.map(edge => {
+        const a = achsen[edge.id];
+        const wp = edge.data?.points;
+        if (!a || !Array.isArray(wp) || !wp.length) return edge;
+        const neu = mitgezogeneWaypoints(wp, a);
+        return { ...edge, data:{ ...(edge.data || {}), cad_polyline:true, points:neu } };
+      }));
+    }
+    setNodes(ns => ns.map(x => x.id === id
+      ? { ...x, position: { x:(x.position?.x || 0) + dx, y:(x.position?.y || 0) + dy } }
+      : x));
+  }, [handlePosition, setEdges, setNodes, snap]);
 
   // Orthogonales Mitziehen (§ Editor #1). Der Leitungsendpunkt folgt dem Anschluss
   // bereits live (nodeGeometryVersion); damit das endpunktnahe Segment nicht
@@ -3568,7 +3594,9 @@ function EditorInner() {
         data:{
           ...(edge.data || {}),
           cad_polyline:true,
-          points:routePunkte(edge).slice(1, -1),
+          // Vollständige, im Browser vermessene Route inkl. beider Handles.
+          // Das Backend darf diese Exportgeometrie nicht erneut herleiten.
+          export_route:routePunkte(edge),
         },
       }));
       const graph = graphFuerSpeicherung(

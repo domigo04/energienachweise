@@ -36,9 +36,9 @@ EWS_S, EWS_X0, EWS_H = 58, 52, 286
 GROESSEN = {
     "heizkreis": (74, 74), "pump": (48, 48), "valve2": (44, 40),
     "valve3": (52, 40), "checkvalve": (48, 48), "shutoff": (19, 41),
-    "erzeuger": (104, 114), "verbraucher": (68, 50), "speicher": (60, 104),
+    "erzeuger": (104, 114), "verbraucher": (68, 50), "speicher": (72, 149),
     "junction": (46, 46), "label": (120, 16),
-    "waermezaehler": (48, 48), "expansion": (76, 105), "bww": (60, 104),
+    "waermezaehler": (48, 48), "expansion": (76, 105), "bww": (72, 149),
     "anschluss": (60, 40), "stad": (18, 41), "temperatur": (52, 38),
     "sicherheitsventil": (80, 67), "pwt": (94, 68),
     "concrete_area": (180, 120), "interface_line": (180, 40),
@@ -190,7 +190,8 @@ def _handle_pos_base(node, handle: Optional[str]):
             }[seite]
         return {"top-l": (x + w * 0.3, y), "top-r": (x + w * 0.7, y),
                 "bot-l": (x + w * 0.3, y + h), "bot-r": (x + w * 0.7, y + h),
-                "left": (x, y + h / 2), "right": (x + w, y + h / 2)}.get(handle, (x + w / 2, y + h / 2))
+                "left": (x, y + h / 2), "right": (x + w, y + h / 2),
+                "warmwasser": (x + w / 2, y), "kaltwasser": (x + w / 2, y + h)}.get(handle, (x + w / 2, y + h / 2))
     if t == "anschluss":  # Anschlüsse vorne rechts (nicht beim Buchstaben)
         return {"vl": (x + w, y + h * 0.28), "rl": (x + w, y + h * 0.72)}.get(handle, (x + w, y + h / 2))
     if t == "expansion":
@@ -244,6 +245,20 @@ def _thermometer(parts, cx, cy):
     parts.append(f'<text x="{cx}" y="{cy + 3}" text-anchor="middle" font-size="7" font-weight="700" fill="#1e293b">T</text>')
 
 
+def _waermepumpen_symbol(parts, code):
+    parts.extend([
+        '<g fill="none" stroke="#111827" stroke-width="2.5" stroke-linejoin="round">',
+        '<rect x="8" y="8" width="184" height="204" fill="#e5e7eb" stroke-width="3"/>',
+        '<rect x="20" y="20" width="60" height="180" fill="#f3f4f6"/><line x1="20" y1="20" x2="80" y2="200"/>',
+        '<rect x="120" y="20" width="60" height="180" fill="#f3f4f6"/><line x1="180" y1="20" x2="120" y2="200"/>',
+        '<circle cx="100" cy="55" r="26" fill="#e5e7eb"/>',
+        '<path d="M80 68 Q91 61 96.5 57.5 M103.5 52.5 Q109 49 120 42 M80 42 Q91 49 96.5 52.5 M103.5 57.5 Q109 61 120 68"/>',
+        '<path d="M78 184 L100 195 L78 206 Z" fill="#f9fafb"/><path d="M122 184 L100 195 L122 206 Z" fill="#f9fafb"/></g>',
+        '<g font-family="Arial" font-size="16" font-weight="700" fill="#111827">',
+        f'<text x="32" y="38">V</text><text x="148" y="38">K</text><text x="100" y="164" text-anchor="middle">{code}</text></g>',
+    ])
+
+
 def _zeichne_erzeuger(parts, node):
     """Typabhängiges Erzeugersymbol, geometrisch identisch zum Editor."""
     d = node.get("data") or {}
@@ -256,32 +271,20 @@ def _zeichne_erzeuger(parts, node):
 
     if gt == "lwwp":
         bauart = d.get("lwwp_bauart") or "aussenaufstellung"
-        bauart_text = {"split": "SPLIT", "innenaufstellung": "INNEN"}.get(bauart, "AUSSEN")
-        parts.extend([
-            '<rect x="8" y="22" width="184" height="178" rx="3" fill="#ecfeff" stroke="#111827" stroke-width="3"/>',
-            '<g fill="none" stroke="#0891b2" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">',
-            '<path d="M18 63 H53"/><path d="M43 53 L55 63 L43 73"/>',
-            '<path d="M53 103 H18"/><path d="M28 93 L16 103 L28 113"/></g>',
-            '<g fill="#0e7490" font-family="Arial" font-size="13" font-weight="700">',
-            '<text x="15" y="48">AUL</text><text x="15" y="129">FOL</text></g>',
-            '<circle cx="75" cy="83" r="29" fill="white" stroke="#164e63" stroke-width="2.5"/>',
-            '<circle cx="75" cy="83" r="5" fill="#164e63"/>',
-            '<g fill="#a5f3fc" stroke="#164e63" stroke-width="1.3">',
-            '<path d="M75 78 C57 55 58 48 70 52 C82 56 81 68 75 78Z"/>',
-            '<path d="M80 83 C103 65 110 68 105 79 C100 90 89 89 80 83Z"/>',
-            '<path d="M75 88 C93 111 90 118 79 113 C68 108 69 97 75 88Z"/>',
-            '<path d="M70 83 C47 101 40 98 45 87 C50 76 61 77 70 83Z"/></g>',
-            '<rect x="119" y="48" width="56" height="91" rx="3" fill="#f8fafc" stroke="#111827" stroke-width="2.3"/>',
-            '<circle cx="147" cy="78" r="15" fill="#e2e8f0" stroke="#111827" stroke-width="2"/>',
-            '<path d="M135 85 Q142 78 147 75 M147 81 Q153 77 159 70" fill="none" stroke="#111827" stroke-width="1.8"/>',
-            '<path d="M132 119 H163 M132 112 L147 126 L163 112" fill="none" stroke="#dc2626" stroke-width="2"/>',
-        ])
         if bauart == "split":
-            parts.append('<path d="M104 62 V126" fill="none" stroke="#f97316" stroke-width="2.5" stroke-dasharray="7 5"/>')
-        parts.extend([
-            f'<text x="147" y="157" text-anchor="middle" font-family="Arial" font-size="12" font-weight="700" fill="#334155">{bauart_text}</text>',
-            '<text x="100" y="190" text-anchor="middle" font-family="Arial" font-size="14" font-weight="700" fill="#111827">L/W-WP</text>',
-        ])
+            parts.extend([
+                '<rect x="8" y="30" width="78" height="142" fill="#e5e7eb" stroke="#111827" stroke-width="3"/>',
+                '<rect x="114" y="30" width="78" height="142" fill="#e5e7eb" stroke="#111827" stroke-width="3"/>',
+                '<circle cx="47" cy="77" r="23" fill="white" stroke="#111827" stroke-width="2"/>',
+                '<path d="M47 55 L53 74 L71 77 L53 82 L47 101 L42 82 L24 77 L42 72 Z" fill="#bae6fd" stroke="#111827" stroke-width="1.4"/>',
+                '<path d="M86 101 H114" fill="none" stroke="#f97316" stroke-width="3" stroke-dasharray="7 5"/>',
+                '<text x="47" y="137" text-anchor="middle" font-size="11" font-weight="700">VERFL.</text>',
+                '<text x="153" y="90" text-anchor="middle" font-size="11" font-weight="700">VERD.</text>',
+                '<text x="153" y="110" text-anchor="middle" font-size="10">INNEN</text>',
+                '<text x="100" y="202" text-anchor="middle" font-family="Arial" font-size="14" font-weight="700">L/W-WP SPLIT</text>',
+            ])
+        else:
+            _waermepumpen_symbol(parts, "L/W-WP")
     elif gt == "fernwaerme":
         parts.extend([
             '<rect x="12" y="12" width="176" height="196" rx="4" fill="#f8fafc" stroke="#111827" stroke-width="3"/>',
@@ -321,17 +324,7 @@ def _zeichne_erzeuger(parts, node):
         ])
     elif gt in {"", "ews_wp", "wasser_wp", "co2_wp"}:
         code = {"ews_wp": "S/W-WP", "wasser_wp": "W/W-WP", "co2_wp": "CO₂-WP"}.get(gt, "WP")
-        parts.extend([
-            '<g fill="none" stroke="#111827" stroke-width="2.5" stroke-linejoin="round">',
-            '<rect x="8" y="8" width="184" height="204" fill="#e5e7eb" stroke-width="3"/>',
-            '<rect x="20" y="20" width="60" height="180" fill="#f3f4f6"/><line x1="20" y1="20" x2="80" y2="200"/>',
-            '<rect x="120" y="20" width="60" height="180" fill="#f3f4f6"/><line x1="180" y1="20" x2="120" y2="200"/>',
-            '<circle cx="100" cy="55" r="26" fill="#e5e7eb"/>',
-            '<path d="M80 68 Q91 61 96.5 57.5 M103.5 52.5 Q109 49 120 42 M80 42 Q91 49 96.5 52.5 M103.5 57.5 Q109 61 120 68"/>',
-            '<path d="M78 184 L100 195 L78 206 Z" fill="#f9fafb"/><path d="M122 184 L100 195 L122 206 Z" fill="#f9fafb"/></g>',
-            '<g font-family="Arial" font-size="16" font-weight="700" fill="#111827">',
-            f'<text x="32" y="38">V</text><text x="148" y="38">K</text><text x="100" y="164" text-anchor="middle">{code}</text></g>',
-        ])
+        _waermepumpen_symbol(parts, code)
     else:
         label = _esc(generator_type_label(gt) or "ERZEUGER")
         parts.extend([
@@ -622,13 +615,20 @@ def zeichne_standard(parts, node, results):
     elif t == "verbraucher":
         parts.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="3" fill="white" stroke="#f97316" stroke-width="2"/>')
         parts.append(f'<text x="{cx}" y="{cy + 5}" text-anchor="middle" font-size="13" font-weight="700" fill="#f97316">{_esc(label or "")}</text>')
-    elif t == "speicher":
-        parts.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="6" fill="#fef2f2" stroke="#dc2626" stroke-width="2.5"/>')
-        parts.append(f'<text x="{cx}" y="{cy + 4}" text-anchor="middle" font-size="12" font-weight="700" fill="#dc2626">SP</text>')
-    elif t == "bww":
-        # Brauchwarmwasser-Speicher: wie Speicher, aber GRÜN
-        parts.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="6" fill="#f0fdf4" stroke="#16a34a" stroke-width="2.5"/>')
-        parts.append(f'<text x="{cx}" y="{cy + 4}" text-anchor="middle" font-size="11" font-weight="700" fill="#15803d">BWW</text>')
+    elif t in ("speicher", "bww"):
+        sx, sy = w / 140, h / 290
+        parts.append(f'<g transform="translate({x},{y}) scale({sx:.4f},{sy:.4f})">')
+        parts.append('<path d="M65 4 L75 14 M75 4 L65 14" fill="none" stroke="#111827" stroke-width="2"/>')
+        parts.append('<path d="M20 45 A50 25 0 0 1 120 45 L120 245 A50 25 0 0 1 20 245 Z" fill="#e5e7eb" stroke="#111827" stroke-width="3"/>')
+        parts.append('<line x1="20" y1="45" x2="120" y2="45" stroke="#111827" stroke-width="3"/>')
+        liter = _f(d.get("speicher_liter"))
+        liter_text = f"{liter:.0f} L" if liter and liter > 0 else "… L"
+        parts.append(f'<text x="70" y="78" text-anchor="middle" font-size="16" font-weight="700">{liter_text}</text>')
+        if t == "bww":
+            parts.append('<text x="70" y="151" text-anchor="middle" font-size="15" font-weight="700">BWW</text>')
+            parts.append('<path d="M70 45 V2 M65 9 L70 2 L75 9" fill="none" stroke="#ef4444" stroke-width="3"/>')
+            parts.append('<path d="M70 245 V288 M65 281 L70 288 L75 281" fill="none" stroke="#16a34a" stroke-width="3" stroke-dasharray="7 5"/>')
+        parts.append("</g>")
     elif t == "waermezaehler":
         parts.append(f'<circle cx="{cx}" cy="{cy}" r="16" fill="white" stroke="#0f766e" stroke-width="2.5"/>')
         parts.append(f'<text x="{cx}" y="{cy + 3.5}" text-anchor="middle" font-size="10" font-weight="700" fill="#0f766e">WZ</text>')
@@ -778,7 +778,7 @@ def zeichne_edge(parts, edge, nodes_by_id, results):
     x2, y2 = handle_pos(ziel, edge.get("targetHandle"))
     stroke = edge.get("stroke") or (edge.get("style") or {}).get("stroke") or "#1e293b"
     layer_id = str((edge.get("data") or {}).get("layer_id") or "")
-    ist_rl = stroke == RL_FARBE or layer_id.endswith("_rl")
+    ist_rl = stroke == RL_FARBE or layer_id.endswith("_rl") or layer_id == "trinkkaltwasser"
     dash = ' stroke-dasharray="10,7"' if ist_rl else ""
     # CAD-Leitung wie FlowEdge.jsx: echte Polylinie; klassische React-Flow-
     # Kanten ohne cad_polyline behalten ihre automatische Winkelroute.
@@ -787,10 +787,22 @@ def zeichne_edge(parts, edge, nodes_by_id, results):
     gespeicherter_radius = _f(edge_data.get("corner_radius"))
     r = max(0, gespeicherter_radius if gespeicherter_radius is not None else 8)
     stuetzpunkte = edge_data.get("points") or []
-    ist_cad_polyline = bool(edge_data.get("cad_polyline")) or bool(stuetzpunkte)
+    # Beim PDF-Export liefert der Editor die bereits mit den tatsächlich
+    # vermessenen React-Flow-Handles berechnete vollständige Route. Diese hat
+    # Vorrang vor jeder Backend-Näherung der Symbolgeometrie.
+    export_route = edge_data.get("export_route") or []
+    gueltige_export_route = [
+        (_f(p.get("x")), _f(p.get("y")))
+        for p in export_route if isinstance(p, dict)
+    ]
+    gueltige_export_route = [p for p in gueltige_export_route if None not in p]
+    ist_cad_polyline = bool(edge_data.get("cad_polyline")) or bool(stuetzpunkte) or len(gueltige_export_route) >= 2
     if ist_cad_polyline:
-        gueltige_stuetzpunkte = [(_f(p.get("x")), _f(p.get("y"))) for p in stuetzpunkte]
-        punkte = [(x1, y1)] + [p for p in gueltige_stuetzpunkte if None not in p] + [(x2, y2)]
+        if len(gueltige_export_route) >= 2:
+            punkte = gueltige_export_route
+        else:
+            gueltige_stuetzpunkte = [(_f(p.get("x")), _f(p.get("y"))) for p in stuetzpunkte]
+            punkte = [(x1, y1)] + [p for p in gueltige_stuetzpunkte if None not in p] + [(x2, y2)]
         pfad = _gerundeter_polylinien_pfad(punkte, r)
         # Label ungefähr in der geometrischen Mitte der Polylinie.
         laengen = [((punkte[i - 1], punkte[i]), ((punkte[i][0] - punkte[i - 1][0]) ** 2 + (punkte[i][1] - punkte[i - 1][1]) ** 2) ** 0.5) for i in range(1, len(punkte))]
@@ -858,7 +870,9 @@ def erzeuge_svg(nodes: list, edges: list, results: dict) -> str:
             xs += [cap_x - 85, cap_x + 85]
             ys += [cap_y, cap_y + 18]
     for edge in edges:
-        for point in (edge.get("data") or {}).get("points") or []:
+        edge_data = edge.get("data") or {}
+        route_for_bounds = edge_data.get("export_route") or edge_data.get("points") or []
+        for point in route_for_bounds:
             xs.append(_f(point.get("x")))
             ys.append(_f(point.get("y")))
     rand = 50

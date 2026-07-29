@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { Handle, Position, useReactFlow, NodeResizer } from '@xyflow/react';
 import {
   SymPump, SymValve2V, SymValve3, SymCheckValve,
-  SymShutoff, SymWE, SymVerbraucher, SymSpeicher, SymBypass,
+  SymShutoff, SymWE, SymVerbraucher, SymSpeicher, SymBwwSpeicher, SymBypass,
   SymSTAD, SymTemperatur, SymSicherheitsventil, SymPWT,
 } from './symbols';
 
@@ -663,19 +663,17 @@ export function ExpansionNode({ data, selected: sel }) {
 export function BwwNode({ data, selected: sel }) {
   return (
     <div style={wrap(sel)}>
-      {H(Position.Top,    'top-l',  { top: -6,    left: '30%' })}
-      {H(Position.Top,    'top-r',  { top: -6,    left: '70%' })}
-      {H(Position.Bottom, 'bot-l',  { bottom: -6, left: '30%' })}
-      {H(Position.Bottom, 'bot-r',  { bottom: -6, left: '70%' })}
+      <ZoneHandles prefix="sz" />
+      {H(Position.Top,    'top-l',  { top: -6,    left: '30%', background:'#ef4444' })}
+      {H(Position.Top,    'top-r',  { top: -6,    left: '70%', background:'#ef4444' })}
+      {H(Position.Bottom, 'bot-l',  { bottom: -6, left: '30%', background:'#3b82f6' })}
+      {H(Position.Bottom, 'bot-r',  { bottom: -6, left: '70%', background:'#3b82f6' })}
       {H(Position.Left,   'left',   { left: -6 })}
       {H(Position.Right,  'right',  { right: -6 })}
-      <svg viewBox="0 0 56 100" width="56" height="100">
-        <rect x="3" y="3" width="50" height="94" rx="6" fill="#f0fdf4" stroke="#16a34a" strokeWidth="2.5" />
-        <line x1="3" y1="35" x2="53" y2="35" stroke="#86efac" strokeWidth="1.2" strokeDasharray="5,3" />
-        <line x1="3" y1="65" x2="53" y2="65" stroke="#86efac" strokeWidth="1.2" strokeDasharray="5,3" />
-        <text x="28" y="54" textAnchor="middle" fontSize="11" fontWeight="700" fill="#15803d">BWW</text>
-      </svg>
-      <Label text={data.label || 'BWW'} color="#15803d" />
+      {H(Position.Top, 'warmwasser', { top:-6, left:'50%', background:'#ef4444' })}
+      {H(Position.Bottom, 'kaltwasser', { bottom:-6, left:'50%', background:'#16a34a' })}
+      <SymBwwSpeicher liter={data.speicher_liter} />
+      <Label text={data.label || 'BWW'} />
     </div>
   );
 }

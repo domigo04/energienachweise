@@ -4,13 +4,8 @@ Nutzt Structured Outputs der Chat-Completions-API
 (`response_format={"type": "json_schema", ...}` mit `strict: true`), damit kein
 Fliesstext geparst werden muss.
 
-ACHTUNG — bewusst KEIN Default-Modell:
-
-Die OpenAI-Modelldokumentation war beim Implementieren nicht erreichbar, und eine
-Modell-ID aus dem Gedächtnis zu setzen wäre geraten — genau das soll hier nicht
-passieren. Darum ist `COST_MAPPING_LLM_MODEL` für diesen Provider Pflicht. Fehlt
-sie, meldet sich der Provider als nicht einsatzbereit (mit Grund) und der
-LV-Import läuft ohne KI-Vorschläge normal weiter.
+Der verifizierte Standard für Structured Outputs ist `gpt-5.6`; er kann über
+`COST_MAPPING_LLM_MODEL` bzw. `LV_REVIEW_LLM_MODEL` überschrieben werden.
 """
 from __future__ import annotations
 
@@ -21,17 +16,20 @@ from app.lv_import.llm.base import (
     CostMappingLLM, RESPONSE_SCHEMA, SYSTEM_PROMPT, build_user_prompt, parse_mappings,
 )
 
+DEFAULT_MODEL = "gpt-5.6"
+
 
 class OpenAICostMapper(CostMappingLLM):
     name = "openai"
 
     def __init__(self, model: Optional[str] = None, client=None):
-        super().__init__(model or os.getenv("COST_MAPPING_LLM_MODEL"), client)
+        super().__init__(
+            model or os.getenv("COST_MAPPING_LLM_MODEL")
+            or os.getenv("LV_REVIEW_LLM_MODEL") or DEFAULT_MODEL,
+            client,
+        )
 
     def available(self) -> tuple[bool, str]:
-        if not self.model:
-            return False, ("COST_MAPPING_LLM_MODEL muss für OpenAI gesetzt werden "
-                           "(kein geratener Default)")
         if self._client is not None:
             return True, "Client injiziert"
         if not os.getenv("OPENAI_API_KEY"):
@@ -49,8 +47,6 @@ class OpenAICostMapper(CostMappingLLM):
         return self._client
 
     def resolve(self, positions, allowed_positions) -> list[dict]:
-        if not self.model:
-            return []
         try:
             antwort = self._get_client().chat.completions.create(
                 model=self.model,

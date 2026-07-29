@@ -60,6 +60,14 @@ def _build_detail(project: HcProject) -> ProjectDetailOut:
         name=project.name,
         standort=project.standort,
         kunde=project.kunde,
+        projektnummer=project.projektnummer,
+        strasse=project.strasse,
+        plz=project.plz,
+        ort=project.ort,
+        bauherr=project.bauherr,
+        sia_phase=project.sia_phase,
+        projektfortschritt_pct=project.projektfortschritt_pct or 0,
+        planbezeichnung=project.planbezeichnung,
         beschreibung=project.beschreibung,
         verantwortlicher_id=project.verantwortlicher_id,
         verantwortlicher_name=project.verantwortlicher_name,
@@ -311,10 +319,10 @@ def update_project(project_id: int, body: ProjectUpdate, user: User = Depends(ge
     project.updated_at = datetime.utcnow()
 
     if body.base_data:
-        if not project.base_data:
+        bd = project.base_data
+        if not bd:
             bd = HcProjectBaseData(tenant_id=user.tenant_id, project_id=project.id)
             db.add(bd)
-            db.flush()
         for field in (
             "t_aussen", "t_innen", "heizungssystem", "warmwasser_bedarf_kw",
             "gebaeudekategorie", "klimastation",
@@ -322,14 +330,14 @@ def update_project(project_id: int, body: ProjectUpdate, user: User = Depends(ge
         ):
             val = getattr(body.base_data, field, None)
             if val is not None:
-                old = getattr(project.base_data, field)
+                old = getattr(bd, field)
                 old_value = old.value if hasattr(old, "value") else old
                 new_value = val.value if hasattr(val, "value") else val
                 if old_value != new_value:
                     before[f"base_data.{field}"] = old_value
                     after[f"base_data.{field}"] = new_value
-                setattr(project.base_data, field, val)
-        project.base_data.updated_at = datetime.utcnow()
+                setattr(bd, field, val)
+        bd.updated_at = datetime.utcnow()
 
     if after:
         add_audit_event(

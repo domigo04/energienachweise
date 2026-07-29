@@ -168,19 +168,24 @@ def test_fehlender_api_key_meldet_grund(monkeypatch):
     assert resolver.resolve(_pos()) == {}
 
 
-def test_openai_verlangt_ausdrueckliche_modell_id(monkeypatch):
-    """Kein geratener Default: ohne COST_MAPPING_LLM_MODEL ist OpenAI nicht bereit."""
+def test_openai_hat_verifizierten_structured_output_default(monkeypatch):
     monkeypatch.delenv("COST_MAPPING_LLM_MODEL", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "test")
-    ok, grund = OpenAICostMapper().available()
-    assert ok is False
-    assert "COST_MAPPING_LLM_MODEL" in grund
+    provider = OpenAICostMapper()
+    assert provider.model == "gpt-5.6"
 
 
 def test_modell_kommt_aus_der_umgebung(monkeypatch):
     monkeypatch.setenv("COST_MAPPING_LLM_MODEL", "irgendein-modell")
     assert AnthropicCostMapper().model == "irgendein-modell"
     assert OpenAICostMapper().model == "irgendein-modell"
+
+
+def test_provider_wird_aus_vorhandenem_api_key_gewaehlt(monkeypatch):
+    monkeypatch.delenv("COST_MAPPING_LLM_PROVIDER", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert resolver.provider_name() == "openai"
 
 
 def test_unbekannter_provider_ist_kein_absturz(monkeypatch):

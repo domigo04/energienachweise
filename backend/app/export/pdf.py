@@ -7,12 +7,16 @@ import io
 from datetime import date
 
 from reportlab.graphics import renderPDF
-from reportlab.lib.utils import ImageReader
 from reportlab.lib.pagesizes import A3, A4, landscape
 from reportlab.pdfgen import canvas as pdfcanvas
 from svglib.svglib import svg2rlg
 
 from app.export.schema_svg import erzeuge_svg
+from app.data.generator_types import (
+    HEAT_PUMP_TYPES,
+    SOURCE_CIRCUIT_TYPES,
+    generator_type_label,
+)
 
 PLANER = "SIREGO GmbH · Dominic Goulon · Winterthur"
 
@@ -56,6 +60,7 @@ def legende_zeilen(nodes: list, results: dict) -> list:
     gr = results.get("gruppe_results") or {}
     vr = results.get("verteiler_results") or {}
     nf = results.get("node_flows") or {}
+    ergebnisse_erzeuger = results.get("heatpump_results") or {}
     for n in _sortiert(nodes):
         d = n.get("data") or {}
         t = n.get("type")
@@ -105,7 +110,14 @@ def legende_zeilen(nodes: list, results: dict) -> list:
             elif ex:
                 werte = f"⚠ {ex['fehler']}"
         elif t == "erzeuger":
-            werte = " · ".join(x for x in [d.get("typ"), f"{d.get('leistung_kw')} kW" if d.get("leistung_kw") else None] if x) or "—"
+            er = ergebnisse_erzeuger.get(n["id"], {})
+            werte = " · ".join(x for x in [
+                d.get("typ") or generator_type_label(d.get("generator_type")),
+                f"{d.get('leistung_kw')} kW" if d.get("leistung_kw") else None,
+                f"Heizung {_fmt(er.get('heating_flow_m3h'))} m³/h" if er.get("heating_flow_m3h") is not None else None,
+                f"Quelle {_fmt(er.get('q_source_kw'), 1)} kW" if er.get("q_source_kw") is not None else None,
+                f"Sole {_fmt(er.get('source_flow_m3h'))} m³/h" if er.get("source_flow_m3h") is not None else None,
+            ] if x) or "—"
         elif t == "erdsonden":
             anzahl = max(1, min(24, int(_f(d.get("sonden_anzahl")) or 5)))
             laenge = _f(d.get("sonden_laenge_m"))
@@ -124,6 +136,7 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
     gr = results.get("gruppe_results") or {}
     vr = results.get("verteiler_results") or {}
     nf = results.get("node_flows") or {}
+    ergebnisse_erzeuger = results.get("heatpump_results") or {}
     for n in _sortiert(nodes):
         d = n.get("data") or {}
         t = n.get("type")
@@ -210,8 +223,64 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
             elif ex:
                 resultate = [("Fehler", ex["fehler"], "")]
         elif t == "erzeuger":
-            eingaben = [("Typ", d.get("typ") or "—", ""), ("Nennleistung", d.get("leistung_kw"), "kW"),
-                        ("VL / RL", f"{d.get('vl_temp', '—')} / {d.get('rl_temp', '—')}", "°C")]
+            er = ergebnisse_erzeuger.get(n["id"], {})
+            generator_type = d.get("generator_type")
+            typ_text = str(d.get("typ") or "").lower()
+            ist_waermepumpe = (
+                generator_type in HEAT_PUMP_TYPES
+                or er.get("ist_waermepumpe") is True
+                or "wärmepumpe" in typ_text
+                or "waermepumpe" in typ_text
+                or not generator_type
+            )
+            hat_quellenkreis = (
+                generator_type in SOURCE_CIRCUIT_TYPES
+                or er.get("source_flow_m3h") is not None
+                or (not generator_type and (d.get("sole_vl") or d.get("sole_rl")))
+            )
+            eingaben = [("Erzeugerart", generator_type_label(d.get("generator_type")) or "—", ""),
+                        ("Fabrikat / Typ", d.get("typ") or "—", ""),
+                        ("Nennleistung", d.get("leistung_kw"), "kW"),
+                        ("VL / RL Heizung", f"{d.get('vl_temp', '—')} / {d.get('rl_temp', '—')}", "°C")]
+            if ist_waermepumpe:
+                eingaben.extend([
+                    ("COP", d.get("cop"), ""),
+                    ("Elektrische Leistung", d.get("p_el_kw"), "kW"),
+                ])
+            if hat_quellenkreis:
+                quelle = "Quelle" if generator_type == "wasser_wp" else "Sole"
+                eingaben.extend([
+                    (f"VL / RL {quelle}",
+                     f"{d.get('sole_vl', '—')} / {d.get('sole_rl', '—')}", "°C"),
+                    (f"Stoffwert {quelle} cρ",
+                     er.get("source_ce"), "kWh/(m³·K)"),
+                ])
+            if generator_type == "lwwp":
+                bauart = {
+                    "aussenaufstellung": "Monoblock – Aussenaufstellung",
+                    "innenaufstellung": "Monoblock – Innenaufstellung",
+                    "split": "Splitgerät",
+                }.get(d.get("lwwp_bauart"), d.get("lwwp_bauart") or "Aussenaufstellung")
+                eingaben.extend([
+                    ("Bauart", bauart, ""),
+                    ("Aussenluft / Fortluft",
+                    f"{d.get('aussenluft_temp', '—')} / {d.get('fortluft_temp', '—')}", "°C"),
+                ])
+            resultate = [
+                ("ΔT Heizung", _fmt(er.get("heating_dt"), 2), "K"),
+                ("V' Erzeugerkreis", _fmt(er.get("heating_flow_m3h")), "m³/h"),
+            ]
+            if ist_waermepumpe:
+                resultate.extend([
+                    ("Elektrische Leistung", _fmt(er.get("p_el_kw"), 2), "kW"),
+                    ("Quellenleistung", _fmt(er.get("q_source_kw"), 2), "kW"),
+                ])
+            if hat_quellenkreis:
+                quelle = "Quellenkreis" if generator_type == "wasser_wp" else "Solekreis"
+                resultate.extend([
+                    (f"ΔT {quelle}", _fmt(er.get("source_dt"), 2), "K"),
+                    (f"V' {quelle}", _fmt(er.get("source_flow_m3h")), "m³/h"),
+                ])
         elif t == "erdsonden":
             anzahl = max(1, min(24, int(_f(d.get("sonden_anzahl")) or 5)))
             laenge = _f(d.get("sonden_laenge_m"))
@@ -227,7 +296,7 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
 
 
 # ── PDF zusammenbauen ───────────────────────────────────────────────────────
-def _deckblatt(c, projekt_name, schema_name, inhalt):
+def _deckblatt(c, projekt_name, schema_name, inhalt, plankopf=None):
     w, h = A4
     c.setPageSize(A4)
     c.setFillColorRGB(0.86, 0.15, 0.15)
@@ -241,8 +310,14 @@ def _deckblatt(c, projekt_name, schema_name, inhalt):
     c.drawString(50, h - 155, schema_name or "Schema")
     c.setFont("Helvetica", 11)
     y = h - 210
-    for label, wert in [("Datum", date.today().strftime("%d.%m.%Y")),
-                        ("Planer", PLANER),
+    plankopf = plankopf or {}
+    for label, wert in [("Projektnummer", plankopf.get("projektnummer") or "—"),
+                        ("Bauherr", plankopf.get("bauherr") or "—"),
+                        ("Standort", plankopf.get("standort") or "—"),
+                        ("Datum", date.today().strftime("%d.%m.%Y")),
+                        ("Planer", plankopf.get("planer") or PLANER),
+                        ("Revision", plankopf.get("revision") or "0"),
+                        ("Status", plankopf.get("status") or "Entwurf"),
                         ("Inhalt", INHALT_TEXT.get(inhalt, inhalt))]:
         c.setFillColorRGB(0.45, 0.5, 0.55)
         c.drawString(50, y, label)
@@ -255,39 +330,46 @@ def _deckblatt(c, projekt_name, schema_name, inhalt):
     c.showPage()
 
 
-def _schema_seite(c, svg_string, projekt_name, schema_name, schema_png: bytes | None = None):
+def _plankopf(c, seite, projekt_name, schema_name, plankopf=None):
+    daten = plankopf or {}
+    x, y, breite, hoehe = seite[0] - 420, 18, 390, 76
+    c.setStrokeColorRGB(0.2, 0.24, 0.3)
+    c.setLineWidth(0.7)
+    c.rect(x, y, breite, hoehe, stroke=1, fill=0)
+    c.line(x + 235, y, x + 235, y + hoehe)
+    c.line(x, y + 25, x + breite, y + 25)
+    c.line(x, y + 50, x + breite, y + 50)
+    c.setFillColorRGB(0.1, 0.12, 0.2)
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(x + 8, y + 58, projekt_name or "Projekt")
+    c.setFont("Helvetica", 7)
+    c.drawString(x + 8, y + 42, f"Bauherr: {daten.get('bauherr') or '—'}")
+    c.drawString(x + 8, y + 30, f"Standort: {daten.get('standort') or '—'}")
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(x + 8, y + 12, daten.get("planbezeichnung") or schema_name or "Anlagenschema")
+    c.setFont("Helvetica", 7)
+    c.drawString(x + 243, y + 59, f"Plan-Nr. {daten.get('dokumentnummer') or '—'}")
+    c.drawString(x + 243, y + 42, f"Revision {daten.get('revision') or '0'} · {daten.get('status') or 'Entwurf'}")
+    c.drawString(x + 243, y + 30, f"{daten.get('planformat') or 'A3 quer'} · Schema ohne Massstab")
+    c.drawString(x + 243, y + 12, f"{date.today().strftime('%d.%m.%Y')} · {daten.get('bearbeiter') or PLANER}")
+
+
+def _schema_seite(c, svg_string, projekt_name, schema_name, plankopf=None):
     seite = landscape(A3)
     c.setPageSize(seite)
     rand = 30
-    nutz_b, nutz_h = seite[0] - 2 * rand, seite[1] - 2 * rand - 20
-    if schema_png:
-        # Momentaufnahme derselben React-Flow-DOM: Symbol, Drehung, Route und
-        # Position stammen damit exakt aus der Zeichenansicht.
-        bild = ImageReader(io.BytesIO(schema_png))
-        bild_b, bild_h = bild.getSize()
-        skala = min(nutz_b / bild_b, nutz_h / bild_h)
-        ziel_b, ziel_h = bild_b * skala, bild_h * skala
-        c.drawImage(
-            bild,
-            rand + (nutz_b - ziel_b) / 2,
-            rand + 20 + (nutz_h - ziel_h) / 2,
-            width=ziel_b,
-            height=ziel_h,
-            preserveAspectRatio=True,
-            mask="auto",
-        )
-    else:
-        # Fallback für API-Aufrufe ohne Browser-Momentaufnahme.
-        zeichnung = svg2rlg(io.StringIO(svg_string))
-        skala = min(nutz_b / zeichnung.width, nutz_h / zeichnung.height, 1.5)
-        zeichnung.scale(skala, skala)
-        zeichnung.width *= skala
-        zeichnung.height *= skala
-        renderPDF.draw(zeichnung, c, rand + (nutz_b - zeichnung.width) / 2,
-                       rand + 20 + (nutz_h - zeichnung.height) / 2)
-    c.setFont("Helvetica", 8)
-    c.setFillColorRGB(0.45, 0.5, 0.55)
-    c.drawString(rand, 18, f"{projekt_name} · {schema_name} · {date.today().strftime('%d.%m.%Y')} · {PLANER}")
+    plankopf_hoehe = 92
+    nutz_b, nutz_h = seite[0] - 2 * rand, seite[1] - 2 * rand - plankopf_hoehe
+    # Ausschliesslich serverseitiger Vektorpfad: unabhängig von Browserzoom,
+    # Auswahlzustand, Raster und sichtbarem Canvas-Ausschnitt.
+    zeichnung = svg2rlg(io.StringIO(svg_string))
+    skala = min(nutz_b / zeichnung.width, nutz_h / zeichnung.height, 1.5)
+    zeichnung.scale(skala, skala)
+    zeichnung.width *= skala
+    zeichnung.height *= skala
+    renderPDF.draw(zeichnung, c, rand + (nutz_b - zeichnung.width) / 2,
+                   rand + plankopf_hoehe + (nutz_h - zeichnung.height) / 2)
+    _plankopf(c, seite, projekt_name, schema_name, plankopf)
     c.showPage()
 
 
@@ -378,18 +460,16 @@ def _berechnungs_seiten(c, abschnitte, projekt_name):
 
 def erzeuge_pdf(projekt_name: str, schema_name: str, inhalt: str,
                 nodes: list, edges: list, results: dict,
-                schema_png: bytes | None = None) -> bytes:
+                plankopf: dict | None = None) -> bytes:
     """Komplettes PDF gemäss gewähltem Inhalt (Deckblatt immer dabei)."""
     buf = io.BytesIO()
     c = pdfcanvas.Canvas(buf, pagesize=A4)
     c.setTitle(f"{projekt_name} — {schema_name}")
-    _deckblatt(c, projekt_name, schema_name, inhalt)
+    _deckblatt(c, projekt_name, schema_name, inhalt, plankopf)
     if inhalt in ("schema", "beides"):
-        # Bei einem Browser-Snapshot ist der alte Parallel-Renderer weder
-        # nötig noch erwünscht: das spart Zeit und verhindert Abweichungen.
-        svg = "" if schema_png else erzeuge_svg(nodes, edges, results)
-        _schema_seite(c, svg, projekt_name, schema_name, schema_png)
-        _legende_seiten(c, legende_zeilen(nodes, results), projekt_name, results.get("anschluss_warnings"))
+        svg = erzeuge_svg(nodes, edges, results)
+        _schema_seite(c, svg, projekt_name, schema_name, plankopf)
+        _legende_seiten(c, legende_zeilen(nodes, results), projekt_name, results.get("warnungen"))
     if inhalt in ("berechnungen", "beides"):
         _berechnungs_seiten(c, berechnungs_abschnitte(nodes, results), projekt_name)
     c.save()

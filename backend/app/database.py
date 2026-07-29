@@ -3,11 +3,13 @@ import os
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
+from app.runtime import assert_safe_runtime_configuration
 
 # .env laden (liegt im Ordner backend/)
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./privcontrol.db")
+assert_safe_runtime_configuration(database_url=DATABASE_URL)
 
 # relative SQLite-Pfade robust absolut machen
 if DATABASE_URL.startswith("sqlite:///./"):

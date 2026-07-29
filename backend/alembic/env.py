@@ -15,6 +15,8 @@ from app.database import Base
 from app.models import heizungscockpit  # noqa: F401
 from app.models import auth  # noqa: F401
 from app.models import kv  # noqa: F401
+from app.models import grobkostenschaetzung  # noqa: F401
+from app.models import lv_import  # noqa: F401
 
 config = context.config
 config.set_main_option("sqlalchemy.url", os.getenv("DATABASE_URL", "sqlite:///./privcontrol.db"))

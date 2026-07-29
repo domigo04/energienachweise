@@ -248,3 +248,28 @@ def test_warnung_wenn_der_heizkreis_nirgends_endet():
     edges = [_leitung("h1", "wp", "j1", "heizung_vl")]
     res = berechne_schema(nodes, edges)["heatpump_results"]["wp"]
     assert any("keinem Speicher" in w for w in res["warnings"])
+
+
+def test_luftwasser_wp_bilanziert_umweltleistung_ohne_solekreis():
+    nodes = [{
+        "id": "lwwp",
+        "type": "erzeuger",
+        "data": {
+            "generator_type": "lwwp",
+            "leistung_kw": 50,
+            "vl_temp": 50,
+            "rl_temp": 30,
+            "cop": 4,
+            "aussenluft_temp": -8,
+            "fortluft_temp": -12,
+        },
+    }]
+
+    res = berechne_schema(nodes, [])["heatpump_results"]["lwwp"]
+
+    assert res["heating_flow_m3h"] == round(50 / (1.163 * 20), 4)
+    assert res["p_el_kw"] == 12.5
+    assert res["q_source_kw"] == 37.5
+    assert res["source_flow_m3h"] is None
+    assert res["hat_hydraulischen_quellenkreis"] is False
+    assert not any("Sole" in warning for warning in res["warnings"])

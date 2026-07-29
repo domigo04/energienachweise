@@ -231,6 +231,12 @@ gehört noch zum Kreis. Auch die Hauptstrang-Propagierung des Verteilers stoppt 
 Speicher. Reihenfolge: Verbraucher-/Verteilerkreise → WP-Erzeugerkreis →
 WP-Quellenkreis → freie Topologie. Keine Leitung wird von zwei Kreisen beschrieben.
 
+**Luft/Wasser-Wärmepumpe:** Die Umweltleistung wird aus Heizleistung und COP
+beziehungsweise elektrischer Leistung bilanziert, jedoch entsteht kein
+hydraulischer Quellenvolumenstrom. Aussenluft (AUL) und Fortluft (FOL) werden
+ausschliesslich am Erzeugersymbol dargestellt und bilden keine Kanten des
+Wassernetzes.
+
 ## 15. Anschlussverhalten der Bauteile (2026-07-26)
 `frontend/src/pages/hc/schema/componentRegistry.js` ist die einzige Quelle:
 - `free` — frei platzieren, bestehende Leitungen bleiben unberührt.

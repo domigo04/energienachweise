@@ -157,11 +157,71 @@ export function SymShutoff() {
   );
 }
 
-export function SymWE() {
-  // Wärmepumpe nach Dominics Vorlage. Die Anschluss-Handles liegen bewusst
-  // ausserhalb des SVG und können im Schema unabhängig davon konfiguriert werden.
+const generatorAria = {
+  ews_wp: 'Sole/Wasser-Wärmepumpe',
+  lwwp: 'Luft/Wasser-Wärmepumpe mit Aussenluft und Fortluft',
+  wasser_wp: 'Wasser/Wasser-Wärmepumpe',
+  co2_wp: 'CO₂-Wärmepumpe',
+  fernwaerme: 'Fernwärmeübergabe',
+  gas: 'Gaskessel',
+  oel: 'Ölkessel',
+  holz: 'Holz- oder Pelletkessel',
+  elektro: 'Elektroheizung',
+  hybrid: 'Hybrid-Wärmeerzeuger',
+  sonstige: 'Wärmeerzeuger',
+};
+
+function SymLuftWasserWP({ bauart }) {
+  const split = bauart === 'split';
+  const innen = bauart === 'innenaufstellung';
   return (
-    <svg viewBox="0 0 200 220" width="104" height="114" role="img" aria-label="Wärmepumpe">
+    <svg viewBox="0 0 200 220" width="104" height="114" role="img"
+      aria-label={generatorAria.lwwp}>
+      <rect x="8" y="22" width="184" height="178" rx="3" fill="#ecfeff" stroke="#111827" strokeWidth="3"/>
+
+      {/* Luftwege sind cyan und bewusst keine hydraulischen Anschlüsse. */}
+      <g fill="none" stroke="#0891b2" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M18 63 H53"/><path d="M43 53 L55 63 L43 73"/>
+        <path d="M53 103 H18"/><path d="M28 93 L16 103 L28 113"/>
+      </g>
+      <g fill="#0e7490" fontFamily="Arial, sans-serif" fontSize="13" fontWeight="700">
+        <text x="15" y="48">AUL</text>
+        <text x="15" y="129">FOL</text>
+      </g>
+
+      {/* Ventilator der Ausseneinheit. */}
+      <circle cx="75" cy="83" r="29" fill="white" stroke="#164e63" strokeWidth="2.5"/>
+      <circle cx="75" cy="83" r="5" fill="#164e63"/>
+      <g fill="#a5f3fc" stroke="#164e63" strokeWidth="1.3">
+        <path d="M75 78 C57 55 58 48 70 52 C82 56 81 68 75 78Z"/>
+        <path d="M80 83 C103 65 110 68 105 79 C100 90 89 89 80 83Z"/>
+        <path d="M75 88 C93 111 90 118 79 113 C68 108 69 97 75 88Z"/>
+        <path d="M70 83 C47 101 40 98 45 87 C50 76 61 77 70 83Z"/>
+      </g>
+
+      {/* Innen-/Hydraulikmodul; bei Split mit Kältemittelleitung getrennt. */}
+      <rect x="119" y="48" width="56" height="91" rx="3" fill="#f8fafc" stroke="#111827" strokeWidth="2.3"/>
+      <circle cx="147" cy="78" r="15" fill="#e2e8f0" stroke="#111827" strokeWidth="2"/>
+      <path d="M135 85 Q142 78 147 75 M147 81 Q153 77 159 70" fill="none" stroke="#111827" strokeWidth="1.8"/>
+      <path d="M132 119 H163 M132 112 L147 126 L163 112" fill="none" stroke="#dc2626" strokeWidth="2"/>
+      {split && <path d="M104 62 V126" fill="none" stroke="#f97316" strokeWidth="2.5" strokeDasharray="7 5"/>}
+      <text x="147" y="157" textAnchor="middle" fontFamily="Arial, sans-serif" fontSize="12" fontWeight="700" fill="#334155">
+        {split ? 'SPLIT' : innen ? 'INNEN' : 'AUSSEN'}
+      </text>
+      <text x="100" y="190" textAnchor="middle" fontFamily="Arial, sans-serif" fontSize="14" fontWeight="700" fill="#111827">L/W-WP</text>
+    </svg>
+  );
+}
+
+function SymWaermepumpe({ generatorType }) {
+  const code = {
+    ews_wp:'S/W-WP',
+    wasser_wp:'W/W-WP',
+    co2_wp:'CO₂-WP',
+  }[generatorType] || 'WP';
+  return (
+    <svg viewBox="0 0 200 220" width="104" height="114" role="img"
+      aria-label={generatorAria[generatorType] || 'Wärmepumpe'}>
       <g fill="none" stroke="#111827" strokeWidth="2.5" strokeLinejoin="round">
         <rect x="8" y="8" width="184" height="204" fill="#e5e7eb" strokeWidth="3" />
 
@@ -184,9 +244,92 @@ export function SymWE() {
       <g fontFamily="Arial, sans-serif" fontSize="16" fontWeight="700" fill="#111827">
         <text x="32" y="38">V</text>
         <text x="148" y="38">K</text>
+        <text x="100" y="164" textAnchor="middle">{code}</text>
       </g>
     </svg>
   );
+}
+
+function SymKessel({ generatorType }) {
+  const fuel = { gas:'GAS', oel:'ÖL', holz:'HOLZ' }[generatorType] || 'KESSEL';
+  return (
+    <svg viewBox="0 0 200 220" width="104" height="114" role="img"
+      aria-label={generatorAria[generatorType]}>
+      <rect x="22" y="14" width="156" height="192" rx="8" fill="#fff7ed" stroke="#111827" strokeWidth="3"/>
+      <rect x="39" y="32" width="122" height="34" rx="3" fill="#f8fafc" stroke="#111827" strokeWidth="2"/>
+      <text x="100" y="55" textAnchor="middle" fontFamily="Arial, sans-serif" fontSize="16" fontWeight="700" fill="#111827">{fuel}</text>
+      <path d="M101 177 C67 164 65 134 89 111 C88 130 101 130 107 103 C135 127 143 158 119 177 C114 160 101 151 92 164 C90 170 94 175 101 177Z"
+        fill="#fb923c" stroke="#9a3412" strokeWidth="2.5"/>
+      {generatorType === 'holz' && (
+        <g stroke="#78350f" strokeWidth="4" strokeLinecap="round">
+          <line x1="65" y1="188" x2="104" y2="180"/><line x1="96" y1="181" x2="137" y2="190"/>
+        </g>
+      )}
+    </svg>
+  );
+}
+
+function SymFernwaerme() {
+  return (
+    <svg viewBox="0 0 200 220" width="104" height="114" role="img" aria-label={generatorAria.fernwaerme}>
+      <rect x="12" y="12" width="176" height="196" rx="4" fill="#f8fafc" stroke="#111827" strokeWidth="3"/>
+      <path d="M100 42 L155 103 L100 164 L45 103 Z" fill="white" stroke="#111827" strokeWidth="3"/>
+      <path d="M100 42 V164" stroke="#111827" strokeWidth="2.5"/>
+      <text x="71" y="99" textAnchor="middle" fontSize="18" fontWeight="700" fill="#dc2626">+</text>
+      <text x="129" y="99" textAnchor="middle" fontSize="18" fontWeight="700" fill="#2563eb">−</text>
+      <text x="100" y="191" textAnchor="middle" fontFamily="Arial, sans-serif" fontSize="14" fontWeight="700" fill="#111827">FERNWÄRME</text>
+    </svg>
+  );
+}
+
+function SymElektro() {
+  return (
+    <svg viewBox="0 0 200 220" width="104" height="114" role="img" aria-label={generatorAria.elektro}>
+      <rect x="22" y="14" width="156" height="192" rx="8" fill="#fefce8" stroke="#111827" strokeWidth="3"/>
+      <path d="M111 37 L67 118 H99 L87 183 L139 91 H106 Z" fill="#facc15" stroke="#854d0e" strokeWidth="3" strokeLinejoin="round"/>
+      <text x="100" y="196" textAnchor="middle" fontFamily="Arial, sans-serif" fontSize="14" fontWeight="700" fill="#111827">ELEKTRO</text>
+    </svg>
+  );
+}
+
+function SymHybrid() {
+  return (
+    <svg viewBox="0 0 200 220" width="104" height="114" role="img" aria-label={generatorAria.hybrid}>
+      <rect x="10" y="12" width="180" height="196" rx="6" fill="#f8fafc" stroke="#111827" strokeWidth="3"/>
+      <line x1="100" y1="27" x2="100" y2="180" stroke="#64748b" strokeWidth="2" strokeDasharray="7 5"/>
+      <circle cx="57" cy="87" r="30" fill="#e0f2fe" stroke="#111827" strokeWidth="2.5"/>
+      <path d="M36 99 Q50 88 55 84 M60 80 Q67 74 78 66 M36 66 Q50 77 55 81 M60 85 Q67 91 78 99"
+        fill="none" stroke="#111827" strokeWidth="2"/>
+      <path d="M144 129 C119 116 122 91 139 76 C138 91 149 90 153 67 C176 90 177 117 160 129 C157 113 144 107 137 118 C137 123 139 127 144 129Z"
+        fill="#fb923c" stroke="#9a3412" strokeWidth="2.3"/>
+      <text x="100" y="195" textAnchor="middle" fontFamily="Arial, sans-serif" fontSize="14" fontWeight="700" fill="#111827">HYBRID</text>
+    </svg>
+  );
+}
+
+function SymGenerisch() {
+  return (
+    <svg viewBox="0 0 200 220" width="104" height="114" role="img" aria-label={generatorAria.sonstige}>
+      <rect x="15" y="15" width="170" height="190" rx="7" fill="#f8fafc" stroke="#111827" strokeWidth="3"/>
+      <circle cx="100" cy="91" r="41" fill="white" stroke="#64748b" strokeWidth="2.5"/>
+      <text x="100" y="101" textAnchor="middle" fontFamily="Arial, sans-serif" fontSize="27" fontWeight="700" fill="#334155">WE</text>
+      <text x="100" y="181" textAnchor="middle" fontFamily="Arial, sans-serif" fontSize="13" fontWeight="700" fill="#64748b">ERZEUGER</text>
+    </svg>
+  );
+}
+
+export function SymWE({ generatorType, lwwpBauart }) {
+  if (generatorType === 'lwwp') return <SymLuftWasserWP bauart={lwwpBauart}/>;
+  if (['ews_wp', 'wasser_wp', 'co2_wp'].includes(generatorType)) {
+    return <SymWaermepumpe generatorType={generatorType}/>;
+  }
+  if (generatorType === 'fernwaerme') return <SymFernwaerme/>;
+  if (['gas', 'oel', 'holz'].includes(generatorType)) return <SymKessel generatorType={generatorType}/>;
+  if (generatorType === 'elektro') return <SymElektro/>;
+  if (generatorType === 'hybrid') return <SymHybrid/>;
+  // Bestandsschemas ohne strukturierten Typ behalten das bisherige WP-Symbol.
+  if (!generatorType) return <SymWaermepumpe generatorType="ews_wp"/>;
+  return <SymGenerisch/>;
 }
 
 export function SymVerbraucher() {

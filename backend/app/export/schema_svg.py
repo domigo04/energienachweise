@@ -12,6 +12,8 @@ import math
 import re
 from typing import Optional
 
+from app.data.generator_types import generator_type_label
+
 VL_FARBE = "#ef4444"
 RL_FARBE = "#3b82f6"
 SOLE_VL_FARBE = "#4f46e5"
@@ -34,7 +36,7 @@ EWS_S, EWS_X0, EWS_H = 58, 52, 286
 GROESSEN = {
     "heizkreis": (74, 74), "pump": (48, 48), "valve2": (44, 40),
     "valve3": (52, 40), "checkvalve": (48, 48), "shutoff": (19, 41),
-    "erzeuger": (92, 72), "verbraucher": (68, 50), "speicher": (60, 104),
+    "erzeuger": (104, 114), "verbraucher": (68, 50), "speicher": (60, 104),
     "junction": (46, 46), "label": (120, 16),
     "waermezaehler": (48, 48), "expansion": (76, 105), "bww": (60, 104),
     "anschluss": (60, 40), "stad": (18, 41), "temperatur": (52, 38),
@@ -154,6 +156,13 @@ def _handle_pos_base(node, handle: Optional[str]):
         return {"vl": (x, y + 28), "rl": (x + w, y + 28),
                 "top": (x + w / 2, y), "bottom": (x + w / 2, y + h)}.get(handle, (x + w / 2, y + h / 2))
     if t == "erzeuger":
+        zone = re.match(r"^wz-(t|b|l|r)-(\d+)$", handle or "")
+        if zone:
+            seite, prozent = zone.group(1), float(zone.group(2)) / 100
+            return {
+                "t": (x + w * prozent, y), "b": (x + w * prozent, y + h),
+                "l": (x, y + h * prozent), "r": (x + w, y + h * prozent),
+            }[seite]
         # VL oben, RL unten (Dominic-Feedback Loop B); zusätzlich die semantischen
         # Anschlüsse: Heizungsseite rechts, Quellenseite (Sole) links.
         return {"vl": (x + w / 2, y), "rl": (x + w / 2, y + h),
@@ -165,6 +174,13 @@ def _handle_pos_base(node, handle: Optional[str]):
     if t == "junction":
         return {"left": (x, y + 30), "right": (x + w, y + 30), "top": (x + 23, y)}.get(handle, (x + 23, y + 30))
     if t in ("speicher", "bww"):
+        zone = re.match(r"^sz-(t|b|l|r)-(\d+)$", handle or "")
+        if zone:
+            seite, prozent = zone.group(1), float(zone.group(2)) / 100
+            return {
+                "t": (x + w * prozent, y), "b": (x + w * prozent, y + h),
+                "l": (x, y + h * prozent), "r": (x + w, y + h * prozent),
+            }[seite]
         return {"top-l": (x + w * 0.3, y), "top-r": (x + w * 0.7, y),
                 "bot-l": (x + w * 0.3, y + h), "bot-r": (x + w * 0.7, y + h),
                 "left": (x, y + h / 2), "right": (x + w, y + h / 2)}.get(handle, (x + w / 2, y + h / 2))
@@ -219,6 +235,102 @@ def _pumpe(parts, cx, cy, r=15, nach_unten=False):
 def _thermometer(parts, cx, cy):
     parts.append(f'<circle cx="{cx}" cy="{cy}" r="6" fill="white" stroke="#1e293b" stroke-width="1.4"/>')
     parts.append(f'<text x="{cx}" y="{cy + 3}" text-anchor="middle" font-size="7" font-weight="700" fill="#1e293b">T</text>')
+
+
+def _zeichne_erzeuger(parts, node):
+    """Typabhängiges Erzeugersymbol, geometrisch identisch zum Editor."""
+    d = node.get("data") or {}
+    x = (node.get("position") or {}).get("x", 0)
+    y = (node.get("position") or {}).get("y", 0)
+    w, _ = node_groesse(node)
+    s = w / 200
+    gt = str(d.get("generator_type") or "")
+    parts.append(f'<g transform="translate({x},{y}) scale({s:.4f})">')
+
+    if gt == "lwwp":
+        bauart = d.get("lwwp_bauart") or "aussenaufstellung"
+        bauart_text = {"split": "SPLIT", "innenaufstellung": "INNEN"}.get(bauart, "AUSSEN")
+        parts.extend([
+            '<rect x="8" y="22" width="184" height="178" rx="3" fill="#ecfeff" stroke="#111827" stroke-width="3"/>',
+            '<g fill="none" stroke="#0891b2" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">',
+            '<path d="M18 63 H53"/><path d="M43 53 L55 63 L43 73"/>',
+            '<path d="M53 103 H18"/><path d="M28 93 L16 103 L28 113"/></g>',
+            '<g fill="#0e7490" font-family="Arial" font-size="13" font-weight="700">',
+            '<text x="15" y="48">AUL</text><text x="15" y="129">FOL</text></g>',
+            '<circle cx="75" cy="83" r="29" fill="white" stroke="#164e63" stroke-width="2.5"/>',
+            '<circle cx="75" cy="83" r="5" fill="#164e63"/>',
+            '<g fill="#a5f3fc" stroke="#164e63" stroke-width="1.3">',
+            '<path d="M75 78 C57 55 58 48 70 52 C82 56 81 68 75 78Z"/>',
+            '<path d="M80 83 C103 65 110 68 105 79 C100 90 89 89 80 83Z"/>',
+            '<path d="M75 88 C93 111 90 118 79 113 C68 108 69 97 75 88Z"/>',
+            '<path d="M70 83 C47 101 40 98 45 87 C50 76 61 77 70 83Z"/></g>',
+            '<rect x="119" y="48" width="56" height="91" rx="3" fill="#f8fafc" stroke="#111827" stroke-width="2.3"/>',
+            '<circle cx="147" cy="78" r="15" fill="#e2e8f0" stroke="#111827" stroke-width="2"/>',
+            '<path d="M135 85 Q142 78 147 75 M147 81 Q153 77 159 70" fill="none" stroke="#111827" stroke-width="1.8"/>',
+            '<path d="M132 119 H163 M132 112 L147 126 L163 112" fill="none" stroke="#dc2626" stroke-width="2"/>',
+        ])
+        if bauart == "split":
+            parts.append('<path d="M104 62 V126" fill="none" stroke="#f97316" stroke-width="2.5" stroke-dasharray="7 5"/>')
+        parts.extend([
+            f'<text x="147" y="157" text-anchor="middle" font-family="Arial" font-size="12" font-weight="700" fill="#334155">{bauart_text}</text>',
+            '<text x="100" y="190" text-anchor="middle" font-family="Arial" font-size="14" font-weight="700" fill="#111827">L/W-WP</text>',
+        ])
+    elif gt == "fernwaerme":
+        parts.extend([
+            '<rect x="12" y="12" width="176" height="196" rx="4" fill="#f8fafc" stroke="#111827" stroke-width="3"/>',
+            '<path d="M100 42 L155 103 L100 164 L45 103 Z" fill="white" stroke="#111827" stroke-width="3"/>',
+            '<path d="M100 42 V164" stroke="#111827" stroke-width="2.5"/>',
+            '<text x="71" y="99" text-anchor="middle" font-size="18" font-weight="700" fill="#dc2626">+</text>',
+            '<text x="129" y="99" text-anchor="middle" font-size="18" font-weight="700" fill="#2563eb">-</text>',
+            '<text x="100" y="191" text-anchor="middle" font-family="Arial" font-size="14" font-weight="700" fill="#111827">FERNWÄRME</text>',
+        ])
+    elif gt in {"gas", "oel", "holz"}:
+        fuel = {"gas": "GAS", "oel": "ÖL", "holz": "HOLZ"}[gt]
+        parts.extend([
+            '<rect x="22" y="14" width="156" height="192" rx="8" fill="#fff7ed" stroke="#111827" stroke-width="3"/>',
+            '<rect x="39" y="32" width="122" height="34" rx="3" fill="#f8fafc" stroke="#111827" stroke-width="2"/>',
+            f'<text x="100" y="55" text-anchor="middle" font-family="Arial" font-size="16" font-weight="700" fill="#111827">{fuel}</text>',
+            '<path d="M101 177 C67 164 65 134 89 111 C88 130 101 130 107 103 C135 127 143 158 119 177 C114 160 101 151 92 164 C90 170 94 175 101 177Z" fill="#fb923c" stroke="#9a3412" stroke-width="2.5"/>',
+        ])
+        if gt == "holz":
+            parts.append('<g stroke="#78350f" stroke-width="4" stroke-linecap="round"><line x1="65" y1="188" x2="104" y2="180"/><line x1="96" y1="181" x2="137" y2="190"/></g>')
+    elif gt == "elektro":
+        parts.extend([
+            '<rect x="22" y="14" width="156" height="192" rx="8" fill="#fefce8" stroke="#111827" stroke-width="3"/>',
+            '<path d="M111 37 L67 118 H99 L87 183 L139 91 H106 Z" fill="#facc15" stroke="#854d0e" stroke-width="3" stroke-linejoin="round"/>',
+            '<text x="100" y="196" text-anchor="middle" font-family="Arial" font-size="14" font-weight="700" fill="#111827">ELEKTRO</text>',
+        ])
+    elif gt == "hybrid":
+        parts.extend([
+            '<rect x="10" y="12" width="180" height="196" rx="6" fill="#f8fafc" stroke="#111827" stroke-width="3"/>',
+            '<line x1="100" y1="27" x2="100" y2="180" stroke="#64748b" stroke-width="2" stroke-dasharray="7 5"/>',
+            '<circle cx="57" cy="87" r="30" fill="#e0f2fe" stroke="#111827" stroke-width="2.5"/>',
+            '<path d="M36 99 Q50 88 55 84 M60 80 Q67 74 78 66 M36 66 Q50 77 55 81 M60 85 Q67 91 78 99" fill="none" stroke="#111827" stroke-width="2"/>',
+            '<path d="M144 129 C119 116 122 91 139 76 C138 91 149 90 153 67 C176 90 177 117 160 129 C157 113 144 107 137 118 C137 123 139 127 144 129Z" fill="#fb923c" stroke="#9a3412" stroke-width="2.3"/>',
+            '<text x="100" y="195" text-anchor="middle" font-family="Arial" font-size="14" font-weight="700" fill="#111827">HYBRID</text>',
+        ])
+    elif gt in {"", "ews_wp", "wasser_wp", "co2_wp"}:
+        code = {"ews_wp": "S/W-WP", "wasser_wp": "W/W-WP", "co2_wp": "CO₂-WP"}.get(gt, "WP")
+        parts.extend([
+            '<g fill="none" stroke="#111827" stroke-width="2.5" stroke-linejoin="round">',
+            '<rect x="8" y="8" width="184" height="204" fill="#e5e7eb" stroke-width="3"/>',
+            '<rect x="20" y="20" width="60" height="180" fill="#f3f4f6"/><line x1="20" y1="20" x2="80" y2="200"/>',
+            '<rect x="120" y="20" width="60" height="180" fill="#f3f4f6"/><line x1="180" y1="20" x2="120" y2="200"/>',
+            '<circle cx="100" cy="55" r="26" fill="#e5e7eb"/>',
+            '<path d="M80 68 Q91 61 96.5 57.5 M103.5 52.5 Q109 49 120 42 M80 42 Q91 49 96.5 52.5 M103.5 57.5 Q109 61 120 68"/>',
+            '<path d="M78 184 L100 195 L78 206 Z" fill="#f9fafb"/><path d="M122 184 L100 195 L122 206 Z" fill="#f9fafb"/></g>',
+            '<g font-family="Arial" font-size="16" font-weight="700" fill="#111827">',
+            f'<text x="32" y="38">V</text><text x="148" y="38">K</text><text x="100" y="164" text-anchor="middle">{code}</text></g>',
+        ])
+    else:
+        label = _esc(generator_type_label(gt) or "ERZEUGER")
+        parts.extend([
+            '<rect x="15" y="15" width="170" height="190" rx="7" fill="#f8fafc" stroke="#111827" stroke-width="3"/>',
+            '<circle cx="100" cy="91" r="41" fill="white" stroke="#64748b" stroke-width="2.5"/>',
+            '<text x="100" y="101" text-anchor="middle" font-family="Arial" font-size="27" font-weight="700" fill="#334155">WE</text>',
+            f'<text x="100" y="181" text-anchor="middle" font-family="Arial" font-size="11" font-weight="700" fill="#64748b">{label}</text>',
+        ])
+    parts.append("</g>")
 
 
 # ── SVG-Bauteil-Symbole 1:1 aus Dominics Vorlagen (in Node-Box skaliert) ────
@@ -495,10 +607,11 @@ def zeichne_standard(parts, node, results):
         _sym(parts, x, y, w, t, SYM_INNER[t])
     elif t == "checkvalve":
         _absperr(parts, cx, cy)
-    elif t in ("erzeuger", "verbraucher"):
-        farbe = "#1e293b" if t == "erzeuger" else "#f97316"
-        parts.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="3" fill="white" stroke="{farbe}" stroke-width="2"/>')
-        parts.append(f'<text x="{cx}" y="{cy + 5}" text-anchor="middle" font-size="13" font-weight="700" fill="{farbe}">{_esc(label or ("WE" if t == "erzeuger" else ""))}</text>')
+    elif t == "erzeuger":
+        _zeichne_erzeuger(parts, node)
+    elif t == "verbraucher":
+        parts.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="3" fill="white" stroke="#f97316" stroke-width="2"/>')
+        parts.append(f'<text x="{cx}" y="{cy + 5}" text-anchor="middle" font-size="13" font-weight="700" fill="#f97316">{_esc(label or "")}</text>')
     elif t == "speicher":
         parts.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="6" fill="#fef2f2" stroke="#dc2626" stroke-width="2.5"/>')
         parts.append(f'<text x="{cx}" y="{cy + 4}" text-anchor="middle" font-size="12" font-weight="700" fill="#dc2626">SP</text>')

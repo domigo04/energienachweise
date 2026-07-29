@@ -16,7 +16,8 @@ from typing import List, Optional
 from app.calculations.expansion import berechne_expansion
 from app.calculations.leitungsdimension import automatische_dimension
 from app.calculations.ventil import berechne_kvs
-from app.calculations.waermepumpe import berechne_waermepumpe, ist_waermepumpe
+from app.calculations.waermepumpe import berechne_waermepumpe
+from app.data.generator_types import SOURCE_CIRCUIT_TYPES
 
 VL_FARBE = "#ef4444"
 RL_FARBE = "#3b82f6"
@@ -287,7 +288,18 @@ def _waermepumpen_kreise(nodes, edges, edge_flows, node_flows, calc_edges) -> di
         d = wp.get("data") or {}
         heiz_edges, heiz_quellen, heiz_grenzen = _wp_kreis(wid, "heating", edges, node_by_id)
         sole_edges, sole_quellen, _ = _wp_kreis(wid, "source", edges, node_by_id)
-        res = berechne_waermepumpe(d, hat_quellenseite=bool(sole_edges) or ist_waermepumpe(d))
+        # Luft/Wasser-WP: Umweltleistung ja, aber kein hydraulischer
+        # Quellenkreis. Eine Sole-/Wasser-Seite wird nur für die dafür
+        # vorgesehenen Typen oder für eine tatsächlich gezeichnete
+        # Quellenleitung erwartet.
+        hat_hydraulischen_quellenkreis = (
+            str(d.get("generator_type") or "") in SOURCE_CIRCUIT_TYPES
+            or bool(sole_edges)
+        )
+        res = berechne_waermepumpe(
+            d,
+            hat_quellenseite=hat_hydraulischen_quellenkreis,
+        )
         res["heating_port_quelle"] = "port" if "port" in heiz_quellen else ("layer" if heiz_quellen else None)
         res["source_port_quelle"] = "port" if "port" in sole_quellen else ("layer" if sole_quellen else None)
 

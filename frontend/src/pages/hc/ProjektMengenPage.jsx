@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, Pencil, X, Check, Info, ClipboardList } from "lucide-react";
 import { getProject, getProjectContext, setProjectParameter } from "../../api/hcApi";
+import { GENERATOR_TYPE_LABELS } from "../../components/hc/nodes/generatorTypes";
 
 // §37 — Projektmengenansicht: der komplette ProjectContext nach Kategorien.
 // Zeigt je Parameter effektiven Wert + Herkunft + Status und erlaubt komfortable
@@ -36,20 +37,6 @@ const STATUS_LABELS = {
   erkannt: "erkannt",
   ergaenzung_erforderlich: "Ergänzung offen",
   unbekannt: "unbekannt",
-};
-
-const GENERATOR_TYPE_LABELS = {
-  ews_wp: "Sole/Wasser-WP (Erdsonden)",
-  lwwp: "Luft/Wasser-WP",
-  wasser_wp: "Wasser/Wasser-WP",
-  co2_wp: "CO₂-Wärmepumpe",
-  fernwaerme: "Fernwärme",
-  gas: "Gas",
-  oel: "Öl",
-  holz: "Holz",
-  elektro: "Elektro",
-  hybrid: "Hybrid",
-  sonstige: "Sonstige",
 };
 
 function formatValue(p) {

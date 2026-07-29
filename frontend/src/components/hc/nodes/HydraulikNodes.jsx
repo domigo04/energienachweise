@@ -206,7 +206,7 @@ export function ErzeugerNode({ data, selected: sel }) {
       {H(Position.Right,  'heating_return', { right: -6, top: '68%', background: '#3b82f6' })}
       {H(Position.Left,   'source_flow',    { left: -6,  top: '32%', background: '#8b5cf6' })}
       {H(Position.Left,   'source_return',  { left: -6,  top: '68%', background: '#6d28d9' })}
-      <SymWE />
+      <SymWE generatorType={data.generator_type} lwwpBauart={data.lwwp_bauart} />
       <Label text={data.label} />
     </div>
   );

@@ -34,6 +34,13 @@ import {
 } from './schema/graphMigration';
 import { SCHALTUNGEN } from '../../components/hc/nodes/schaltungen';
 import {
+  GENERATOR_TYPES,
+  LWWP_BAUARTEN,
+  generatorType,
+  hatSoleOderWasserkreis,
+  istWaermepumpe,
+} from '../../components/hc/nodes/generatorTypes';
+import {
   createSchema,
   createSchemaRevision,
   deleteSchemaUnderlay,
@@ -52,26 +59,6 @@ import { branchAnschluss, isBranchInsertable, isInlineInsertable } from './schem
 
 // ── Konstanten ────────────────────────────────────────────────
 const KVS_REIHE = [0.1, 0.16, 0.25, 0.4, 0.63, 1.0, 1.6, 2.5, 4.0, 6.3, 10, 16, 25, 40, 63];
-// Strukturierter Erzeugertyp (§4). Wert = ProjectContext-Schlüssel, Label = UI.
-// Der frühere Freitext `typ` bleibt als Beschriftung erhalten; dieser Wert ist
-// die maschinenlesbare Primärquelle für Mengen und Kostenschätzung.
-const GENERATOR_TYPES = [
-  { value:'ews_wp',     label:'Sole/Wasser-WP (Erdsonden)' },
-  { value:'lwwp',       label:'Luft/Wasser-WP' },
-  { value:'wasser_wp',  label:'Wasser/Wasser-WP' },
-  { value:'co2_wp',     label:'CO₂-Wärmepumpe' },
-  { value:'fernwaerme', label:'Fernwärme' },
-  { value:'gas',        label:'Gas' },
-  { value:'oel',        label:'Öl' },
-  { value:'holz',       label:'Holz' },
-  { value:'elektro',    label:'Elektro' },
-  { value:'hybrid',     label:'Hybrid' },
-  { value:'sonstige',   label:'Sonstige' },
-];
-// Erzeuger mit Quellenseite. Muss zu backend/app/calculations/waermepumpe.py
-// (WP_TYPEN) passen — dort entscheidet dieselbe Liste über die Rechnung.
-const WP_GENERATOR_TYPES = ['ews_wp', 'lwwp', 'wasser_wp', 'co2_wp', 'hybrid'];
-
 // Wie ein Bauteil auf eine bestehende Leitung trifft (frei / inline / Abzweig),
 // steht AUSSCHLIESSLICH in `schema/componentRegistry.js` (`placement`). Vorher
 // stand hier ein zweites, handgepflegtes Set — und die beiden Quellen wichen
@@ -529,6 +516,50 @@ const ROHR_DIMS = [
 ];
 const ZUSATZ_NAMEN = ['Heizkessel', 'Vorschaltgefäss', 'WW-Erwärmer', 'Heizkörper', 'Plattentauscher', 'Lufterhitzer', 'Sonden', 'Verteiler EWS'];
 
+function ErzeugerTypFelder({ data, onSet }) {
+  const aktuell = generatorType(data.generator_type);
+  const waehlen = (value) => {
+    const vorherigesStandardlabel = aktuell?.label;
+    const next = generatorType(value);
+    onSet('generator_type', value || null);
+    if (!data.typ || data.typ === vorherigesStandardlabel) onSet('typ', next?.label || '');
+    if (!data.label || data.label === 'WE' || data.label === vorherigesStandardlabel) {
+      onSet('label', next?.label || 'Wärmeerzeuger');
+    }
+    if (value === 'lwwp' && !data.lwwp_bauart) onSet('lwwp_bauart', 'aussenaufstellung');
+  };
+  return (
+    <>
+      <label style={lbl}>Erzeugerart</label>
+      <select style={{ ...inp, cursor:'pointer' }} value={data.generator_type ?? ''}
+        onChange={event => waehlen(event.target.value)}>
+        <option value="">— Erzeugerart wählen —</option>
+        {GENERATOR_TYPES.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
+      </select>
+      {data.generator_type === 'lwwp' && (
+        <>
+          <label style={lbl}>Bauart Luft/Wasser-WP</label>
+          <select style={{ ...inp, cursor:'pointer' }} value={data.lwwp_bauart || 'aussenaufstellung'}
+            onChange={event => onSet('lwwp_bauart', event.target.value)}>
+            {LWWP_BAUARTEN.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
+          </select>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6 }}>
+            <div><label style={lbl}>Aussenluft [°C]</label>
+              <input type="number" style={inp} value={data.aussenluft_temp ?? ''}
+                onChange={event => onSet('aussenluft_temp', event.target.value)} placeholder="-8"/></div>
+            <div><label style={lbl}>Fortluft [°C]</label>
+              <input type="number" style={inp} value={data.fortluft_temp ?? ''}
+                onChange={event => onSet('fortluft_temp', event.target.value)} placeholder="-12"/></div>
+          </div>
+          <div style={{ marginTop:4, padding:'5px 7px', borderRadius:6, background:'#ecfeff', color:'#0e7490', fontSize:9, lineHeight:1.45 }}>
+            AUL und FOL sind Luftströme im Erzeugersymbol und keine hydraulischen Leitungen.
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
 function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ventilResults, pumpenResults, expansionResults, anschlussWarnungen, anschlussResults, pwtResults, heatpumpResults, onUpdate, onDelete, onSetAbgaenge, navigate, drawingConfig, onDrawingConfig }) {
   // Punkt 13 — nichts ausgewählt heisst nicht „nichts zu zeigen": dann gehören
   // hierher die Eigenschaften der ANSICHT, wie in Revit.
@@ -801,23 +832,27 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
   // stehen nur Eingaben und Anzeige — nichts wird im Frontend gerechnet.
   if (node.type === 'erzeuger') {
     const hp = heatpumpResults?.[node.id];
-    const wp = hp?.ist_waermepumpe;
+    const wp = istWaermepumpe(d.generator_type);
+    const quelleMitMedium = hatSoleOderWasserkreis(d.generator_type);
     return (
       <div style={panelSt}>
         <PT>Wärmeerzeuger</PT>
+        <ErzeugerTypFelder data={d} onSet={set}/>
         {fld('Bezeichnung','label','WE','','text')}
-        {fld('Typ','typ','z.B. Wärmepumpe','','text')}
+        {fld('Fabrikat / Typ','typ','optional','','text')}
         {fld('Nennleistung','leistung_kw','','kW')}
         {fld('VL Temperatur','vl_temp','','°C')}
         {fld('RL Temperatur','rl_temp','','°C')}
         {wp && <>
           <Div/>
           <div style={{ fontSize:9, color:'#94a3b8', marginBottom:6 }}>
-            QUELLENSEITE — ohne COP oder elektrische Leistung bleibt die
-            Quellenleistung bewusst leer (sie ist nicht die Heizleistung).
+            ENERGIEBILANZ — ohne COP oder elektrische Leistung bleibt die
+            Umwelt-/Quellenleistung bewusst leer.
           </div>
           {fld('COP','cop','z.B. 4.0','')}
           {fld('Elektrische Leistung','p_el_kw','hat Vorrang vor COP','kW')}
+        </>}
+        {quelleMitMedium && <>
           {fld('Sole-VL (zur WP)','sole_vl','','°C')}
           {fld('Sole-RL (zur Quelle)','sole_rl','','°C')}
           {fld('c·ρ Sole','sole_ce','leer = Wasser 1.163','kWh/m³K')}
@@ -830,6 +865,8 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
           {wp && <>
             {ro('Elektrische Leistung', hp.p_el_kw, 'kW')}
             {ro('Quellenleistung', hp.q_source_kw, 'kW')}
+          </>}
+          {hp.source_flow_m3h != null && <>
             {ro('ΔT Solekreis', hp.source_dt, 'K')}
             {ro("V' Solekreis", hp.source_flow_m3h, 'm³/h', true)}
           </>}
@@ -1284,15 +1321,12 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, onUpdate, onClose, navig
       </div>
     );
   } else if (node.type === 'erzeuger') {
+    const wp = istWaermepumpe(d.generator_type);
+    const quelleMitMedium = hatSoleOderWasserkreis(d.generator_type);
     body = (
       <div style={{ display:'grid', gap:10 }}>
-        <div><label style={lbl}>Erzeugertyp</label>
-          <select style={{...inp,cursor:'pointer'}} value={d.generator_type??''}
-            onChange={e=>set('generator_type', e.target.value || null)}>
-            <option value="">— wählen —</option>
-            {GENERATOR_TYPES.map(g=><option key={g.value} value={g.value}>{g.label}</option>)}
-          </select></div>
-        <div><label style={lbl}>Bezeichnung (frei)</label><input style={inp} value={d.typ??''} onChange={e=>set('typ',e.target.value)} placeholder="z.B. Fabrikat/Typ"/></div>
+        <ErzeugerTypFelder data={d} onSet={set}/>
+        <div><label style={lbl}>Fabrikat / Typ (frei)</label><input style={inp} value={d.typ??''} onChange={e=>set('typ',e.target.value)} placeholder="optional"/></div>
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
           <div><label style={lbl}>Leistung [kW]</label><input type="number" style={inp} value={d.leistung_kw??''} onChange={e=>set('leistung_kw',e.target.value)}/></div>
           <div><label style={lbl}>VL [°C]</label><input type="number" style={inp} value={d.vl_temp??''} onChange={e=>set('vl_temp',e.target.value)}/></div>
@@ -1300,11 +1334,13 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, onUpdate, onClose, navig
         </div>
         {/* Quellenseite — nur bei Wärmepumpen. Q_source = Q_heat − P_el; ohne
             COP/P_el bleibt sie leer statt der Heizleistung gleichgesetzt. */}
-        {WP_GENERATOR_TYPES.includes(String(d.generator_type || '')) && <>
+        {wp && <>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
             <div><label style={lbl}>COP</label><input type="number" style={inp} value={d.cop??''} onChange={e=>set('cop',e.target.value)} placeholder="z.B. 4.0"/></div>
             <div><label style={lbl}>P_el [kW]</label><input type="number" style={inp} value={d.p_el_kw??''} onChange={e=>set('p_el_kw',e.target.value)} placeholder="hat Vorrang"/></div>
           </div>
+        </>}
+        {quelleMitMedium && <>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
             <div><label style={lbl}>Sole-VL [°C]</label><input type="number" style={inp} value={d.sole_vl??''} onChange={e=>set('sole_vl',e.target.value)}/></div>
             <div><label style={lbl}>Sole-RL [°C]</label><input type="number" style={inp} value={d.sole_rl??''} onChange={e=>set('sole_rl',e.target.value)}/></div>
@@ -1447,7 +1483,7 @@ const closeToolbarMenu = (event) => event.currentTarget.closest('details')?.remo
 function EditorInner() {
   const navigate = useNavigate();
   const { id: projectId } = useParams();
-  const { screenToFlowPosition, getInternalNode, getZoom, fitView, getViewport, setViewport } = useReactFlow();
+  const { screenToFlowPosition, getInternalNode, getZoom, fitView } = useReactFlow();
   const updateNodeInternals = useUpdateNodeInternals();
   const nodeGeometryVersion = useStore(state => {
     let signature = '';
@@ -1540,6 +1576,7 @@ function EditorInner() {
   const [schemaId, setSchemaId]     = useState(null);
   const [loaded, setLoaded]         = useState(false);
   const [saveState, setSaveState]   = useState('idle'); // idle | saving | saved | error
+  const [exportState, setExportState] = useState('idle'); // idle | loading
   const [revisionenOpen, setRevisionenOpen] = useState(false);
   const [revisionen, setRevisionen] = useState([]);
   const [revisionenLoading, setRevisionenLoading] = useState(false);
@@ -3473,32 +3510,8 @@ function EditorInner() {
 
   const downloadPdf = async (inhalt) => {
     if (!schemaId) return;
-    const alterViewport = getViewport();
-    const alteAuswahl = selected;
-    const alteKante = selectedEdgeId;
-    const alteMarkierung = markierteEdgeIds;
-    let flowElement = null;
+    setExportState('loading');
     try {
-      let schemaPng = null;
-      if (inhalt === 'schema' || inhalt === 'beides') {
-        setSelected(null);
-        setSelectedEdgeId(null);
-        setMarkierteEdgeIds([]);
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-        await fitView({ padding:0.06, duration:0, minZoom:0.1, maxZoom:1.5 });
-        await new Promise(resolve => requestAnimationFrame(resolve));
-        flowElement = document.querySelector('.hc-hydraulik-flow');
-        if (!flowElement) throw new Error('Zeichenfläche nicht gefunden');
-        flowElement.classList.add('hc-pdf-capture');
-        const { toPng } = await import('html-to-image');
-        schemaPng = await toPng(flowElement, {
-          pixelRatio:2,
-          backgroundColor:'#f8fafc',
-          cacheBust:true,
-          width:flowElement.clientWidth,
-          height:flowElement.clientHeight,
-        });
-      }
       const graph = graphFuerSpeicherung(
         nodes,
         edges,
@@ -3508,22 +3521,24 @@ function EditorInner() {
       const res = await api.post(`/api/v1/schemas/${schemaId}/pdf`, {
         inhalt,
         graph,
-        schema_png:schemaPng,
       }, {
         responseType: 'blob',
       });
       const url = URL.createObjectURL(res.data);
-      window.open(url, '_blank');
-      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      const disposition = res.headers?.['content-disposition'] || '';
+      const match = disposition.match(/filename="?([^"]+)"?/i);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = match?.[1] || `Schema_${inhalt}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
     } catch (error) {
       console.error('PDF-Export fehlgeschlagen', error);
-      alert('PDF konnte nicht geladen werden.');
+      alert(error?.response?.data?.detail || 'PDF konnte nicht erstellt werden. Bitte Schema und Verbindung prüfen.');
     } finally {
-      flowElement?.classList.remove('hc-pdf-capture');
-      setViewport(alterViewport, { duration:0 });
-      setSelected(alteAuswahl);
-      setSelectedEdgeId(alteKante);
-      setMarkierteEdgeIds(alteMarkierung);
+      setExportState('idle');
     }
   };
 
@@ -4147,10 +4162,10 @@ function EditorInner() {
             className="hc-icon-button" title="Gespeicherte Stände und Änderungen">
             <History size={17} />
           </button>
-          <ToolbarMenu label="Exportieren" icon={Download} primary align="right">
+          <ToolbarMenu label={exportState === 'loading' ? 'PDF wird erstellt …' : 'Exportieren'} icon={Download} primary align="right">
             {[['schema','Schema als PDF'],['berechnungen','Berechnungen als PDF'],['beides','Schema + Berechnungen']].map(([key,text])=>(
-              <button key={key} disabled={!schemaId} onClick={event=>{ downloadPdf(key); closeToolbarMenu(event); }}
-                style={{ ...menuActionStyle, opacity:schemaId?1:.45 }}>
+              <button key={key} disabled={!schemaId || exportState === 'loading'} onClick={event=>{ downloadPdf(key); closeToolbarMenu(event); }}
+                style={{ ...menuActionStyle, opacity:schemaId && exportState !== 'loading' ? 1 : .45 }}>
                 <Download size={14} /> {text}
               </button>
             ))}

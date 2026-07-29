@@ -72,10 +72,10 @@ def test_erzeugersymbole_werden_typabhaengig_exportiert():
         },
     }
     luft_svg = erzeuge_svg([lwwp], [], {})
-    assert "AUL" in luft_svg
-    assert "FOL" in luft_svg
-    assert "L/W-WP" in luft_svg
-    assert "SPLIT" in luft_svg
+    assert "VERFL." in luft_svg
+    assert "VERD." in luft_svg
+    assert "L/W-WP SPLIT" in luft_svg
+    assert "AUL" not in luft_svg
     assert handle_pos(lwwp, "wz-l-28") == pytest.approx((40, 70 + 114 * 0.28))
     abschnitt = berechnungs_abschnitte(
         [lwwp],
@@ -199,6 +199,49 @@ def test_svg_cad_anker_sind_unsichtbar_und_polylinie_startet_exakt_am_punkt():
     # Alte Junction-Bauteile zeichneten ein schwarzes T-Symbol. CAD-Anker
     # gehören nur zur Topologie und dürfen im Export nicht auftauchen.
     assert 'stroke="#1e293b" stroke-width="6"' not in svg
+
+
+def test_pdf_export_verwendet_editor_route_ohne_endpunkte_neu_zu_berechnen():
+    """Die im Browser vermessene Route bleibt im Vektor-Export unverändert."""
+    nodes = [
+        {"id": "a", "type": "pump", "position": {"x": 0, "y": 0}, "data": {}},
+        {"id": "b", "type": "speicher", "position": {"x": 300, "y": 180}, "data": {}},
+    ]
+    edges = [{
+        "id": "e", "source": "a", "sourceHandle": "bottom",
+        "target": "b", "targetHandle": "top-l",
+        "style": {"stroke": VL},
+        "data": {
+            "layer_id": "heizung_vl", "cad_polyline": True,
+            "points": [{"x": 999, "y": 999}],
+            "export_route": [
+                {"x": 24.25, "y": 48.5},
+                {"x": 24.25, "y": 130.5},
+                {"x": 321.75, "y": 130.5},
+                {"x": 321.75, "y": 180.25},
+            ],
+        },
+    }]
+    svg = erzeuge_svg(nodes, edges, {})
+    assert 'M 24.25 48.5' in svg
+    assert 'Q 24.25 130.5' in svg
+    assert 'Q 321.75 130.5' in svg
+    assert 'L 321.75 180.25' in svg
+    assert "999" not in svg
+
+
+def test_bww_speicher_hat_trinkwarm_und_trinkkaltwasser_im_export():
+    node = {
+        "id": "bww", "type": "bww", "position": {"x": 30, "y": 40},
+        "data": {"speicher_liter": 500},
+    }
+    svg = erzeuge_svg([node], [], {})
+    assert "500 L" in svg and ">BWW</text>" in svg
+    assert 'stroke="#ef4444"' in svg
+    assert 'stroke="#16a34a"' in svg
+    assert 'stroke-dasharray="7 5"' in svg
+    assert handle_pos(node, "warmwasser") == (66, 40)
+    assert handle_pos(node, "kaltwasser") == (66, 189)
 
 
 def test_svg_exportiert_beton_skalierung_und_bauteilbeschriftung():

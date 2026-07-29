@@ -37,7 +37,7 @@ PROVIDERS: dict[str, type[CostMappingLLM]] = {
     "anthropic": AnthropicCostMapper,
     "openai": OpenAICostMapper,
 }
-DEFAULT_PROVIDER = "anthropic"
+DEFAULT_PROVIDER = "openai"
 
 
 def enabled() -> bool:
@@ -46,7 +46,14 @@ def enabled() -> bool:
 
 
 def provider_name() -> str:
-    return (os.getenv("COST_MAPPING_LLM_PROVIDER") or DEFAULT_PROVIDER).strip().lower()
+    explicit = os.getenv("COST_MAPPING_LLM_PROVIDER")
+    if explicit:
+        return explicit.strip().lower()
+    if os.getenv("OPENAI_API_KEY"):
+        return "openai"
+    if os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN"):
+        return "anthropic"
+    return DEFAULT_PROVIDER
 
 
 def get_provider(name: Optional[str] = None, *, model=None, client=None) -> Optional[CostMappingLLM]:

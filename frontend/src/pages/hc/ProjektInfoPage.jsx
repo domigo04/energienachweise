@@ -89,12 +89,19 @@ export default function ProjektInfoPage() {
           zertifizierung: form.zertifizierung || null,
         },
       };
-      const updated = await updateProject(id, payload);
-      setProject(updated);
-      setForm(formFromProject(updated));
+      await updateProject(id, payload);
+      // Read-after-write: die UI bestätigt erst, wenn dieselben Werte über den
+      // normalen GET-Pfad wieder aus der Datenbank gelesen wurden.
+      const persisted = await getProject(id);
+      if ((persisted.sia_phase || "") !== payload.sia_phase
+        || Number(persisted.projektfortschritt_pct || 0) !== payload.projektfortschritt_pct) {
+        throw new Error("Projektphase wurde vom Server nicht bestätigt");
+      }
+      setProject(persisted);
+      setForm(formFromProject(persisted));
       setSaved(true);
-    } catch {
-      setError("Speichern fehlgeschlagen");
+    } catch (err) {
+      setError(err?.response?.data?.detail || err?.message || "Speichern fehlgeschlagen");
     } finally {
       setSaving(false);
     }

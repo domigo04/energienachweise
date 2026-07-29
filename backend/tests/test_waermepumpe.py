@@ -4,7 +4,7 @@ Prüft die Physik (PHYSIK §1, Energiebilanz der WP) UND die Topologie:
 welche Leitungen zu welchem Kreis gehören und wo ein Kreis endet.
 Keine echten Projektdaten — nur erfundene Testschemas.
 """
-from app.calculations.hydraulik import berechne_schema
+from app.calculations.hydraulik import _wp_kreis, berechne_schema
 from app.calculations.waermepumpe import (
     CE_WASSER, berechne_waermepumpe, elektrische_leistung, volumenstrom,
 )
@@ -128,6 +128,25 @@ def test_wp_puffer_kreis_alle_leitungen_gleicher_fluss():
     assert res["node_flows"]["p1"] == v          # Pumpe im Kreis
     assert res["node_flows"]["wp"] == v
     assert res["leitung_results"]["e2"]["dn"]    # Dimensionierung sieht den Fluss
+
+
+def test_dreiwegeventil_beendet_den_vorrangkreis():
+    """WP → 3WV gehört noch zum Ladekreis; hinter dem 3WV beginnt der durch
+    dessen Vorrangstellung gewählte separate Kreis."""
+    nodes = [
+        WP,
+        {"id": "v3", "type": "valve3", "data": {}},
+        {"id": "sp", "type": "speicher", "data": {}},
+    ]
+    edges = [
+        _leitung("bis_ventil", "wp", "v3", "heizung_vl", sourceHandle="heating_flow"),
+        _leitung("nach_ventil", "v3", "sp", "heizung_vl"),
+    ]
+    edge_ids, _, grenzen = _wp_kreis(
+        "wp", "heating", edges, {node["id"]: node for node in nodes},
+    )
+    assert edge_ids == {"bis_ventil"}
+    assert "valve3" in grenzen
 
 
 def test_solekreis_rechnet_mit_quellenleistung_nicht_mit_heizleistung():

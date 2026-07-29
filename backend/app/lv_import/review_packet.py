@@ -15,7 +15,7 @@ def _value(feature):
     return feature.get("value") if isinstance(feature, dict) else None
 
 
-def build_review_packet(features: dict, costs: list[dict]) -> dict:
+def build_review_packet(features: dict, costs: list[dict], positions: list[dict] | None = None) -> dict:
     """Tokenarmes JSON-Paket und deterministische Plausibilitätsprüfungen."""
     values = {
         key: {
@@ -34,7 +34,7 @@ def build_review_packet(features: dict, costs: list[dict]) -> dict:
             "amount": row.get("detected_amount"),
             "group_total": bool(row.get("is_group_total")),
         }
-        for index, row in enumerate(costs or [])
+        for index, row in enumerate((costs or [])[:120])
         if row.get("detected_amount") is not None or row.get("original_title")
     ]
     checks: list[dict] = []
@@ -68,6 +68,19 @@ def build_review_packet(features: dict, costs: list[dict]) -> dict:
     packet = {
         "features": values,
         "costs": cost_rows,
+        "positions": [
+            {
+                "id": str(position.get("pos_nr") or index),
+                "title": str(position.get("beschreibung") or "")[:180],
+                "quantity": position.get("menge"),
+                "unit": position.get("einheit"),
+                "amount": position.get("betrag"),
+                "page": position.get("source_page"),
+            }
+            for index, position in enumerate((positions or [])[:120])
+            if position.get("beschreibung") or position.get("menge") is not None
+            or position.get("betrag") is not None
+        ],
         "checks": checks,
         "instruction": (
             "Prüfe nur fachliche Widersprüche. Erfinde keine Werte. "
@@ -80,5 +93,6 @@ def build_review_packet(features: dict, costs: list[dict]) -> dict:
         "characters": len(compact),
         # Robuste Vorabschätzung ohne Tokenizer-Abhängigkeit.
         "estimated_tokens": math.ceil(len(compact) / 4),
+        "positions_sent": len(packet["positions"]),
         "deterministic_checks": checks,
     }

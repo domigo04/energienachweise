@@ -22,6 +22,7 @@ from app.models.heizungscockpit import (
 )
 from app.schemas.hc_schemas import ProjectBaseDataOut
 from app.calculations.schema_mengen import mengen_aus_schema
+from app.routers.hc_projects import _build_detail
 
 
 def _frische_db():
@@ -69,6 +70,32 @@ def test_grunddaten_im_out_schema():
     assert out.ebf_m2 == 1420.0
     assert out.anzahl_nutzungseinheiten == 10
     assert out.projektart == "Neubau"
+
+
+def test_projekt_detail_liefert_sia_phase_und_plankopfdaten_zurueck():
+    """GET/PATCH-Details dürfen gespeicherte Metadaten nicht durch Schema-
+    Defaults ersetzen; sonst setzt das Frontend die gerade gespeicherten Werte
+    unmittelbar wieder auf leer zurück."""
+    engine, db = _frische_db()
+    p = HcProject(
+        tenant_id=1, erstellt_von=1, name="Werkhof",
+        projektnummer="P-42", strasse="Musterweg 8", plz="8000", ort="Zürich",
+        bauherr="Beispiel AG", sia_phase="41", projektfortschritt_pct=65,
+        planbezeichnung="Prinzipschema Heizung",
+    )
+    db.add(p)
+    db.flush()
+    db.add(HcProjectBaseData(tenant_id=1, project_id=p.id))
+    db.commit()
+    db.refresh(p)
+
+    detail = _build_detail(p)
+    assert detail.projektnummer == "P-42"
+    assert detail.strasse == "Musterweg 8"
+    assert detail.bauherr == "Beispiel AG"
+    assert detail.sia_phase == "41"
+    assert detail.projektfortschritt_pct == 65
+    assert detail.planbezeichnung == "Prinzipschema Heizung"
 
 
 # ── Schritt 2 — Mengen live aus dem Schema ──────────────────────────────────

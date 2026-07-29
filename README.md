@@ -62,6 +62,15 @@ npm run build
 - `ADMIN_INITIAL_PASSWORD`
 - `ALLOWED_ORIGINS`
 - Frontend: `VITE_API_BASE`
+- LV-KI-Prüfung (empfohlen): `OPENAI_API_KEY`; optional
+  `LV_REVIEW_LLM_MODEL` (Standard `gpt-5.6`) und
+  `LV_REVIEW_LLM_PROVIDER=openai`
+- Alternativ Claude: `ANTHROPIC_API_KEY`,
+  `LV_REVIEW_LLM_PROVIDER=anthropic` und eine explizite
+  `LV_REVIEW_LLM_MODEL`
+
+Ohne Modellschlüssel bleibt der LV-Import vollständig parserbasiert aktiv und
+zeigt im Review sichtbar an, dass keine KI-Normalisierung ausgeführt wurde.
 
 Ein Git-Push darf keine Benutzer oder Projekte löschen. Das ist gewährleistet,
 wenn `DATABASE_URL` auf eine persistente PostgreSQL-Instanz zeigt. Der

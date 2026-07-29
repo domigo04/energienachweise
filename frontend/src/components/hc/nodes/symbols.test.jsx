@@ -5,14 +5,13 @@ import { describe, expect, it } from 'vitest';
 import { SymWE } from './symbols';
 
 describe('Wärmeerzeugersymbole', () => {
-  it('symbolisiert bei Luft/Wasser-WP Aussenluft und Fortluft', () => {
+  it('zeichnet innen- und aussenaufgestellte Luft/Wasser-WP wie die Standard-WP', () => {
     const markup = renderToStaticMarkup(
       <SymWE generatorType="lwwp" lwwpBauart="aussenaufstellung"/>,
     );
-    expect(markup).toContain('AUL');
-    expect(markup).toContain('FOL');
     expect(markup).toContain('L/W-WP');
-    expect(markup).toContain('AUSSEN');
+    expect(markup).toContain('<text x="32" y="38">V</text>');
+    expect(markup).not.toContain('AUL');
     expect(markup).toContain('aria-label="Luft/Wasser-Wärmepumpe mit Aussenluft und Fortluft"');
   });
 
@@ -20,7 +19,9 @@ describe('Wärmeerzeugersymbole', () => {
     const markup = renderToStaticMarkup(
       <SymWE generatorType="lwwp" lwwpBauart="split"/>,
     );
-    expect(markup).toContain('SPLIT');
+    expect(markup).toContain('L/W-WP SPLIT');
+    expect(markup).toContain('VERFL.');
+    expect(markup).toContain('VERD.');
     expect(markup).toContain('stroke-dasharray="7 5"');
   });
 

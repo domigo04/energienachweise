@@ -196,10 +196,27 @@ function ImportZusammenfassung({ report, imp, offen }) {
         {report.parser_first && (
           <li>· Parser-First: kompaktes KI-Prüfpaket ca. {report.llm_review_estimated_tokens ?? "—"} Tokens</li>
         )}
+        {report.llm_review_available ? (
+          <li className="font-semibold text-green-700">
+            · KI-Normalisierung {report.llm_review_called ? "ausgeführt" : "bereit"}
+            {(report.llm_review_features_applied || report.llm_review_costs_applied)
+              ? `: ${report.llm_review_features_applied || 0} Mengen, ${report.llm_review_costs_applied || 0} Preise ergänzt`
+              : ""}
+          </li>
+        ) : (
+          <li className="text-amber-600">
+            · KI-Prüfung nicht konfiguriert: {report.llm_review_reason || "API-Zugang fehlt"}
+          </li>
+        )}
       </ul>
       {(report.deterministic_checks || []).map(check => (
         <p key={check.code} className="mt-1 text-[11px] font-medium text-amber-700">
           Plausibilitätsprüfung: {check.message}
+        </p>
+      ))}
+      {(report.llm_review_warnings || []).map((warning, index) => (
+        <p key={`${warning}-${index}`} className="mt-1 text-[11px] font-medium text-amber-700">
+          KI-Prüfung: {warning}
         </p>
       ))}
       {report.cost_source && (
@@ -240,8 +257,8 @@ function UploadAnsicht() {
     try {
       const imp = await uploadLvImport(file);
       navigate(`/auswertung/import/${imp.id}`);
-    } catch {
-      setError("Upload fehlgeschlagen. Nur PDF wird unterstützt.");
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Upload fehlgeschlagen. Nur PDF wird unterstützt.");
     } finally {
       setBusy(false);
     }

@@ -30,6 +30,7 @@ SPEICHER_TYPEN = ("speicher", "bww")
 # Kreisgrenzen der Wärmepumpen-Traversierung: die Leitung BIS zur Grenze gehört
 # noch zum Kreis, alles dahinter ist ein anderer Kreis.
 WP_KREIS_GRENZEN = (BLOCK_TYPEN + SPEICHER_TYPEN + VERBRAUCHER_TYPEN
+                    + ("valve3",)
                     + ("erdsonden", "pwt", "verbraucher"))
 
 
@@ -203,6 +204,8 @@ def _system_von_edge(e) -> Optional[str]:
     layer_id = str((e.get("data") or {}).get("layer_id") or "")
     if layer_id.startswith("sole"):
         return "source"
+    if layer_id == "bww" or layer_id.startswith("trink"):
+        return None
     if layer_id:
         return "heating"
     return None

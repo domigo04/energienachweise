@@ -389,10 +389,12 @@ def _plankopf(c, seite, projekt_name, schema_name, plankopf=None):
         ("Sole VL", (0.92, 0.70, 0.03), None),
         ("Sole RL", (0.09, 0.64, 0.29), [5, 3]),
         ("Kälte VL/RL", (0.02, 0.71, 0.83), None),
+        ("Trinkwarmwasser", (0.94, 0.27, 0.27), None),
+        ("Trinkkaltwasser", (0.09, 0.64, 0.29), [5, 3]),
     ]
     c.setFont("Helvetica", 6.5)
     for index, (label, color, dash) in enumerate(legend):
-        ly = y + 75 - index * 14
+        ly = y + 75 - index * 11
         c.setStrokeColorRGB(*color)
         c.setLineWidth(2)
         c.setDash(dash or [])

@@ -146,6 +146,21 @@ def test_rohrmeter_quelle_und_verteilung_getrennt():
     assert "Quelle 40 m" in res["pipe_length_m"]["source_text"]
 
 
+def test_bkp_241_11_detailpositionen_zaehlen_auch_ohne_rohr_im_titel():
+    """Fabrikats-/Detailtitel unter 241.11 bleiben Primärkreis-Rohrmeter."""
+    text = ("241.11 Rohrleitungen Primärkreis WP zu Erdsondensammler\n"
+            "241.110 Geberit COOL-FIT Versorgung Vorlauf\n"
+            "m 32\n"
+            "241.111 Geberit COOL-FIT Versorgung Rücklauf\n"
+            "m 28\n"
+            "243.2 Flächenheizung\n"
+            "Bodenheizungsrohre m 900")
+    res = q.pipe_lengths(_rows(text))
+    assert res["pipe_length_source_m"]["value"] == 60
+    assert res["pipe_length_m"]["value"] == 60
+    assert res["pipe_length_m"]["per_section"] == {"241.110": 32, "241.111": 28}
+
+
 def test_quadratmeter_sind_keine_rohrmeter():
     """m² darf nicht als Laufmeter gelesen werden."""
     res = q.pipe_lengths(_rows("243.2 Flächenheizung\nBodenheizung Fläche m2 450"))

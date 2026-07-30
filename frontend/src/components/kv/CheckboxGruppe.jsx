@@ -24,7 +24,7 @@ export default function CheckboxGruppe({ label, options, value = [], onChange })
               key={key}
               onClick={() => toggle(opt)}
               className={
-                "rounded-lg border px-3 py-1.5 text-sm transition " +
+                "rounded-sm border px-3 py-1.5 text-sm transition " +
                 (on
                   ? "border-brand-500 bg-brand-50 font-medium text-brand-700"
                   : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50")

@@ -31,7 +31,7 @@ export default function Home() {
   const vorname = (user?.name || "").split(" ")[0];
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-10 lg:px-8">
+    <div className="mx-auto max-w-6xl px-4 py-10 lg:px-8">
       <header className="mb-8">
         <p className="text-sm font-medium text-brand-600">Heizungscockpit</p>
         <h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-900">
@@ -47,9 +47,9 @@ export default function Home() {
           <Link
             key={to}
             to={to}
-            className="card group flex flex-col p-6 transition hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md"
+            className="card group flex flex-col p-6 transition hover:border-slate-400"
           >
-            <div className="flex size-11 items-center justify-center rounded-xl bg-brand-50 text-brand-600 transition group-hover:bg-brand-100">
+            <div className="flex size-11 items-center justify-center rounded-sm border border-brand-200 bg-brand-50 text-brand-700 transition group-hover:border-brand-300">
               <Icon className="size-6" />
             </div>
             <h2 className="mt-4 text-lg font-bold text-slate-900">{title}</h2>
@@ -65,13 +65,13 @@ export default function Home() {
       <div className="card mt-8 p-6">
         <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-400">So hängt es zusammen</h3>
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
-          <div className="rounded-xl bg-slate-50 p-4">
+          <div className="rounded-sm border-l-2 border-slate-300 bg-slate-50 p-4">
             <div className="text-sm font-bold text-slate-800">1 · Auswertung befüllen</div>
             <p className="mt-1 text-sm text-slate-500">
               Erfasse abgeschlossene Projekte mit ihren echten BKP-Kosten. Je mehr Referenzen, desto verlässlicher.
             </p>
           </div>
-          <div className="rounded-xl bg-slate-50 p-4">
+          <div className="rounded-sm border-l-2 border-slate-300 bg-slate-50 p-4">
             <div className="text-sm font-bold text-slate-800">2 · Grobkostenschätzung ziehen</div>
             <p className="mt-1 text-sm text-slate-500">
               In einem Projekt vergleicht das Tool deine Eingaben mit ähnlichen Referenzen und zeigt Bandbreite und Vertrauen.

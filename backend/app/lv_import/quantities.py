@@ -495,12 +495,24 @@ def pipe_lengths(rows) -> dict:
     quelle_fund = verteil_fund = None
     je_abschnitt: dict[str, float] = {}
     ausgeschlossen: list[str] = []
+    verbrauchte_mengen_zeilen: set[int] = set()
 
     for i, row in enumerate(rows):
+        if i in verbrauchte_mengen_zeilen:
+            continue
         text = row.get("text") or ""
         low = text.lower()
         section_low = (row.get("section_title") or "").lower()
-        if not any(t in low for t in PIPE_INCLUDE_TERMS) and \
+        section_nr = row.get("section_nr") or ""
+        # BKP 241.11 ist fachlich vollständig «Rohrleitungen Primärkreis».
+        # Echte LVs nummerieren die einzelnen Fabrikate darunter weiter
+        # (z.B. 241.110/241.111), wobei im Detailtitel das Wort «Rohr» fehlen
+        # kann. Eine klar ausgewiesene Menge in m gehört trotzdem zur
+        # Primärkreis-Rohrsumme. Ohne diese Kontextregel gingen genau diese
+        # Positionen verloren.
+        ist_primaerkreis_abschnitt = section_nr.startswith("241.11")
+        if not ist_primaerkreis_abschnitt and \
+           not any(t in low for t in PIPE_INCLUDE_TERMS) and \
            not any(t in section_low for t in PIPE_INCLUDE_TERMS):
             continue
         if any(t in low for t in (
@@ -508,9 +520,14 @@ def pipe_lengths(rows) -> dict:
             "lieferlaenge", "stangenlänge", "stangenlaenge",
         )):
             continue
-        meter, _idx = _menge_im_kontext(rows, i, _menge_meter)
+        meter, mengen_idx = _menge_im_kontext(rows, i, _menge_meter)
         if meter is None:
             continue
+        if mengen_idx is not None and mengen_idx != i:
+            # Beschreibung und darunterliegende Mengenzelle bilden eine
+            # Position. Die Mengenzelle darf beim nächsten Schleifendurchlauf
+            # nicht ein zweites Mal summiert werden.
+            verbrauchte_mengen_zeilen.add(mengen_idx)
         # Ausschluss über Positionstext ODER Abschnittstitel (Punkt 11).
         if any(t in low for t in PIPE_EXCLUDE_TERMS) or \
            any(t in section_low for t in PIPE_EXCLUDE_SECTION_TERMS):
@@ -529,7 +546,7 @@ def pipe_lengths(rows) -> dict:
             verteil_n += 1
             if verteil_fund is None:
                 verteil_fund = _fund(row, rows, i)
-        nr = row.get("section_nr")
+        nr = section_nr
         if nr:
             je_abschnitt[nr] = round(je_abschnitt.get(nr, 0.0) + meter, 1)
 

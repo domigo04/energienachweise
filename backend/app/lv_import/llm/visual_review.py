@@ -39,7 +39,9 @@ Konditionen. Lies zusätzlich den sichtbaren Projektkopf: Projektname,
 Projektnummer, Ort, Unternehmer und Offertdatum. Fehlende Kopfangaben bleiben
 null. Bei den technischen Kennwerten sind besonders wichtig:
 Wärmeerzeugertyp und Heizleistung in kW; Anzahl, Länge je Sonde und
-Gesamtbohrmeter der Erdsonden; Rohrmeter total ohne Fussbodenheizungsrohre;
+Gesamtbohrmeter der Erdsonden; Rohrmeter total ohne Fussbodenheizungsrohre,
+dabei die Rohrmeter aus BKP 241.11 (Primärkreis) und BKP 243.1
+(Wärmeverteilung) addieren;
 Anzahl technische Pufferspeicher, Pumpen und Wärmemessungen/Wärmezähler.
 Prüfe jeden im Schema erlaubten technischen Schlüssel; wenn der sichtbare
 Nachweis fehlt, gib dafür null zurück statt den Schlüssel still auszulassen.
@@ -70,7 +72,8 @@ _TECHNICAL_PAGE_TERMS = {
         "sondenlange", "lange sonde",
     ),
     "pipe": (
-        "243.1 rohrleitungen", "rohrmeter", "laufmeter", "rohrleitung", "rohrleitungen", "lfm",
+        "241.11", "primärkreis", "primaerkreis", "243.1 rohrleitungen", "rohrmeter",
+        "laufmeter", "rohrleitung", "rohrleitungen", "lfm",
     ),
     "pumps": (
         "pumpe", "pumpen", "umwalzpumpe", "heizkreispumpe", "ladepumpe",

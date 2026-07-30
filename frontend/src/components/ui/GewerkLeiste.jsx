@@ -22,9 +22,9 @@ export default function GewerkLeiste({ aktiv = "heizung", className = "" }) {
             aria-current={istAktiv ? "page" : undefined}
             title={g.bald ? "Dieses Gewerk kommt später" : undefined}
             className={
-              "inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-sm font-semibold transition " +
+              "inline-flex items-center gap-1.5 rounded-sm border px-3.5 py-1.5 text-sm font-semibold transition " +
               (istAktiv
-                ? "bg-brand-600 text-white shadow-sm"
+                ? "border-brand-700 bg-brand-600 text-white"
                 : g.bald
                   ? "cursor-not-allowed border border-dashed border-slate-200 bg-slate-50 text-slate-400"
                   : "border border-slate-200 text-slate-600 hover:bg-slate-50")
@@ -32,7 +32,7 @@ export default function GewerkLeiste({ aktiv = "heizung", className = "" }) {
           >
             {g.label}
             {g.bald && (
-              <span className="rounded-full bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+              <span className="rounded-sm bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">
                 Bald
               </span>
             )}

@@ -9,7 +9,7 @@ import { ArrowLeft } from "lucide-react";
 //   title, subtitle, actions (React-Knoten, optional)
 export default function PageHeader({ back, title, subtitle, actions, children }) {
   return (
-    <div className="mb-6">
+    <div className="mb-6 border-b border-slate-300 pb-5">
       {back && (
         <Link
           to={back.to}
@@ -20,7 +20,7 @@ export default function PageHeader({ back, title, subtitle, actions, children })
       )}
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
         <div className="min-w-0">
-          {title && <h1 className="text-2xl font-bold text-slate-900">{title}</h1>}
+          {title && <h1 className="text-2xl font-bold tracking-[-0.02em] text-slate-950">{title}</h1>}
           {subtitle && <p className="mt-1 max-w-2xl text-sm text-slate-500">{subtitle}</p>}
         </div>
         {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}

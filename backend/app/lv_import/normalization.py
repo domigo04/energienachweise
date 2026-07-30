@@ -18,6 +18,9 @@ def parse_number(raw) -> Optional[float]:
     s = str(raw).strip()
     if not s:
         return None
+    # Schweizer Offerten kennzeichnen ganze Franken häufig mit ".-" oder ",-".
+    # Das ist 0 Rappen und kein negatives Vorzeichen.
+    s = re.sub(r"[.,]-$", "", s)
     s = _THOUSAND.sub("", s)
     s = s.replace("’", "").replace("'", "").replace(" ", "").replace(" ", "")
     # Dezimalkomma → Punkt (nur wenn genau ein Komma und kein Punkt)

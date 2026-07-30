@@ -37,7 +37,8 @@ VALID, MISMATCH, UNGEPRUEFT = "valid", "mismatch", "unchecked"
 # Betrag am Zeilenende: Schweizer Format mit Apostroph-Tausendern und/oder
 # zwei Nachkommastellen.
 _BETRAG_ENDE = re.compile(
-    r"(\d{1,3}(?:[’'\s]\d{3})+(?:[.,]\d{2})?|\d+[.,]\d{2}|\d{4,})\s*$")
+    r"(\d{1,3}(?:[’'\s]\d{3})+(?:[.,](?:\d{2}|-))?"
+    r"|\d+[.,](?:\d{2}|-)|\d{4,})\s*$")
 # Einzelposition: "241.10  Titel ...  1'410.00"
 _POSITION = re.compile(r"^\s*(?:pos\.?\s*|bkp\s*)?(\d{3}(?:\.\d+)+)\s+(\S.*)$", re.IGNORECASE)
 # Gruppenkopf ohne Betrag: "241  Energielagerung"

@@ -103,6 +103,23 @@ def test_mismatch_wird_erkannt():
     assert res["group_totals"]["241"]["sum_positions"] == 2000.0
 
 
+def test_schweizer_nullrappen_format_wird_gelesen():
+    """Offerten schreiben ganze Franken oft als 1'410.- bzw. 780.-."""
+    text = (
+        "KOSTENZUSAMMENSTELLUNG\n"
+        "241.10 Expansion und Sicherheit Primärkreis 1'410.-\n"
+        "242.2 Expansion und Sicherheit Wärmeerzeugung 780.-\n"
+        "Total BKP 241 1'410.-\n"
+        "Total BKP 242 780.-\n"
+        "Total BKP 24 2'190.-\n"
+    )
+    res = parse_cost_summary([{"page": 1, "text": text}])
+    assert {p["original_position"]: p["amount"] for p in res["positions"]} == {
+        "241.10": 1410.0, "242.2": 780.0,
+    }
+    assert res["trade_total"] == 2190.0
+
+
 # ── Punkt 14 — Detailinformation bleibt erhalten ──────────────────────────
 
 def test_originalnummer_und_titel_bleiben_erhalten(summary):

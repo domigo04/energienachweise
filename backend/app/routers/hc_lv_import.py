@@ -30,7 +30,7 @@ from app.lv_import.feature_keys import FEATURE_DEFS, FEATURE_KEYS, FEATURE_TO_CO
 from app.lv_import import page_classifier as pc
 from app.lv_import.review_packet import build_review_packet
 from app.lv_import.positions import parse_positions
-from app.lv_import.llm import document_review
+from app.lv_import.llm import visual_review
 
 router = APIRouter(prefix="/api/v1/lv-imports", tags=["KV – LV-Import"])
 
@@ -182,16 +182,24 @@ async def upload_lv(
             # Einzelpositionen bleiben einzeln sichtbar: Menge, Preis und Titel
             # können so vom Menschen direkt in derselben Zeile geprüft werden.
             costs = cost_rows_from_positions(positions)
-        # Erst deterministische Norm-LV-Regeln, dann optional das kleine
-        # Klassifikations-LLM für noch offene Kostentitel.
-        llm_stat = llm.apply_to_rows(costs)
-        # Parser-first-Dokumentprüfung: ein einziger kompakter Structured-Output-
-        # Aufruf normalisiert nur fehlende Mengen/Preise. Parserwerte gewinnen.
+        # Die vollständige PDF-Datei wird zusätzlich visuell ausgewertet. Das ist
+        # bei überlagerten Formularwerten zwingend: deren extrahierter Text ist
+        # nachweislich nicht zuverlässig. Nur ein rechnerisch widerspruchsfreies
+        # visuelles Resultat ersetzt Parserwerte und Kosten.
         review = build_review_packet(features, costs, positions)
-        llm_review = document_review.review(review["packet"])
-        llm_review_apply = document_review.apply_result(
-            features, costs, positions, llm_review.get("result") or {},
-        )
+        visual = visual_review.review(raw)
+        visual_apply = {
+            "visual_review_features_applied": 0,
+            "visual_review_costs_applied": 0,
+            "visual_review_warnings": [],
+        }
+        if visual["success"]:
+            costs, visual_apply = visual_review.apply_result(
+                features, visual["result"],
+            )
+        # Erst nach der autoritativen visuellen Auswertung offene Titel gegen
+        # das geschlossene Norm-LV auflösen.
+        llm_stat = llm.apply_to_rows(costs)
         # ALLE kanonischen Features anlegen (auch nicht erkannte) → der Nutzer
         # sieht die vollständige Checkliste und kann fehlende Werte ergänzen.
         for key in FEATURE_KEYS:
@@ -233,7 +241,11 @@ async def upload_lv(
                    and not c.get("is_group_total")]
         imp.debug_json = json.dumps({
             **pipeline.debug_dump(),
-            "cost_source": "cost_summary" if has_cost_summary(summary) else "lv_positions",
+            "cost_source": (
+                "visual_ai_pdf" if visual["success"]
+                else "cost_summary" if has_cost_summary(summary)
+                else "lv_positions"
+            ),
             "features_erkannt": len(erkannte),
             "features_total": len(FEATURE_KEYS),
             "feature_keys_erkannt": erkannte,
@@ -242,15 +254,18 @@ async def upload_lv(
             "kosten_ohne_zuordnung": len(pruefen),
             "llm_positions_sent": llm_stat["sent"],
             "llm_positions_mapped": llm_stat["mapped"],
-            "parser_first": True,
+            "parser_first": False,
             "llm_review_characters": review["characters"],
             "llm_review_estimated_tokens": review["estimated_tokens"],
             "llm_review_positions_sent": review["positions_sent"],
             "deterministic_checks": review["deterministic_checks"],
             "parsed_positions": len(positions),
-            "llm_review_called": llm_review["called"],
-            **document_review.status(),
-            **llm_review_apply,
+            "visual_review_called": visual["called"],
+            "visual_review_success": visual["success"],
+            "visual_review_attempts": visual["attempts"],
+            "visual_review_issues": visual["issues"],
+            **visual_review.status(),
+            **visual_apply,
             **llm.status(),
             "gruppen_validierung": {
                 g: i.get("validation_status")
@@ -258,16 +273,20 @@ async def upload_lv(
             "trade_total": summary.get("trade_total"),
             "projekt_erkannt": sorted(projekt.keys()),
         }, ensure_ascii=False)
-        imp.status = LvImportStatus.review.value if imp.is_searchable else LvImportStatus.extracted.value
+        quality_ready = visual["success"] or not visual_review.required()
+        imp.status = (
+            LvImportStatus.review.value
+            if quality_ready else LvImportStatus.extracted.value
+        )
     except Exception as exc:
         imp.status = LvImportStatus.failed.value
         imp.debug_json = json.dumps({
             **pipeline.debug_dump(),
-            "parser_first": True,
+            "parser_first": False,
             "error_stage": "extract_and_normalize",
             "error_type": type(exc).__name__,
             "error": str(exc)[:400],
-            **document_review.status(),
+            **visual_review.status(),
         }, ensure_ascii=False)
 
     db.commit()
@@ -541,6 +560,13 @@ def approve_lv(import_id: int, user: User = Depends(get_current_user), db: Sessi
     imp = _get_import(db, user, import_id)
     if imp.status == LvImportStatus.approved.value:
         raise HTTPException(status_code=409, detail="Import ist bereits freigegeben")
+    report = _report(imp)
+    if report.get("visual_review_required") and not report.get("visual_review_success"):
+        raise HTTPException(status_code=409, detail={
+            "message": "Das LV ist noch nicht freigabebereit. Die visuelle "
+                       "PDF-Auswertung muss zuerst widerspruchsfrei abgeschlossen werden.",
+            "visual_review_issues": report.get("visual_review_issues") or [],
+        })
 
     # Freigabe nur, wenn jeder relevante Wert geprüft ist — bestätigt ODER
     # bewusst als unbekannt markiert (beides setzt confirmed=True).

@@ -67,7 +67,8 @@ _DESCRIPTION_BEGRIFFE = (
 # BKP-Zeile mit Betrag: "241.10 Expansion und Sicherheit ... 1'410.00"
 _BKP_ZEILE_MIT_BETRAG = re.compile(
     r"^\s*(?:bkp\s*)?(2\d{2}(?:\.\d+)?)\D.*?"
-    r"(\d{1,3}(?:[’'\s]\d{3})+(?:[.,]\d{2})?|\d+[.,]\d{2})\s*$",
+    r"(\d{1,3}(?:[’'\s]\d{3})+(?:[.,](?:\d{2}|-))?"
+    r"|\d+[.,](?:\d{2}|-))\s*$",
     re.IGNORECASE,
 )
 # Reine BKP-Gruppenzeile ohne Betrag ("241 Energielagerung") zählt schwächer mit.
@@ -175,6 +176,30 @@ def classify_pages(pages) -> list[dict]:
         res = classify_page(p.get("text") or "")
         out.append({"page": p.get("page"), "type": res["type"],
                     "confidence": res["confidence"], "signals": res["signals"]})
+    # Eine Kostenzusammenstellung läuft häufig ohne wiederholten Titel auf der
+    # nächsten Seite weiter. Falls die erste Seite sicher erkannt wurde, wird
+    # eine direkt folgende Seite mit mehreren BKP-/Totalzeilen als Fortsetzung
+    # übernommen. So geht die letzte Seite mit Gewerktotal nicht verloren.
+    for index in range(1, len(out)):
+        if out[index - 1]["type"] != COST_SUMMARY:
+            continue
+        if out[index]["type"] not in (UNKNOWN, COVER):
+            continue
+        text = (pages[index].get("text") or "") if index < len(pages or []) else ""
+        lines = _zeilen(text)
+        bkp_lines = sum(1 for line in lines if _BKP_ZEILE.match(line))
+        total_lines = sum(
+            1 for line in lines
+            if re.match(r"^\s*(?:total|summe)\s+(?:bkp\s*)?\d+", line, re.IGNORECASE)
+        )
+        if bkp_lines >= 2 and total_lines >= 1:
+            out[index] = {
+                "page": out[index]["page"],
+                "type": COST_SUMMARY,
+                "confidence": MEDIUM,
+                "signals": ["Fortsetzung Kostenzusammenstellung",
+                            f"{bkp_lines} BKP-Zeilen", f"{total_lines} Totalzeilen"],
+            }
     return out
 
 

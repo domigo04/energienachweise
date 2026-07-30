@@ -3,9 +3,10 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Upload, FileText, CheckCircle2, AlertTriangle, Trash2, Plus, ChevronDown, Loader2 } from "lucide-react";
 import {
   uploadLvImport, listLvImports, getLvImport, getFachwerte, getNormLv,
-  updateLvFeature, updateLvCost, addLvCost, deleteLvCost, updateLvImport, approveLvImport,
+  updateLvFeature, updateLvCost, addLvCost, deleteLvCost, updateLvCommercial,
+  updateLvImport, approveLvImport,
 } from "../../api/hcApi";
-import { GENERATOR_TYPE_LABELS } from "../../components/hc/nodes/generatorTypes";
+import { GENERATOR_TYPES, GENERATOR_TYPE_LABELS } from "../../components/hc/nodes/generatorTypes";
 
 // B9 — Review-Seite des LV-Imports. Ohne :id ist es die Upload-Ansicht.
 // Aus einem Unternehmer-LV entsteht ein geprüfter technischer Fingerprint +
@@ -355,6 +356,132 @@ function NeueKostZeile({ onAdd }) {
   );
 }
 
+function KonditionenEditor({ imp, gesperrt, onSaved }) {
+  const toRow = (condition) => ({
+    ...condition,
+    original_label: condition.original_label || "",
+    kind: condition.kind || "percent",
+    direction: condition.direction || "deduction",
+    rate_percent: condition.rate_percent ?? "",
+    amount: condition.amount ?? "",
+    basis_amount: condition.basis_amount ?? "",
+  });
+  const [rows, setRows] = useState(() => (imp.conditions || []).map(toRow));
+  const [vatRate, setVatRate] = useState(imp.report?.commercial?.vat_rate ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setRows((imp.conditions || []).map(toRow));
+    setVatRate(imp.report?.commercial?.vat_rate ?? "");
+  }, [imp.conditions, imp.report?.commercial?.vat_rate]);
+
+  const patchRow = (index, patch) => {
+    setRows((current) => current.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+  };
+  const addRow = () => setRows((current) => [...current, {
+    original_label: "Sonstiger Abzug", kind: "percent",
+    direction: "deduction", rate_percent: "", amount: "", basis_amount: "",
+  }]);
+  const save = async () => {
+    setSaving(true); setError("");
+    try {
+      const result = await updateLvCommercial(imp.id, {
+        vat_rate: vatRate,
+        conditions: rows,
+      });
+      onSaved(result);
+    } catch (err) {
+      const detail = err?.response?.data?.detail;
+      setError(typeof detail === "string" ? detail : detail?.message || "Konditionen konnten nicht gespeichert werden.");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const commercial = imp.report?.commercial || {};
+
+  return (
+    <section className="card overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/60 px-4 py-3 sm:px-5">
+        <div>
+          <h2 className="text-sm font-bold text-slate-800">Kommerzielle Konditionen</h2>
+          <p className="mt-0.5 text-[11px] text-slate-400">Rabatt, Skonto und sonstige Abzüge vor der Freigabe prüfen oder ergänzen.</p>
+        </div>
+        {!gesperrt && (
+          <button type="button" onClick={addRow} className="btn-secondary min-h-8">
+            <Plus className="size-4" /> Abzug ergänzen
+          </button>
+        )}
+      </div>
+      {error && <p className="mx-4 mt-3 rounded-lg bg-red-50 p-2 text-xs text-red-700 sm:mx-5">{error}</p>}
+      <div className="divide-y divide-slate-100">
+        {rows.map((condition, index) => (
+          <div key={condition.id || `new-${index}`} className="grid gap-2 px-4 py-3 sm:grid-cols-[1.5fr_.8fr_.8fr_.7fr_.9fr_auto] sm:items-end sm:px-5">
+            <div>
+              <label className="label">Bezeichnung</label>
+              <input className="input" disabled={gesperrt} value={condition.original_label}
+                onChange={(e) => patchRow(index, { original_label: e.target.value })} />
+            </div>
+            <div>
+              <label className="label">Art</label>
+              <select className="input" disabled={gesperrt} value={condition.kind}
+                onChange={(e) => patchRow(index, { kind: e.target.value })}>
+                <option value="percent">Prozent</option>
+                <option value="fixed">Fixbetrag</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">Richtung</label>
+              <select className="input" disabled={gesperrt} value={condition.direction}
+                onChange={(e) => patchRow(index, { direction: e.target.value })}>
+                <option value="deduction">Abzug</option>
+                <option value="surcharge">Zuschlag</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">{condition.kind === "percent" ? "Prozent" : "CHF"}</label>
+              <input className="input" type="number" step="0.01" disabled={gesperrt}
+                value={condition.kind === "percent" ? condition.rate_percent : condition.amount}
+                onChange={(e) => patchRow(index, condition.kind === "percent"
+                  ? { rate_percent: e.target.value } : { amount: e.target.value })} />
+            </div>
+            <div>
+              <label className="label">Basis CHF (optional)</label>
+              <input className="input" type="number" step="0.01" disabled={gesperrt}
+                value={condition.basis_amount}
+                onChange={(e) => patchRow(index, { basis_amount: e.target.value })} />
+            </div>
+            {!gesperrt && (
+              <button type="button" onClick={() => setRows((current) => current.filter((_, i) => i !== index))}
+                className="btn-ghost min-h-9 min-w-9 text-slate-400 hover:text-red-500" title="Kondition entfernen">
+                <Trash2 className="size-4" />
+              </button>
+            )}
+          </div>
+        ))}
+        {!rows.length && <p className="px-4 py-4 text-xs text-slate-400 sm:px-5">Noch keine Konditionen erfasst.</p>}
+      </div>
+      <div className="space-y-2 border-t border-slate-100 bg-slate-50/50 px-4 py-3 text-sm sm:px-5">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div className="w-32">
+            <label className="label">MWST %</label>
+            <input className="input" type="number" step="0.1" disabled={gesperrt}
+              value={vatRate} onChange={(e) => setVatRate(e.target.value)} />
+          </div>
+          {!gesperrt && <button type="button" onClick={save} disabled={saving} className="btn-primary">{saving ? "Berechnet…" : "Konditionen speichern"}</button>}
+        </div>
+        {commercial.subtotal_excl_vat != null && (
+          <div className="space-y-1 border-t border-slate-200 pt-2">
+            <div className="flex justify-between"><span>Summe exkl. MWST</span><strong>CHF {commercial.subtotal_excl_vat.toLocaleString("de-CH")}</strong></div>
+            <div className="flex justify-between"><span>MWST {commercial.vat_rate} %</span><span>CHF {commercial.vat_amount?.toLocaleString("de-CH")}</span></div>
+            <div className="flex justify-between text-base"><strong>Endsumme inkl. MWST</strong><strong>CHF {commercial.total_incl_vat?.toLocaleString("de-CH")}</strong></div>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 // ── Review-Ansicht (mit :id) ────────────────────────────────────────────────
 function ReviewAnsicht({ id }) {
   const [imp, setImp] = useState(null);
@@ -484,8 +611,11 @@ function ReviewAnsicht({ id }) {
     try {
       const res = await approveLvImport(id);
       setImp((cur) => ({ ...cur, ...res.import }));
-    } catch {
-      setError("Freigabe fehlgeschlagen — bitte alle Werte und Kosten prüfen.");
+    } catch (err) {
+      const detail = err?.response?.data?.detail;
+      setError(typeof detail === "string"
+        ? detail
+        : detail?.message || "Freigabe fehlgeschlagen — bitte alle Werte und Kosten prüfen.");
     } finally {
       setApproving(false);
     }
@@ -635,13 +765,24 @@ function ReviewAnsicht({ id }) {
                     </div>
                     {!multi && (
                     <div className="flex items-center gap-2 sm:justify-end">
-                      <input
-                        className="input w-36"
-                        disabled={gesperrt}
-                        defaultValue={f.confirmed_value ?? (f.value ?? "")}
-                        placeholder={f.value != null ? String(f.value) : "Wert eingeben"}
-                        onBlur={(e) => setFeature(f, { confirmed_value: e.target.value, confirmed: true })}
-                      />
+                      {f.key === "generator_type" ? (
+                        <select className="input w-52" disabled={gesperrt}
+                          value={f.confirmed_value ?? (f.value ?? "")}
+                          onChange={(e) => setFeature(f, { confirmed_value: e.target.value, confirmed: true })}>
+                          <option value="">— nicht erkannt —</option>
+                          {GENERATOR_TYPES.filter((type) => type.value !== "hybrid").map((type) => (
+                            <option key={type.value} value={type.value}>{type.label}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          className="input w-36"
+                          disabled={gesperrt}
+                          defaultValue={f.confirmed_value ?? (f.value ?? "")}
+                          placeholder={f.value != null ? String(f.value) : "Wert eingeben"}
+                          onBlur={(e) => setFeature(f, { confirmed_value: e.target.value, confirmed: true })}
+                        />
+                      )}
                       {f.unit && <span className="w-6 text-xs text-slate-400">{f.unit}</span>}
                       <label className={`inline-flex items-center gap-1 text-[11px] font-semibold ${f.confirmed ? "text-green-600" : "text-slate-400"}`} title="Wert geprüft (bestätigt oder bewusst unbekannt)">
                         <input type="checkbox" disabled={gesperrt} checked={!!f.confirmed}
@@ -837,42 +978,12 @@ function ReviewAnsicht({ id }) {
             )}
           </div>
         </section>
-        {(imp.conditions || []).length > 0 && (
-          <section className="card overflow-hidden">
-            <div className="border-b border-slate-100 bg-slate-50/60 px-4 py-3 sm:px-5">
-              <h2 className="text-sm font-bold text-slate-800">Kommerzielle Konditionen</h2>
-            </div>
-            <div className="divide-y divide-slate-100 text-sm">
-              {(imp.conditions || []).map((condition) => (
-                <div key={condition.id} className="flex items-center justify-between gap-3 px-4 py-2.5 sm:px-5">
-                  <span className="text-slate-600">{condition.original_label}</span>
-                  <span className="font-medium text-slate-900">
-                    {condition.direction === "deduction" ? "−" : "+"}
-                    {condition.kind === "percent"
-                      ? `${condition.rate_percent?.toLocaleString("de-CH")} %`
-                      : `CHF ${condition.calculated_amount?.toLocaleString("de-CH")}`}
-                  </span>
-                </div>
-              ))}
-              {imp.report?.commercial?.subtotal_excl_vat != null && (
-                <>
-                  <div className="flex items-center justify-between px-4 py-2.5 sm:px-5">
-                    <span>Summe exkl. MWST</span>
-                    <strong>CHF {imp.report.commercial.subtotal_excl_vat.toLocaleString("de-CH")}</strong>
-                  </div>
-                  <div className="flex items-center justify-between px-4 py-2.5 sm:px-5">
-                    <span>MWST {imp.report.commercial.vat_rate} %</span>
-                    <span>CHF {imp.report.commercial.vat_amount?.toLocaleString("de-CH")}</span>
-                  </div>
-                  <div className="flex items-center justify-between bg-slate-50 px-4 py-3 sm:px-5">
-                    <strong>Endsumme inkl. MWST</strong>
-                    <strong>CHF {imp.report.commercial.total_incl_vat?.toLocaleString("de-CH")}</strong>
-                  </div>
-                </>
-              )}
-            </div>
-          </section>
-        )}
+        <KonditionenEditor imp={imp} gesperrt={gesperrt}
+          onSaved={(result) => setImp((current) => ({
+            ...current,
+            conditions: result.conditions,
+            report: { ...current.report, commercial: result.commercial },
+          }))} />
       </div>
       )}
 

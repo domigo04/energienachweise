@@ -172,7 +172,7 @@ def test_openai_hat_verifizierten_structured_output_default(monkeypatch):
     monkeypatch.delenv("COST_MAPPING_LLM_MODEL", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "test")
     provider = OpenAICostMapper()
-    assert provider.model == "gpt-5.6"
+    assert provider.model == "gpt-5.6-terra"
 
 
 def test_modell_kommt_aus_der_umgebung(monkeypatch):

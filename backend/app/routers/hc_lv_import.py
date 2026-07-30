@@ -25,7 +25,7 @@ from app.lv_import.feature_extract import extract_features
 from app.lv_import.cost_extract import cost_rows_from_positions
 from app.lv_import.cost_summary import parse_cost_summary, to_cost_rows, has_cost_summary
 from app.lv_import.project_extract import extract_project_data
-from app.lv_import import norm_lv
+from app.lv_import import commercial, norm_lv
 from app.lv_import.llm import resolver as llm
 from app import fachwerte
 from app.lv_import.feature_keys import (
@@ -105,6 +105,17 @@ def _cost_out(c: LvImportCost) -> dict:
     }
 
 
+def _condition_out(c: LvImportCondition) -> dict:
+    return {
+        "id": c.id, "original_label": c.original_label, "kind": c.kind,
+        "direction": c.direction, "rate_percent": c.rate_percent,
+        "amount": c.amount, "basis_amount": c.basis_amount,
+        "calculated_amount": c.calculated_amount,
+        "running_total": c.running_total, "order": c.order_index,
+        "source_page": c.source_page,
+    }
+
+
 def _import_out(imp: LvImport, detail: bool = False) -> dict:
     base = {
         "id": imp.id, "filename": imp.filename, "file_hash": imp.file_hash,
@@ -127,14 +138,10 @@ def _import_out(imp: LvImport, detail: bool = False) -> dict:
     if detail:
         base["features"] = [_feature_out(f) for f in imp.features]
         base["costs"] = [_cost_out(c) for c in imp.costs]
-        base["conditions"] = [{
-            "id": c.id, "original_label": c.original_label, "kind": c.kind,
-            "direction": c.direction, "rate_percent": c.rate_percent,
-            "amount": c.amount, "basis_amount": c.basis_amount,
-            "calculated_amount": c.calculated_amount,
-            "running_total": c.running_total, "order": c.order_index,
-            "source_page": c.source_page,
-        } for c in sorted(imp.conditions, key=lambda x: x.order_index)]
+        base["conditions"] = [
+            _condition_out(c)
+            for c in sorted(imp.conditions, key=lambda x: x.order_index)
+        ]
         # Punkt 25 — Verarbeitungsbericht für die Import-Zusammenfassung.
         base["report"] = _report(imp)
     return base
@@ -211,14 +218,25 @@ async def upload_lv(
         # Visuell werden nur Kostenzusammenstellung, Konditionsseiten und
         # konkrete Parser-Konflikte geprüft — nie nochmals das ganze PDF.
         review = build_review_packet(features, costs, positions)
-        # Kostenzusammenstellungen haben Vorrang. Von allgemeinen
-        # Bedingungsseiten werden nur echte Konditionsfundstellen gewählt.
+        summary_invalid = (
+            not has_cost_summary(summary)
+            or any(
+                item.get("validation_status") != "valid"
+                for item in (summary.get("group_totals") or {}).values()
+            )
+        )
+        # Gut geparste Kosten werden nicht nochmals als Seitenbild an OpenAI
+        # gesendet. Nur bei einem echten Summenkonflikt kommen die Kosten-
+        # zusammenstellungsseiten dazu. Konditionen werden im ganzen bereits
+        # geparsten Dokument gesucht, damit z.B. die Rabattseite 2 nicht wegen
+        # einer abweichenden Seitenklasse verloren geht.
         priority_review_pages = {
-            p["page"] for p in pipeline.cost_summary_pages if p.get("page")
+            p["page"] for p in pipeline.cost_summary_pages
+            if summary_invalid and p.get("page")
         }
         priority_review_pages.update(
             visual_review.select_commercial_review_pages(
-                pipeline.conditions_pages,
+                pipeline.pages, max_pages=2,
             )
         )
         review_pages = set(priority_review_pages)
@@ -255,16 +273,24 @@ async def upload_lv(
         review_pages = (
             prioritized
             + [page for page in sorted(review_pages) if page not in priority_review_pages]
-        )[:12]
+        )[:8]
         budget = ImportLlmBudget.from_env()
         visual = (
             visual_review.review(
                 raw, page_numbers=review_pages, budget=budget,
                 parser_context={
                     "features": review["packet"]["features"],
-                    "costs": review["packet"]["costs"],
+                    "costs": (
+                        review["packet"]["costs"] if summary_invalid else []
+                    ),
+                    "trade_total": summary.get("trade_total"),
                     "checks": review["packet"]["checks"],
                 },
+                require_costs=summary_invalid,
+                # Der zweite visuelle Call übertrug bisher dieselben hoch-
+                # aufgelösten PDF-Seiten nochmals. Bei korrekten Parserkosten
+                # bleibt ein unsicherer KI-Wert stattdessen manuell prüfbar.
+                allow_correction=summary_invalid,
             )
             if review_pages else {
                 "called": False, "success": True, "attempts": 0, "result": {},
@@ -277,20 +303,18 @@ async def upload_lv(
             "visual_review_costs_applied": 0,
             "visual_review_warnings": [],
         }
-        if visual["success"] and visual.get("result"):
+        if visual.get("result"):
+            if (
+                visual["result"].get("trade_total") is None
+                and summary.get("trade_total") is not None
+            ):
+                visual["result"]["trade_total"] = summary["trade_total"]
             visual_costs, visual_apply = visual_review.apply_result(
                 features, visual["result"],
             )
             # Ein fehlerfreier Parser bleibt Kostenquelle. KI-Kosten ersetzen ihn
             # nur, wenn Positionen/Summen fehlen oder widersprüchlich sind.
-            summary_invalid = (
-                not has_cost_summary(summary)
-                or any(
-                    item.get("validation_status") != "valid"
-                    for item in (summary.get("group_totals") or {}).values()
-                )
-            )
-            if summary_invalid and visual_costs:
+            if summary_invalid and visual["success"] and visual_costs:
                 costs = visual_costs
             commercial_result = visual_apply.get("commercial") or {}
             for item in commercial_result.get("conditions") or []:
@@ -621,6 +645,103 @@ def delete_cost(import_id: int, cost_id: int, user: User = Depends(get_current_u
     db.commit()
 
 
+@router.put("/{import_id}/commercial")
+def update_commercial(
+    import_id: int, body: dict,
+    user: User = Depends(get_current_user), db: Session = Depends(get_db),
+):
+    """Rabatt, Skonto und sonstige Konditionen im Review ersetzen/rechnen."""
+    imp = _get_import(db, user, import_id)
+    if imp.status == LvImportStatus.approved.value:
+        raise HTTPException(status_code=409, detail="Freigegebener Import ist gesperrt")
+
+    report = _report(imp)
+    raw_conditions = body.get("conditions")
+    if not isinstance(raw_conditions, list) or len(raw_conditions) > 30:
+        raise HTTPException(status_code=422, detail="Ungültige Konditionsliste")
+
+    def optional_number(value, label):
+        if value in (None, ""):
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail=f"Ungültiger Wert: {label}")
+
+    normalized: list[dict] = []
+    for index, item in enumerate(raw_conditions):
+        kind = item.get("kind")
+        direction = item.get("direction")
+        if kind not in {"percent", "fixed"}:
+            raise HTTPException(status_code=422, detail="Typ muss Prozent oder Fixbetrag sein")
+        if direction not in {"deduction", "surcharge"}:
+            raise HTTPException(status_code=422, detail="Richtung muss Abzug oder Zuschlag sein")
+        label = str(item.get("original_label") or item.get("label") or "").strip()
+        if not label:
+            label = "Sonstiger Abzug" if direction == "deduction" else "Sonstiger Zuschlag"
+        rate = optional_number(item.get("rate_percent"), f"{label} Prozent")
+        amount = optional_number(item.get("amount"), f"{label} Betrag")
+        basis = optional_number(item.get("basis_amount"), f"{label} Basis")
+        if kind == "percent" and rate is None:
+            raise HTTPException(status_code=422, detail=f"Prozentsatz fehlt: {label}")
+        if kind == "fixed" and amount is None:
+            raise HTTPException(status_code=422, detail=f"Fixbetrag fehlt: {label}")
+        normalized.append({
+            "label": label[:255], "kind": kind, "direction": direction,
+            "rate_percent": rate, "amount": amount, "basis_amount": basis,
+            "order": index + 1, "source_page": item.get("source_page"),
+        })
+
+    base_amount = report.get("trade_total")
+    if base_amount is None:
+        einzel = [
+            _cost_effective(c) for c in imp.costs
+            if not c.is_group_total and _cost_effective(c) is not None
+        ]
+        gruppen = [
+            _cost_effective(c) for c in imp.costs
+            if c.is_group_total and _cost_effective(c) is not None
+        ]
+        base_amount = sum(einzel) if einzel else (sum(gruppen) if gruppen else None)
+    vat_rate = optional_number(
+        body.get(
+            "vat_rate",
+            (report.get("commercial") or {}).get("vat_rate"),
+        ),
+        "MWST",
+    )
+    calculated = commercial.calculate_chain(base_amount, normalized, vat_rate)
+
+    for condition in list(imp.conditions):
+        db.delete(condition)
+    db.flush()
+    for item in calculated.get("conditions") or []:
+        db.add(LvImportCondition(
+            lv_import_id=imp.id, original_label=item["label"],
+            kind=item["kind"], direction=item["direction"],
+            rate_percent=item.get("rate_percent"), amount=item.get("amount"),
+            basis_amount=item.get("basis_amount"),
+            calculated_amount=item.get("calculated_amount"),
+            running_total=item.get("running_total"),
+            order_index=int(item.get("order") or 0),
+            source_page=item.get("source_page"),
+        ))
+    report["trade_total"] = base_amount
+    report["commercial"] = calculated
+    imp.debug_json = json.dumps(report, ensure_ascii=False)
+    db.commit()
+    rows = (
+        db.query(LvImportCondition)
+        .filter(LvImportCondition.lv_import_id == imp.id)
+        .order_by(LvImportCondition.order_index)
+        .all()
+    )
+    return {
+        "conditions": [_condition_out(c) for c in rows],
+        "commercial": calculated,
+    }
+
+
 @router.patch("/{import_id}")
 def update_import(import_id: int, body: dict, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Projektgrunddaten im Review ergänzen (Item 6). Fliessen bei Freigabe ins RefProjekt."""
@@ -675,14 +796,6 @@ def approve_lv(import_id: int, user: User = Depends(get_current_user), db: Sessi
     imp = _get_import(db, user, import_id)
     if imp.status == LvImportStatus.approved.value:
         raise HTTPException(status_code=409, detail="Import ist bereits freigegeben")
-    report = _report(imp)
-    if report.get("visual_review_required") and not report.get("visual_review_success"):
-        raise HTTPException(status_code=409, detail={
-            "message": "Das LV ist noch nicht freigabebereit. Die visuelle "
-                       "PDF-Auswertung muss zuerst widerspruchsfrei abgeschlossen werden.",
-            "visual_review_issues": report.get("visual_review_issues") or [],
-        })
-
     # Freigabe nur, wenn jeder relevante Wert geprüft ist — bestätigt ODER
     # bewusst als unbekannt markiert (beides setzt confirmed=True).
     unbestaetigt = [f.key for f in imp.features if not f.confirmed]

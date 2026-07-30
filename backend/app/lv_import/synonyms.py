@@ -128,5 +128,7 @@ GENERATOR_TYPE_TERMS: list[tuple[str, tuple[str, ...]]] = [
     ("holz", ("pellet", "schnitzel", "stückholz", "holzheizung")),
     ("elektro", ("elektroheizung", "heizstab", "elektrisch")),
     ("hybrid", ("hybrid",)),
-    ("wasser_wp", ("wärmepumpe", "waermepumpe", "wp")),  # generisch zuletzt
+    # Eine generische „Wärmepumpe" ist keine Wasser/Wasser-WP. Ohne erkennbare
+    # Quelle bleibt sie bewusst unspezifisch und wird im Review geprüft.
+    ("sonstige", ("wärmepumpe", "waermepumpe", "wp")),  # generisch zuletzt
 ]

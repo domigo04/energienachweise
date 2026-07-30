@@ -52,6 +52,11 @@ def test_erzeugerleistung_und_typ():
     assert f["generator_type"]["value"] == "ews_wp"
 
 
+def test_generische_waermepumpe_wird_nicht_als_wasser_wp_erfunden():
+    f = extract_features(_pages("Wärmepumpe 82 kW"))
+    assert f["generator_type"]["value"] == "sonstige"
+
+
 def test_speichervolumen():
     f = extract_features(_pages("Pufferspeicher 1'500 Liter"))
     assert f["storage_volume_l"]["value"] == 1500
@@ -342,6 +347,66 @@ def test_freigabe_blockiert_ohne_bestaetigung():
         assert e.status_code == 422
         assert "pump_count" in e.detail["unconfirmed"]
     assert db.query(RefProjekt).count() == 0
+
+
+def test_manuelle_pruefung_ueberstimmt_fehlgeschlagenes_visual_review():
+    """Der Mensch ist das letzte Gate; ein früherer KI-Fehler darf eine
+    vollständig bestätigte Auswertung nicht dauerhaft blockieren."""
+    import json
+    from app.routers.hc_lv_import import approve_lv
+    from types import SimpleNamespace
+
+    db = _db()
+    imp = LvImport(
+        tenant_id=1, filename="manuell.pdf", file_hash="manual",
+        status=LvImportStatus.extracted.value,
+        debug_json=json.dumps({
+            "visual_review_required": True,
+            "visual_review_success": False,
+            "visual_review_issues": ["KI nicht erreichbar"],
+        }),
+    )
+    db.add(imp)
+    db.flush()
+    db.add(LvImportFeature(
+        lv_import_id=imp.id, key="generator_type",
+        value="ews_wp", confirmed=True,
+    ))
+    db.commit()
+
+    result = approve_lv(
+        imp.id,
+        user=SimpleNamespace(id=1, tenant_id=1, name="D", email="d@x.ch"),
+        db=db,
+    )
+    assert result["import"]["status"] == "approved"
+
+
+def test_konditionen_vor_freigabe_manuell_ersetzbar():
+    from app.routers.hc_lv_import import update_commercial
+    from types import SimpleNamespace
+
+    db = _db()
+    imp = LvImport(
+        tenant_id=1, filename="konditionen.pdf", file_hash="conditions",
+        status=LvImportStatus.review.value,
+        debug_json='{"trade_total":100000}',
+    )
+    db.add(imp)
+    db.commit()
+    user = SimpleNamespace(id=1, tenant_id=1, name="D", email="d@x.ch")
+    result = update_commercial(imp.id, {
+        "vat_rate": 8.1,
+        "conditions": [
+            {"original_label": "Rabatt", "kind": "percent",
+             "direction": "deduction", "rate_percent": 6},
+            {"original_label": "Sonstiger Abzug", "kind": "fixed",
+             "direction": "deduction", "amount": 500},
+        ],
+    }, user=user, db=db)
+    assert len(result["conditions"]) == 2
+    assert result["commercial"]["subtotal_excl_vat"] == 93500
+    assert result["commercial"]["total_incl_vat"] == 101073.5
 
 
 def test_freigabe_blockiert_bei_ungepruefter_kostenposition():

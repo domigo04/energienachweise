@@ -38,8 +38,13 @@ Ermittle nur grobe Kennwerte, bepreiste Kostenpositionen und kommerzielle
 Konditionen. Bei den technischen Kennwerten sind besonders wichtig:
 Wärmeerzeugertyp, Anzahl und Heizleistung in kW; Anzahl, Länge je Sonde und
 Gesamtbohrmeter der Erdsonden; Rohrmeter total ohne Fussbodenheizungsrohre;
-Anzahl Pumpen und Anzahl Wärmemessungen/Wärmezähler. Addiere Rohrmeter nur,
-wenn die sichtbaren Mengen eindeutig sind. Keine Schrauben, Bögen, Schellen,
+Anzahl technische Pufferspeicher, Pumpen und Wärmemessungen/Wärmezähler.
+Für `generator_type` sind nur diese Codes zulässig: `ews_wp` für
+Sole/Wasser- oder Erdsonden-WP, `lwwp` für Luft/Wasser-WP, `wasser_wp` nur für
+Grundwasser/Wasser-Wasser-WP, ferner `co2_wp`, `fernwaerme`, `holz`, `elektro`
+oder `sonstige`. Eine generische Wärmepumpe ist niemals automatisch
+`wasser_wp`. Addiere Rohrmeter nur, wenn die sichtbaren Mengen eindeutig sind.
+Keine Schrauben, Bögen, Schellen,
 Rohrmeter je Dimension oder anderen unbezahlten Einzelmengen als separate
 Kostenpositionen. Pauschalen nie künstlich aufteilen.
 
@@ -70,6 +75,10 @@ _TECHNICAL_PAGE_TERMS = {
         "warmemessung", "warmemessungen", "warmezahler",
         "warmwasserzahler",
     ),
+    "storage": (
+        "pufferspeicher", "technikspeicher", "technischer speicher",
+        "heizungsspeicher", "energiespeicher",
+    ),
 }
 _TECHNICAL_PAGE_FEATURES = {
     "generator": ("generator_type", "generator_count", "generator_power_kw"),
@@ -80,6 +89,7 @@ _TECHNICAL_PAGE_FEATURES = {
     "pipe": ("pipe_length_m",),
     "pumps": ("pump_count",),
     "meters": ("heat_meter_count",),
+    "storage": ("buffer_count",),
 }
 _COMMERCIAL_PAGE_TERMS = (
     "rabatt", "skonto", "abzug", "abzuge", "zuschlag", "baureinigung",
@@ -98,7 +108,8 @@ RESPONSE_SCHEMA = {
                 "properties": {
                     "key": {"type": "string", "enum": LV_IMPORT_FEATURE_KEYS},
                     "value": {"anyOf": [
-                        {"type": "number"}, {"type": "string"}, {"type": "null"},
+                        {"type": "number"}, {"type": "string"},
+                        {"type": "boolean"}, {"type": "null"},
                     ]},
                     "confidence": {"type": "number", "minimum": 0, "maximum": 1},
                     "source_page": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
@@ -314,16 +325,16 @@ def select_commercial_review_pages(
     ]
 
 
-def validate(result: dict) -> list[str]:
+def validate(result: dict, *, require_costs: bool = True) -> list[str]:
     """Prüft Geldsummen, Dubletten und technisch unmögliche Mengen."""
     issues: list[str] = []
     costs = result.get("costs") or []
     groups = result.get("group_totals") or []
-    if not costs:
+    if require_costs and not costs:
         issues.append("Keine Einzelkosten aus der Kostenzusammenstellung erkannt.")
-    if not groups:
+    if require_costs and not groups:
         issues.append("Keine BKP-Gruppentotale erkannt.")
-    if _number(result.get("trade_total")) is None:
+    if require_costs and _number(result.get("trade_total")) is None:
         issues.append("Gewerktotal fehlt.")
 
     positions = [str(c.get("position") or "").strip() for c in costs]
@@ -481,7 +492,8 @@ def _call(
 def review(
     pdf_bytes: bytes, *, page_numbers: list[int] | None = None, client=None,
     model: str | None = None, budget: ImportLlmBudget | None = None,
-    parser_context: dict | None = None,
+    parser_context: dict | None = None, require_costs: bool = True,
+    allow_correction: bool = True,
 ) -> dict:
     """Visuelle Auswertung plus höchstens ein automatischer Korrekturdurchgang."""
     config = status()
@@ -506,15 +518,18 @@ def review(
             parser_context=parser_context,
         )
         attempts = budget.calls
-        issues = validate(result)
-        if issues and budget.may_call(max(500, len(selected_pdf) // 80)):
+        issues = validate(result, require_costs=require_costs)
+        if (
+            issues and allow_correction
+            and budget.may_call(max(500, len(selected_pdf) // 80))
+        ):
             correction = "\n".join(f"- {issue}" for issue in issues)
             result = _call(
                 client, selected_pdf, model, budget, correction,
                 original_pages=page_numbers, parser_context=parser_context,
             )
             attempts = budget.calls
-            issues = validate(result)
+            issues = validate(result, require_costs=require_costs)
     except Exception as exc:
         issues = [f"{type(exc).__name__}: {str(exc)[:300]}"]
     return {
@@ -538,6 +553,11 @@ def apply_result(features: dict, result: dict) -> tuple[list[dict], dict]:
         confidence = _number(item.get("confidence")) or 0
         if key not in LV_IMPORT_FEATURE_KEYS or value is None or confidence < MIN_FEATURE_CONFIDENCE:
             continue
+        if key == "generator_type":
+            from app import fachwerte
+            value = fachwerte.normalize("generator_types", value)
+            if not value:
+                continue
         evidence = str(item.get("evidence") or "")[:300]
         features[key] = {
             "value": value,

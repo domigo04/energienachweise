@@ -109,6 +109,33 @@ def test_bleibender_summenfehler_blockiert_freigabe():
     assert any("Gewerktotal" in issue for issue in result["issues"])
 
 
+def test_fokussierte_technikpruefung_sendet_pdf_nur_einmal():
+    focused = _valid()
+    focused["costs"] = []
+    focused["group_totals"] = []
+    focused["trade_total"] = None
+    fake = FakeResponses([focused])
+    result = visual_review.review(
+        b"%PDF-test", client=fake, model="test",
+        require_costs=False, allow_correction=False,
+    )
+    assert result["success"] is True
+    assert result["attempts"] == 1
+    assert len(fake.calls) == 1
+
+
+def test_visuelle_ews_wp_wird_kanonisch_gespeichert():
+    result = _valid()
+    result["features"].append({
+        "key": "generator_type", "value": "Sole/Wasser-Wärmepumpe",
+        "confidence": 0.98, "source_page": 8,
+        "evidence": "Erdsonden-Wärmepumpe", "reason": "Solekreis sichtbar",
+    })
+    features = {}
+    visual_review.apply_result(features, result)
+    assert features["generator_type"]["value"] == "ews_wp"
+
+
 def test_erdsonden_widerspruch_wird_erkannt():
     invalid = _valid()
     invalid["features"][2]["value"] = 7702500

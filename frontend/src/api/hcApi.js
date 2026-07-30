@@ -181,6 +181,8 @@ export const updateLvCost = (id, costId, data) =>
   api.patch(`${BASE}/lv-imports/${id}/costs/${costId}`, data).then(r => r.data);
 export const addLvCost = (id, data) => api.post(`${BASE}/lv-imports/${id}/costs`, data).then(r => r.data);
 export const deleteLvCost = (id, costId) => api.delete(`${BASE}/lv-imports/${id}/costs/${costId}`);
+export const updateLvCommercial = (id, data) =>
+  api.put(`${BASE}/lv-imports/${id}/commercial`, data).then(r => r.data);
 export const updateLvImport = (id, data) => api.patch(`${BASE}/lv-imports/${id}`, data).then(r => r.data);
 export const approveLvImport = (id) => api.post(`${BASE}/lv-imports/${id}/approve`).then(r => r.data);
 // Zentrale Auswahllisten (Punkt 5/20) — eine Quelle für alle kategorialen Werte.

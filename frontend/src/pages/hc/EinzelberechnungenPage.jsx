@@ -6,13 +6,14 @@ import {
 } from "lucide-react";
 import { api } from "../../api";
 import PageHeader from "../../components/ui/PageHeader";
+import { IconKompressor, IconSpeicher, IconWaermetauscher } from "../../components/ui/fachIcons";
 
 const ZAHL = (wert) => Number(String(wert).replace(",", "."));
 
 const RECHNER = [
   {
     id: "waermetauscher",
-    icon: Waves,
+    icon: IconWaermetauscher,
     titel: "Wärmetauscher",
     kurz: "Benötigte Tauscherfläche aus Leistung, U-Wert und logarithmischer Temperaturdifferenz.",
     quelle: "Wärmetauscherauslegung.xlsx",
@@ -25,7 +26,7 @@ const RECHNER = [
   },
   {
     id: "speicher_wp",
-    icon: BatteryCharging,
+    icon: IconSpeicher,
     titel: "Technischer Speicher",
     kurz: "Wasservolumen für eine definierte Überbrückungszeit der Wärmepumpe.",
     quelle: "TS_Auslegung.xlsx · Speicher_Auslegung.xlsx",
@@ -58,7 +59,7 @@ const RECHNER = [
   },
   {
     id: "waermepumpe",
-    icon: ThermometerSun,
+    icon: IconKompressor,
     titel: "WP-Leistungen",
     kurz: "Heiz-, Quellen- und elektrische Leistung über den COP umrechnen.",
     quelle: "Heiz_Kälteleistung.xslx.xlsx",

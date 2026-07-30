@@ -29,10 +29,10 @@ function NavItem({ to, label, icon: Icon, onNavigate }) {
       to={to}
       onClick={onNavigate}
       className={({ isActive }) =>
-        "flex items-center gap-3 rounded-sm border-l-2 px-3 py-2 text-sm font-medium transition " +
+        "flex items-center gap-3 rounded-lg border px-3 py-2.5 text-sm font-medium transition " +
         (isActive
-          ? "border-brand-500 bg-slate-800 text-white"
-          : "border-transparent text-slate-400 hover:bg-slate-900 hover:text-white")
+          ? "border-brand-200 bg-white text-brand-800 shadow-sm"
+          : "border-transparent text-slate-600 hover:border-brand-200 hover:bg-white/70 hover:text-ink")
       }
     >
       {Icon ? <Icon className="size-[18px] shrink-0" strokeWidth={2} /> : <span className="size-[18px]" />}
@@ -46,10 +46,10 @@ function SidebarContent({ user, onLogout, onNavigate }) {
   return (
     <div className="flex h-full flex-col">
       {/* Marke */}
-      <div className="flex items-center gap-3 border-b border-slate-800 px-5 py-[18px]">
-        <img src={logo} alt="SIREGO" className="h-8 w-auto object-contain brightness-0 invert" draggable="false" />
+      <div className="flex items-center gap-3 border-b border-brand-100 px-5 py-[18px]">
+        <img src={logo} alt="SIREGO" className="h-8 w-auto object-contain" draggable="false" />
         <div className="leading-tight">
-          <div className="text-sm font-bold text-white">Heizungscockpit</div>
+          <div className="text-sm font-bold text-ink">Heizungscockpit</div>
           <div className="text-[11px] text-slate-500">SIREGO GmbH</div>
         </div>
       </div>
@@ -61,14 +61,14 @@ function SidebarContent({ user, onLogout, onNavigate }) {
         ))}
 
         <div className="pt-5">
-          <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">Rechner</div>
+          <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Rechner</div>
           {RECHNER.map((i) => (
             <NavItem key={i.to} {...i} onNavigate={onNavigate} />
           ))}
         </div>
 
         <div className="pt-5">
-          <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">Verwaltung</div>
+          <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Verwaltung</div>
           {/* Baupreisindex für ALLE Nutzer: jede Firma pflegt ihre eigenen Indexwerte */}
           <NavItem to="/admin/baupreisindex" label="Baupreisindex" icon={TrendingUp} onNavigate={onNavigate} />
           {(user?.role === "admin" || user?.firma_role === "admin") && (
@@ -81,19 +81,19 @@ function SidebarContent({ user, onLogout, onNavigate }) {
       </nav>
 
       {/* Benutzer + Abmelden */}
-      <div className="border-t border-slate-800 p-3">
-        <NavLink to="/konto" onClick={onNavigate} className="flex items-center gap-3 rounded-sm px-2 py-2 transition hover:bg-slate-900">
-          <div className="flex size-9 items-center justify-center rounded-sm border border-slate-700 bg-slate-800 text-sm font-bold text-slate-200">
+      <div className="border-t border-brand-100 p-3">
+        <NavLink to="/konto" onClick={onNavigate} className="flex items-center gap-3 rounded-lg px-2 py-2 transition hover:bg-white/70">
+          <div className="flex size-9 items-center justify-center rounded-lg border border-brand-200 bg-white text-sm font-bold text-brand-700">
             {initial}
           </div>
           <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-medium text-slate-200">{user?.name || "Angemeldet"}</div>
-            <div className="truncate text-xs text-slate-500">{user?.email}</div>
+            <div className="truncate text-sm font-medium text-ink">{user?.name || "Angemeldet"}</div>
+            <div className="truncate text-xs text-slate-400">{user?.email}</div>
           </div>
         </NavLink>
         <button
           onClick={onLogout}
-          className="mt-1 flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm font-medium text-slate-500 transition hover:bg-slate-900 hover:text-slate-200"
+          className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-500 transition hover:bg-white/70 hover:text-ink"
         >
           <LogOut className="size-4" /> Abmelden
         </button>
@@ -111,24 +111,24 @@ export default function AppLayout() {
   return (
     <div className="min-h-screen bg-slate-100">
       {/* Desktop-Sidebar */}
-      <aside className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:z-40 lg:block lg:w-60 lg:border-r lg:border-slate-800 lg:bg-slate-950">
+      <aside className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:z-40 lg:block lg:w-60 lg:border-r lg:border-brand-100 lg:bg-brand-50">
         <SidebarContent user={user} onLogout={doLogout} />
       </aside>
 
       {/* Handy-Kopf */}
-      <div className="sticky top-0 z-30 flex items-center gap-3 border-b border-slate-800 bg-slate-950 px-4 py-3 lg:hidden">
-        <button onClick={() => setOpen(true)} className="rounded-sm border border-slate-700 p-2 text-slate-200">
+      <div className="sticky top-0 z-30 flex items-center gap-3 border-b border-slate-200 bg-white px-4 py-3 lg:hidden">
+        <button onClick={() => setOpen(true)} className="rounded-lg border border-slate-300 p-2 text-slate-700">
           <Menu className="size-5" />
         </button>
-        <span className="text-sm font-bold text-white">Heizungscockpit</span>
+        <span className="text-sm font-bold text-ink">Heizungscockpit</span>
       </div>
 
       {/* Handy-Schublade */}
       {open && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 bg-slate-900/40" onClick={() => setOpen(false)} />
-          <div className="absolute inset-y-0 left-0 w-64 bg-slate-950 shadow-xl">
-            <button onClick={() => setOpen(false)} className="absolute right-3 top-3 rounded-sm p-1.5 text-slate-500 hover:bg-slate-900 hover:text-white">
+          <div className="absolute inset-y-0 left-0 w-64 bg-brand-50 shadow-xl">
+            <button onClick={() => setOpen(false)} className="absolute right-3 top-3 rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-ink">
               <X className="size-5" />
             </button>
             <SidebarContent user={user} onLogout={doLogout} onNavigate={() => setOpen(false)} />

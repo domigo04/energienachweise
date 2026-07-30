@@ -18,6 +18,11 @@ class FakeResponses:
 
 def _valid():
     return {
+        "project_data": {
+            "project_name": "MFH Test", "project_number": "23033",
+            "location": "Rorschacherberg", "contractor": "Unternehmer AG",
+            "offer_date": "11.07.2023",
+        },
         "features": [
             {
                 "key": "borehole_count", "value": 6, "confidence": 0.99,
@@ -84,6 +89,7 @@ def test_visuelle_werte_ueberschreiben_falschen_pdf_text():
     assert features["borehole_length_each_m"]["value"] == 150
     assert features["borehole_total_m"]["value"] == 900
     assert metrics["visual_review_costs_applied"] == 2
+    assert metrics["project_data"]["project_number"] == "23033"
     assert sum(c["detected_amount"] for c in costs if not c["is_group_total"]) == 3817
 
 

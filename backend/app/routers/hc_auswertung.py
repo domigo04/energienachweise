@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
+from app import fachwerte
 from app.calculations.kostenschaetzung import netto_aus_brutto, quantile
 from app.data.bkp_positionen import BKP_GRUPPEN, BKP_POSITIONEN, TREIBER_LABEL, treiber_fuer_bkp
 from app.database import get_db
@@ -126,7 +127,8 @@ def _summary(r: RefProjekt, lv_import: LvImport | None = None) -> dict:
     return {
         "id": r.id, "name": r.name, "projektart": r.projektart, "gebaeudetyp": r.gebaeudetyp,
         "anlagenkonfiguration": r.anlagenkonfiguration or "monovalent",
-        "waermeerzeuger": r.waermeerzeuger or [], "waermeabgabe": r.waermeabgabe or [],
+        "waermeerzeuger": fachwerte.normalize_list("generator_types", r.waermeerzeuger),
+        "waermeabgabe": r.waermeabgabe or [],
         "ebf_m2": r.ebf_m2, "heizleistung_kw": r.heizleistung_kw, "datum": r.datum,
         **bn,
         "summe_kosten": bn["netto_chf"],  # Rückwärtskompatibel: massgebend ist jetzt Netto
@@ -161,7 +163,7 @@ def _apply(r: RefProjekt, body: RefProjektIn, user: User):
     r.ausbauumfang = body.ausbauumfang
     r.zertifizierung = body.zertifizierung
     r.anlagenkonfiguration = body.anlagenkonfiguration
-    r.waermeerzeuger = body.waermeerzeuger
+    r.waermeerzeuger = fachwerte.normalize_list("generator_types", body.waermeerzeuger)
     r.waermeabgabe = body.waermeabgabe
     r.ebf_m2 = body.ebf_m2
     r.bohrmeter = body.bohrmeter
@@ -386,7 +388,10 @@ async def import_csv(file: UploadFile = File(...), user: User = Depends(get_curr
                 ausbauumfang=(row.get("ausbauumfang") or "").strip() or None,
                 zertifizierung=(row.get("zertifizierung") or "").strip() or None,
                 anlagenkonfiguration=(row.get("anlagenkonfiguration") or "").strip() or None,
-                waermeerzeuger=[x.strip() for x in (row.get("waermeerzeuger") or "").split(";") if x.strip()],
+                waermeerzeuger=fachwerte.normalize_list(
+                    "generator_types",
+                    [x.strip() for x in (row.get("waermeerzeuger") or "").split(";") if x.strip()],
+                ),
                 waermeabgabe=[x.strip() for x in (row.get("waermeabgabe") or "").split(";") if x.strip()],
                 ebf_m2=_num(row.get("ebf_m2")), bohrmeter=_num(row.get("bohrmeter")),
                 heizleistung_kw=_num(row.get("heizleistung_kw")), anzahl_einheiten=_pint(row.get("anzahl_einheiten")),

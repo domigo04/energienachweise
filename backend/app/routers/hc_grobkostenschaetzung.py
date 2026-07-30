@@ -207,17 +207,17 @@ def _dokumentiere_manuelle_werte(inputs: dict, bisherige_inputs: dict, user: Use
 
 def _wp_typ_von(waermeerzeuger: list) -> Optional[str]:
     erzeuger = set(waermeerzeuger or [])
-    if "Erdsonden-WP" in erzeuger:
+    if erzeuger & {"Erdsonden-WP", "ews_wp"}:
         return "sole"
-    if "Wasser/Wasser-WP" in erzeuger:
+    if erzeuger & {"Wasser/Wasser-WP", "wasser_wp"}:
         return "wasser"
-    if "Luft/Wasser-WP" in erzeuger:
+    if erzeuger & {"Luft/Wasser-WP", "lwwp"}:
         return "luft"
     return None  # Gas/Öl/Fernwärme/… — fällt beim Wärmepumpen-Hard-Filter raus
 
 
 def _hat_erdsonden(waermeerzeuger: list) -> bool:
-    return any("erdsonde" in (e or "").lower() for e in (waermeerzeuger or []))
+    return any(e == "ews_wp" or "erdsonde" in (e or "").lower() for e in (waermeerzeuger or []))
 
 
 _FLAECHIG = {"FBH", "TABS", "Wandheizung", "Deckenstrahlplatten"}

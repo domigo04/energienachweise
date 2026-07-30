@@ -35,10 +35,14 @@ oder überlagerter PDF-Text ist nur ein
 Hinweis; wenn Text und Seitenbild widersprechen, gewinnt der sichtbare Wert.
 
 Ermittle nur grobe Kennwerte, bepreiste Kostenpositionen und kommerzielle
-Konditionen. Bei den technischen Kennwerten sind besonders wichtig:
+Konditionen. Lies zusätzlich den sichtbaren Projektkopf: Projektname,
+Projektnummer, Ort, Unternehmer und Offertdatum. Fehlende Kopfangaben bleiben
+null. Bei den technischen Kennwerten sind besonders wichtig:
 Wärmeerzeugertyp und Heizleistung in kW; Anzahl, Länge je Sonde und
 Gesamtbohrmeter der Erdsonden; Rohrmeter total ohne Fussbodenheizungsrohre;
 Anzahl technische Pufferspeicher, Pumpen und Wärmemessungen/Wärmezähler.
+Prüfe jeden im Schema erlaubten technischen Schlüssel; wenn der sichtbare
+Nachweis fehlt, gib dafür null zurück statt den Schlüssel still auszulassen.
 Für `generator_type` sind nur diese Codes zulässig: `ews_wp` für
 Sole/Wasser- oder Erdsonden-WP, `lwwp` für Luft/Wasser-WP, `wasser_wp` nur für
 Grundwasser/Wasser-Wasser-WP, ferner `co2_wp`, `fernwaerme`, `holz`, `elektro`
@@ -66,7 +70,7 @@ _TECHNICAL_PAGE_TERMS = {
         "sondenlange", "lange sonde",
     ),
     "pipe": (
-        "rohrmeter", "laufmeter", "rohrleitung", "rohrleitungen", "lfm",
+        "243.1 rohrleitungen", "rohrmeter", "laufmeter", "rohrleitung", "rohrleitungen", "lfm",
     ),
     "pumps": (
         "pumpe", "pumpen", "umwalzpumpe", "heizkreispumpe", "ladepumpe",
@@ -97,9 +101,25 @@ _COMMERCIAL_PAGE_TERMS = (
 )
 
 _NULLABLE_NUMBER = {"anyOf": [{"type": "number"}, {"type": "null"}]}
+_NULLABLE_STRING = {"anyOf": [{"type": "string"}, {"type": "null"}]}
 RESPONSE_SCHEMA = {
     "type": "object",
     "properties": {
+        "project_data": {
+            "type": "object",
+            "properties": {
+                "project_name": _NULLABLE_STRING,
+                "project_number": _NULLABLE_STRING,
+                "location": _NULLABLE_STRING,
+                "contractor": _NULLABLE_STRING,
+                "offer_date": _NULLABLE_STRING,
+            },
+            "required": [
+                "project_name", "project_number", "location", "contractor",
+                "offer_date",
+            ],
+            "additionalProperties": False,
+        },
         "features": {
             "type": "array",
             "items": {
@@ -192,7 +212,7 @@ RESPONSE_SCHEMA = {
         },
     },
     "required": [
-        "features", "costs", "group_totals", "trade_total", "conditions",
+        "project_data", "features", "costs", "group_totals", "trade_total", "conditions",
         "vat_rate", "stated_subtotal_excl_vat", "stated_vat_amount",
         "stated_total_incl_vat", "warnings",
     ],
@@ -621,6 +641,14 @@ def apply_result(features: dict, result: dict) -> tuple[list[dict], dict]:
             "source": "visual_ai_pdf",
         })
     return rows, {
+        "project_data": {
+            key: (str(value).strip()[:200] if value not in (None, "") else None)
+            for key, value in (result.get("project_data") or {}).items()
+            if key in {
+                "project_name", "project_number", "location", "contractor",
+                "offer_date",
+            }
+        },
         "visual_review_features_applied": applied,
         "visual_review_costs_applied": len(result.get("costs") or []),
         "visual_review_trade_total": result.get("trade_total"),

@@ -9,7 +9,7 @@ import {
 } from "../../api/hcApi";
 import PageHeader from "../../components/ui/PageHeader";
 import GewerkLeiste from "../../components/ui/GewerkLeiste";
-import { GEBAEUDETYPEN, PROJEKTARTEN, WAERMEABGABE, WAERMEERZEUGER } from "../../data/kv";
+import { GEBAEUDETYPEN, PROJEKTARTEN, WAERMEABGABE, WAERMEERZEUGER, waermeerzeugerLabel } from "../../data/kv";
 import { LEER, chf, zahl } from "../../lib/format";
 
 // Kennwert = Netto pro m² EBF. Die Zahl, mit der Referenzen verglichen werden;
@@ -31,7 +31,7 @@ const SPALTEN = [
   { key: "name", titel: "Name", breit: true, wert: (r) => r.name || "" },
   { key: "projektart", titel: "Projektart", wert: (r) => r.projektart || "" },
   { key: "gebaeudetyp", titel: "Nutzung", wert: (r) => r.gebaeudetyp || "" },
-  { key: "waermeerzeuger", titel: "Wärmeerzeuger", wert: (r) => (r.waermeerzeuger || []).join(", ") },
+  { key: "waermeerzeuger", titel: "Wärmeerzeuger", wert: (r) => (r.waermeerzeuger || []).map(waermeerzeugerLabel).join(", ") },
   { key: "ebf_m2", titel: "EBF m²", wert: (r) => r.ebf_m2, num: true },
   { key: "heizleistung_kw", titel: "kW", wert: (r) => r.heizleistung_kw, num: true },
   { key: "summe_kosten", titel: "Netto CHF", wert: (r) => r.summe_kosten, num: true },
@@ -238,7 +238,7 @@ export default function AuswertungList() {
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <span className="mr-1 w-24 shrink-0 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Erzeuger</span>
               {WAERMEERZEUGER.map((e) => (
-                <ChipToggle key={e} label={e} aktiv={fErzeuger.has(e)} onClick={() => toggleFilter(setFErzeuger)(e)} />
+                <ChipToggle key={e.value} label={e.label} aktiv={fErzeuger.has(e.value)} onClick={() => toggleFilter(setFErzeuger)(e.value)} />
               ))}
             </div>
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -340,7 +340,7 @@ export default function AuswertungList() {
                     <td className="whitespace-nowrap py-2 pr-3 text-slate-500">{r.projektart || LEER}</td>
                     <td className="whitespace-nowrap py-2 pr-3 text-slate-500">{r.gebaeudetyp || LEER}</td>
                     <td className="whitespace-nowrap py-2 pr-3 text-slate-500">
-                      {(r.waermeerzeuger || []).join(", ") || LEER}
+                      {(r.waermeerzeuger || []).map(waermeerzeugerLabel).join(", ") || LEER}
                     </td>
                     <td className="py-2 pr-3 text-right tabular-nums text-slate-600">{zahl(r.ebf_m2)}</td>
                     <td className="py-2 pr-3 text-right tabular-nums text-slate-600">{zahl(r.heizleistung_kw, 1)}</td>

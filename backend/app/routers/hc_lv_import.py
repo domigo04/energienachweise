@@ -241,6 +241,15 @@ async def upload_lv(
                 pipeline.pages, max_pages=2,
             )
         )
+        # Der Projektkopf wird im selben sparsamen Visual-Review-Aufruf geprüft.
+        # Kein zusätzlicher API-Call; höchstens die erste Deckblattseite kommt
+        # zum bereits kleinen Seitenpaket hinzu.
+        priority_review_pages.update(
+            p["page"] for p in pipeline.grunddaten_pages[:1] if p.get("page")
+        )
+        technical_review_pages = visual_review.select_technical_review_pages(
+            pipeline.technik_pages, features,
+        )
         review_pages = set(priority_review_pages)
         review_pages.update(
             (features.get(key) or {}).get("source_page")
@@ -252,11 +261,7 @@ async def upload_lv(
         # gelangten deshalb nie zur visuellen KI-Prüfung. Aus den bereits
         # geparsten Technikseiten werden dafür wenige starke Stichworttreffer
         # ergänzt; das PDF wird nicht nochmals ausgelesen.
-        review_pages.update(
-            visual_review.select_technical_review_pages(
-                pipeline.technik_pages, features,
-            )
-        )
+        review_pages.update(technical_review_pages)
         for check in review["deterministic_checks"]:
             if check.get("severity") != "warning":
                 continue
@@ -274,7 +279,9 @@ async def upload_lv(
         prioritized = sorted(priority_review_pages)
         review_pages = (
             prioritized
-            + [page for page in sorted(review_pages) if page not in priority_review_pages]
+            + [page for page in technical_review_pages if page not in priority_review_pages]
+            + [page for page in sorted(review_pages)
+               if page not in priority_review_pages and page not in technical_review_pages]
         )[:8]
         budget = ImportLlmBudget.from_env()
         visual = (
@@ -315,6 +322,16 @@ async def upload_lv(
             visual_costs, visual_apply = visual_review.apply_result(
                 features, visual["result"],
             )
+            visual_project = visual_apply.get("project_data") or {}
+            for field, attr in (
+                ("project_name", "projekt_name"),
+                ("project_number", "projekt_nummer"),
+                ("location", "ort"),
+                ("contractor", "unternehmer"),
+                ("offer_date", "offert_datum"),
+            ):
+                if visual_project.get(field):
+                    setattr(imp, attr, visual_project[field])
             # Ein fehlerfreier Parser bleibt Kostenquelle. KI-Kosten ersetzen ihn
             # nur, wenn Positionen/Summen fehlen oder widersprüchlich sind.
             if summary_invalid and visual["success"] and visual_costs:

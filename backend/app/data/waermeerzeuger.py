@@ -9,6 +9,14 @@ import re
 
 
 _ERZEUGER_KLASSEN = {
+    "ews_wp": "sole_wp",
+    "lwwp": "luft_wp",
+    "wasser_wp": "wasser_wp",
+    "fernwaerme": "fernwaerme",
+    "gas": "gas",
+    "oel": "oel",
+    "holz": "holz",
+    "solarthermie": "solarthermie",
     "Erdsonden-WP": "sole_wp",
     "Luft/Wasser-WP": "luft_wp",
     "Wasser/Wasser-WP": "wasser_wp",

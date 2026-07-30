@@ -1,8 +1,12 @@
 // Mehrfach-Auswahl als Pills (Häkchen-System) — für Wärmeerzeuger/-abgabe.
 export default function CheckboxGruppe({ label, options, value = [], onChange }) {
   const toggle = (opt) => {
+    const key = typeof opt === "string" ? opt : opt.value;
+    const aliases = typeof opt === "string" ? [] : (opt.aliases || []);
     const set = new Set(value);
-    set.has(opt) ? set.delete(opt) : set.add(opt);
+    const active = set.has(key) || aliases.some((alias) => set.has(alias));
+    aliases.forEach((alias) => set.delete(alias));
+    active ? set.delete(key) : set.add(key);
     onChange([...set]);
   };
   return (
@@ -10,11 +14,14 @@ export default function CheckboxGruppe({ label, options, value = [], onChange })
       {label && <label className="label">{label}</label>}
       <div className="flex flex-wrap gap-2">
         {options.map((opt) => {
-          const on = value.includes(opt);
+          const key = typeof opt === "string" ? opt : opt.value;
+          const text = typeof opt === "string" ? opt : opt.label;
+          const on = value.includes(key)
+            || (typeof opt !== "string" && (opt.aliases || []).some((alias) => value.includes(alias)));
           return (
             <button
               type="button"
-              key={opt}
+              key={key}
               onClick={() => toggle(opt)}
               className={
                 "rounded-lg border px-3 py-1.5 text-sm transition " +
@@ -23,7 +30,7 @@ export default function CheckboxGruppe({ label, options, value = [], onChange })
                   : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50")
               }
             >
-              {on ? "✓ " : ""}{opt}
+              {on ? "✓ " : ""}{text}
             </button>
           );
         })}

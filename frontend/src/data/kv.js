@@ -1,15 +1,34 @@
 // Gemeinsame Auswahllisten fürs KV-Tool (Auswertung + Kostenschätzung).
+import { GENERATOR_TYPES, GENERATOR_TYPE_LABELS } from "../components/hc/nodes/generatorTypes";
 export const PROJEKTARTEN = ["Neubau", "Umbau", "Sanierung", "Ersatz Wärmeerzeuger", "Aufstockung", "Mischprojekt"];
 export const GEBAEUDETYPEN = ["MFH", "EFH", "Büro", "Gewerbe", "Schule", "Hotel", "Industrie", "Restaurant", "Schwimmhalle", "Spital", "Werkstatt"];
 export const AUSBAUUMFAENGE = ["Vollausbau", "Grundausbau", "Mieterausbau", "nur Erzeugung", "nur Verteilung"];
 export const ZERTIFIZIERUNGEN = ["Gesetz", "Minergie", "Minergie-P", "Minergie-Eco", "SNBS", "LEED"];
 
-// Mehrfach-Auswahl (Häkchen)
-export const WAERMEERZEUGER = ["Erdsonden-WP", "Luft/Wasser-WP", "Wasser/Wasser-WP", "Fernwärme", "Gas", "Öl", "Pellets/Holz", "Solarthermie"];
+// Mehrfach-Auswahl mit denselben stabilen Codes wie LV-Import und Backend.
+const HISTORISCHE_ERZEUGER = [
+  { value: "gas", label: "Gas", aliases: ["Gas"] },
+  { value: "oel", label: "Öl", aliases: ["Öl"] },
+  { value: "solarthermie", label: "Solarthermie", aliases: ["Solarthermie"] },
+];
+export const WAERMEERZEUGER = GENERATOR_TYPES
+  .filter((item) => item.value !== "hybrid")
+  .map((item) => ({
+    value: item.value,
+    label: item.label,
+    aliases: {
+      ews_wp: ["Erdsonden-WP"], lwwp: ["Luft/Wasser-WP"],
+      wasser_wp: ["Wasser/Wasser-WP"], fernwaerme: ["Fernwärme"],
+      holz: ["Pellets/Holz"], solarthermie: ["Solarthermie"],
+    }[item.value] || [],
+  })).concat(HISTORISCHE_ERZEUGER);
+export const waermeerzeugerLabel = (code) => GENERATOR_TYPE_LABELS[code]
+  || HISTORISCHE_ERZEUGER.find((item) => item.value === code)?.label
+  || code;
 export const WAERMEABGABE = ["FBH", "Heizkörper", "TABS", "Deckenstrahlplatten", "Lufterhitzer", "Wandheizung", "Konvektoren"];
 
 // Bohrmeter nur relevant, wenn ein Erdsonden-Kreislauf gewählt ist.
-export const hasErdsonde = (arr) => (arr || []).some((e) => e.toLowerCase().includes("erdsonde"));
+export const hasErdsonde = (arr) => (arr || []).some((e) => e === "ews_wp" || e.toLowerCase().includes("erdsonde"));
 
 // Anlagenkonfiguration — ein sehr starker Faktor für die Ähnlichkeit (siehe
 // calculations/kostenschaetzung.py). Ein monovalentes Referenzprojekt darf für

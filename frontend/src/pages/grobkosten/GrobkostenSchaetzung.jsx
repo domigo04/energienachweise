@@ -23,7 +23,7 @@ import { chf, gruppeInfo, num, NUTZUNGEN, PROJEKTARTEN } from "../../data/gk";
 
 const LEER = {
   ebf_m2: "", leistung_kw: "", anzahl_ne: "", nutzung: "MFH", projektart: "Neubau", zertifizierung: "",
-  waermeerzeuger: ["Erdsonden-WP"], waermeabgabe: ["FBH"],
+  waermeerzeuger: ["ews_wp"], waermeabgabe: ["FBH"],
   bww_bei_heizung: false, baupreisindex_beruecksichtigen: false,
   weiterbetrieb_umbau: false, etappierung: false,
   rohrmeter: "", bohrmeter: "", hk_anzahl: "",

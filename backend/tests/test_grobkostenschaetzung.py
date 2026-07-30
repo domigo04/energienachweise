@@ -251,6 +251,7 @@ def test_erzeuger_signatur_ist_reihenfolgeunabhaengig_und_eindeutig():
         ["Erdsonden-WP", "Gas"]
     )
     assert erzeuger_signatur_von(["Gas"]) != erzeuger_signatur_von(["Öl"])
+    assert erzeuger_signatur_von(["ews_wp"]) == erzeuger_signatur_von(["Erdsonden-WP"])
 
 
 def test_hard_filter_trennt_nicht_wp_erzeuger_trotz_wp_typ_none():
@@ -538,6 +539,8 @@ def test_adapter_wp_typ_und_abgabe_ableitung():
     assert _wp_typ_von(["Gas"]) is None
     assert _hat_erdsonden(["Erdsonden-WP"]) is True
     assert _hat_erdsonden(["Luft/Wasser-WP"]) is False
+    assert _wp_typ_von(["ews_wp"]) == "sole"
+    assert _hat_erdsonden(["ews_wp"]) is True
     assert _abgabe_dominant_von(["FBH", "Heizkörper"]) == "gemischt"
     assert _abgabe_dominant_von(["TABS"]) == "FBH"
 

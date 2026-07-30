@@ -33,8 +33,8 @@ const CONF_STYLE = {
 const CONF_LABEL = { high: "hohe Sicherheit", medium: "prüfen", low: "unsicher" };
 
 const STATUS_STYLE = {
-  approved: "bg-violet-100 text-violet-700", review: "bg-blue-100 text-blue-700",
-  extracted: "bg-amber-100 text-amber-800", uploaded: "bg-slate-100 text-slate-600",
+  approved: "bg-slate-100 text-slate-700", review: "bg-slate-100 text-slate-700",
+  extracted: "bg-slate-100 text-slate-700", uploaded: "bg-slate-100 text-slate-600",
   failed: "bg-red-100 text-red-700",
 };
 // Der Status ist im Backend ein englischer Enum-Wert; im UI steht immer Deutsch.
@@ -197,9 +197,8 @@ function ImportZusammenfassung({ report, imp }) {
     [`${report.commercial?.conditions?.length || 0} Konditionen erkannt`, true],
   ];
   return (
-    <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
-      <p className="text-xs font-bold text-slate-700">Import abgeschlossen</p>
-      <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-slate-500">
+    <div className="mb-5 max-w-5xl border-b border-slate-200 pb-3">
+      <ul className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-slate-500">
         {zeilen.map(([text, ok]) => (
           <li key={text} className={ok ? "" : "text-slate-400"}>· {text}</li>
         ))}
@@ -699,7 +698,7 @@ function ReviewAnsicht({ id }) {
               className={"flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left transition "
                 + (i === schritt ? "bg-slate-800 text-white" : "bg-white hover:bg-slate-50")}>
               <span className={"flex size-5 shrink-0 items-center justify-center rounded text-[11px] font-bold "
-                + (schrittFertig[i] ? "bg-green-600 text-white" : i === schritt ? "bg-white text-slate-800" : "bg-slate-100 text-slate-500")}>
+                + (schrittFertig[i] ? "bg-slate-600 text-white" : i === schritt ? "bg-white text-slate-800" : "bg-slate-100 text-slate-500")}>
                 {schrittFertig[i] ? <Check className="size-3" /> : i + 1}
               </span>
               <span className="truncate text-xs font-semibold">{s.titel}</span>
@@ -720,10 +719,6 @@ function ReviewAnsicht({ id }) {
       <section className="card max-w-5xl overflow-hidden">
         <div className="border-b border-slate-100 bg-slate-50/60 px-4 py-3 sm:px-5">
           <h2 className="text-sm font-bold text-slate-800">Projektinformationen</h2>
-          <p className="mt-0.5 text-[11px] text-slate-400">
-            Aus dem Deckblatt erkannte Angaben bitte prüfen. Vergleichsrelevante Merkmale
-            sind Auswahllisten — kein Freitext.
-          </p>
         </div>
         <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 sm:px-5 lg:grid-cols-3">
           {[
@@ -841,7 +836,7 @@ function ReviewAnsicht({ id }) {
                         />
                       )}
                       {f.unit && <span className="w-6 text-xs text-slate-400">{f.unit}</span>}
-                      <label className={`inline-flex items-center gap-1 text-[11px] font-semibold ${f.confirmed ? "text-green-600" : "text-slate-400"}`} title="Wert geprüft (bestätigt oder bewusst unbekannt)">
+                      <label className={`inline-flex items-center gap-1 text-[11px] font-semibold ${f.confirmed ? "text-slate-600" : "text-slate-400"}`} title="Wert geprüft (bestätigt oder bewusst unbekannt)">
                         <input type="checkbox" disabled={gesperrt} checked={!!f.confirmed}
                           onChange={(e) => setFeature(f, { confirmed: e.target.checked })} />
                         geprüft
@@ -849,10 +844,6 @@ function ReviewAnsicht({ id }) {
                       <Gespeichert an={gespeichert === `f${f.id}`} />
                     </div>
                     )}
-                    {/* P0 #1 — Fundstelle samt Herkunftsmarker zum Wert. */}
-                    <div className="sm:col-span-2">
-                      <Quelle feature={f} tag={M.tag} tagStyle={M.tagStyle} />
-                    </div>
                   </div>
                   );
                 })}
@@ -869,7 +860,7 @@ function ReviewAnsicht({ id }) {
 
       {/* Schritt 3 — Kosten je BKP-Gruppe mit Total und Summenprüfung (Punkt 23) */}
       {schritt === 2 && (
-      <div className="space-y-5">
+      <div className="max-w-5xl space-y-5">
         {kostenGruppen.map(({ gruppe, positionen, total }) => (
           <section key={gruppe} className="card overflow-hidden">
             <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/60 px-4 py-3 sm:px-5">

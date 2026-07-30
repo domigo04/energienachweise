@@ -195,7 +195,7 @@ def test_fehlende_technikwerte_waehlen_nur_passende_parserseiten():
     assert 3 not in pages_selected
 
 
-def test_bereits_sichere_technikwerte_werden_nicht_nochmals_ausgewaehlt():
+def test_starker_techniktreffer_wird_trotz_parserwert_visuell_geprueft():
     pages = [{"page": 8, "text": "Wärmepumpe Heizleistung 42 kW"}]
     features = {
         "generator_type": {"value": "waermepumpe", "confidence": "high"},
@@ -209,7 +209,9 @@ def test_bereits_sichere_technikwerte_werden_nicht_nochmals_ausgewaehlt():
         "pump_count": {"value": 2, "confidence": "high"},
         "heat_meter_count": {"value": 1, "confidence": "high"},
     }
-    assert visual_review.select_technical_review_pages(pages, features) == []
+    # Ein plausibler Textparserwert kann bei Formular-PDFs trotzdem aus einer
+    # überlagerten bzw. falschen Tabellenzelle stammen.
+    assert visual_review.select_technical_review_pages(pages, features) == [8]
 
 
 def test_pumpen_sind_im_strukturierten_visual_review_erlaubt():

@@ -19,7 +19,9 @@ from app.models.auth import User
 from app.models.lv_import import (
     LvImport, LvImportFeature, LvImportCost, LvImportCondition, LvImportStatus,
 )
-from app.models.kv import RefProjekt, RefKostenzeile, RefProjektFeature
+from app.models.kv import (
+    RefProjekt, RefKostenzeile, RefProjektFeature, RefProjektGewerk,
+)
 from app.lv_import.pipeline import LvPipeline
 from app.lv_import.feature_extract import extract_features
 from app.lv_import.cost_extract import cost_rows_from_positions
@@ -285,6 +287,7 @@ async def upload_lv(
                     ),
                     "trade_total": summary.get("trade_total"),
                     "checks": review["packet"]["checks"],
+                    "costs_valid": not summary_invalid,
                 },
                 require_costs=summary_invalid,
                 # Der zweite visuelle Call übertrug bisher dieselben hoch-
@@ -870,6 +873,22 @@ def approve_lv(import_id: int, user: User = Depends(get_current_user), db: Sessi
         setattr(ref, column, int(round(v)) if column == "anzahl_waermemessungen" else v)
     db.add(ref)
     db.flush()
+
+    # Rabatt und Skonto auch in die bestehende Referenzstruktur übernehmen.
+    # Die vollständige Konditionskette bleibt am verknüpften LvImport erhalten.
+    rabatt = skonto = 0.0
+    for condition in imp.conditions:
+        label = (condition.original_label or "").casefold()
+        if condition.kind != "percent" or condition.direction != "deduction":
+            continue
+        if "rabatt" in label:
+            rabatt = float(condition.rate_percent or 0)
+        elif "skonto" in label:
+            skonto = float(condition.rate_percent or 0)
+    ref.gewerke.append(RefProjektGewerk(
+        tenant_id=user.tenant_id, gewerk="heizung",
+        rabatt_pct=rabatt, skonto_pct=skonto,
+    ))
 
     # Kompletter normalisierter Fingerprint (ALLE Merkmale, gemeinsame Sprache).
     for f in imp.features:

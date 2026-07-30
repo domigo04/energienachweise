@@ -314,10 +314,15 @@ def _label_wert(rows, labels, *, einheit_meter: bool):
             # rechts vom Label. Für Stückzahlen ist keine Einheit verlangt
             # („Total Sonden   6").
             if row.get("spatial") and row.get("ausmass") is not None:
+                # Eine als Meter erkannte Tabellenzeile darf nie zur
+                # Sondenanzahl werden (überlagerte Formulare erzeugten sonst
+                # aus «Total Sonden m 6» fälschlich 65 Sonden).
+                if not einheit_meter and row.get("einheit") not in (None, "stk"):
+                    continue
                 wert = row["ausmass"]
             else:
                 wert = _erste_zahl_nach_label(low, labels)
-        if wert is not None:
+        if wert is not None and (not einheit_meter or 10 <= wert <= 1000):
             return wert, _fund(row, rows, i)
     return None, None
 
@@ -494,13 +499,19 @@ def pipe_lengths(rows) -> dict:
     for i, row in enumerate(rows):
         text = row.get("text") or ""
         low = text.lower()
-        if not any(t in low for t in PIPE_INCLUDE_TERMS):
+        section_low = (row.get("section_title") or "").lower()
+        if not any(t in low for t in PIPE_INCLUDE_TERMS) and \
+           not any(t in section_low for t in PIPE_INCLUDE_TERMS):
+            continue
+        if any(t in low for t in (
+            "herstellungslänge", "herstellungslaenge", "lieferlänge",
+            "lieferlaenge", "stangenlänge", "stangenlaenge",
+        )):
             continue
         meter, _idx = _menge_im_kontext(rows, i, _menge_meter)
         if meter is None:
             continue
         # Ausschluss über Positionstext ODER Abschnittstitel (Punkt 11).
-        section_low = (row.get("section_title") or "").lower()
         if any(t in low for t in PIPE_EXCLUDE_TERMS) or \
            any(t in section_low for t in PIPE_EXCLUDE_SECTION_TERMS):
             ausgeschlossen.append(text[:80])

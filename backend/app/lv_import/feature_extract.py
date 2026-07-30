@@ -87,11 +87,14 @@ def _count_feature(zeilen, family) -> Optional[dict]:
 
 
 def _generator_type(zeilen) -> Optional[dict]:
-    for seite, line in zeilen:
-        low = line.lower()
-        for code, hints in GENERATOR_TYPE_TERMS:
+    # Spezifische Quellenbegriffe haben Vorrang vor einer früheren generischen
+    # Erwähnung wie «Primärkreis WP».
+    for code, hints in GENERATOR_TYPE_TERMS:
+        for seite, line in zeilen:
+            low = line.lower()
             if any(h in low for h in hints):
-                return {"value": code, "confidence": MEDIUM, "source_page": seite, "source_text": line}
+                return {"value": code, "confidence": MEDIUM,
+                        "source_page": seite, "source_text": line}
     return None
 
 
@@ -285,6 +288,40 @@ def extract_features(pages, word_pages=None) -> dict:
             result["borehole_total_m"] = mtr
 
     _bauteilmengen_ergaenzen(pages, result)
+
+    # Überlagerte Formularwerte dürfen nicht als technisch plausible Mengen
+    # erscheinen. Solche Felder bleiben offen und gehen gezielt in die visuelle
+    # Prüfung, statt z.B. CHF 87'050 als Sondenanzahl zu speichern.
+    count = (result.get("borehole_count") or {}).get("value")
+    if count is not None and not 1 <= float(count) <= 200:
+        result["borehole_count"] = {
+            "value": None, "confidence": LOW,
+            "source_page": (result.get("borehole_count") or {}).get("source_page"),
+            "source_text": "Parserwert unplausibel; visuell prüfen",
+        }
+    each = (result.get("borehole_length_each_m") or {}).get("value")
+    if each is not None and not 10 <= float(each) <= 1000:
+        result["borehole_length_each_m"] = {
+            "value": None, "confidence": LOW,
+            "source_page": (result.get("borehole_length_each_m") or {}).get("source_page"),
+            "source_text": "Parserwert unplausibel; visuell prüfen",
+        }
+
+    # Warmwasser ist eine Ja/Nein-Angabe. Eine klare enthaltene BWW-Position
+    # reicht als konservativer positiver Nachweis; bei fehlender Evidenz bleibt
+    # das Feld bewusst offen.
+    if _fehlt(result, "domestic_hot_water_included"):
+        for seite, line in zeilen:
+            low = line.casefold()
+            if any(term in low for term in (
+                "brauchwarmwasserspeicher", "warmwasserbereitung",
+                "wassererwärmer", "wassererwaermer", "bww-speicher",
+            )):
+                result["domestic_hot_water_included"] = {
+                    "value": True, "confidence": MEDIUM,
+                    "source_page": seite, "source_text": line,
+                }
+                break
     return result
 
 

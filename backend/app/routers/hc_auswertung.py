@@ -8,6 +8,7 @@ CRUD für reale, abgeschlossene Projekte + ihre BKP-Kosten, plus:
 """
 import csv
 import io
+import json
 from collections import defaultdict
 from datetime import date
 from typing import List, Optional
@@ -23,6 +24,7 @@ from app.data.bkp_positionen import BKP_GRUPPEN, BKP_POSITIONEN, TREIBER_LABEL, 
 from app.database import get_db
 from app.models.auth import User
 from app.models.kv import RefKostenzeile, RefProjekt, RefProjektGewerk
+from app.models.lv_import import LvImport
 
 router = APIRouter(prefix="/api/v1/auswertung", tags=["KV – Auswertung (Referenzprojekte)"])
 
@@ -84,8 +86,43 @@ def _brutto_netto(r: RefProjekt) -> dict:
             "rabatt_pct": rabatt, "skonto_pct": skonto}
 
 
-def _summary(r: RefProjekt) -> dict:
+def _import_commercial(imp: LvImport | None) -> dict | None:
+    if not imp:
+        return None
+    try:
+        report = json.loads(imp.debug_json or "{}")
+    except (TypeError, ValueError):
+        report = {}
+    commercial = report.get("commercial") or {}
+    conditions = sorted(imp.conditions, key=lambda c: c.order_index)
+    if not commercial and not conditions:
+        return None
+    return {
+        "base_amount": commercial.get("base_amount") or report.get("trade_total"),
+        "conditions": [{
+            "label": c.original_label, "kind": c.kind,
+            "direction": c.direction, "rate_percent": c.rate_percent,
+            "amount": c.amount, "basis_amount": c.basis_amount,
+            "calculated_amount": c.calculated_amount,
+            "running_total": c.running_total, "order": c.order_index,
+        } for c in conditions],
+        "subtotal_excl_vat": commercial.get("subtotal_excl_vat"),
+        "vat_rate": commercial.get("vat_rate"),
+        "vat_amount": commercial.get("vat_amount"),
+        "total_incl_vat": commercial.get("total_incl_vat"),
+        "valid": commercial.get("valid"),
+        "issues": commercial.get("issues") or [],
+    }
+
+
+def _summary(r: RefProjekt, lv_import: LvImport | None = None) -> dict:
     bn = _brutto_netto(r)
+    imported = _import_commercial(lv_import)
+    if imported:
+        if imported.get("base_amount") is not None:
+            bn["brutto_chf"] = round(float(imported["base_amount"]))
+        if imported.get("total_incl_vat") is not None:
+            bn["netto_chf"] = round(float(imported["total_incl_vat"]))
     return {
         "id": r.id, "name": r.name, "projektart": r.projektart, "gebaeudetyp": r.gebaeudetyp,
         "anlagenkonfiguration": r.anlagenkonfiguration or "monovalent",
@@ -96,9 +133,9 @@ def _summary(r: RefProjekt) -> dict:
     }
 
 
-def _out(r: RefProjekt) -> dict:
+def _out(r: RefProjekt, lv_import: LvImport | None = None) -> dict:
     return {
-        **_summary(r),
+        **_summary(r, lv_import),
         "ausbauumfang": r.ausbauumfang, "zertifizierung": r.zertifizierung,
         "bww_bei_heizung": r.bww_bei_heizung,
         "weiterbetrieb_umbau": r.weiterbetrieb_umbau, "etappierung": r.etappierung,
@@ -113,6 +150,7 @@ def _out(r: RefProjekt) -> dict:
             {"id": z.id, "bkp_nr": z.bkp_nr, "bkp_name": z.bkp_name, "betrag_chf": z.betrag_chf}
             for z in r.kostenzeilen if z.gewerk == "heizung"
         ],
+        "lv_commercial": _import_commercial(lv_import),
     }
 
 
@@ -270,7 +308,15 @@ def list_refs(user: User = Depends(get_current_user), db: Session = Depends(get_
         db.query(RefProjekt).filter(RefProjekt.tenant_id == user.tenant_id)
         .order_by(RefProjekt.created_at.desc()).all()
     )
-    return [_summary(r) for r in refs]
+    imports = (
+        db.query(LvImport)
+        .filter(
+            LvImport.tenant_id == user.tenant_id,
+            LvImport.ref_projekt_id.in_([r.id for r in refs] or [-1]),
+        ).all()
+    )
+    by_ref = {imp.ref_projekt_id: imp for imp in imports}
+    return [_summary(r, by_ref.get(r.id)) for r in refs]
 
 
 @router.get("/katalog")
@@ -407,7 +453,10 @@ def get_ref(ref_id: int, user: User = Depends(get_current_user), db: Session = D
     r = db.query(RefProjekt).filter(RefProjekt.id == ref_id, RefProjekt.tenant_id == user.tenant_id).first()
     if not r:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Referenzprojekt nicht gefunden")
-    return _out(r)
+    imp = db.query(LvImport).filter(
+        LvImport.ref_projekt_id == r.id, LvImport.tenant_id == user.tenant_id,
+    ).first()
+    return _out(r, imp)
 
 
 @router.get("/{ref_id}/export.csv")

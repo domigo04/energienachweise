@@ -36,7 +36,7 @@ Hinweis; wenn Text und Seitenbild widersprechen, gewinnt der sichtbare Wert.
 
 Ermittle nur grobe Kennwerte, bepreiste Kostenpositionen und kommerzielle
 Konditionen. Bei den technischen Kennwerten sind besonders wichtig:
-Wärmeerzeugertyp, Anzahl und Heizleistung in kW; Anzahl, Länge je Sonde und
+Wärmeerzeugertyp und Heizleistung in kW; Anzahl, Länge je Sonde und
 Gesamtbohrmeter der Erdsonden; Rohrmeter total ohne Fussbodenheizungsrohre;
 Anzahl technische Pufferspeicher, Pumpen und Wärmemessungen/Wärmezähler.
 Für `generator_type` sind nur diese Codes zulässig: `ews_wp` für
@@ -81,10 +81,9 @@ _TECHNICAL_PAGE_TERMS = {
     ),
 }
 _TECHNICAL_PAGE_FEATURES = {
-    "generator": ("generator_type", "generator_count", "generator_power_kw"),
+    "generator": ("generator_type", "generator_power_kw"),
     "boreholes": (
-        "boreholes_present", "borehole_count", "borehole_length_each_m",
-        "borehole_total_m",
+        "borehole_count", "borehole_length_each_m", "borehole_total_m",
     ),
     "pipe": ("pipe_length_m",),
     "pumps": ("pump_count",),
@@ -261,11 +260,9 @@ def select_technical_review_pages(
     selected: list[int] = []
     ranked_by_group: dict[str, list[tuple[int, int]]] = {}
     for group, keys in _TECHNICAL_PAGE_FEATURES.items():
-        needs_review = any(
-            (features.get(key) or {}).get("value") in (None, "")
-            or (features.get(key) or {}).get("confidence") == "low"
-            for key in keys
-        )
+        # Je Fachgruppe die stärkste Seite prüfen. Ein scheinbar plausibler
+        # Parserwert kann aus Standardtext statt aus dem Ausmass stammen.
+        needs_review = True
         if not needs_review:
             continue
         ranked: list[tuple[int, int]] = []
@@ -441,6 +438,12 @@ def _call(
         )
         task += f" Verwende bei source_page die Originalseitennummer. Zuordnung: {page_map}."
     if parser_context:
+        if parser_context.get("costs_valid"):
+            task += (
+                "\nDie Kostenpositionen und BKP-Summen sind bereits "
+                "deterministisch validiert. Gib costs und group_totals leer "
+                "zurück und prüfe nur Technik sowie Konditionen/Endsumme."
+            )
         task += (
             "\nKompaktes Parserresultat zum Prüfen:\n"
             + json.dumps(parser_context, ensure_ascii=False, separators=(",", ":"))

@@ -62,12 +62,10 @@ FEATURE_KEYS = list(FEATURE_DEFS.keys())
 # Im LV-Review werden bewusst nur grobe, kostenrelevante Kennwerte gespeichert.
 # Die übrigen Definitionen bleiben für bestehende Referenzprojekte kompatibel.
 LV_IMPORT_FEATURE_KEYS = [
-    "generator_type", "generator_count", "generator_power_kw",
-    "boreholes_present", "borehole_count", "borehole_length_each_m",
-    "borehole_total_m", "pipe_length_m", "floor_heating_pipe_m",
-    "floor_heating_area_m2", "pump_count", "heat_meter_count", "buffer_count",
-    "temporary_heating_present", "geocooling_present",
-    "domestic_hot_water_included",
+    "generator_type", "generator_power_kw",
+    "borehole_count", "borehole_length_each_m",
+    "borehole_total_m", "pipe_length_m", "pump_count", "heat_meter_count",
+    "buffer_count", "domestic_hot_water_included",
 ]
 
 # LV-Feature-Schlüssel → ProjectContext-Parameterschlüssel (project_context.PARAMETER).

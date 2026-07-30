@@ -57,6 +57,14 @@ def test_generische_waermepumpe_wird_nicht_als_wasser_wp_erfunden():
     assert f["generator_type"]["value"] == "sonstige"
 
 
+def test_spezifischer_erzeugertyp_gewinnt_gegen_fruehe_generische_wp_erwaehnung():
+    f = extract_features(_pages(
+        "Expansion Primärkreis WP\n"
+        "242.1 Wärmepumpe Sole/Wasser"
+    ))
+    assert f["generator_type"]["value"] == "ews_wp"
+
+
 def test_speichervolumen():
     f = extract_features(_pages("Pufferspeicher 1'500 Liter"))
     assert f["storage_volume_l"]["value"] == 1500
@@ -123,6 +131,16 @@ def test_pipe_length_extrahiert_oder_manuell():
     assert f["pipe_length_m"]["confidence"] in ("low", "medium")
     # Ohne Angabe: nicht geraten → bleibt manuell zu erfassen.
     assert "pipe_length_m" not in extract_features(_pages("Nur Text ohne Rohre"))
+
+
+def test_rohrmeter_aus_abschnitt_ohne_standard_lieferlaenge():
+    f = extract_features(_pages(
+        "243.1 Rohrleitungen\n"
+        "Gasrohre in Herstellungslängen von 6 m\n"
+        "DN 15 m 12\n"
+        "DN 20 m 18"
+    ))
+    assert f["pipe_length_m"]["value"] == 30
 
 
 # ── Block C #10/#11 — Positionsblock-Parser + Bauteilmengen ─────────────────

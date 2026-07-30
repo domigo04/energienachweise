@@ -52,6 +52,7 @@ export default function AuswertungForm() {
   const [form, setForm] = useState(LEER);
   const [betraege, setBetraege] = useState({}); // { bkp_nr: "12345" }
   const [katalog, setKatalog] = useState({ positionen: [] });
+  const [lvCommercial, setLvCommercial] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -70,6 +71,7 @@ export default function AuswertungForm() {
     if (isEdit) {
       getRef(id)
         .then((r) => {
+          setLvCommercial(r.lv_commercial || null);
           setForm({
             name: r.name || "", projektart: r.projektart || "", gebaeudetyp: r.gebaeudetyp || "",
             ausbauumfang: r.ausbauumfang || "", zertifizierung: r.zertifizierung || "",
@@ -178,6 +180,42 @@ export default function AuswertungForm() {
                 <h2 className="font-semibold text-slate-800">Zusammenstellung Heizung</h2>
                 <InfoTip text={ERKL.brutto} />
               </div>
+              {lvCommercial ? (
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between border-b border-slate-200 pb-2">
+                    <strong>Brutto / LV-Summe</strong>
+                    <strong>CHF {chf(lvCommercial.base_amount)}</strong>
+                  </div>
+                  {(lvCommercial.conditions || []).map((condition, index) => (
+                    <div key={`${condition.label}-${index}`}>
+                      <div className="flex justify-between gap-3">
+                        <span className="min-w-0 text-slate-600">
+                          {condition.label}
+                          {condition.kind === "percent" && condition.rate_percent != null
+                            ? ` ${condition.rate_percent} %` : ""}
+                        </span>
+                        <span className="whitespace-nowrap font-medium">
+                          {condition.direction === "deduction" ? "−" : "+"} CHF {chf(Math.abs(condition.calculated_amount || 0))}
+                        </span>
+                      </div>
+                      {condition.running_total != null && (
+                        <div className="mt-1 flex justify-between border-t border-dotted border-slate-300 pt-1 text-xs font-semibold text-slate-500">
+                          <span>Zwischentotal {index + 1}</span>
+                          <span>CHF {chf(condition.running_total)}</span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  <div className="flex justify-between border-t border-slate-300 pt-2">
+                    <span>MWST {lvCommercial.vat_rate ?? 0} %</span>
+                    <span>CHF {chf(lvCommercial.vat_amount)}</span>
+                  </div>
+                  <div className="flex justify-between border-t-2 border-slate-800 pt-2 text-base">
+                    <strong>Netto inkl. MWST</strong>
+                    <strong className="text-brand-600">CHF {chf(lvCommercial.total_incl_vat)}</strong>
+                  </div>
+                </div>
+              ) : (
               <div className="grid grid-cols-2 gap-4">
                 <div><label className="label">Rabatt [%]</label>
                   <input type="number" step="0.1" className="input" value={form.rabatt_pct} onChange={(e) => set("rabatt_pct", e.target.value)} /></div>
@@ -188,6 +226,7 @@ export default function AuswertungForm() {
                 <div><div className="label">Netto (nach Rabatt/Skonto)</div>
                   <div className="mt-1 text-lg font-bold text-brand-600">{chf(netto)} CHF</div></div>
               </div>
+              )}
               <p className="mt-3 text-xs text-slate-400">Laufend gegen das Leistungsverzeichnis/Devis des Unternehmers prüfen — passt die Summe?</p>
             </div>
           </aside>

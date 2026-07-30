@@ -17,12 +17,12 @@ import { GENERATOR_TYPES, GENERATOR_TYPE_LABELS } from "../../components/hc/node
 const MULTI_FEATURES = {};
 
 const KATEGORIEN = [
-  { titel: "Wärmeerzeugung", keys: ["generator_type", "generator_count", "generator_power_kw"] },
-  { titel: "Erdsonden", keys: ["boreholes_present", "borehole_count", "borehole_length_each_m", "borehole_total_m"] },
+  { titel: "Wärmeerzeugung", keys: ["generator_type", "generator_power_kw"] },
+  { titel: "Erdsonden", keys: ["borehole_count", "borehole_length_each_m", "borehole_total_m"] },
   { titel: "Speicher", keys: ["buffer_count"] },
-  { titel: "Wärmeverteilung", keys: ["pipe_length_m", "pump_count", "floor_heating_pipe_m", "floor_heating_area_m2"] },
+  { titel: "Wärmeverteilung", keys: ["pipe_length_m", "pump_count"] },
   { titel: "Wärmemessung", keys: ["heat_meter_count"] },
-  { titel: "Anlagenumfang", keys: ["temporary_heating_present", "geocooling_present", "domestic_hot_water_included"] },
+  { titel: "Warmwasser", keys: ["domestic_hot_water_included"] },
 ];
 
 const CONF_STYLE = {
@@ -179,42 +179,24 @@ function ProcessingAnsicht({ schritt, vergangen }) {
 // Punkt 25 — Zusammenfassung nach der Verarbeitung.
 function ImportZusammenfassung({ report, imp, offen }) {
   if (!report || !Object.keys(report).length) return null;
-  const typen = report.page_types || {};
   const zeilen = [
     [`${report.page_count ?? imp.page_count} Seiten analysiert`, true],
-    [`${typen.lv || 0} LV-Seiten erkannt`, (typen.lv || 0) > 0],
-    [`${typen.cost_summary || 0} Kostenzusammenstellungs-Seiten erkannt`, (typen.cost_summary || 0) > 0],
-    [`${report.features_erkannt ?? 0} technische Werte erkannt`, (report.features_erkannt ?? 0) > 0],
     [`${report.kostenpositionen ?? 0} Kostenpositionen erkannt`, (report.kostenpositionen ?? 0) > 0],
     [`${report.commercial?.conditions?.length || 0} Konditionen erkannt`, true],
-    [`${(report.kostenpositionen ?? 0) - (report.kosten_ohne_zuordnung ?? 0)} davon dem Norm-LV zugeordnet`, true],
   ];
   return (
     <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
       <p className="text-xs font-bold text-slate-700">Import abgeschlossen</p>
-      <ul className="mt-1.5 grid gap-x-4 gap-y-0.5 text-[11px] text-slate-500 sm:grid-cols-2">
+      {offen > 0 && (
+        <div className="mt-2 flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-800">
+          <AlertTriangle className="size-4 shrink-0" />
+          Noch {offen} Angaben prüfen – orange markierte Zeilen bearbeiten.
+        </div>
+      )}
+      <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-slate-500">
         {zeilen.map(([text, ok]) => (
           <li key={text} className={ok ? "" : "text-slate-400"}>· {text}</li>
         ))}
-        {offen > 0 && (
-          <li className="font-semibold text-amber-600">· {offen} Angaben müssen geprüft werden</li>
-        )}
-        {report.visual_review_success ? (
-          <li className="font-semibold text-green-700">
-            · Visuelle KI-PDF-Auswertung bestanden
-            {`: ${report.visual_review_attempts || 1} Durchgang/Durchgänge, ${report.visual_review_features_applied || 0} Mengen, ${report.visual_review_costs_applied || 0} Preise`}
-          </li>
-        ) : report.visual_review_required ? (
-          <li className="font-semibold text-red-700">
-            · Noch nicht freigabebereit: visuelle PDF-Auswertung nicht bestanden
-          </li>
-        ) : report.visual_review_available ? (
-          <li className="font-semibold text-amber-700">· Visuelle KI-PDF-Auswertung bereit</li>
-        ) : (
-          <li className="text-amber-600">
-            · Visuelle KI-Prüfung nicht konfiguriert: {report.visual_review_reason || "API-Zugang fehlt"}
-          </li>
-        )}
       </ul>
       {(report.deterministic_checks || []).map(check => (
         <p key={check.code} className="mt-1 text-[11px] font-medium text-amber-700">
@@ -226,20 +208,6 @@ function ImportZusammenfassung({ report, imp, offen }) {
           Auswertung blockiert: {warning}
         </p>
       ))}
-      {(report.visual_review_warnings || []).map((warning, index) => (
-        <p key={`${warning}-${index}`} className="mt-1 text-[11px] font-medium text-amber-700">
-          Visuelle KI-Prüfung: {warning}
-        </p>
-      ))}
-      {report.cost_source && (
-        <p className="mt-1.5 text-[11px] text-slate-400">
-          Kostenquelle: {report.cost_source === "visual_ai_pdf"
-            ? "visuell geprüfte PDF-Kostenzusammenstellung"
-            : report.cost_source === "cost_summary"
-            ? "Kostenzusammenstellung (bevorzugt)"
-            : "LV-Positionstotale (keine Kostenzusammenstellung gefunden)"}
-        </p>
-      )}
     </div>
   );
 }
@@ -414,42 +382,46 @@ function KonditionenEditor({ imp, gesperrt, onSaved }) {
         )}
       </div>
       {error && <p className="mx-4 mt-3 rounded-lg bg-red-50 p-2 text-xs text-red-700 sm:mx-5">{error}</p>}
+      <div className="grid grid-cols-[1fr_auto] border-b border-slate-200 px-4 py-3 text-sm sm:px-5">
+        <strong>Brutto / LV-Summe</strong>
+        <strong>CHF {(commercial.base_amount ?? imp.report?.trade_total ?? 0).toLocaleString("de-CH")}</strong>
+      </div>
+      <div className="hidden grid-cols-[1.5fr_.65fr_.7fr_.7fr_auto] gap-2 bg-slate-50 px-4 py-2 text-[10px] font-bold uppercase tracking-wide text-slate-400 sm:grid sm:px-5">
+        <span>Bezeichnung</span><span>Satz</span><span className="text-right">Abzug/Zuschlag</span><span className="text-right">Zwischentotal</span><span />
+      </div>
       <div className="divide-y divide-slate-100">
         {rows.map((condition, index) => (
-          <div key={condition.id || `new-${index}`} className="grid gap-2 px-4 py-3 sm:grid-cols-[1.5fr_.8fr_.8fr_.7fr_.9fr_auto] sm:items-end sm:px-5">
+          <div key={condition.id || `new-${index}`} className="grid gap-2 px-4 py-3 sm:grid-cols-[1.5fr_.65fr_.7fr_.7fr_auto] sm:items-center sm:px-5">
             <div>
-              <label className="label">Bezeichnung</label>
               <input className="input" disabled={gesperrt} value={condition.original_label}
                 onChange={(e) => patchRow(index, { original_label: e.target.value })} />
+              {!gesperrt && (
+                <div className="mt-1 flex gap-1">
+                  <select className="rounded border border-slate-200 bg-white px-1 py-0.5 text-[10px]" value={condition.kind}
+                    onChange={(e) => patchRow(index, { kind: e.target.value })}>
+                    <option value="percent">Prozent</option><option value="fixed">Fixbetrag</option>
+                  </select>
+                  <select className="rounded border border-slate-200 bg-white px-1 py-0.5 text-[10px]" value={condition.direction}
+                    onChange={(e) => patchRow(index, { direction: e.target.value })}>
+                    <option value="deduction">Abzug</option><option value="surcharge">Zuschlag</option>
+                  </select>
+                </div>
+              )}
             </div>
             <div>
-              <label className="label">Art</label>
-              <select className="input" disabled={gesperrt} value={condition.kind}
-                onChange={(e) => patchRow(index, { kind: e.target.value })}>
-                <option value="percent">Prozent</option>
-                <option value="fixed">Fixbetrag</option>
-              </select>
-            </div>
-            <div>
-              <label className="label">Richtung</label>
-              <select className="input" disabled={gesperrt} value={condition.direction}
-                onChange={(e) => patchRow(index, { direction: e.target.value })}>
-                <option value="deduction">Abzug</option>
-                <option value="surcharge">Zuschlag</option>
-              </select>
-            </div>
-            <div>
-              <label className="label">{condition.kind === "percent" ? "Prozent" : "CHF"}</label>
               <input className="input" type="number" step="0.01" disabled={gesperrt}
                 value={condition.kind === "percent" ? condition.rate_percent : condition.amount}
                 onChange={(e) => patchRow(index, condition.kind === "percent"
                   ? { rate_percent: e.target.value } : { amount: e.target.value })} />
+              <span className="mt-0.5 block text-[10px] text-slate-400">{condition.kind === "percent" ? "%" : "CHF"}</span>
             </div>
-            <div>
-              <label className="label">Basis CHF (optional)</label>
-              <input className="input" type="number" step="0.01" disabled={gesperrt}
-                value={condition.basis_amount}
-                onChange={(e) => patchRow(index, { basis_amount: e.target.value })} />
+            <div className={`text-right text-sm font-medium ${condition.direction === "deduction" ? "text-slate-700" : "text-green-700"}`}>
+              {condition.calculated_amount != null
+                ? `${condition.direction === "deduction" ? "−" : "+"} CHF ${Math.abs(condition.calculated_amount).toLocaleString("de-CH")}`
+                : "nach Speichern"}
+            </div>
+            <div className="text-right text-sm font-bold text-slate-800">
+              {condition.running_total != null ? `CHF ${condition.running_total.toLocaleString("de-CH")}` : "—"}
             </div>
             {!gesperrt && (
               <button type="button" onClick={() => setRows((current) => current.filter((_, i) => i !== index))}
@@ -463,7 +435,7 @@ function KonditionenEditor({ imp, gesperrt, onSaved }) {
       </div>
       <div className="space-y-2 border-t border-slate-100 bg-slate-50/50 px-4 py-3 text-sm sm:px-5">
         <div className="flex flex-wrap items-end justify-between gap-3">
-          <div className="w-32">
+          <div className="w-40">
             <label className="label">MWST %</label>
             <input className="input" type="number" step="0.1" disabled={gesperrt}
               value={vatRate} onChange={(e) => setVatRate(e.target.value)} />
@@ -472,7 +444,7 @@ function KonditionenEditor({ imp, gesperrt, onSaved }) {
         </div>
         {commercial.subtotal_excl_vat != null && (
           <div className="space-y-1 border-t border-slate-200 pt-2">
-            <div className="flex justify-between"><span>Summe exkl. MWST</span><strong>CHF {commercial.subtotal_excl_vat.toLocaleString("de-CH")}</strong></div>
+            <div className="flex justify-between"><span>Zwischentotal exkl. MWST</span><strong>CHF {commercial.subtotal_excl_vat.toLocaleString("de-CH")}</strong></div>
             <div className="flex justify-between"><span>MWST {commercial.vat_rate} %</span><span>CHF {commercial.vat_amount?.toLocaleString("de-CH")}</span></div>
             <div className="flex justify-between text-base"><strong>Endsumme inkl. MWST</strong><strong>CHF {commercial.total_incl_vat?.toLocaleString("de-CH")}</strong></div>
           </div>
@@ -721,7 +693,16 @@ function ReviewAnsicht({ id }) {
       {/* Schritt 2 — Technischer Fingerprint nach Kategorien */}
       {schritt === 1 && (
       <div className="space-y-6">
-        {KATEGORIEN.map((kat) => {
+        {(featTotal - featGeprueft) > 0 && (
+          <div className="flex items-center gap-2 rounded-xl border-2 border-amber-300 bg-amber-50 p-3 text-sm font-bold text-amber-900">
+            <AlertTriangle className="size-5 shrink-0" />
+            Bitte die {featTotal - featGeprueft} orange markierten Angaben prüfen.
+          </div>
+        )}
+        {KATEGORIEN.filter((kat) =>
+          kat.titel !== "Erdsonden"
+          || featureByKey.generator_type?.effective_value === "ews_wp"
+        ).map((kat) => {
           const rows = kat.keys.map((k) => featureByKey[k]).filter(Boolean);
           if (!rows.length) return null;
           return (
@@ -735,18 +716,16 @@ function ReviewAnsicht({ id }) {
                   const werte = (f.effective_value || "").split(",").map((s) => s.trim()).filter(Boolean);
                   const nichtErkannt = f.value == null && !f.confirmed_value;
                   return (
-                  <div key={f.id} className={`grid gap-2 px-4 py-3.5 sm:px-5 ${multi ? "" : "sm:grid-cols-[1fr_auto] sm:items-center"}`}>
+                  <div key={f.id} className={`grid gap-2 px-4 py-3.5 sm:px-5 ${!f.confirmed ? "border-l-4 border-l-amber-400 bg-amber-50/70" : ""} ${multi ? "" : "sm:grid-cols-[1fr_auto] sm:items-center"}`}>
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-medium text-slate-900">{f.label}</span>
-                        {f.confidence && !multi && <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${CONF_STYLE[f.confidence]}`}>{CONF_LABEL[f.confidence]}</span>}
-                        {nichtErkannt && (
-                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
-                            nicht zuverlässig erkannt
+                        {!f.confirmed && (
+                          <span className="rounded-full bg-amber-200 px-2 py-0.5 text-[11px] font-bold text-amber-900">
+                            Aktion nötig
                           </span>
                         )}
                       </div>
-                      <Quelle feature={f} tag={M.tag} tagStyle={M.tagStyle} />
                       {multi && listen && (
                         <div className="mt-2">
                           <MultiSelect
@@ -774,9 +753,19 @@ function ReviewAnsicht({ id }) {
                             <option key={type.value} value={type.value}>{type.label}</option>
                           ))}
                         </select>
+                      ) : f.key === "domestic_hot_water_included" || f.key === "boreholes_present" ? (
+                        <select className="input w-36" disabled={gesperrt}
+                          value={String(f.confirmed_value ?? f.value ?? "")}
+                          onChange={(e) => setFeature(f, { confirmed_value: e.target.value, confirmed: true })}>
+                          <option value="">— wählen —</option>
+                          <option value="true">Ja</option>
+                          <option value="false">Nein</option>
+                        </select>
                       ) : (
                         <input
                           className="input w-36"
+                          type="number"
+                          step={["borehole_count", "pump_count", "heat_meter_count", "buffer_count"].includes(f.key) ? "1" : "0.1"}
                           disabled={gesperrt}
                           defaultValue={f.confirmed_value ?? (f.value ?? "")}
                           placeholder={f.value != null ? String(f.value) : "Wert eingeben"}
@@ -799,10 +788,6 @@ function ReviewAnsicht({ id }) {
           );
         })}
 
-        {/* Erzeugertyp-Klartext, falls erkannt */}
-        {featureByKey.generator_type && (
-          <p className="text-xs text-slate-400">Erkannter Erzeugertyp: {anzeige("generator_type", featureByKey.generator_type.effective_value)}</p>
-        )}
         {!KATEGORIEN.some((kat) => kat.keys.some((k) => featureByKey[k])) && (
           <p className="text-sm text-slate-400">Keine technischen Werte erkannt — bitte im nächsten Schritt Kosten und ggf. Werte manuell ergänzen.</p>
         )}
@@ -831,7 +816,7 @@ function ReviewAnsicht({ id }) {
             </div>
             <div className="divide-y divide-slate-100">
               {positionen.map((c) => (
-                <div key={c.id} className="px-4 py-3 sm:px-5">
+                <div key={c.id} className={`px-4 py-3 sm:px-5 ${(!c.confirmed || !c.mapping_confirmed) ? "border-l-4 border-l-amber-400 bg-amber-50/50" : ""}`}>
                   {/* Punkt 16 — Block 1: WAS IM LV STEHT. Nummer, Titel, Betrag,
                       Betrag geprüft. Diese Zeile bleibt immer so wie im PDF. */}
                   <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-start">
@@ -841,6 +826,9 @@ function ReviewAnsicht({ id }) {
                         {c.original_position || `BKP ${c.bkp_nr}`}
                         {c.original_title ? ` ${c.original_title}` : ""}
                         {c.manual && <span className="ml-1 rounded bg-slate-100 px-1 text-[10px] font-semibold text-slate-500">manuell erfasst</span>}
+                        {(!c.confirmed || !c.mapping_confirmed) && (
+                          <span className="ml-2 rounded-full bg-amber-200 px-2 py-0.5 text-[10px] font-bold text-amber-900">Aktion nötig</span>
+                        )}
                       </p>
                       {c.positionen > 1 && !c.original_position && (
                         <p className="text-[11px] text-slate-400">({c.positionen} Positionen aggregiert)</p>
@@ -878,18 +866,6 @@ function ReviewAnsicht({ id }) {
                     <div className="mt-2 border-l-2 border-slate-200 pl-3">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Norm-LV</span>
-                        {(() => {
-                          const b = c.canonical_key ? MAPPING[c.mapping_method] : NICHT_ZUGEORDNET;
-                          if (!b) return null;
-                          return (
-                            <span className={`rounded px-1 text-[10px] font-semibold ${b.style}`}
-                              title={c.mapping_reason || b.hilfe}>
-                              {b.label}
-                              {c.mapping_method === "llm" && c.mapping_confidence != null
-                                ? ` ${Math.round(c.mapping_confidence * 100)} %` : ""}
-                            </span>
-                          );
-                        })()}
                         <span className="min-w-0 truncate text-[11px] text-slate-500">
                           {c.canonical_key
                             ? `${c.canonical_key} ${c.canonical_label || ""}`

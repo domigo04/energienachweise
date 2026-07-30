@@ -57,7 +57,9 @@ _COVER_BEGRIFFE = (
 _CONDITIONS_BEGRIFFE = (
     "allgemeine bedingungen", "besondere bedingungen", "vorbemerkungen",
     "vertragsbedingungen", "sia 118", "allgemeine bestimmungen",
-    "zahlungsbedingungen", "garantie", "haftung",
+    "zahlungsbedingungen", "garantie", "haftung", "rabatt", "skonto",
+    "baureinigung", "bauwasser", "bauwesenversicherung", "baureklame",
+    "mehrwertsteuer", "mwst", "netto inkl",
 )
 _DESCRIPTION_BEGRIFFE = (
     "technische beschreibung", "anlagebeschrieb", "anlagenbeschreibung",

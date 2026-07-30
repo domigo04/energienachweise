@@ -1,4 +1,4 @@
-"""Visuelle, verifizierte LV-Auswertung mit dem vollständigen PDF.
+"""Sparsame visuelle LV-Auswertung nur für ausgewählte Problemseiten.
 
 Viele ausgefüllte Unternehmer-LVs enthalten überlagerte Formularwerte. Der
 extrahierte Text kann dadurch z.B. ``118500`` enthalten, obwohl auf der Seite
@@ -10,33 +10,33 @@ Freigabe-Status gelangen.
 from __future__ import annotations
 
 import base64
+import io
 import json
 import os
 from typing import Any
 
-from app.lv_import import norm_lv
-from app.lv_import.feature_keys import FEATURE_DEFS, FEATURE_KEYS
+from app.lv_import import commercial, norm_lv
+from app.lv_import.feature_keys import LV_IMPORT_FEATURE_KEYS
+from app.lv_import.llm.budget import ImportLlmBudget, enabled as global_enabled
 
 DEFAULT_MODEL = "gpt-5.6"
 MIN_FEATURE_CONFIDENCE = 0.75
 TOLERANCE_CHF = 1.0
 
-SYSTEM_PROMPT = """Du bist ein erfahrener Schweizer HLK-Fachplaner und liest
-ein vollständiges Heizungs-LV wie ein Mensch. Werte IMMER die sichtbar
-gerenderte PDF-Seite aus. Unsichtbarer/überlagerter PDF-Text ist nur ein
+SYSTEM_PROMPT = """Du bist ein erfahrener Schweizer HLK-Fachplaner. Du erhältst
+nur gezielt ausgewählte Problem-, Kosten- oder Konditionsseiten eines bereits
+geparsten Heizungs-LV. Werte die sichtbar gerenderte Seite aus. Unsichtbarer
+oder überlagerter PDF-Text ist nur ein
 Hinweis; wenn Text und Seitenbild widersprechen, gewinnt der sichtbare Wert.
 
-Ermittle technische Gesamtmengen (Rohrmeter, Pumpen, Ventile,
-Fussbodenheizungsverteiler, Wärmezähler, Speicher, Erzeuger und Erdsonden)
-sowie alle Kosten aus der Kostenzusammenstellung. Unterscheide Stückzahl,
-Abmessung, Leistung, Einheitspreis und Positionsbetrag. Erwähnungen in
-Fliesstext oder technischen Daten sind keine bestellten Stückzahlen.
+Ermittle nur grobe Kennwerte, bepreiste Kostenpositionen und kommerzielle
+Konditionen. Keine Schrauben, Bögen, Schellen, Dimensionen oder anderen
+unbezahlten Einzelmengen. Pauschalen nie künstlich aufteilen.
 
 Beispiel: sichtbar «Länge/Sonde 150 m» und «Total Sonden 6» bedeutet 6
-Erdsonden, 150 m je Sonde und 900 m total. Erfasse bei Kosten jede
-Einzelposition, jedes ausgewiesene BKP-Gruppentotal und das Gewerktotal.
-Erfinde nichts; fehlende Werte bleiben null. Liefere Seite und kurzen
-sichtbaren Beleg. Schweizer Apostrophe sind Tausendertrennzeichen."""
+Erdsonden, 150 m je Sonde und 900 m total. Erfasse bei Kosten nur bepreiste
+Haupt-/Unterpositionen, Gruppentotale und Gewerktotal. Konditionen bleiben
+getrennt. Erfinde nichts; fehlende Werte bleiben null. Belege kurz."""
 
 _NULLABLE_NUMBER = {"anyOf": [{"type": "number"}, {"type": "null"}]}
 RESPONSE_SCHEMA = {
@@ -47,7 +47,7 @@ RESPONSE_SCHEMA = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "key": {"type": "string", "enum": FEATURE_KEYS},
+                    "key": {"type": "string", "enum": LV_IMPORT_FEATURE_KEYS},
                     "value": {"anyOf": [
                         {"type": "number"}, {"type": "string"}, {"type": "null"},
                     ]},
@@ -100,15 +100,48 @@ RESPONSE_SCHEMA = {
             },
         },
         "trade_total": _NULLABLE_NUMBER,
+        "conditions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "label": {"type": "string"},
+                    "kind": {"type": "string", "enum": ["percent", "fixed"]},
+                    "direction": {
+                        "type": "string", "enum": ["deduction", "surcharge"],
+                    },
+                    "rate_percent": _NULLABLE_NUMBER,
+                    "amount": _NULLABLE_NUMBER,
+                    "basis_amount": _NULLABLE_NUMBER,
+                    "order": {"type": "integer"},
+                    "source_page": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+                },
+                "required": [
+                    "label", "kind", "direction", "rate_percent", "amount",
+                    "basis_amount", "order", "source_page",
+                ],
+                "additionalProperties": False,
+            },
+        },
+        "vat_rate": _NULLABLE_NUMBER,
+        "stated_subtotal_excl_vat": _NULLABLE_NUMBER,
+        "stated_vat_amount": _NULLABLE_NUMBER,
+        "stated_total_incl_vat": _NULLABLE_NUMBER,
         "warnings": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["features", "costs", "group_totals", "trade_total", "warnings"],
+    "required": [
+        "features", "costs", "group_totals", "trade_total", "conditions",
+        "vat_rate", "stated_subtotal_excl_vat", "stated_vat_amount",
+        "stated_total_incl_vat", "warnings",
+    ],
     "additionalProperties": False,
 }
 
 
 def enabled() -> bool:
-    return os.getenv("LV_VISUAL_REVIEW_ENABLED", "true").strip().lower() not in {
+    return global_enabled() and os.getenv(
+        "LV_VISUAL_REVIEW_ENABLED", "true",
+    ).strip().lower() not in {
         "0", "false", "no", "off", "nein",
     }
 
@@ -202,6 +235,13 @@ def validate(result: dict) -> list[str]:
             issues.append(
                 f"Erdsondenrechnung {count:g} × {each:g} m ≠ {total:g} m."
             )
+    _, condition_issues = commercial.validate(
+        trade_total, result.get("conditions") or [], _number(result.get("vat_rate")),
+        _number(result.get("stated_subtotal_excl_vat")),
+        _number(result.get("stated_vat_amount")),
+        _number(result.get("stated_total_incl_vat")),
+    )
+    issues.extend(condition_issues)
     return issues
 
 
@@ -217,11 +257,44 @@ def _response_text(response) -> str:
     return ""
 
 
-def _call(client, pdf_bytes: bytes, model: str, correction: str | None = None) -> dict:
+def _selected_pdf(pdf_bytes: bytes, page_numbers: list[int] | None) -> bytes:
+    """Erzeugt für den API-Aufruf ein PDF nur mit den ausgewählten Seiten."""
+    if not page_numbers:
+        return pdf_bytes
+    try:
+        from pypdf import PdfReader, PdfWriter
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        writer = PdfWriter()
+        for number in sorted(set(page_numbers)):
+            if 1 <= number <= len(reader.pages):
+                writer.add_page(reader.pages[number - 1])
+        target = io.BytesIO()
+        writer.write(target)
+        return target.getvalue() if len(writer.pages) else pdf_bytes
+    except Exception:
+        return pdf_bytes
+
+
+def _call(
+    client, pdf_bytes: bytes, model: str, budget: ImportLlmBudget,
+    correction: str | None = None, original_pages: list[int] | None = None,
+    parser_context: dict | None = None,
+) -> dict:
     task = (
-        "Lies das gesamte angehängte LV visuell aus. Die Kostenzusammenstellung "
-        "ist für Preise maßgeblich. Gib den vollständigen strukturierten Datensatz zurück."
+        "Prüfe nur die angehängten ausgewählten Seiten. Gib den kleinen "
+        "strukturierten Datensatz zurück."
     )
+    if original_pages:
+        page_map = ", ".join(
+            f"Teil-PDF {index} = Originalseite {page}"
+            for index, page in enumerate(sorted(set(original_pages)), start=1)
+        )
+        task += f" Verwende bei source_page die Originalseitennummer. Zuordnung: {page_map}."
+    if parser_context:
+        task += (
+            "\nKompaktes Parserresultat zum Prüfen:\n"
+            + json.dumps(parser_context, ensure_ascii=False, separators=(",", ":"))
+        )
     if correction:
         task += (
             "\n\nDer erste Durchgang war rechnerisch widersprüchlich. Lies die "
@@ -229,12 +302,18 @@ def _call(client, pdf_bytes: bytes, model: str, correction: str | None = None) -
             f"Datensatz. Fehler:\n{correction}"
         )
     encoded = base64.b64encode(pdf_bytes).decode("ascii")
+    estimated_input = max(500, len(pdf_bytes) // 80 + len(task) // 4)
+    if not budget.may_call(estimated_input):
+        return {}
+    budget.start_call()
     response = client.responses.create(
         model=model,
         timeout=float(os.getenv("LV_VISUAL_REVIEW_TIMEOUT_SECONDS", "180")),
-        store=False,
+        store=os.getenv("LV_LLM_STORE_RESPONSES", "false").strip().lower() in {
+            "1", "true", "yes", "on",
+        },
         reasoning={"effort": os.getenv("LV_VISUAL_REVIEW_REASONING", "high")},
-        max_output_tokens=int(os.getenv("LV_VISUAL_REVIEW_MAX_OUTPUT_TOKENS", "12000")),
+        max_output_tokens=budget.max_output_tokens,
         input=[
             {"role": "system", "content": [{"type": "input_text", "text": SYSTEM_PROMPT}]},
             {"role": "user", "content": [
@@ -251,6 +330,7 @@ def _call(client, pdf_bytes: bytes, model: str, correction: str | None = None) -
             "strict": True, "schema": RESPONSE_SCHEMA,
         }},
     )
+    budget.record(response, estimated_input_tokens=estimated_input)
     try:
         parsed = json.loads(_response_text(response))
     except (TypeError, ValueError):
@@ -258,7 +338,11 @@ def _call(client, pdf_bytes: bytes, model: str, correction: str | None = None) -
     return parsed if isinstance(parsed, dict) else {}
 
 
-def review(pdf_bytes: bytes, *, client=None, model: str | None = None) -> dict:
+def review(
+    pdf_bytes: bytes, *, page_numbers: list[int] | None = None, client=None,
+    model: str | None = None, budget: ImportLlmBudget | None = None,
+    parser_context: dict | None = None,
+) -> dict:
     """Visuelle Auswertung plus höchstens ein automatischer Korrekturdurchgang."""
     config = status()
     if client is None and not config["visual_review_available"]:
@@ -270,18 +354,26 @@ def review(pdf_bytes: bytes, *, client=None, model: str | None = None) -> dict:
     if client is None:
         import openai
         client = openai.OpenAI()
+    budget = budget or ImportLlmBudget.from_env()
     model = model or config["visual_review_model"]
+    selected_pdf = _selected_pdf(pdf_bytes, page_numbers)
     result: dict = {}
     issues: list[str] = []
     attempts = 0
     try:
-        attempts = 1
-        result = _call(client, pdf_bytes, model)
+        result = _call(
+            client, selected_pdf, model, budget, original_pages=page_numbers,
+            parser_context=parser_context,
+        )
+        attempts = budget.calls
         issues = validate(result)
-        if issues:
-            attempts = 2
+        if issues and budget.may_call(max(500, len(selected_pdf) // 80)):
             correction = "\n".join(f"- {issue}" for issue in issues)
-            result = _call(client, pdf_bytes, model, correction)
+            result = _call(
+                client, selected_pdf, model, budget, correction,
+                original_pages=page_numbers, parser_context=parser_context,
+            )
+            attempts = budget.calls
             issues = validate(result)
     except Exception as exc:
         issues = [f"{type(exc).__name__}: {str(exc)[:300]}"]
@@ -291,6 +383,8 @@ def review(pdf_bytes: bytes, *, client=None, model: str | None = None) -> dict:
         "attempts": attempts,
         "result": result,
         "issues": issues,
+        "reviewed_pages": sorted(set(page_numbers or [])),
+        **budget.status(),
         **config,
     }
 
@@ -302,7 +396,7 @@ def apply_result(features: dict, result: dict) -> tuple[list[dict], dict]:
         key = item.get("key")
         value = item.get("value")
         confidence = _number(item.get("confidence")) or 0
-        if key not in FEATURE_KEYS or value is None or confidence < MIN_FEATURE_CONFIDENCE:
+        if key not in LV_IMPORT_FEATURE_KEYS or value is None or confidence < MIN_FEATURE_CONFIDENCE:
             continue
         evidence = str(item.get("evidence") or "")[:300]
         features[key] = {
@@ -367,6 +461,13 @@ def apply_result(features: dict, result: dict) -> tuple[list[dict], dict]:
         "visual_review_features_applied": applied,
         "visual_review_costs_applied": len(result.get("costs") or []),
         "visual_review_trade_total": result.get("trade_total"),
+        "commercial": commercial.validate(
+            _number(result.get("trade_total")), result.get("conditions") or [],
+            _number(result.get("vat_rate")),
+            _number(result.get("stated_subtotal_excl_vat")),
+            _number(result.get("stated_vat_amount")),
+            _number(result.get("stated_total_incl_vat")),
+        )[0],
         "visual_review_warnings": [
             str(w)[:300] for w in (result.get("warnings") or [])[:30]
         ],

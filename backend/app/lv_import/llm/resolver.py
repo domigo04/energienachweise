@@ -25,6 +25,7 @@ from app.lv_import import norm_lv
 from app.lv_import.llm.base import CostMappingLLM
 from app.lv_import.llm.anthropic_provider import AnthropicCostMapper
 from app.lv_import.llm.openai_provider import OpenAICostMapper
+from app.lv_import.llm.budget import ImportLlmBudget, enabled as global_enabled
 
 # Ab dieser Sicherheit wird ein Vorschlag überhaupt übernommen (Punkt 10).
 MIN_CONFIDENCE = 0.75
@@ -41,7 +42,7 @@ DEFAULT_PROVIDER = "openai"
 
 
 def enabled() -> bool:
-    return (os.getenv("COST_MAPPING_LLM_ENABLED", "true").strip().lower()
+    return global_enabled() and (os.getenv("COST_MAPPING_LLM_ENABLED", "true").strip().lower()
             not in ("0", "false", "no", "off", "nein"))
 
 
@@ -56,10 +57,13 @@ def provider_name() -> str:
     return DEFAULT_PROVIDER
 
 
-def get_provider(name: Optional[str] = None, *, model=None, client=None) -> Optional[CostMappingLLM]:
+def get_provider(
+    name: Optional[str] = None, *, model=None, client=None,
+    budget: ImportLlmBudget | None = None,
+) -> Optional[CostMappingLLM]:
     """Provider aus der Konfiguration. Unbekannter Name → None."""
     klasse = PROVIDERS.get((name or provider_name()))
-    return klasse(model=model, client=client) if klasse else None
+    return klasse(model=model, client=client, budget=budget) if klasse else None
 
 
 def status() -> dict:
@@ -115,9 +119,17 @@ def resolve(positions: list[dict], *, provider: Optional[CostMappingLLM] = None)
         if provider is None or not provider.available()[0]:
             return {}
 
-    rohdaten = provider.resolve(positions, _allowed_positions()) or []
+    for position in positions:
+        position["candidates"] = norm_lv.candidates(
+            position["title"], position.get("group"), position.get("section_path"),
+        )
+    rohdaten = provider.resolve(positions, []) or []
 
     gefragte = {p["source_id"] for p in positions}
+    allowed_by_source = {
+        p["source_id"]: {candidate["key"] for candidate in p["candidates"]}
+        for p in positions
+    }
     out: dict[str, dict] = {}
     for eintrag in rohdaten:
         sid = str(eintrag.get("source_id") or "")
@@ -131,7 +143,7 @@ def resolve(positions: list[dict], *, provider: Optional[CostMappingLLM] = None)
         grund = str(eintrag.get("reason") or "").strip()[:180]
         key = eintrag.get("canonical_key")
 
-        if not norm_lv.ist_norm_position(key):
+        if not norm_lv.ist_norm_position(key) or key not in allowed_by_source.get(sid, set()):
             # Entweder bewusst null (gewünscht) oder ein erfundener Schlüssel.
             hinweis = ("keine passende Norm-Position" if key in (None, "")
                        else f"unbekannter Schlüssel '{key}' verworfen")
@@ -163,7 +175,8 @@ def positions_from_rows(rows) -> list[dict]:
     return [
         {"source_id": r.get("original_position") or str(r.get("bkp_nr") or ""),
          "title": r.get("original_title") or "",
-         "group": str(r.get("bkp_nr") or "") or None}
+         "group": str(r.get("bkp_nr") or "") or None,
+         "section_path": r.get("section_path")}
         for r in (rows or [])
         if not r.get("is_group_total")
         and not r.get("canonical_key")
@@ -172,7 +185,10 @@ def positions_from_rows(rows) -> list[dict]:
     ]
 
 
-def apply_to_rows(rows: list[dict], *, provider: Optional[CostMappingLLM] = None) -> dict:
+def apply_to_rows(
+    rows: list[dict], *, provider: Optional[CostMappingLLM] = None,
+    budget: ImportLlmBudget | None = None,
+) -> dict:
     """Offene Zeilen zuordnen und `rows` in place ergänzen.
 
     Bereits bestätigte Nutzerentscheidungen werden nie überschrieben.
@@ -183,6 +199,8 @@ def apply_to_rows(rows: list[dict], *, provider: Optional[CostMappingLLM] = None
               and not r.get("mapping_confirmed") and (r.get("original_title") or "")]
     if not offene:
         return {"sent": 0, "mapped": 0}
+    if provider is None:
+        provider = get_provider(budget=budget)
     ergebnis = resolve(positions_from_rows(offene), provider=provider)
     if not ergebnis:
         return {"sent": len(offene), "mapped": 0}

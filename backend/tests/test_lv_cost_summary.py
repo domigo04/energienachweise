@@ -13,6 +13,7 @@ from app.lv_import.cost_summary import (
     parse_cost_summary, to_cost_rows, has_cost_summary, VALID, MISMATCH,
 )
 from app.lv_import import norm_lv
+from app.lv_import import commercial
 from app.lv_import import page_classifier as pc
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -251,6 +252,36 @@ def test_to_cost_rows_trennt_positionen_und_gruppentotale(summary):
     # Die Summe der Einzelpositionen ergibt das Gewerktotal — ohne die
     # Gruppentotale doppelt mitzuzählen.
     assert round(sum(r["detected_amount"] for r in positionen), 2) == GOLDEN_TRADE_TOTAL
+
+
+def test_golden_konditionskette_ergibt_endsumme_260723(summary):
+    """Konditionen bleiben separat; die 20 Kostenpositionen werden nie geteilt."""
+    common_basis = 244729.68
+    conditions = [
+        {"label": "Rabatt", "kind": "percent", "direction": "deduction",
+         "rate_percent": 6, "order": 1},
+        {"label": "Skonto", "kind": "percent", "direction": "deduction",
+         "rate_percent": 2, "order": 2},
+        {"label": "Baureinigung/Beschädigungen", "kind": "percent",
+         "direction": "deduction", "rate_percent": 0.5,
+         "basis_amount": common_basis, "order": 3},
+        {"label": "Bauwasser und elektrische Energie", "kind": "percent",
+         "direction": "deduction", "rate_percent": 0.3,
+         "basis_amount": common_basis, "order": 4},
+        {"label": "Bauwesenversicherung", "kind": "percent",
+         "direction": "deduction", "rate_percent": 0.2,
+         "basis_amount": common_basis, "order": 5},
+        {"label": "Baureklame", "kind": "fixed", "direction": "deduction",
+         "amount": 200, "order": 6},
+    ]
+    calculated, issues = commercial.validate(
+        summary["trade_total"], conditions, 7.7, stated_total=260723,
+    )
+    assert len(summary["positions"]) == 20
+    assert len(conditions) == 6
+    assert calculated["subtotal_excl_vat"] == 242082.38
+    assert calculated["total_incl_vat"] == 260722.72
+    assert issues == []
 
 
 # ── Freigabe: Gruppentotale dürfen die Referenzkosten nicht verdoppeln ─────

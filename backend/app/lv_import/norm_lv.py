@@ -59,6 +59,27 @@ def as_frontend() -> dict:
     }
 
 
+def candidates(
+    title: str, bkp_group: str | None, section_path: str | None = None,
+    limit: int = 6,
+) -> list[dict]:
+    """Wenige Ziele für einen unsicheren Fall, bevorzugt aus demselben BKP."""
+    context_tokens = set(falte(f"{section_path or ''} {title}").split())
+    ranked = []
+    for position in NORM_POSITIONS:
+        target_tokens = set(falte(position["bezeichnung"]).split())
+        overlap = len(context_tokens & target_tokens)
+        same_group = position["gruppe"] == str(bkp_group or "")
+        score = (10 if same_group else 0) + overlap
+        ranked.append((score, same_group, position["key"], position))
+    ranked.sort(key=lambda item: (-item[0], -int(item[1]), item[2]))
+    selected = [item[3] for item in ranked[:max(1, min(limit, 8))]]
+    return [
+        {"key": p["key"], "title": p["bezeichnung"], "group": p["gruppe"]}
+        for p in selected
+    ]
+
+
 # ── Normalisierung ─────────────────────────────────────────────────────────
 
 def falte(text: str) -> str:

@@ -52,6 +52,8 @@ class LvImport(Base):
     ort = Column(String, nullable=True)
     unternehmer = Column(String, nullable=True)
     offert_datum = Column(String, nullable=True)
+    gewerk = Column(String, nullable=True)
+    waehrung = Column(String, nullable=True)
     # Punkt 25/30 — Verarbeitungsbericht (Seitenklassen, Trefferzahlen) als JSON
     # für die Import-Zusammenfassung und den Debug-Dump.
     debug_json = Column(Text, nullable=True)
@@ -64,6 +66,8 @@ class LvImport(Base):
                             cascade="all, delete-orphan")
     costs = relationship("LvImportCost", back_populates="lv_import",
                          cascade="all, delete-orphan")
+    conditions = relationship("LvImportCondition", back_populates="lv_import",
+                              cascade="all, delete-orphan")
 
 
 class LvImportFeature(Base):
@@ -100,6 +104,7 @@ class LvImportCost(Base):
     # Planer Unterpositionen je Projekt unterschiedlich nummerieren.
     original_position = Column(String, nullable=True)    # z.B. "241.10"
     original_title = Column(String, nullable=True)
+    section_path = Column(String, nullable=True)
     canonical_key = Column(String, nullable=True, index=True)   # Norm-LV-Position
     original_amount = Column(Float, nullable=True)              # wie im LV gelesen
     # Wie die Zuordnung zustande kam: exact | rule | llm | manual. Zusammen mit
@@ -128,3 +133,22 @@ class LvImportCost(Base):
     manual = Column(Boolean, nullable=False, default=False)   # manuell hinzugefügt
 
     lv_import = relationship("LvImport", back_populates="costs")
+
+
+class LvImportCondition(Base):
+    __tablename__ = "lv_import_conditions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    lv_import_id = Column(Integer, ForeignKey("lv_imports.id"), nullable=False, index=True)
+    original_label = Column(String, nullable=False)
+    kind = Column(String, nullable=False)             # percent | fixed
+    direction = Column(String, nullable=False)        # deduction | surcharge
+    rate_percent = Column(Float, nullable=True)
+    amount = Column(Float, nullable=True)
+    basis_amount = Column(Float, nullable=True)
+    calculated_amount = Column(Float, nullable=True)
+    running_total = Column(Float, nullable=True)
+    order_index = Column(Integer, nullable=False, default=0)
+    source_page = Column(Integer, nullable=True)
+
+    lv_import = relationship("LvImport", back_populates="conditions")

@@ -47,11 +47,11 @@ class FakeOpenAI:
         return SimpleNamespace(choices=[SimpleNamespace(message=msg)])
 
 
-def _pos(source_id="248.2", title="Elektroanschluesse", group="248"):
+def _pos(source_id="243.x", title="Regelung Verteilung", group="243"):
     return [{"source_id": source_id, "title": title, "group": group}]
 
 
-def _map(source_id="248.2", key="243.6", conf=0.96, reason="Regelung/Elektro"):
+def _map(source_id="243.x", key="243.6", conf=0.96, reason="Regelung Verteilung"):
     return [{"source_id": source_id, "canonical_key": key,
              "confidence": conf, "reason": reason}]
 
@@ -73,18 +73,18 @@ ALLE_PROVIDER = pytest.mark.parametrize("mach_provider", [_anthropic, _openai],
 @ALLE_PROVIDER
 def test_gueltige_zuordnung_wird_uebernommen(mach_provider):
     res = resolver.resolve(_pos(), provider=mach_provider(_map()))
-    assert res["248.2"]["canonical_key"] == "243.6"
-    assert res["248.2"]["mapping_method"] == "llm"
-    assert res["248.2"]["mapping_confidence"] == 0.96
-    assert "0.96" in res["248.2"]["mapping_reason"]
+    assert res["243.x"]["canonical_key"] == "243.6"
+    assert res["243.x"]["mapping_method"] == "llm"
+    assert res["243.x"]["mapping_confidence"] == 0.96
+    assert "0.96" in res["243.x"]["mapping_reason"]
 
 
 @ALLE_PROVIDER
 def test_null_ist_ein_gueltiges_ergebnis(mach_provider):
     res = resolver.resolve(_pos(), provider=mach_provider(
         _map(key=None, conf=0.38, reason="keine passende Position")))
-    assert res["248.2"]["canonical_key"] is None
-    assert res["248.2"]["mapping_method"] is None
+    assert res["243.x"]["canonical_key"] is None
+    assert res["243.x"]["mapping_method"] is None
 
 
 @ALLE_PROVIDER
@@ -92,15 +92,15 @@ def test_erfundener_schluessel_wird_verworfen(mach_provider):
     """Closed world: ein Schlüssel ausserhalb des Norm-LV wird nie übernommen."""
     res = resolver.resolve(_pos(), provider=mach_provider(
         _map(key="999.99_elektro", conf=0.99)))
-    assert res["248.2"]["canonical_key"] is None
-    assert "unbekannter Schlüssel" in res["248.2"]["mapping_reason"]
+    assert res["243.x"]["canonical_key"] is None
+    assert "unbekannter Schlüssel" in res["243.x"]["mapping_reason"]
 
 
 @ALLE_PROVIDER
 def test_zu_geringe_confidence_wird_nicht_uebernommen(mach_provider):
     res = resolver.resolve(_pos(), provider=mach_provider(_map(conf=0.5)))
-    assert res["248.2"]["canonical_key"] is None
-    assert "unsicher" in res["248.2"]["mapping_reason"]
+    assert res["243.x"]["canonical_key"] is None
+    assert "unsicher" in res["243.x"]["mapping_reason"]
 
 
 @ALLE_PROVIDER
@@ -113,7 +113,7 @@ def test_fremde_position_wird_ignoriert(mach_provider):
 def test_hohe_confidence_setzt_nie_mapping_confirmed(mach_provider):
     """Punkt 10 — selbst 0.99 bestätigt nichts. Das kann nur der Mensch."""
     res = resolver.resolve(_pos(), provider=mach_provider(_map(conf=0.99)))
-    assert "mapping_confirmed" not in res["248.2"]
+    assert "mapping_confirmed" not in res["243.x"]
 
 
 # ── Punkt 20 — jeder Ausfall bleibt harmlos ───────────────────────────────
@@ -145,7 +145,7 @@ def test_openai_refusal_bleibt_ohne_wirkung():
 def test_json_mit_umgebendem_fliesstext_wird_trotzdem_gelesen():
     payload = json.dumps({"mappings": _map()})
     p = _anthropic(raw=f"Hier das Ergebnis:\n{payload}\nEnde.")
-    assert resolver.resolve(_pos(), provider=p)["248.2"]["canonical_key"] == "243.6"
+    assert resolver.resolve(_pos(), provider=p)["243.x"]["canonical_key"] == "243.6"
 
 
 # ── Konfiguration ─────────────────────────────────────────────────────────
@@ -211,16 +211,24 @@ def test_beide_provider_registriert():
 @ALLE_PROVIDER
 def test_prompt_enthaelt_keine_betraege_und_keine_projektdaten(mach_provider):
     p = mach_provider()
-    positionen = [{"source_id": "248.2", "title": "Elektroanschluesse", "group": "248"}]
+    positionen = [{"source_id": "243.x", "title": "Regelung Verteilung", "group": "243"}]
     resolver.resolve(positionen, provider=p)
     prompt = json.dumps(p._client.calls[0], ensure_ascii=False)
     for verboten in ("11757", "11'757", "Hagmann", "Burgstrasse", "Rorschacherberg",
                      "Bauherr", "265664"):
         assert verboten not in prompt, f"{verboten} darf nicht ans LLM gehen"
     # Erlaubt und nötig: Titel, Nummer, geschlossene Liste, Gruppe als Hinweis.
-    assert "Elektroanschluesse" in prompt
-    assert "242.3" in prompt and "Wärmepumpe Sole/Wasser" in prompt
-    assert "nur Hinweis" in prompt
+    assert "Regelung Verteilung" in prompt
+    assert "243.6" in prompt and "Regelung" in prompt
+    assert "Wärmepumpe Sole/Wasser" not in prompt
+    user_content = (
+        p._client.calls[0]["messages"][0]["content"]
+        if p.name == "anthropic"
+        else p._client.calls[0]["messages"][1]["content"]
+    )
+    sent = json.loads(user_content)["positions"][0]
+    assert len(sent["candidates"]) <= 6
+    assert {candidate["group"] for candidate in sent["candidates"]} == {"243"}
 
 
 @ALLE_PROVIDER
@@ -248,7 +256,7 @@ def test_systemprompt_verbietet_nummernlogik_und_erfindungen():
     sp = " ".join(base.SYSTEM_PROMPT.lower().split())
     assert "erfinde niemals" in sp
     assert "bezeichnung, nicht nach der nummer" in sp
-    assert "kein filter" in sp        # Gruppe nur schwacher Hinweis
+    assert "kandidatenliste" in sp
     assert "null" in sp               # darf „weiss nicht" sagen
 
 
@@ -268,7 +276,7 @@ def test_apply_to_rows_respektiert_bestaetigte_entscheidungen():
         {"original_position": "249.3", "original_title": "Regiearbeiten",
          "canonical_key": None, "mapping_confirmed": True, "is_group_total": False},
         # offen → darf zugeordnet werden
-        {"original_position": "248.2", "original_title": "Elektroanschluesse",
+        {"original_position": "243.x", "bkp_nr": "243", "original_title": "Regelung Verteilung",
          "canonical_key": None, "mapping_confirmed": False, "is_group_total": False},
         # Gruppentotal → nie
         {"original_position": None, "bkp_nr": "248", "original_title": "Total BKP 248",

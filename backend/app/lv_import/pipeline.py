@@ -141,6 +141,10 @@ class LvPipeline:
         return self.word_pages_for(pc.COST_SUMMARY)
 
     @property
+    def conditions_pages(self) -> list[dict]:
+        return self.pages_for(pc.CONDITIONS)
+
+    @property
     def lv_pages(self) -> list[dict]:
         """LV-Seiten — Fallback für Kosten (Punkt 13, Priorität 2)."""
         return self.pages_for(pc.LV) or self.pages

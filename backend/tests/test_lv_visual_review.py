@@ -56,6 +56,11 @@ def _valid():
             },
         ],
         "trade_total": 3817,
+        "conditions": [],
+        "vat_rate": None,
+        "stated_subtotal_excl_vat": None,
+        "stated_vat_amount": None,
+        "stated_total_incl_vat": None,
         "warnings": [],
     }
 
@@ -118,3 +123,33 @@ def test_fehlender_api_key_ist_kein_stiller_erfolg(monkeypatch):
     assert result["called"] is False
     assert result["success"] is False
     assert result["visual_review_required"] is True
+
+
+def test_globale_limits_werden_im_visual_call_verwendet(monkeypatch):
+    monkeypatch.setenv("LV_LLM_MAX_OUTPUT_TOKENS", "6000")
+    monkeypatch.setenv("LV_VISUAL_REVIEW_TIMEOUT_SECONDS", "180")
+    monkeypatch.setenv("LV_LLM_STORE_RESPONSES", "false")
+    fake = FakeResponses([_valid()])
+    result = visual_review.review(b"%PDF-test", client=fake, model="test")
+    assert result["success"] is True
+    assert result["llm_calls"] == 1
+    assert fake.calls[0]["max_output_tokens"] == 6000
+    assert fake.calls[0]["timeout"] == 180
+    assert fake.calls[0]["store"] is False
+
+
+def test_call_und_kostenlimit_stoppen_weitere_aufrufe(monkeypatch):
+    monkeypatch.setenv("LV_LLM_MAX_CALLS_PER_IMPORT", "0")
+    fake = FakeResponses([_valid()])
+    result = visual_review.review(b"%PDF-test", client=fake, model="test")
+    assert result["success"] is False
+    assert result["llm_stop_reason"] == "call_limit_reached"
+    assert fake.calls == []
+
+
+def test_llm_global_deaktivierbar(monkeypatch):
+    monkeypatch.setenv("LV_LLM_ENABLED", "false")
+    fake = FakeResponses([_valid()])
+    result = visual_review.review(b"%PDF-test", client=fake, model="test")
+    assert result["called"] is False
+    assert fake.calls == []

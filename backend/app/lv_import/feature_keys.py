@@ -20,6 +20,7 @@ FEATURE_DEFS = {
     "generator_count": {"typ": "int", "einheit": None, "label": "Wärmeerzeuger"},
     "generator_power_kw": {"typ": "float", "einheit": "kW", "label": "Erzeugerleistung"},
     "borehole_count": {"typ": "int", "einheit": None, "label": "Erdsonden"},
+    "boreholes_present": {"typ": "bool", "einheit": None, "label": "Erdsonden vorhanden"},
     "borehole_length_each_m": {"typ": "float", "einheit": "m", "label": "Länge je Sonde"},
     "borehole_total_m": {"typ": "float", "einheit": "m", "label": "Bohrmeter"},
     "buffer_count": {"typ": "int", "einheit": None, "label": "Pufferspeicher"},
@@ -33,6 +34,21 @@ FEATURE_DEFS = {
     "floor_heating_manifold_count": {
         "typ": "int", "einheit": None, "label": "Fussbodenheizungsverteiler",
     },
+    "floor_heating_pipe_m": {
+        "typ": "float", "einheit": "m", "label": "Fussbodenheizungsrohr",
+    },
+    "floor_heating_area_m2": {
+        "typ": "float", "einheit": "m²", "label": "Fussbodenheizungsfläche",
+    },
+    "temporary_heating_present": {
+        "typ": "bool", "einheit": None, "label": "Provisorium vorhanden",
+    },
+    "geocooling_present": {
+        "typ": "bool", "einheit": None, "label": "Geocooling vorhanden",
+    },
+    "domestic_hot_water_included": {
+        "typ": "bool", "einheit": None, "label": "Warmwasserbereitung enthalten",
+    },
     # Rohrmeter getrennt nach Seite (Punkt 11): Quelle = Primärkreis/Erdsonden-
     # sammler, Verteilung = Heizungsverteilung. pipe_length_m ist die Summe und
     # bleibt der Kostentreiber für die bestehende Ähnlichkeit.
@@ -42,6 +58,17 @@ FEATURE_DEFS = {
 }
 
 FEATURE_KEYS = list(FEATURE_DEFS.keys())
+
+# Im LV-Review werden bewusst nur grobe, kostenrelevante Kennwerte gespeichert.
+# Die übrigen Definitionen bleiben für bestehende Referenzprojekte kompatibel.
+LV_IMPORT_FEATURE_KEYS = [
+    "generator_type", "generator_count", "generator_power_kw",
+    "boreholes_present", "borehole_count", "borehole_length_each_m",
+    "borehole_total_m", "pipe_length_m", "floor_heating_pipe_m",
+    "floor_heating_area_m2", "heat_meter_count", "buffer_count",
+    "temporary_heating_present", "geocooling_present",
+    "domestic_hot_water_included",
+]
 
 # LV-Feature-Schlüssel → ProjectContext-Parameterschlüssel (project_context.PARAMETER).
 # Nur hier gepflegt (B12). generator_type ist beidseitig gleich benannt.

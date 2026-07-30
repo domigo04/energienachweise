@@ -169,6 +169,11 @@ def parse_cost_summary(pages, word_pages=None) -> dict:
                 "bkp_group": gruppe,
                 "original_position": nummer,
                 "original_title": titel,
+                "section_path": " > ".join(
+                    part for part in (
+                        f"BKP {gruppe}", group_names.get(gruppe), titel,
+                    ) if part
+                ),
                 "original_amount": round(betrag, 2),
                 "amount": round(betrag, 2),
                 "source_page": seite,
@@ -226,6 +231,7 @@ def to_cost_rows(result: dict) -> list[dict]:
             "bkp_nr": p["bkp_group"],
             "original_position": p["original_position"],
             "original_title": p["original_title"],
+            "section_path": p.get("section_path"),
             # Zuordnung + wie sie zustande kam (später messbar, Punkt: Metriken).
             "canonical_key": p.get("canonical_key"),
             "mapping_method": p.get("mapping_method"),

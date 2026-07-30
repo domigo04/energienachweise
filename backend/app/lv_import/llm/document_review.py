@@ -12,6 +12,7 @@ import os
 from typing import Any
 
 from app.lv_import.feature_keys import FEATURE_DEFS, FEATURE_KEYS
+from app.lv_import.llm.budget import ImportLlmBudget, enabled as global_enabled
 
 MIN_CONFIDENCE = 0.75
 DEFAULT_OPENAI_MODEL = "gpt-5.6"
@@ -64,7 +65,9 @@ RESPONSE_SCHEMA = {
 
 
 def enabled() -> bool:
-    return os.getenv("LV_REVIEW_LLM_ENABLED", "true").strip().lower() not in {
+    return global_enabled() and os.getenv(
+        "LV_REVIEW_LLM_ENABLED", "true",
+    ).strip().lower() not in {
         "0", "false", "no", "off", "nein",
     }
 
@@ -128,7 +131,10 @@ def _parse(text: str) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def review(packet: dict, *, provider: str | None = None, model: str | None = None, client=None) -> dict:
+def review(
+    packet: dict, *, provider: str | None = None, model: str | None = None,
+    client=None, budget: ImportLlmBudget | None = None,
+) -> dict:
     """Ein gebündelter Structured-Output-Aufruf. Jeder Fehler ist soft-fail."""
     config = status()
     provider = provider or config["llm_review_provider"]
@@ -137,17 +143,27 @@ def review(packet: dict, *, provider: str | None = None, model: str | None = Non
         return {"called": False, "result": {}, **config}
     if not provider or not model:
         return {"called": False, "result": {}, **config}
+    budget = budget or ImportLlmBudget.from_env()
+    prompt = _prompt(packet)
+    estimated_input = max(200, len(prompt) // 4)
+    if not budget.may_call(estimated_input):
+        return {"called": False, "result": {}, **budget.status(), **config}
     try:
+        budget.start_call()
         if provider == "openai":
             if client is None:
                 import openai
                 client = openai.OpenAI()
             response = client.chat.completions.create(
                 model=model,
-                timeout=30.0,
+                timeout=float(os.getenv("LV_VISUAL_REVIEW_TIMEOUT_SECONDS", "180")),
+                max_completion_tokens=budget.max_output_tokens,
+                store=os.getenv("LV_LLM_STORE_RESPONSES", "false").strip().lower() in {
+                    "1", "true", "yes", "on",
+                },
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": _prompt(packet)},
+                    {"role": "user", "content": prompt},
                 ],
                 response_format={
                     "type": "json_schema",
@@ -158,6 +174,7 @@ def review(packet: dict, *, provider: str | None = None, model: str | None = Non
                     },
                 },
             )
+            budget.record(response, estimated_input_tokens=estimated_input)
             message = response.choices[0].message
             if getattr(message, "refusal", None):
                 return {"called": True, "result": {}, **config}
@@ -168,14 +185,15 @@ def review(packet: dict, *, provider: str | None = None, model: str | None = Non
                 client = anthropic.Anthropic()
             response = client.messages.create(
                 model=model,
-                timeout=30.0,
-                max_tokens=4000,
+                timeout=float(os.getenv("LV_VISUAL_REVIEW_TIMEOUT_SECONDS", "180")),
+                max_tokens=budget.max_output_tokens,
                 system=SYSTEM_PROMPT,
                 output_config={"effort": "low", "format": {
                     "type": "json_schema", "schema": RESPONSE_SCHEMA,
                 }},
-                messages=[{"role": "user", "content": _prompt(packet)}],
+                messages=[{"role": "user", "content": prompt}],
             )
+            budget.record(response, estimated_input_tokens=estimated_input)
             text = next(
                 (block.text for block in (response.content or [])
                  if getattr(block, "type", None) == "text"),
@@ -186,7 +204,7 @@ def review(packet: dict, *, provider: str | None = None, model: str | None = Non
             result = {}
     except Exception:
         result = {}
-    return {"called": True, "result": result, **config}
+    return {"called": True, "result": result, **budget.status(), **config}
 
 
 def apply_result(

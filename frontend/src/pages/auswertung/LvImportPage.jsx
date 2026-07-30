@@ -13,20 +13,15 @@ import { GENERATOR_TYPE_LABELS } from "../../components/hc/nodes/generatorTypes"
 
 // Mehrwertige Merkmale kommen aus der zentralen Registry (Punkt 6/7) und werden
 // als Checkbox-Gruppe dargestellt, nicht als Zahlenfeld.
-const MULTI_FEATURES = { generator_types: "generator_types", heat_delivery_types: "heat_delivery_types" };
+const MULTI_FEATURES = {};
 
 const KATEGORIEN = [
-  { titel: "Wärmeerzeugung", keys: ["generator_types", "generator_count", "generator_power_kw"] },
-  { titel: "Erdsonden", keys: ["borehole_count", "borehole_length_each_m", "borehole_total_m"] },
-  { titel: "Speicher", keys: ["buffer_count", "storage_volume_l"] },
-  { titel: "Wärmeabgabe", keys: ["heat_delivery_types", "radiator_count"] },
-  {
-    titel: "Wärmeverteilung",
-    keys: ["pump_count", "valve_2way_count", "valve_3way_count", "balancing_valve_count",
-           "floor_heating_manifold_count",
-           "pipe_length_source_m", "pipe_length_distribution_m", "pipe_length_m"],
-  },
+  { titel: "Wärmeerzeugung", keys: ["generator_type", "generator_count", "generator_power_kw"] },
+  { titel: "Erdsonden", keys: ["boreholes_present", "borehole_count", "borehole_length_each_m", "borehole_total_m"] },
+  { titel: "Speicher", keys: ["buffer_count"] },
+  { titel: "Wärmeverteilung", keys: ["pipe_length_m", "floor_heating_pipe_m", "floor_heating_area_m2"] },
   { titel: "Wärmemessung", keys: ["heat_meter_count"] },
+  { titel: "Anlagenumfang", keys: ["temporary_heating_present", "geocooling_present", "domestic_hot_water_included"] },
 ];
 
 const CONF_STYLE = {
@@ -181,6 +176,7 @@ function ImportZusammenfassung({ report, imp, offen }) {
     [`${typen.cost_summary || 0} Kostenzusammenstellungs-Seiten erkannt`, (typen.cost_summary || 0) > 0],
     [`${report.features_erkannt ?? 0} technische Werte erkannt`, (report.features_erkannt ?? 0) > 0],
     [`${report.kostenpositionen ?? 0} Kostenpositionen erkannt`, (report.kostenpositionen ?? 0) > 0],
+    [`${report.commercial?.conditions?.length || 0} Konditionen erkannt`, true],
     [`${(report.kostenpositionen ?? 0) - (report.kosten_ohne_zuordnung ?? 0)} davon dem Norm-LV zugeordnet`, true],
   ];
   return (
@@ -542,6 +538,8 @@ function ReviewAnsicht({ id }) {
             ["ort", "Ort", "text"],
             ["unternehmer", "Unternehmer", "text"],
             ["offert_datum", "Datum", "text"],
+            ["gewerk", "Gewerk", "text"],
+            ["waehrung", "Währung", "text"],
             ["region", "Region", "text"],
             ["ebf_m2", "EBF [m²]", "number"],
             ["anzahl_einheiten", "Nutzungseinheiten", "number"],
@@ -823,6 +821,42 @@ function ReviewAnsicht({ id }) {
             )}
           </div>
         </section>
+        {(imp.conditions || []).length > 0 && (
+          <section className="card overflow-hidden">
+            <div className="border-b border-slate-100 bg-slate-50/60 px-4 py-3 sm:px-5">
+              <h2 className="text-sm font-bold text-slate-800">Kommerzielle Konditionen</h2>
+            </div>
+            <div className="divide-y divide-slate-100 text-sm">
+              {(imp.conditions || []).map((condition) => (
+                <div key={condition.id} className="flex items-center justify-between gap-3 px-4 py-2.5 sm:px-5">
+                  <span className="text-slate-600">{condition.original_label}</span>
+                  <span className="font-medium text-slate-900">
+                    {condition.direction === "deduction" ? "−" : "+"}
+                    {condition.kind === "percent"
+                      ? `${condition.rate_percent?.toLocaleString("de-CH")} %`
+                      : `CHF ${condition.calculated_amount?.toLocaleString("de-CH")}`}
+                  </span>
+                </div>
+              ))}
+              {imp.report?.commercial?.subtotal_excl_vat != null && (
+                <>
+                  <div className="flex items-center justify-between px-4 py-2.5 sm:px-5">
+                    <span>Summe exkl. MWST</span>
+                    <strong>CHF {imp.report.commercial.subtotal_excl_vat.toLocaleString("de-CH")}</strong>
+                  </div>
+                  <div className="flex items-center justify-between px-4 py-2.5 sm:px-5">
+                    <span>MWST {imp.report.commercial.vat_rate} %</span>
+                    <span>CHF {imp.report.commercial.vat_amount?.toLocaleString("de-CH")}</span>
+                  </div>
+                  <div className="flex items-center justify-between bg-slate-50 px-4 py-3 sm:px-5">
+                    <strong>Endsumme inkl. MWST</strong>
+                    <strong>CHF {imp.report.commercial.total_incl_vat?.toLocaleString("de-CH")}</strong>
+                  </div>
+                </>
+              )}
+            </div>
+          </section>
+        )}
       </div>
       )}
 

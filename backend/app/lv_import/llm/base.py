@@ -7,9 +7,8 @@ denselben Auftrag bekommen (Voraussetzung für einen faires Benchmark).
 
 Was das Modell bekommt, ist bewusst eng (Datensparsamkeit):
 
-    erlaubt:  Original-Unterpositionsnummer, Originaltitel,
-              geschlossene Liste der Norm-LV-Positionen,
-              optional die BKP-Hauptgruppe als SCHWACHER Kontext
+    erlaubt:  Original-Unterpositionsnummer, Originaltitel, BKP-/Abschnittspfad
+              und höchstens wenige Kandidaten aus dem passenden BKP-Kontext
     nie:      Beträge, PDF-Inhalte, Projektname, Bauherr, Unternehmer,
               Adressen, Telefonnummern, Personennamen, technische Mengen
 
@@ -53,12 +52,9 @@ Regeln:
 - Wähle `canonical_key` ausschliesslich aus der vorgegebenen Liste. Erfinde
   niemals einen Schlüssel und niemals eine neue Kategorie.
 - Entscheide nach der BEZEICHNUNG, nicht nach der Nummer. Unternehmer
-  nummerieren Unterpositionen je Projekt anders: „242.1 Wärmeerzeuger
-  Sole/Wasser-Wärmepumpe" gehört zur Norm-Position „Wärmepumpe Sole/Wasser",
-  auch wenn diese eine andere Nummer trägt.
-- Eine Leistung kann in einer anderen Hauptgruppe stehen als im Norm-LV.
-  „Isolation Rohrleitungen" unter 247 gehört zur Norm-Rohrisolation unter 248.
-  Die mitgelieferte Gruppe ist nur ein schwacher Hinweis, kein Filter.
+  nummerieren Unterpositionen je Projekt anders.
+- Beachte BKP-Gruppe, vollständigen Abschnittspfad und fachlichen Kontext.
+- Wähle je Quellposition nur aus deren Kandidatenliste.
 - Passt keine Position fachlich, setze `canonical_key` auf null und eine tiefe
   `confidence`. Das ist ausdrücklich erwünscht und besser als ein Rateschluss.
 - `confidence` ist deine ehrliche Sicherheit zwischen 0 und 1.
@@ -67,25 +63,19 @@ Regeln:
 
 
 def build_user_prompt(positions: list[dict], allowed_positions: list[dict]) -> str:
-    """Prompt aus offenen Positionen + geschlossener Liste.
+    """Kompakter Prompt aus offenen Positionen und ihren wenigen Kandidaten.
 
     `positions`: [{"source_id", "title", "group"(optional)}]
     `allowed_positions`: [{"key", "title"}]
     """
-    liste = "\n".join(f'{p["key"]}\t{p["title"]}' for p in allowed_positions)
-    zeilen = []
-    for p in positions:
-        gruppe = p.get("group")
-        zeilen.append(
-            f'{p["source_id"]}\t{p["title"]}'
-            + (f"\t(Hauptgruppe {gruppe}, nur Hinweis)" if gruppe else "")
-        )
-    return (
-        "Erlaubte Norm-LV-Positionen (geschlossene Liste, Schlüssel<TAB>Bezeichnung):\n"
-        f"{liste}\n\n"
-        "Zuzuordnende Positionen (Originalnummer<TAB>Bezeichnung):\n"
-        + "\n".join(zeilen)
-    )
+    compact = [{
+        "source_id": p["source_id"],
+        "title": p["title"],
+        "bkp_group": p.get("group"),
+        "section_path": p.get("section_path"),
+        "candidates": p.get("candidates") or [],
+    } for p in positions]
+    return json.dumps({"positions": compact}, ensure_ascii=False, separators=(",", ":"))
 
 
 _JSON_BLOCK = re.compile(r"\{.*\}", re.DOTALL)
@@ -126,9 +116,10 @@ class CostMappingLLM(ABC):
     #: Kurzname für Konfiguration und Debug ("openai" | "anthropic")
     name: str = "base"
 
-    def __init__(self, model: Optional[str] = None, client=None):
+    def __init__(self, model: Optional[str] = None, client=None, budget=None):
         self.model = model
         self._client = client
+        self.budget = budget
 
     @abstractmethod
     def available(self) -> tuple[bool, str]:

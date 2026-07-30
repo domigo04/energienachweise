@@ -16,7 +16,9 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user
 from app.database import get_db
 from app.models.auth import User
-from app.models.lv_import import LvImport, LvImportFeature, LvImportCost, LvImportStatus
+from app.models.lv_import import (
+    LvImport, LvImportFeature, LvImportCost, LvImportCondition, LvImportStatus,
+)
 from app.models.kv import RefProjekt, RefKostenzeile, RefProjektFeature
 from app.lv_import.pipeline import LvPipeline
 from app.lv_import.feature_extract import extract_features
@@ -26,11 +28,14 @@ from app.lv_import.project_extract import extract_project_data
 from app.lv_import import norm_lv
 from app.lv_import.llm import resolver as llm
 from app import fachwerte
-from app.lv_import.feature_keys import FEATURE_DEFS, FEATURE_KEYS, FEATURE_TO_CONTEXT
+from app.lv_import.feature_keys import (
+    FEATURE_DEFS, LV_IMPORT_FEATURE_KEYS, FEATURE_TO_CONTEXT,
+)
 from app.lv_import import page_classifier as pc
 from app.lv_import.review_packet import build_review_packet
 from app.lv_import.positions import parse_positions
 from app.lv_import.llm import visual_review
+from app.lv_import.llm.budget import ImportLlmBudget
 
 router = APIRouter(prefix="/api/v1/lv-imports", tags=["KV – LV-Import"])
 
@@ -65,10 +70,19 @@ def _cost_effective(c: LvImportCost):
 
 
 def _cost_out(c: LvImportCost) -> dict:
+    if c.mapping_confirmed:
+        mapping_status = "automatisch zugeordnet" if c.canonical_key else "nicht zugeordnet"
+    elif c.mapping_method == norm_lv.LLM:
+        mapping_status = "LLM-Vorschlag"
+    elif c.canonical_key:
+        mapping_status = "automatisch zugeordnet"
+    else:
+        mapping_status = "manuell zu prüfen"
     return {
         "id": c.id, "bkp_nr": c.bkp_nr,
         # Punkt 14/17 — Originalnummer, Originaltitel und kanonische Zuordnung.
         "original_position": c.original_position, "original_title": c.original_title,
+        "section_path": c.section_path,
         "canonical_key": c.canonical_key,
         "canonical_label": norm_lv.norm_label(c.canonical_key) if c.canonical_key else None,
         "original_amount": c.original_amount,
@@ -76,6 +90,7 @@ def _cost_out(c: LvImportCost) -> dict:
         "mapping_confidence": c.mapping_confidence,
         "mapping_reason": c.mapping_reason,
         "mapping_confirmed": bool(c.mapping_confirmed),
+        "mapping_status": mapping_status,
         # Fliesst diese Zeile in die Referenzkosten? Nur mit bestätigter
         # Norm-LV-Zuordnung — sonst bleibt sie nur im Import dokumentiert.
         "in_reference": bool(c.canonical_key and c.mapping_confirmed
@@ -106,11 +121,20 @@ def _import_out(imp: LvImport, detail: bool = False) -> dict:
             "projekt_name": imp.projekt_name, "projekt_nummer": imp.projekt_nummer,
             "ort": imp.ort, "unternehmer": imp.unternehmer,
             "offert_datum": imp.offert_datum,
+            "gewerk": imp.gewerk, "waehrung": imp.waehrung,
         },
     }
     if detail:
         base["features"] = [_feature_out(f) for f in imp.features]
         base["costs"] = [_cost_out(c) for c in imp.costs]
+        base["conditions"] = [{
+            "id": c.id, "original_label": c.original_label, "kind": c.kind,
+            "direction": c.direction, "rate_percent": c.rate_percent,
+            "amount": c.amount, "basis_amount": c.basis_amount,
+            "calculated_amount": c.calculated_amount,
+            "running_total": c.running_total, "order": c.order_index,
+            "source_page": c.source_page,
+        } for c in sorted(imp.conditions, key=lambda x: x.order_index)]
         # Punkt 25 — Verarbeitungsbericht für die Import-Zusammenfassung.
         base["report"] = _report(imp)
     return base
@@ -165,6 +189,8 @@ async def upload_lv(
         imp.ort = (projekt.get("location") or {}).get("value")
         imp.unternehmer = (projekt.get("contractor") or {}).get("value")
         imp.offert_datum = (projekt.get("offer_date") or {}).get("value")
+        imp.gewerk = "heizung"
+        imp.waehrung = "CHF"
         if projekt.get("building_use"):
             imp.gebaeudetyp = projekt["building_use"]["value"]
         if projekt.get("units"):
@@ -182,27 +208,90 @@ async def upload_lv(
             # Einzelpositionen bleiben einzeln sichtbar: Menge, Preis und Titel
             # können so vom Menschen direkt in derselben Zeile geprüft werden.
             costs = cost_rows_from_positions(positions)
-        # Die vollständige PDF-Datei wird zusätzlich visuell ausgewertet. Das ist
-        # bei überlagerten Formularwerten zwingend: deren extrahierter Text ist
-        # nachweislich nicht zuverlässig. Nur ein rechnerisch widerspruchsfreies
-        # visuelles Resultat ersetzt Parserwerte und Kosten.
+        # Visuell werden nur Kostenzusammenstellung, Konditionsseiten und
+        # konkrete Parser-Konflikte geprüft — nie nochmals das ganze PDF.
         review = build_review_packet(features, costs, positions)
-        visual = visual_review.review(raw)
+        review_pages = {
+            p["page"] for p in (
+                pipeline.cost_summary_pages + pipeline.conditions_pages
+            ) if p.get("page")
+        }
+        review_pages.update(
+            (features.get(key) or {}).get("source_page")
+            for key in LV_IMPORT_FEATURE_KEYS
+            if (features.get(key) or {}).get("confidence") == "low"
+            and (features.get(key) or {}).get("source_page")
+        )
+        for check in review["deterministic_checks"]:
+            if check.get("severity") != "warning":
+                continue
+            review_pages.update(
+                f.get("source_page") for f in features.values()
+                if isinstance(f, dict) and f.get("source_page")
+            )
+        if pipeline.extraction_method == "image" and not review_pages:
+            # Ohne Textebene sind nur ein kleiner Anfangs-/Endseiten-Sample
+            # vertretbar; der Import bleibt andernfalls zur manuellen Prüfung.
+            all_pages = list(range(1, pipeline.page_count + 1))
+            review_pages.update(
+                all_pages if len(all_pages) <= 6 else all_pages[:2] + all_pages[-4:]
+            )
+        review_pages = sorted(review_pages)[:12]
+        budget = ImportLlmBudget.from_env()
+        visual = (
+            visual_review.review(
+                raw, page_numbers=review_pages, budget=budget,
+                parser_context={
+                    "features": review["packet"]["features"],
+                    "costs": review["packet"]["costs"],
+                    "checks": review["packet"]["checks"],
+                },
+            )
+            if review_pages else {
+                "called": False, "success": True, "attempts": 0, "result": {},
+                "issues": [], "reviewed_pages": [], **budget.status(),
+                **visual_review.status(),
+            }
+        )
         visual_apply = {
             "visual_review_features_applied": 0,
             "visual_review_costs_applied": 0,
             "visual_review_warnings": [],
         }
-        if visual["success"]:
-            costs, visual_apply = visual_review.apply_result(
+        if visual["success"] and visual.get("result"):
+            visual_costs, visual_apply = visual_review.apply_result(
                 features, visual["result"],
             )
+            # Ein fehlerfreier Parser bleibt Kostenquelle. KI-Kosten ersetzen ihn
+            # nur, wenn Positionen/Summen fehlen oder widersprüchlich sind.
+            summary_invalid = (
+                not has_cost_summary(summary)
+                or any(
+                    item.get("validation_status") != "valid"
+                    for item in (summary.get("group_totals") or {}).values()
+                )
+            )
+            if summary_invalid and visual_costs:
+                costs = visual_costs
+            commercial_result = visual_apply.get("commercial") or {}
+            for item in commercial_result.get("conditions") or []:
+                db.add(LvImportCondition(
+                    lv_import_id=imp.id,
+                    original_label=str(item.get("label") or "")[:255],
+                    kind=item["kind"], direction=item["direction"],
+                    rate_percent=item.get("rate_percent"),
+                    amount=item.get("amount"), basis_amount=item.get("basis_amount"),
+                    calculated_amount=item.get("calculated_amount"),
+                    running_total=item.get("running_total"),
+                    order_index=int(item.get("order") or 0),
+                    source_page=item.get("source_page"),
+                ))
         # Erst nach der autoritativen visuellen Auswertung offene Titel gegen
         # das geschlossene Norm-LV auflösen.
-        llm_stat = llm.apply_to_rows(costs)
+        llm_stat = llm.apply_to_rows(costs, budget=budget)
         # ALLE kanonischen Features anlegen (auch nicht erkannte) → der Nutzer
         # sieht die vollständige Checkliste und kann fehlende Werte ergänzen.
-        for key in FEATURE_KEYS:
+        for key in LV_IMPORT_FEATURE_KEYS:
             f = features.get(key)
             val = f.get("value") if f else None
             bbox = (f or {}).get("source_bbox")
@@ -222,6 +311,7 @@ async def upload_lv(
                 lv_import_id=imp.id, bkp_nr=c["bkp_nr"],
                 original_position=c.get("original_position"),
                 original_title=c.get("original_title"),
+                section_path=c.get("section_path"),
                 canonical_key=c.get("canonical_key"),
                 original_amount=c.get("detected_amount"),
                 mapping_method=c.get("mapping_method"),
@@ -236,25 +326,28 @@ async def upload_lv(
             ))
         # Punkt 25/30 — Verarbeitungsbericht: was wurde erkannt, was muss geprüft
         # werden. Speist die Import-Zusammenfassung und den Debug-Dump.
-        erkannte = [k for k, f in features.items() if f.get("value") is not None]
+        erkannte = [
+            k for k in LV_IMPORT_FEATURE_KEYS
+            if (features.get(k) or {}).get("value") is not None
+        ]
         pruefen = [c["bkp_nr"] for c in costs if not c.get("canonical_key")
                    and not c.get("is_group_total")]
         imp.debug_json = json.dumps({
             **pipeline.debug_dump(),
             "cost_source": (
-                "visual_ai_pdf" if visual["success"]
-                else "cost_summary" if has_cost_summary(summary)
+                "cost_summary" if has_cost_summary(summary)
+                else "visual_ai_pdf" if visual["success"]
                 else "lv_positions"
             ),
             "features_erkannt": len(erkannte),
-            "features_total": len(FEATURE_KEYS),
+            "features_total": len(LV_IMPORT_FEATURE_KEYS),
             "feature_keys_erkannt": erkannte,
             "kostenpositionen": len([c for c in costs if not c.get("is_group_total")]),
             "gruppentotale": len([c for c in costs if c.get("is_group_total")]),
             "kosten_ohne_zuordnung": len(pruefen),
             "llm_positions_sent": llm_stat["sent"],
             "llm_positions_mapped": llm_stat["mapped"],
-            "parser_first": False,
+            "parser_first": True,
             "llm_review_characters": review["characters"],
             "llm_review_estimated_tokens": review["estimated_tokens"],
             "llm_review_positions_sent": review["positions_sent"],
@@ -264,6 +357,8 @@ async def upload_lv(
             "visual_review_success": visual["success"],
             "visual_review_attempts": visual["attempts"],
             "visual_review_issues": visual["issues"],
+            "visual_review_pages": visual.get("reviewed_pages") or [],
+            **budget.status(),
             **visual_review.status(),
             **visual_apply,
             **llm.status(),
@@ -271,6 +366,7 @@ async def upload_lv(
                 g: i.get("validation_status")
                 for g, i in (summary.get("group_totals") or {}).items()},
             "trade_total": summary.get("trade_total"),
+            "commercial": visual_apply.get("commercial") or {},
             "projekt_erkannt": sorted(projekt.keys()),
         }, ensure_ascii=False)
         quality_ready = visual["success"] or not visual_review.required()
@@ -540,7 +636,7 @@ def update_import(import_id: int, body: dict, user: User = Depends(get_current_u
             })
         setattr(imp, feld, code)
     for feld in ("region", "projekt_name", "projekt_nummer", "ort", "unternehmer",
-                 "offert_datum"):
+                 "offert_datum", "gewerk", "waehrung"):
         if feld in body:
             val = body[feld]
             setattr(imp, feld, None if val in (None, "") else str(val)[:200])

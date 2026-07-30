@@ -15,10 +15,11 @@ from app.lv_import.llm.base import (
 class AnthropicCostMapper(CostMappingLLM):
     name = "anthropic"
 
-    def __init__(self, model: Optional[str] = None, client=None):
+    def __init__(self, model: Optional[str] = None, client=None, budget=None):
         super().__init__(
-            model or os.getenv("COST_MAPPING_LLM_MODEL") or os.getenv("LV_REVIEW_LLM_MODEL"),
-            client,
+            model or os.getenv("COST_MAPPING_LLM_MODEL")
+            or os.getenv("LV_MAPPING_MODEL") or os.getenv("LV_REVIEW_LLM_MODEL"),
+            client, budget,
         )
 
     def available(self) -> tuple[bool, str]:
@@ -41,21 +42,29 @@ class AnthropicCostMapper(CostMappingLLM):
         return self._client
 
     def resolve(self, positions, allowed_positions) -> list[dict]:
+        from app.lv_import.llm.budget import ImportLlmBudget
         if not self.model:
             return []
+        budget = self.budget or ImportLlmBudget.from_env()
+        prompt = build_user_prompt(positions, allowed_positions)
+        estimated_input = max(200, len(prompt) // 4)
+        if not budget.may_call(estimated_input):
+            return []
         try:
+            budget.start_call()
             antwort = self._get_client().messages.create(
                 model=self.model,
-                max_tokens=4000,
+                timeout=float(os.getenv("LV_VISUAL_REVIEW_TIMEOUT_SECONDS", "180")),
+                max_tokens=budget.max_output_tokens,
                 system=SYSTEM_PROMPT,
                 output_config={
                     # Kleine Klassifikation — kein tiefes Nachdenken nötig.
                     "effort": "low",
                     "format": {"type": "json_schema", "schema": RESPONSE_SCHEMA},
                 },
-                messages=[{"role": "user",
-                           "content": build_user_prompt(positions, allowed_positions)}],
+                messages=[{"role": "user", "content": prompt}],
             )
+            budget.record(antwort, estimated_input_tokens=estimated_input)
         except Exception:
             return []                      # Netz, Kontingent, Konfiguration
         # Eine Ablehnung ist ein gültiger Ausgang, kein Fehler.

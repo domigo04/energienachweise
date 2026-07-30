@@ -22,11 +22,15 @@ DEFAULT_MODEL = "gpt-5.6"
 class OpenAICostMapper(CostMappingLLM):
     name = "openai"
 
-    def __init__(self, model: Optional[str] = None, client=None):
+    def __init__(self, model: Optional[str] = None, client=None, budget=None):
+        mapping_model = os.getenv("LV_MAPPING_MODEL")
+        if mapping_model == "LV_MAPPING_MODEL":
+            mapping_model = None
         super().__init__(
             model or os.getenv("COST_MAPPING_LLM_MODEL")
+            or mapping_model
             or os.getenv("LV_REVIEW_LLM_MODEL") or DEFAULT_MODEL,
-            client,
+            client, budget,
         )
 
     def available(self) -> tuple[bool, str]:
@@ -47,9 +51,17 @@ class OpenAICostMapper(CostMappingLLM):
         return self._client
 
     def resolve(self, positions, allowed_positions) -> list[dict]:
+        from app.lv_import.llm.budget import ImportLlmBudget
+        budget = self.budget or ImportLlmBudget.from_env()
+        estimated_input = max(200, len(build_user_prompt(positions, allowed_positions)) // 4)
+        if not budget.may_call(estimated_input):
+            return []
         try:
+            budget.start_call()
             antwort = self._get_client().chat.completions.create(
                 model=self.model,
+                timeout=float(os.getenv("LV_VISUAL_REVIEW_TIMEOUT_SECONDS", "180")),
+                max_completion_tokens=budget.max_output_tokens,
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user",
@@ -63,7 +75,11 @@ class OpenAICostMapper(CostMappingLLM):
                         "schema": RESPONSE_SCHEMA,
                     },
                 },
+                store=os.getenv("LV_LLM_STORE_RESPONSES", "false").strip().lower() in {
+                    "1", "true", "yes", "on",
+                },
             )
+            budget.record(antwort, estimated_input_tokens=estimated_input)
         except Exception:
             return []                      # Netz, Kontingent, Konfiguration
         try:

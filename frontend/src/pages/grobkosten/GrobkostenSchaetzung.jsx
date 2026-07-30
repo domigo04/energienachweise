@@ -69,14 +69,14 @@ function FreigabeFortschritt({ status, gesperrt, versionNr, freigegebenAt, laedt
   const naechsterSchritt = STATUS_SCHRITTE[Math.min(erreicht, 4)]?.label;
 
   return (
-    <div className={`card overflow-hidden ${gesperrt ? "border-green-200" : "border-blue-200"}`}>
-      <div className={`px-4 py-4 sm:px-5 ${gesperrt ? "bg-green-50/60" : "bg-blue-50/50"}`}>
+    <div className="card overflow-hidden border-slate-300">
+      <div className="bg-white px-4 py-4 sm:px-5">
         <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
-              {gesperrt ? <LockKeyhole className="size-4 text-green-700" /> : <ListChecks className="size-4 text-blue-700" />}
+              {gesperrt ? <LockKeyhole className="size-4 text-slate-700" /> : <ListChecks className="size-4 text-brand-700" />}
               Abschlussfortschritt
-              <span className="rounded-full bg-white/80 px-2 py-0.5 text-[11px] text-slate-600">{erreicht} von 5</span>
+              <span className="rounded-sm border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600">{erreicht} von 5</span>
             </div>
             <p className="mt-1 text-xs text-slate-500">
               {gesperrt
@@ -85,8 +85,8 @@ function FreigabeFortschritt({ status, gesperrt, versionNr, freigegebenAt, laedt
                   : `Nächster Meilenstein: ${naechsterSchritt}.`}
             </p>
           </div>
-          <div className="h-2 w-full overflow-hidden rounded-full bg-white/80 sm:mt-1 sm:w-44">
-            <div className={`h-full rounded-full transition-all ${gesperrt ? "bg-green-500" : "bg-blue-500"}`} style={{ width: `${erreicht * 20}%` }} />
+          <div className="h-1.5 w-full overflow-hidden rounded-sm bg-slate-200 sm:mt-1 sm:w-44">
+            <div className="h-full bg-brand-600 transition-all" style={{ width: `${erreicht * 20}%` }} />
           </div>
         </div>
 
@@ -94,9 +94,9 @@ function FreigabeFortschritt({ status, gesperrt, versionNr, freigegebenAt, laedt
           {STATUS_SCHRITTE.map((schritt, index) => {
             const fertig = index < erreicht;
             return (
-              <div key={schritt.key} className={`flex min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left sm:block sm:px-0 sm:py-0 sm:text-center ${fertig ? "bg-white/60 sm:bg-transparent" : ""}`}>
-                <div className={`flex size-7 shrink-0 items-center justify-center rounded-full border text-xs font-bold transition sm:mx-auto ${fertig
-                  ? gesperrt ? "border-green-500 bg-green-500 text-white" : "border-blue-500 bg-blue-500 text-white"
+              <div key={schritt.key} className="flex min-w-0 items-center gap-2 px-2 py-1.5 text-left sm:block sm:px-0 sm:py-0 sm:text-center">
+                <div className={`flex size-7 shrink-0 items-center justify-center rounded-sm border text-xs font-bold transition sm:mx-auto ${fertig
+                  ? "border-slate-700 bg-slate-700 text-white"
                   : "border-slate-200 bg-white text-slate-400"}`}>
                   {fertig ? <Check className="size-3.5" /> : index + 1}
                 </div>
@@ -402,7 +402,7 @@ export default function GrobkostenSchaetzung() {
   };
 
   return (
-    <div className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8">
+    <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8">
       <PageHeader
         back={{ to: `/projekte/${id}`, label: projekt?.name || "Projekt" }}
         title="Grobkostenschätzung"
@@ -423,9 +423,12 @@ export default function GrobkostenSchaetzung() {
         <fieldset disabled={istGesperrt} className={`card lg:sticky lg:top-4 p-5 ${istGesperrt ? "bg-slate-50/70" : ""}`}>
           <h2 className="mb-4 text-sm font-bold text-slate-800">Eckdaten</h2>
           {vorbelegtFelder.length > 0 && (
-            <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
+            <div className="mb-4 flex gap-2 rounded-sm border border-slate-200 border-l-2 border-l-brand-500 bg-slate-50 p-3 text-xs text-slate-700">
+              <Database className="mt-0.5 size-3.5 shrink-0 text-brand-700" />
+              <span>
               Aus dem Projekt übernommen ({vorbelegtFelder.length} {vorbelegtFelder.length === 1 ? "Wert" : "Werte"}) –
               Grunddaten und Schema-Mengen. Du kannst sie hier für die Schätzung überschreiben; die Projektwerte bleiben unverändert.
+              </span>
             </div>
           )}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

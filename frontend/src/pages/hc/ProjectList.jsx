@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, MapPin, User, UserRoundCheck, CalendarDays, Trash2 } from "lucide-react";
+import { Plus, MapPin, User, UserRoundCheck, CalendarDays, Trash2, FolderPlus } from "lucide-react";
 import { getProjects, createProject, deleteProjectPermanent, deleteAllArchived } from "../../api/hcApi";
 import { useAuth } from "../../auth/AuthContext";
 import { GEBAEUDEKATEGORIEN, KLIMASTATIONEN } from "../../data/sia";
@@ -212,7 +212,9 @@ export default function ProjectList() {
         <div className="py-16 text-center text-sm text-slate-400">Lade Projekte…</div>
       ) : projects.length === 0 ? (
         <div className="card flex flex-col items-center gap-2 border-dashed p-12 text-center">
-          <div className="text-4xl">🔥</div>
+          <div className="flex size-11 items-center justify-center rounded-sm border border-slate-300 bg-slate-50 text-slate-500">
+            <FolderPlus className="size-5" />
+          </div>
           <p className="font-medium text-slate-700">Noch keine Projekte vorhanden</p>
           <p className="text-sm text-slate-400">Erstelle dein erstes Projekt mit dem Button oben rechts.</p>
         </div>
@@ -220,7 +222,7 @@ export default function ProjectList() {
         <div className="grid gap-4 sm:grid-cols-2">
           {projects.map((p) => (
             <div key={p.id} onClick={() => navigate(`/projekte/${p.id}`)}
-              className="card group cursor-pointer p-5 text-left transition hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md">
+              className="card group cursor-pointer border-l-2 border-l-transparent p-5 text-left transition hover:border-slate-400 hover:border-l-brand-600 hover:bg-slate-50/60">
               <div className="mb-2 flex items-start justify-between gap-3">
                 <h3 className="truncate font-semibold text-slate-900 group-hover:text-brand-700">{p.name}</h3>
                 <div className="flex shrink-0 items-center gap-2">

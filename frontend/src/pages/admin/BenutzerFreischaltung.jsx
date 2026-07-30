@@ -15,7 +15,7 @@ import { getAdminOverview, getUsers, updateFirma, updateUser } from "../../api/h
 function Metric({ icon: Icon, value, label, warning }) {
   return (
     <div className="card flex items-center gap-3 p-4">
-      <div className={`flex size-10 items-center justify-center rounded-xl ${warning ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-700"}`}>
+      <div className={`flex size-10 items-center justify-center rounded-sm border bg-slate-50 ${warning ? "border-amber-200 text-amber-700" : "border-slate-200 text-slate-700"}`}>
         <Icon className="size-5" />
       </div>
       <div>

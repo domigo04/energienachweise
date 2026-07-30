@@ -27,10 +27,10 @@ const SOURCE_LABELS = {
 };
 
 const STATUS_STYLE = {
-  bekannt: "bg-green-100 text-green-700",
-  erkannt: "bg-blue-100 text-blue-700",
-  ergaenzung_erforderlich: "bg-amber-100 text-amber-800",
-  unbekannt: "bg-slate-100 text-slate-500",
+  bekannt: "border-green-200 bg-green-50 text-green-700",
+  erkannt: "border-slate-200 bg-slate-50 text-slate-700",
+  ergaenzung_erforderlich: "border-amber-200 bg-amber-50 text-amber-800",
+  unbekannt: "border-slate-200 bg-white text-slate-500",
 };
 const STATUS_LABELS = {
   bekannt: "bekannt",
@@ -55,7 +55,7 @@ function SourceBadge({ param }) {
       ? `${param.schema_value} Schema + ${param.external_value} ergänzt`
       : SOURCE_LABELS[param.source] || param.source;
   return (
-    <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-semibold text-slate-600">
+    <span className="rounded-sm border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
       {detail}
       {param.quelle_notiz ? ` · ${param.quelle_notiz}` : ""}
     </span>
@@ -106,7 +106,7 @@ function ParamRow({ projectId, param, onSaved }) {
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-medium text-slate-900">{param.label}</span>
-            <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_STYLE[param.status] || STATUS_STYLE.unbekannt}`}>
+            <span className={`rounded-sm border px-2 py-0.5 text-[11px] font-semibold ${STATUS_STYLE[param.status] || STATUS_STYLE.unbekannt}`}>
               {STATUS_LABELS[param.status] || param.status}
             </span>
           </div>
@@ -197,7 +197,7 @@ export default function ProjektMengenPage() {
         <div className="flex items-center gap-3">
           <Link to={`/projekte/${id}/info`} className="btn-secondary hidden sm:inline-flex"><ClipboardList className="size-4" /> Projektinfos</Link>
           {z && (
-            <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
+            <div className="rounded-sm border border-slate-200 bg-white px-3 py-1 text-xs font-bold text-slate-600">
               Datenbasis: {bekannt} von {z.anzahl_parameter} bekannt
             </div>
           )}
@@ -205,7 +205,7 @@ export default function ProjektMengenPage() {
       </div>
 
       {z && (z.ergaenzung_erforderlich > 0 || z.unbekannt > 0) && (
-        <div className="mb-6 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+        <div className="mb-6 flex items-start gap-2 rounded-sm border border-amber-200 border-l-2 border-l-amber-500 bg-white p-3 text-sm text-slate-700">
           <Info className="mt-0.5 size-4 shrink-0" />
           <span>
             {z.ergaenzung_erforderlich > 0 && `${z.ergaenzung_erforderlich} Angabe(n) aus dem Schema können ergänzt werden. `}

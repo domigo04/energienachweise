@@ -30,7 +30,7 @@ const ProjectModuleNode = forwardRef(function ProjectModuleNode(
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2">
           {Icon && (
-            <div className="flex size-8 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
+            <div className="flex size-8 items-center justify-center rounded-sm border border-slate-200 bg-slate-50 text-slate-600">
               <Icon className="size-4" />
             </div>
           )}
@@ -62,10 +62,10 @@ const ProjectModuleNode = forwardRef(function ProjectModuleNode(
 
   const interaktiv = Boolean(to || onClick);
   const cls =
-    "block w-full rounded-2xl border bg-white p-4 text-left shadow-sm transition " +
-    (active ? "border-brand-400 ring-2 ring-brand-100 " : "border-slate-200 ") +
+    "block w-full rounded-md border bg-white p-4 text-left transition " +
+    (active ? "border-brand-500 ring-1 ring-brand-100 " : "border-slate-300/80 ") +
     (dimmed ? "opacity-40 " : "opacity-100 ") +
-    (interaktiv ? "hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-md " : "");
+    (interaktiv ? "hover:border-slate-500 hover:bg-slate-50/60 " : "");
 
   const shared = { ref, className: cls, onMouseEnter, onMouseLeave };
   if (to) return <Link to={to} {...shared}>{inner}</Link>;

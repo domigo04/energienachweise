@@ -76,6 +76,7 @@ def status() -> dict:
         "llm_enabled": aktiv,
         "llm_provider": name,
         "llm_model": getattr(p, "model", None),
+        "llm_reasoning": getattr(p, "reasoning", None),
         "llm_available": bool(aktiv and ok),
         "llm_reason": grund if aktiv else "COST_MAPPING_LLM_ENABLED=false",
     }

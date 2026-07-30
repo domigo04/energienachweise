@@ -133,7 +133,7 @@ def test_globale_limits_werden_im_visual_call_verwendet(monkeypatch):
     result = visual_review.review(b"%PDF-test", client=fake, model="test")
     assert result["success"] is True
     assert result["llm_calls"] == 1
-    assert fake.calls[0]["max_output_tokens"] == 6000
+    assert fake.calls[0]["max_output_tokens"] == 2000
     assert fake.calls[0]["timeout"] == 180
     assert fake.calls[0]["store"] is False
 

@@ -34,7 +34,7 @@ RESPONSE_SCHEMA: dict = {
                     # null ist ein ausdrücklich gültiges Ergebnis.
                     "canonical_key": {"type": ["string", "null"]},
                     "confidence": {"type": "number"},
-                    "reason": {"type": "string"},
+                    "reason": {"type": "string", "maxLength": 120},
                 },
                 "required": ["source_id", "canonical_key", "confidence", "reason"],
                 "additionalProperties": False,

@@ -4,7 +4,7 @@ Nutzt Structured Outputs der Chat-Completions-API
 (`response_format={"type": "json_schema", ...}` mit `strict: true`), damit kein
 Fliesstext geparst werden muss.
 
-Der verifizierte Standard für Structured Outputs ist `gpt-5.6`; er kann über
+Der Standard für Structured Outputs ist `gpt-5.6-terra`; er kann über
 `COST_MAPPING_LLM_MODEL` bzw. `LV_REVIEW_LLM_MODEL` überschrieben werden.
 """
 from __future__ import annotations
@@ -15,8 +15,10 @@ from typing import Optional
 from app.lv_import.llm.base import (
     CostMappingLLM, RESPONSE_SCHEMA, SYSTEM_PROMPT, build_user_prompt, parse_mappings,
 )
+from app.lv_import.llm.budget import timeout_seconds
 
-DEFAULT_MODEL = "gpt-5.6"
+DEFAULT_MODEL = "gpt-5.6-terra"
+DEFAULT_REASONING = "medium"
 
 
 class OpenAICostMapper(CostMappingLLM):
@@ -27,10 +29,16 @@ class OpenAICostMapper(CostMappingLLM):
         if mapping_model == "LV_MAPPING_MODEL":
             mapping_model = None
         super().__init__(
-            model or os.getenv("COST_MAPPING_LLM_MODEL")
-            or mapping_model
-            or os.getenv("LV_REVIEW_LLM_MODEL") or DEFAULT_MODEL,
+            model or mapping_model
+            or os.getenv("COST_MAPPING_LLM_MODEL")
+            or os.getenv("LV_REVIEW_LLM_MODEL")
+            or os.getenv("LV_VISUAL_REVIEW_MODEL") or DEFAULT_MODEL,
             client, budget,
+        )
+        self.reasoning = (
+            os.getenv("LV_MAPPING_REASONING")
+            or os.getenv("LV_VISUAL_REVIEW_REASONING")
+            or DEFAULT_REASONING
         )
 
     def available(self) -> tuple[bool, str]:
@@ -57,11 +65,12 @@ class OpenAICostMapper(CostMappingLLM):
         if not budget.may_call(estimated_input):
             return []
         try:
-            budget.start_call()
+            budget.start_call(model=self.model, reasoning=self.reasoning)
             antwort = self._get_client().chat.completions.create(
                 model=self.model,
-                timeout=float(os.getenv("LV_VISUAL_REVIEW_TIMEOUT_SECONDS", "180")),
+                timeout=timeout_seconds(),
                 max_completion_tokens=budget.max_output_tokens,
+                reasoning_effort=self.reasoning,
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user",

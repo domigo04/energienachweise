@@ -19,9 +19,12 @@ from typing import Any
 
 from app.lv_import import commercial, norm_lv
 from app.lv_import.feature_keys import LV_IMPORT_FEATURE_KEYS
-from app.lv_import.llm.budget import ImportLlmBudget, enabled as global_enabled
+from app.lv_import.llm.budget import (
+    ImportLlmBudget, enabled as global_enabled, timeout_seconds,
+)
 
-DEFAULT_MODEL = "gpt-5.6"
+DEFAULT_MODEL = "gpt-5.6-terra"
+DEFAULT_REASONING = "medium"
 MIN_FEATURE_CONFIDENCE = 0.75
 TOLERANCE_CHF = 1.0
 
@@ -99,8 +102,8 @@ RESPONSE_SCHEMA = {
                     ]},
                     "confidence": {"type": "number", "minimum": 0, "maximum": 1},
                     "source_page": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
-                    "evidence": {"type": "string"},
-                    "reason": {"type": "string"},
+                    "evidence": {"type": "string", "maxLength": 160},
+                    "reason": {"type": "string", "maxLength": 80},
                 },
                 "required": [
                     "key", "value", "confidence", "source_page", "evidence", "reason",
@@ -119,7 +122,7 @@ RESPONSE_SCHEMA = {
                     "amount": {"type": "number", "minimum": 0},
                     "source_page": {"type": "integer"},
                     "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-                    "evidence": {"type": "string"},
+                    "evidence": {"type": "string", "maxLength": 160},
                 },
                 "required": [
                     "position", "bkp_group", "title", "amount", "source_page",
@@ -173,7 +176,10 @@ RESPONSE_SCHEMA = {
         "stated_subtotal_excl_vat": _NULLABLE_NUMBER,
         "stated_vat_amount": _NULLABLE_NUMBER,
         "stated_total_incl_vat": _NULLABLE_NUMBER,
-        "warnings": {"type": "array", "items": {"type": "string"}},
+        "warnings": {
+            "type": "array",
+            "items": {"type": "string", "maxLength": 160},
+        },
     },
     "required": [
         "features", "costs", "group_totals", "trade_total", "conditions",
@@ -205,6 +211,9 @@ def status() -> dict:
         "visual_review_enabled": active,
         "visual_review_required": required(),
         "visual_review_model": os.getenv("LV_VISUAL_REVIEW_MODEL", DEFAULT_MODEL),
+        "visual_review_reasoning": os.getenv(
+            "LV_VISUAL_REVIEW_REASONING", DEFAULT_REASONING,
+        ),
         "visual_review_available": bool(active and key_ok),
         "visual_review_reason": (
             "bereit" if active and key_ok
@@ -435,14 +444,15 @@ def _call(
     estimated_input = max(500, len(pdf_bytes) // 80 + len(task) // 4)
     if not budget.may_call(estimated_input):
         return {}
-    budget.start_call()
+    reasoning = os.getenv("LV_VISUAL_REVIEW_REASONING", DEFAULT_REASONING)
+    budget.start_call(model=model, reasoning=reasoning)
     response = client.responses.create(
         model=model,
-        timeout=float(os.getenv("LV_VISUAL_REVIEW_TIMEOUT_SECONDS", "180")),
+        timeout=timeout_seconds(),
         store=os.getenv("LV_LLM_STORE_RESPONSES", "false").strip().lower() in {
             "1", "true", "yes", "on",
         },
-        reasoning={"effort": os.getenv("LV_VISUAL_REVIEW_REASONING", "high")},
+        reasoning={"effort": reasoning},
         max_output_tokens=budget.max_output_tokens,
         input=[
             {"role": "system", "content": [{"type": "input_text", "text": SYSTEM_PROMPT}]},

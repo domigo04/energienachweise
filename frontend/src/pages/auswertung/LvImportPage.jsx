@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Upload, FileText, CheckCircle2, AlertTriangle, Trash2, Plus, ChevronDown, Loader2 } from "lucide-react";
+import { Upload, FileText, Check, CheckCircle2, AlertTriangle, Trash2, Plus, ChevronDown, Loader2 } from "lucide-react";
 import {
   uploadLvImport, listLvImports, getLvImport, getFachwerte, getNormLv,
   updateLvFeature, updateLvCost, addLvCost, deleteLvCost, updateLvCommercial,
   updateLvImport, approveLvImport,
 } from "../../api/hcApi";
 import { GENERATOR_TYPES } from "../../components/hc/nodes/generatorTypes";
-import { chf, zahl } from "../../lib/format";
+import PageHeader from "../../components/ui/PageHeader";
+import { LEER, chf, zahl } from "../../lib/format";
 
 // B9 — Review-Seite des LV-Imports. Ohne :id ist es die Upload-Ansicht.
 // Aus einem Unternehmer-LV entsteht ein geprüfter technischer Fingerprint +
@@ -73,6 +74,16 @@ const MAPPING = {
 const NICHT_ZUGEORDNET = { label: "Nicht zugeordnet", style: "bg-amber-100 text-amber-700",
   hilfe: "Keine passende Norm-LV-Position gefunden." };
 
+// Sichtbare Rückmeldung nach dem Speichern eines Feldes.
+function Gespeichert({ an }) {
+  if (!an) return null;
+  return (
+    <span className="inline-flex items-center gap-0.5 whitespace-nowrap text-[11px] font-medium text-green-600">
+      <Check className="size-3" /> gespeichert
+    </span>
+  );
+}
+
 // Punkt 21 — vier klare Schritte statt einer langen Seite.
 const SCHRITTE = [
   { key: "projekt", titel: "Projekt" },
@@ -95,7 +106,7 @@ function Quelle({ feature, tag, tagStyle }) {
           : <span>{feature.source_page != null ? `Seite ${feature.source_page}: ` : ""}„{feature.source_text}"</span>}
         {mehr && (
           <button type="button" onClick={() => setOffen((o) => !o)}
-            className="inline-flex items-center gap-0.5 text-brand-600 hover:underline">
+            className="inline-flex items-center gap-0.5 text-slate-500 hover:text-slate-700 hover:underline">
             Quelle anzeigen <ChevronDown className={`size-3 transition ${offen ? "rotate-180" : ""}`} />
           </button>
         )}
@@ -178,22 +189,16 @@ function ProcessingAnsicht({ schritt, vergangen }) {
 }
 
 // Punkt 25 — Zusammenfassung nach der Verarbeitung.
-function ImportZusammenfassung({ report, imp, offen }) {
+function ImportZusammenfassung({ report, imp }) {
   if (!report || !Object.keys(report).length) return null;
   const zeilen = [
-    [`${report.page_count ?? imp.page_count} Seiten analysiert`, true],
+    [`${report.page_count ?? imp.page_count} Seiten gelesen`, true],
     [`${report.kostenpositionen ?? 0} Kostenpositionen erkannt`, (report.kostenpositionen ?? 0) > 0],
     [`${report.commercial?.conditions?.length || 0} Konditionen erkannt`, true],
   ];
   return (
     <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
       <p className="text-xs font-bold text-slate-700">Import abgeschlossen</p>
-      {offen > 0 && (
-        <div className="mt-2 flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-800">
-          <AlertTriangle className="size-4 shrink-0" />
-          Noch {offen} Angaben prüfen – orange markierte Zeilen bearbeiten.
-        </div>
-      )}
       <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-slate-500">
         {zeilen.map(([text, ok]) => (
           <li key={text} className={ok ? "" : "text-slate-400"}>· {text}</li>
@@ -220,6 +225,7 @@ function UploadAnsicht() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [imports, setImports] = useState([]);
+  const [ueberZone, setUeberZone] = useState(false);
 
   useEffect(() => { listLvImports().then(setImports).catch(() => {}); }, []);
 
@@ -239,10 +245,12 @@ function UploadAnsicht() {
     return () => clearInterval(t);
   }, [busy]);
 
-  const onFile = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
+  const hochladen = async (file) => {
     if (!file) return;
+    if (file.type && file.type !== "application/pdf") {
+      setError("Nur PDF wird unterstützt.");
+      return;
+    }
     setBusy(true); setError("");
     try {
       const imp = await uploadLvImport(file);
@@ -254,40 +262,85 @@ function UploadAnsicht() {
     }
   };
 
+  const onFile = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // dieselbe Datei bleibt danach erneut wählbar
+    hochladen(file);
+  };
+
   if (busy) return <ProcessingAnsicht schritt={schritt} vergangen={vergangen} />;
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-6 sm:py-8 lg:px-8">
-      <Link to="/auswertung" className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 transition hover:text-brand-600">
-        <ArrowLeft className="size-4" /> Auswertung
-      </Link>
-      <h1 className="text-xl font-bold text-slate-900">Unternehmer-LV importieren</h1>
-      <p className="mt-1 text-sm text-slate-500">Aus einem alten LV entsteht ein geprüfter technischer Fingerprint + reale BKP-Kosten. Digitaler Text wird direkt gelesen, gescannte PDFs automatisch per deutscher OCR.</p>
+    <div className="px-4 py-6 lg:px-8">
+      <PageHeader
+        back={{ to: "/auswertung", label: "Auswertung" }}
+        title="Unternehmer-LV importieren"
+        subtitle="Aus einem alten LV entstehen ein technischer Fingerprint und reale BKP-Kosten. Gescannte PDFs werden automatisch per deutscher OCR gelesen."
+      />
 
-      {error && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+      {error && <div className="mb-4 max-w-5xl rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
-      <button onClick={() => fileRef.current?.click()} disabled={busy}
-        className="mt-6 flex w-full flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-300 bg-white p-10 text-slate-500 transition hover:border-brand-400 hover:text-brand-600">
-        <Upload className="size-7" />
-        <span className="text-sm font-semibold">{busy ? "Lade hoch & extrahiere…" : "PDF hochladen (Submission / LV)"}</span>
-        <span className="text-xs text-slate-400">Original wird gespeichert, Werte werden automatisch erkannt</span>
+      <div className="max-w-5xl">
+      {/* Die gestrichelte Fläche sieht aus wie eine Ablagezone — also ist sie
+          auch eine: Klick und Drag & Drop führen zum selben Upload. */}
+      <button
+        type="button"
+        onClick={() => fileRef.current?.click()}
+        disabled={busy}
+        onDragOver={(e) => { e.preventDefault(); setUeberZone(true); }}
+        onDragLeave={() => setUeberZone(false)}
+        onDrop={(e) => { e.preventDefault(); setUeberZone(false); hochladen(e.dataTransfer.files?.[0]); }}
+        className={"flex w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed p-10 transition "
+          + (ueberZone ? "border-slate-800 bg-slate-50 text-slate-700" : "border-slate-300 bg-white text-slate-500 hover:border-slate-400")}
+      >
+        <Upload className="size-6" />
+        <span className="text-sm font-semibold">PDF hier ablegen oder auswählen</span>
+        <span className="text-xs text-slate-400">Submission oder LV · das Original bleibt gespeichert</span>
       </button>
       <input ref={fileRef} type="file" accept="application/pdf,.pdf" className="hidden" onChange={onFile} />
 
       {imports.length > 0 && (
-        <div className="mt-8">
-          <h2 className="mb-2 text-sm font-bold text-slate-700">Bisherige Importe</h2>
-          <div className="card divide-y divide-slate-100">
-            {imports.map((imp) => (
-              <Link key={imp.id} to={`/auswertung/import/${imp.id}`} className="flex items-center gap-3 px-4 py-3 transition hover:bg-slate-50">
-                <FileText className="size-4 text-slate-400" />
-                <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">{imp.filename}</span>
-                <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_STYLE[imp.status] || STATUS_STYLE.uploaded}`}>{statusText(imp.status)}</span>
-              </Link>
-            ))}
-          </div>
+        <div className="mt-6 overflow-x-auto rounded-lg border border-slate-200 bg-white">
+          <table className="w-full min-w-[640px] text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                <th className="w-full py-2 pl-3 pr-3">Datei</th>
+                <th className="whitespace-nowrap py-2 pr-3">Projekt</th>
+                <th className="whitespace-nowrap py-2 pr-3">Unternehmer</th>
+                <th className="whitespace-nowrap py-2 pr-3 text-right">Seiten</th>
+                <th className="whitespace-nowrap py-2 pr-3">Hochgeladen</th>
+                <th className="whitespace-nowrap py-2 pr-3">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {imports.map((imp) => (
+                <tr key={imp.id} onClick={() => navigate(`/auswertung/import/${imp.id}`)}
+                  className="cursor-pointer transition hover:bg-slate-50">
+                  <td className="max-w-0 truncate py-2 pl-3 pr-3">
+                    <Link to={`/auswertung/import/${imp.id}`} onClick={(e) => e.stopPropagation()}
+                      className="inline-flex min-w-0 items-center gap-2 font-medium text-slate-900 hover:text-brand-700">
+                      <FileText className="size-4 shrink-0 text-slate-400" />
+                      <span className="truncate">{imp.filename}</span>
+                    </Link>
+                  </td>
+                  <td className="whitespace-nowrap py-2 pr-3 text-slate-500">{imp.grunddaten?.projekt_name || LEER}</td>
+                  <td className="whitespace-nowrap py-2 pr-3 text-slate-500">{imp.grunddaten?.unternehmer || LEER}</td>
+                  <td className="py-2 pr-3 text-right tabular-nums text-slate-500">{zahl(imp.page_count)}</td>
+                  <td className="whitespace-nowrap py-2 pr-3 tabular-nums text-slate-400">
+                    {imp.created_at ? new Date(imp.created_at).toLocaleDateString("de-CH") : LEER}
+                  </td>
+                  <td className="whitespace-nowrap py-2 pr-3">
+                    <span className={`rounded px-1.5 py-0.5 text-[11px] font-semibold ${STATUS_STYLE[imp.status] || STATUS_STYLE.uploaded}`}>
+                      {statusText(imp.status)}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
+      </div>
     </div>
   );
 }
@@ -419,7 +472,7 @@ function KonditionenEditor({ imp, gesperrt, onSaved }) {
             <div className={`text-right text-sm font-medium ${condition.direction === "deduction" ? "text-slate-700" : "text-green-700"}`}>
               {condition.calculated_amount != null
                 ? `${condition.direction === "deduction" ? "−" : "+"} ${chf(Math.abs(condition.calculated_amount))}`
-                : "nach Speichern"}
+                : "wird beim Speichern berechnet"}
             </div>
             <div className="text-right text-sm font-bold text-slate-800">
               {chf(condition.running_total)}
@@ -462,6 +515,7 @@ function ReviewAnsicht({ id }) {
   const [error, setError] = useState("");
   const [approving, setApproving] = useState(false);
   const [schritt, setSchritt] = useState(0);
+  const [gespeichert, setGespeichert] = useState(null); // zuletzt gespeichertes Feld
 
   const [listen, setListen] = useState(null);
   const [normLv, setNormLv] = useState(null);
@@ -546,14 +600,27 @@ function ReviewAnsicht({ id }) {
     kostenOffen === 0,
     false,
   ];
+  // Wie viel ist in jedem Schritt noch offen — steht am Schritt selbst, nicht
+  // erst darin versteckt.
+  const schrittOffen = [0, featTotal - featGeprueft, kostenOffen + zuordnungOffen, 0];
+
+  // Alle Felder speichern beim Verlassen. Ohne Rückmeldung weiss niemand, ob
+  // der Wert angekommen ist; die Markierung verschwindet nach kurzer Zeit.
+  const merkeGespeichert = (schluessel) => {
+    setGespeichert(schluessel);
+    clearTimeout(merkeGespeichert.timer);
+    merkeGespeichert.timer = setTimeout(() => setGespeichert(null), 1800);
+  };
 
   const setFeature = async (feature, patch) => {
     const updated = await updateLvFeature(id, feature.id, patch);
     setImp((cur) => ({ ...cur, features: cur.features.map((f) => (f.id === feature.id ? updated : f)) }));
+    merkeGespeichert(`f${feature.id}`);
   };
   const setCost = async (cost, patch) => {
     const updated = await updateLvCost(id, cost.id, patch);
     setImp((cur) => ({ ...cur, costs: cur.costs.map((c) => (c.id === cost.id ? updated : c)) }));
+    merkeGespeichert(`c${cost.id}`);
   };
   const entferneKost = async (cost) => {
     await deleteLvCost(id, cost.id);
@@ -566,6 +633,7 @@ function ReviewAnsicht({ id }) {
   const setGrunddaten = async (patch) => {
     const updated = await updateLvImport(id, patch);
     setImp((cur) => ({ ...cur, grunddaten: updated.grunddaten }));
+    merkeGespeichert(Object.keys(patch)[0]);
   };
   const alleBestaetigen = async () => {
     for (const f of (imp.features || []).filter((x) => !x.confirmed)) {
@@ -595,46 +663,53 @@ function ReviewAnsicht({ id }) {
   };
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-6 sm:py-8 lg:px-8">
-      <Link to="/auswertung/import" className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 transition hover:text-brand-600">
-        <ArrowLeft className="size-4" /> LV-Import
-      </Link>
+    <div className="px-4 py-6 lg:px-8">
+      <PageHeader
+        back={{ to: "/auswertung/import", label: "LV-Import" }}
+        title={imp.filename}
+        subtitle={`${imp.page_count} Seite${imp.page_count === 1 ? "" : "n"} · ${M.kopf}`}
+        actions={
+          <span className={`rounded px-2 py-0.5 text-xs font-semibold ${STATUS_STYLE[imp.status] || STATUS_STYLE.uploaded}`}>
+            {statusText(imp.status)}
+          </span>
+        }
+      />
 
       {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="truncate text-xl font-bold text-slate-900">{imp.filename}</h1>
-          <p className="mt-0.5 text-xs text-slate-500">{imp.page_count} Seiten · {M.kopf}</p>
-        </div>
-        <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${STATUS_STYLE[imp.status] || STATUS_STYLE.uploaded}`}>{statusText(imp.status)}</span>
-      </div>
-
       {methode === "ocr" && (
-        <div className="mb-6 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0" /> Kein digitaler Text — die Werte wurden automatisch per OCR (Deutsch) erkannt. Bitte besonders sorgfältig prüfen; jede Fundstelle ist mit «OCR» markiert.
+        <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" /> Kein digitaler Text — per OCR erkannt. Jede Fundstelle ist mit «OCR» markiert.
         </div>
       )}
       {methode === "image" && (
-        <div className="mb-6 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0" /> Kein Text gefunden — auch die OCR lieferte nichts (oder ist auf dem Server nicht verfügbar). Werte bitte manuell erfassen.
+        <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" /> Kein Text gefunden — Werte bitte manuell erfassen.
         </div>
       )}
 
       {/* Punkt 25 — was wurde beim Import erkannt */}
-      <ImportZusammenfassung report={imp.report} imp={imp}
-        offen={(featTotal - featGeprueft) + kostenOffen} />
+      <ImportZusammenfassung report={imp.report} imp={imp} />
 
-      {/* Schritt-Navigation (Punkt 21) */}
-      <ol className="mb-6 flex flex-wrap items-center gap-2">
+      {/* Schritt-Navigation (Punkt 21) — mit der Zahl offener Punkte je Schritt */}
+      <ol className="mb-5 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 sm:grid-cols-4">
         {SCHRITTE.map((s, i) => (
-          <li key={s.key} className="flex min-w-0 flex-1 basis-40">
+          <li key={s.key} className="flex">
             <button type="button" onClick={() => setSchritt(i)}
-              className={`flex min-w-0 flex-1 items-center gap-2 rounded-xl border px-3 py-2 text-left transition ${i === schritt ? "border-brand-400 bg-brand-50" : "border-slate-200 bg-white hover:border-slate-300"}`}>
-              <span className={`flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${schrittFertig[i] ? "bg-green-500 text-white" : i === schritt ? "bg-brand-500 text-white" : "bg-slate-200 text-slate-500"}`}>
-                {schrittFertig[i] ? "✓" : i + 1}
+              className={"flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left transition "
+                + (i === schritt ? "bg-slate-800 text-white" : "bg-white hover:bg-slate-50")}>
+              <span className={"flex size-5 shrink-0 items-center justify-center rounded text-[11px] font-bold "
+                + (schrittFertig[i] ? "bg-green-600 text-white" : i === schritt ? "bg-white text-slate-800" : "bg-slate-100 text-slate-500")}>
+                {schrittFertig[i] ? <Check className="size-3" /> : i + 1}
               </span>
-              <span className={`truncate text-xs font-semibold ${i === schritt ? "text-brand-700" : "text-slate-600"}`}>{s.titel}</span>
+              <span className="truncate text-xs font-semibold">{s.titel}</span>
+              {schrittOffen[i] > 0 && (
+                <span className={"ml-auto shrink-0 rounded px-1.5 text-[11px] font-bold tabular-nums "
+                  + (i === schritt ? "bg-amber-400 text-amber-950" : "bg-amber-100 text-amber-800")}
+                  title={`${schrittOffen[i]} offene Angaben in diesem Schritt`}>
+                  {schrittOffen[i]}
+                </span>
+              )}
             </button>
           </li>
         ))}
@@ -642,7 +717,7 @@ function ReviewAnsicht({ id }) {
 
       {/* Schritt 1 — Projekt (Punkt 20: kategoriale Werte als Select) */}
       {schritt === 0 && (
-      <section className="card overflow-hidden">
+      <section className="card max-w-5xl overflow-hidden">
         <div className="border-b border-slate-100 bg-slate-50/60 px-4 py-3 sm:px-5">
           <h2 className="text-sm font-bold text-slate-800">Projektinformationen</h2>
           <p className="mt-0.5 text-[11px] text-slate-400">
@@ -650,7 +725,7 @@ function ReviewAnsicht({ id }) {
             sind Auswahllisten — kein Freitext.
           </p>
         </div>
-        <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 sm:px-5">
+        <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 sm:px-5 lg:grid-cols-3">
           {[
             ["projekt_name", "Projektname", "text"],
             ["projekt_nummer", "Projekt-Nr.", "text"],
@@ -664,7 +739,9 @@ function ReviewAnsicht({ id }) {
             ["anzahl_einheiten", "Nutzungseinheiten", "number"],
           ].map(([key, label, typ]) => (
             <div key={key}>
-              <label className="label">{label}</label>
+              <label className="label flex items-center gap-2">
+                {label} <Gespeichert an={gespeichert === key} />
+              </label>
               <input type={typ} className="input" disabled={gesperrt}
                 defaultValue={imp.grunddaten?.[key] ?? ""}
                 onBlur={(e) => setGrunddaten({ [key]: e.target.value })} />
@@ -676,7 +753,9 @@ function ReviewAnsicht({ id }) {
             ["zertifizierung", "Zertifizierung", "certifications"],
           ].map(([key, label, liste]) => (
             <div key={key}>
-              <label className="label">{label}</label>
+              <label className="label flex items-center gap-2">
+                {label} <Gespeichert an={gespeichert === key} />
+              </label>
               <select className="input" disabled={gesperrt || !listen}
                 value={imp.grunddaten?.[key] ?? ""}
                 onChange={(e) => setGrunddaten({ [key]: e.target.value })}>
@@ -693,13 +772,7 @@ function ReviewAnsicht({ id }) {
 
       {/* Schritt 2 — Technischer Fingerprint nach Kategorien */}
       {schritt === 1 && (
-      <div className="space-y-6">
-        {(featTotal - featGeprueft) > 0 && (
-          <div className="flex items-center gap-2 rounded-xl border-2 border-amber-300 bg-amber-50 p-3 text-sm font-bold text-amber-900">
-            <AlertTriangle className="size-5 shrink-0" />
-            Bitte die {featTotal - featGeprueft} orange markierten Angaben prüfen.
-          </div>
-        )}
+      <div className="max-w-5xl space-y-6">
         {KATEGORIEN.filter((kat) =>
           kat.titel !== "Erdsonden"
           || featureByKey.generator_type?.effective_value === "ews_wp"
@@ -720,11 +793,6 @@ function ReviewAnsicht({ id }) {
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-medium text-slate-900">{f.label}</span>
-                        {!f.confirmed && (
-                          <span className="rounded-full bg-amber-200 px-2 py-0.5 text-[11px] font-bold text-amber-900">
-                            Aktion nötig
-                          </span>
-                        )}
                       </div>
                       {multi && listen && (
                         <div className="mt-2">
@@ -778,6 +846,7 @@ function ReviewAnsicht({ id }) {
                           onChange={(e) => setFeature(f, { confirmed: e.target.checked })} />
                         geprüft
                       </label>
+                      <Gespeichert an={gespeichert === `f${f.id}`} />
                     </div>
                     )}
                     {/* P0 #1 — Fundstelle samt Herkunftsmarker zum Wert. */}
@@ -820,19 +889,16 @@ function ReviewAnsicht({ id }) {
             </div>
             <div className="divide-y divide-slate-100">
               {positionen.map((c) => (
-                <div key={c.id} className={`px-4 py-3 sm:px-5 ${(!c.confirmed || !c.mapping_confirmed) ? "border-l-4 border-l-amber-400 bg-amber-50/50" : ""}`}>
+                <div key={c.id} className={`px-4 py-3 sm:px-5 lg:grid lg:grid-cols-2 lg:gap-6 ${(!c.confirmed || !c.mapping_confirmed) ? "border-l-4 border-l-amber-400 bg-amber-50/50" : ""}`}>
                   {/* Punkt 16 — Block 1: WAS IM LV STEHT. Nummer, Titel, Betrag,
                       Betrag geprüft. Diese Zeile bleibt immer so wie im PDF. */}
                   <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-start">
                     <div className="min-w-0">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Original-LV</p>
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Original-LV</p>
                       <p className="text-sm font-medium text-slate-900">
                         {c.original_position || `BKP ${c.bkp_nr}`}
                         {c.original_title ? ` ${c.original_title}` : ""}
-                        {c.manual && <span className="ml-1 rounded bg-slate-100 px-1 text-[10px] font-semibold text-slate-500">manuell erfasst</span>}
-                        {(!c.confirmed || !c.mapping_confirmed) && (
-                          <span className="ml-2 rounded-full bg-amber-200 px-2 py-0.5 text-[10px] font-bold text-amber-900">Aktion nötig</span>
-                        )}
+                        {c.manual && <span className="ml-1 rounded bg-slate-100 px-1 text-[11px] font-semibold text-slate-500">manuell erfasst</span>}
                       </p>
                       {c.positionen > 1 && !c.original_position && (
                         <p className="text-[11px] text-slate-400">({c.positionen} Positionen aggregiert)</p>
@@ -856,6 +922,7 @@ function ReviewAnsicht({ id }) {
                           onChange={(e) => setCost(c, { confirmed: e.target.checked })} />
                         Betrag geprüft
                       </label>
+                      <Gespeichert an={gespeichert === `c${c.id}`} />
                       {!gesperrt && (
                         <button onClick={() => entferneKost(c)} className="btn-ghost min-h-8 min-w-8 text-slate-400 hover:text-red-500" title="Position entfernen">
                           <Trash2 className="size-4" />
@@ -867,12 +934,22 @@ function ReviewAnsicht({ id }) {
                   {/* Punkt 16 — Block 2: WOHIN SIE IM NORM-LV GEHÖRT. Getrennter
                       Entscheid mit eigener Bestätigung. */}
                   {!c.is_group_total && (
-                    <div className="mt-2 border-l-2 border-slate-200 pl-3">
+                    <div className="mt-2 border-l-2 border-slate-200 pl-3 lg:mt-0 lg:border-l-0 lg:pl-0">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Norm-LV</span>
+                        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Norm-LV</span>
+                        {(() => {
+                          const m = c.canonical_key ? MAPPING[c.mapping_method] : NICHT_ZUGEORDNET;
+                          return m ? (
+                            <span className={`rounded px-1.5 py-0.5 text-[11px] font-semibold ${m.style}`} title={m.hilfe}>
+                              {m.label}
+                            </span>
+                          ) : null;
+                        })()}
                         <span className="min-w-0 truncate text-[11px] text-slate-500">
                           {c.canonical_key
-                            ? `${c.canonical_key} ${c.canonical_label || ""}`
+                            ? (String(c.canonical_label || "").startsWith(c.canonical_key)
+                              ? c.canonical_label
+                              : `${c.canonical_key} ${c.canonical_label || ""}`.trim())
                             : (c.mapping_confirmed ? "bewusst von der Referenz ausgeschlossen" : "noch nicht entschieden")}
                         </span>
                       </div>
@@ -900,7 +977,7 @@ function ReviewAnsicht({ id }) {
                           ) : (
                             <button type="button" disabled={gesperrt}
                               onClick={() => setCost(c, { mapping_confirmed: !c.mapping_confirmed })}
-                              className={`shrink-0 rounded-lg border px-2 py-1 text-[11px] font-semibold transition ${c.mapping_confirmed ? "border-slate-300 bg-slate-100 text-slate-600" : "border-amber-300 text-amber-700 hover:bg-amber-50"}`}
+                              className={`shrink-0 rounded border px-2 py-1 text-[11px] font-semibold transition ${c.mapping_confirmed ? "border-slate-300 bg-slate-100 text-slate-600" : "border-slate-300 text-slate-600 hover:bg-slate-50"}`}
                               title="Diese Leistung hat keine Norm-LV-Position. Der Betrag bleibt im Import dokumentiert, fliesst aber nicht in die Referenzkosten.">
                               {c.mapping_confirmed ? "ausgeschlossen ✓" : "Von Referenz ausschliessen"}
                             </button>
@@ -969,7 +1046,7 @@ function ReviewAnsicht({ id }) {
 
       {/* Schritt 4 — Freigabe (nur wenn alle Werte geprüft und Kosten bestätigt) */}
       {schritt === 3 && (
-      <section className="card overflow-hidden">
+      <section className="card max-w-5xl overflow-hidden">
         <div className="border-b border-slate-100 bg-slate-50/60 px-4 py-3 sm:px-5">
           <h2 className="text-sm font-bold text-slate-800">Freigabe</h2>
         </div>

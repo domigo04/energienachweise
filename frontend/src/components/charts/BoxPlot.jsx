@@ -1,4 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+
+// Grösse der Hover-Karte — hält `w-52` unten in Sync, damit die Karte am
+// Fensterrand zuverlässig umklappt statt halb abgeschnitten zu werden.
+const KARTE_B = 208, KARTE_H = 170, RAND = 8;
 
 // Horizontaler Boxplot je BKP-Position. Jede Zeile hat ihre EIGENE Skala
 // (die Einheiten unterscheiden sich: CHF/kW, CHF/m² …) → zeigt die Streuung
@@ -6,6 +10,16 @@ import { useState } from "react";
 // zeigt die exakten Zahlen.
 export default function BoxPlot({ data = [] }) {
   const [hover, setHover] = useState(null); // { i, x, y }
+
+  // Die Hover-Karte hängt an Fensterkoordinaten (`fixed`). Beim Scrollen würde
+  // sie sonst neben der Zeile stehenbleiben, zu der sie gehört.
+  useEffect(() => {
+    if (!hover) return undefined;
+    const zu = () => setHover(null);
+    window.addEventListener("scroll", zu, { passive: true });
+    return () => window.removeEventListener("scroll", zu);
+  }, [hover]);
+
   if (!data.length) return <p className="p-4 text-sm text-slate-400">Noch keine Daten.</p>;
 
   const rowH = 64, top = 14, W = 900, gutter = 110, right = 170;
@@ -49,7 +63,13 @@ export default function BoxPlot({ data = [] }) {
         })}
       </svg>
       {hover && (
-        <div className="pointer-events-none fixed z-50 rounded-lg border border-slate-200 bg-white p-3 text-xs shadow-lg" style={{ left: hover.x + 14, top: hover.y + 14 }}>
+        <div
+          className="pointer-events-none fixed z-50 w-52 rounded-lg border border-slate-200 bg-white p-3 text-xs shadow-lg"
+          style={{
+            left: Math.max(RAND, Math.min(hover.x + 14, window.innerWidth - KARTE_B - RAND)),
+            top: Math.max(RAND, Math.min(hover.y + 14, window.innerHeight - KARTE_H - RAND)),
+          }}
+        >
           <div className="mb-1 font-semibold text-slate-800">{data[hover.i].bkp_nr} · {data[hover.i].einheit}</div>
           <div className="space-y-0.5 text-slate-600">
             <div>Minimum: <span className="font-medium text-slate-900">{fmt(data[hover.i].min)}</span></div>

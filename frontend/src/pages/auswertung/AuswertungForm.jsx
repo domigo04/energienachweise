@@ -6,6 +6,7 @@ import CheckboxGruppe from "../../components/kv/CheckboxGruppe";
 import AnlagenkonfigurationAuswahl from "../../components/kv/AnlagenkonfigurationAuswahl";
 import PageHeader from "../../components/ui/PageHeader";
 import InfoTip from "../../components/ui/InfoTip";
+import { chf } from "../../lib/format";
 import {
   AUSBAUUMFAENGE, GEBAEUDETYPEN, PROJEKTARTEN, WAERMEABGABE, WAERMEERZEUGER, ZERTIFIZIERUNGEN, hasErdsonde,
   konfigurationVorschlag,
@@ -38,7 +39,6 @@ const QUALITAET = [
   { v: 0.7, l: "grob (Schätzung)" },
 ];
 const num = (v) => (v === "" || v == null ? null : Number(v));
-const chf = (n) => Math.round(n || 0).toLocaleString("de-CH");
 
 export default function AuswertungForm() {
   const { id } = useParams();
@@ -184,7 +184,7 @@ export default function AuswertungForm() {
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between border-b border-slate-200 pb-2">
                     <strong>Brutto / LV-Summe</strong>
-                    <strong>CHF {chf(lvCommercial.base_amount)}</strong>
+                    <strong>{chf(lvCommercial.base_amount)}</strong>
                   </div>
                   {(lvCommercial.conditions || []).map((condition, index) => (
                     <div key={`${condition.label}-${index}`}>
@@ -195,24 +195,24 @@ export default function AuswertungForm() {
                             ? ` ${condition.rate_percent} %` : ""}
                         </span>
                         <span className="whitespace-nowrap font-medium">
-                          {condition.direction === "deduction" ? "−" : "+"} CHF {chf(Math.abs(condition.calculated_amount || 0))}
+                          {condition.direction === "deduction" ? "−" : "+"} {chf(Math.abs(condition.calculated_amount || 0))}
                         </span>
                       </div>
                       {condition.running_total != null && (
                         <div className="mt-1 flex justify-between border-t border-dotted border-slate-300 pt-1 text-xs font-semibold text-slate-500">
                           <span>Zwischentotal {index + 1}</span>
-                          <span>CHF {chf(condition.running_total)}</span>
+                          <span>{chf(condition.running_total)}</span>
                         </div>
                       )}
                     </div>
                   ))}
                   <div className="flex justify-between border-t border-slate-300 pt-2">
                     <span>MWST {lvCommercial.vat_rate ?? 0} %</span>
-                    <span>CHF {chf(lvCommercial.vat_amount)}</span>
+                    <span>{chf(lvCommercial.vat_amount)}</span>
                   </div>
                   <div className="flex justify-between border-t-2 border-slate-800 pt-2 text-base">
                     <strong>Netto inkl. MWST</strong>
-                    <strong className="text-brand-600">CHF {chf(lvCommercial.total_incl_vat)}</strong>
+                    <strong className="text-brand-600">{chf(lvCommercial.total_incl_vat)}</strong>
                   </div>
                 </div>
               ) : (
@@ -222,9 +222,9 @@ export default function AuswertungForm() {
                 <div><label className="label">Skonto [%]</label>
                   <input type="number" step="0.1" className="input" value={form.skonto_pct} onChange={(e) => set("skonto_pct", e.target.value)} /></div>
                 <div><div className="label">Brutto (Summe LV)</div>
-                  <div className="mt-1 text-lg font-bold text-slate-900">{chf(brutto)} CHF</div></div>
+                  <div className="mt-1 text-lg font-semibold tabular-nums text-slate-900">{chf(brutto)}</div></div>
                 <div><div className="label">Netto (nach Rabatt/Skonto)</div>
-                  <div className="mt-1 text-lg font-bold text-brand-600">{chf(netto)} CHF</div></div>
+                  <div className="mt-1 text-lg font-semibold tabular-nums text-brand-600">{chf(netto)}</div></div>
               </div>
               )}
               <p className="mt-3 text-xs text-slate-400">Laufend gegen das Leistungsverzeichnis/Devis des Unternehmers prüfen — passt die Summe?</p>
@@ -305,7 +305,7 @@ export default function AuswertungForm() {
             <div className="card p-6">
               <div className="mb-1 flex items-center justify-between">
                 <h2 className="font-semibold text-slate-800">BKP-Kosten</h2>
-                <span className="text-sm font-bold text-slate-900">Brutto {chf(brutto)} CHF</span>
+                <span className="text-sm font-semibold tabular-nums text-slate-900">Brutto {chf(brutto)}</span>
               </div>
               <p className="mb-4 text-xs text-slate-400">Nur ausfüllen, was zutrifft — leere Positionen werden nicht gespeichert.</p>
               <div className="space-y-5">

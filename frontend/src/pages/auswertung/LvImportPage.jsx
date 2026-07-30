@@ -6,7 +6,8 @@ import {
   updateLvFeature, updateLvCost, addLvCost, deleteLvCost, updateLvCommercial,
   updateLvImport, approveLvImport,
 } from "../../api/hcApi";
-import { GENERATOR_TYPES, GENERATOR_TYPE_LABELS } from "../../components/hc/nodes/generatorTypes";
+import { GENERATOR_TYPES } from "../../components/hc/nodes/generatorTypes";
+import { chf, zahl } from "../../lib/format";
 
 // B9 — Review-Seite des LV-Imports. Ohne :id ist es die Upload-Ansicht.
 // Aus einem Unternehmer-LV entsteht ein geprüfter technischer Fingerprint +
@@ -35,6 +36,12 @@ const STATUS_STYLE = {
   extracted: "bg-amber-100 text-amber-800", uploaded: "bg-slate-100 text-slate-600",
   failed: "bg-red-100 text-red-700",
 };
+// Der Status ist im Backend ein englischer Enum-Wert; im UI steht immer Deutsch.
+const STATUS_LABEL = {
+  approved: "Freigegeben", review: "Zu prüfen", extracted: "Erkannt – unsicher",
+  uploaded: "Hochgeladen", failed: "Fehlgeschlagen",
+};
+const statusText = (status) => STATUS_LABEL[status] || STATUS_LABEL.uploaded;
 
 // P0 #1 — Herkunft des Textes: aus digitaler Textebene oder per OCR erkannt.
 // tag = kleiner Marker an jeder Fundstelle, damit im Review sichtbar ist, ob ein
@@ -73,12 +80,6 @@ const SCHRITTE = [
   { key: "kosten", titel: "Kosten" },
   { key: "freigabe", titel: "Prüfen & Freigeben" },
 ];
-
-function anzeige(key, wert) {
-  if (wert == null || wert === "") return "—";
-  if (key === "generator_type") return GENERATOR_TYPE_LABELS[wert] || wert;
-  return wert;
-}
 
 // Aufklappbare Fundstelle (Punkt 12/22): kompakte Zeile, Details auf Wunsch.
 function Quelle({ feature, tag, tagStyle }) {
@@ -281,7 +282,7 @@ function UploadAnsicht() {
               <Link key={imp.id} to={`/auswertung/import/${imp.id}`} className="flex items-center gap-3 px-4 py-3 transition hover:bg-slate-50">
                 <FileText className="size-4 text-slate-400" />
                 <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">{imp.filename}</span>
-                <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_STYLE[imp.status] || STATUS_STYLE.uploaded}`}>{imp.status}</span>
+                <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_STYLE[imp.status] || STATUS_STYLE.uploaded}`}>{statusText(imp.status)}</span>
               </Link>
             ))}
           </div>
@@ -384,7 +385,7 @@ function KonditionenEditor({ imp, gesperrt, onSaved }) {
       {error && <p className="mx-4 mt-3 rounded-lg bg-red-50 p-2 text-xs text-red-700 sm:mx-5">{error}</p>}
       <div className="grid grid-cols-[1fr_auto] border-b border-slate-200 px-4 py-3 text-sm sm:px-5">
         <strong>Brutto / LV-Summe</strong>
-        <strong>CHF {(commercial.base_amount ?? imp.report?.trade_total ?? 0).toLocaleString("de-CH")}</strong>
+        <strong className="tabular-nums">{chf(commercial.base_amount ?? imp.report?.trade_total ?? 0)}</strong>
       </div>
       <div className="hidden grid-cols-[1.5fr_.65fr_.7fr_.7fr_auto] gap-2 bg-slate-50 px-4 py-2 text-[10px] font-bold uppercase tracking-wide text-slate-400 sm:grid sm:px-5">
         <span>Bezeichnung</span><span>Satz</span><span className="text-right">Abzug/Zuschlag</span><span className="text-right">Zwischentotal</span><span />
@@ -417,11 +418,11 @@ function KonditionenEditor({ imp, gesperrt, onSaved }) {
             </div>
             <div className={`text-right text-sm font-medium ${condition.direction === "deduction" ? "text-slate-700" : "text-green-700"}`}>
               {condition.calculated_amount != null
-                ? `${condition.direction === "deduction" ? "−" : "+"} CHF ${Math.abs(condition.calculated_amount).toLocaleString("de-CH")}`
+                ? `${condition.direction === "deduction" ? "−" : "+"} ${chf(Math.abs(condition.calculated_amount))}`
                 : "nach Speichern"}
             </div>
             <div className="text-right text-sm font-bold text-slate-800">
-              {condition.running_total != null ? `CHF ${condition.running_total.toLocaleString("de-CH")}` : "—"}
+              {chf(condition.running_total)}
             </div>
             {!gesperrt && (
               <button type="button" onClick={() => setRows((current) => current.filter((_, i) => i !== index))}
@@ -444,9 +445,9 @@ function KonditionenEditor({ imp, gesperrt, onSaved }) {
         </div>
         {commercial.subtotal_excl_vat != null && (
           <div className="space-y-1 border-t border-slate-200 pt-2">
-            <div className="flex justify-between"><span>Zwischentotal exkl. MWST</span><strong>CHF {commercial.subtotal_excl_vat.toLocaleString("de-CH")}</strong></div>
-            <div className="flex justify-between"><span>MWST {commercial.vat_rate} %</span><span>CHF {commercial.vat_amount?.toLocaleString("de-CH")}</span></div>
-            <div className="flex justify-between text-base"><strong>Endsumme inkl. MWST</strong><strong>CHF {commercial.total_incl_vat?.toLocaleString("de-CH")}</strong></div>
+            <div className="flex justify-between"><span>Zwischentotal exkl. MWST</span><strong className="tabular-nums">{chf(commercial.subtotal_excl_vat)}</strong></div>
+            <div className="flex justify-between"><span>MWST {commercial.vat_rate} %</span><span className="tabular-nums">{chf(commercial.vat_amount)}</span></div>
+            <div className="flex justify-between text-base"><strong>Endsumme inkl. MWST</strong><strong className="tabular-nums">{chf(commercial.total_incl_vat)}</strong></div>
           </div>
         )}
       </div>
@@ -494,7 +495,7 @@ function ReviewAnsicht({ id }) {
         eintrag.total = { effective_amount: summe, sum_hint: "(Summe der Positionen)" };
       } else if (eintrag.total && eintrag.positionen.length) {
         const diff = Math.abs((eintrag.total.effective_amount ?? 0) - summe);
-        eintrag.total = { ...eintrag.total, sum_hint: diff > 1 ? `(Positionen: ${summe.toLocaleString("de-CH")})` : null };
+        eintrag.total = { ...eintrag.total, sum_hint: diff > 1 ? `(Positionen: ${zahl(summe)})` : null };
       }
     }
     return [...map.values()].sort((a, b) => a.gruppe.localeCompare(b.gruppe, "de", { numeric: true }));
@@ -606,7 +607,7 @@ function ReviewAnsicht({ id }) {
           <h1 className="truncate text-xl font-bold text-slate-900">{imp.filename}</h1>
           <p className="mt-0.5 text-xs text-slate-500">{imp.page_count} Seiten · {M.kopf}</p>
         </div>
-        <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${STATUS_STYLE[imp.status] || STATUS_STYLE.uploaded}`}>{imp.status}</span>
+        <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${STATUS_STYLE[imp.status] || STATUS_STYLE.uploaded}`}>{statusText(imp.status)}</span>
       </div>
 
       {methode === "ocr" && (
@@ -714,7 +715,6 @@ function ReviewAnsicht({ id }) {
                 {rows.map((f) => {
                   const multi = MULTI_FEATURES[f.key];
                   const werte = (f.effective_value || "").split(",").map((s) => s.trim()).filter(Boolean);
-                  const nichtErkannt = f.value == null && !f.confirmed_value;
                   return (
                   <div key={f.id} className={`grid gap-2 px-4 py-3.5 sm:px-5 ${!f.confirmed ? "border-l-4 border-l-amber-400 bg-amber-50/70" : ""} ${multi ? "" : "sm:grid-cols-[1fr_auto] sm:items-center"}`}>
                     <div className="min-w-0">
@@ -780,6 +780,10 @@ function ReviewAnsicht({ id }) {
                       </label>
                     </div>
                     )}
+                    {/* P0 #1 — Fundstelle samt Herkunftsmarker zum Wert. */}
+                    <div className="sm:col-span-2">
+                      <Quelle feature={f} tag={M.tag} tagStyle={M.tagStyle} />
+                    </div>
                   </div>
                   );
                 })}
@@ -911,7 +915,7 @@ function ReviewAnsicht({ id }) {
                 <div className="flex items-center justify-between bg-slate-50/60 px-4 py-2.5 text-sm sm:px-5">
                   <span className="font-bold text-slate-700">Total {gruppe}</span>
                   <span className="font-bold text-slate-900">
-                    CHF {(total.effective_amount ?? 0).toLocaleString("de-CH")}
+                    {chf(total.effective_amount ?? 0)}
                     {total.sum_hint && <span className="ml-2 text-[11px] font-normal text-slate-400">{total.sum_hint}</span>}
                   </span>
                 </div>
@@ -931,18 +935,18 @@ function ReviewAnsicht({ id }) {
           <div className="space-y-1 px-4 py-3 text-sm sm:px-5">
             <div className="flex items-center justify-between">
               <span className="text-slate-500">1. Im Original-LV gelesen</span>
-              <span className="text-slate-600">CHF {kostenTotal.toLocaleString("de-CH")}</span>
+              <span className="tabular-nums text-slate-600">{chf(kostenTotal)}</span>
             </div>
             <div className="flex items-center justify-between">
               <span className="font-bold text-slate-700">2. Davon in die Norm-LV-Referenz</span>
-              <span className="font-bold text-slate-900">CHF {referenzTotal.toLocaleString("de-CH")}</span>
+              <span className="font-bold tabular-nums text-slate-900">{chf(referenzTotal)}</span>
             </div>
             <div className="flex items-center justify-between">
               <span className={ausserhalbTotal > 0 ? "text-amber-700" : "text-slate-500"}>
                 3. Nicht im Norm-LV / ausgeschlossen
               </span>
               <span className={ausserhalbTotal > 0 ? "font-medium text-amber-700" : "text-slate-600"}>
-                CHF {ausserhalbTotal.toLocaleString("de-CH")}
+                {chf(ausserhalbTotal)}
               </span>
             </div>
             {ausserhalbTotal > 0 && (
@@ -989,8 +993,8 @@ function ReviewAnsicht({ id }) {
                 <li className="flex items-center gap-2">
                   {zuordnungOffen === 0 ? <CheckCircle2 className="size-4 text-green-600" /> : <AlertTriangle className="size-4 text-amber-500" />}
                   Norm-LV-Zuordnung: {zuordnungOffen === 0
-                    ? `geprüft · CHF ${referenzTotal.toLocaleString("de-CH")} gehen in die Referenz`
-                    + (ausserhalbTotal > 0 ? `, CHF ${ausserhalbTotal.toLocaleString("de-CH")} nicht` : "")
+                    ? `geprüft · ${chf(referenzTotal)} gehen in die Referenz`
+                    + (ausserhalbTotal > 0 ? `, ${chf(ausserhalbTotal)} nicht` : "")
                     : `${zuordnungOffen} offen`}
                 </li>
                 <li className="flex items-center gap-2 text-slate-500">

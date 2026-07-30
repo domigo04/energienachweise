@@ -176,7 +176,7 @@ export default function AuswertungList() {
   };
 
   return (
-    <div className="px-4 py-6 lg:px-8">
+    <div className="px-5 py-7 lg:px-10 xl:px-12">
       <PageHeader
         title="Auswertung"
         subtitle="Referenzprojekte Heizung — Datenbasis der Grobkostenschätzung."
@@ -373,8 +373,8 @@ function ChipToggle({ label, aktiv, onClick }) {
     <button
       type="button"
       onClick={onClick}
-      className={"rounded border px-2 py-0.5 text-xs font-medium transition "
-        + (aktiv ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-600 hover:border-slate-400")}
+      className={"rounded-full border px-2.5 py-0.5 text-xs font-medium transition "
+        + (aktiv ? "border-brand-700 bg-brand-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:border-slate-400")}
     >
       {label}
     </button>

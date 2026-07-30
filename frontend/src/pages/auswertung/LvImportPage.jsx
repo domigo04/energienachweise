@@ -100,7 +100,7 @@ function Quelle({ feature, tag, tagStyle }) {
   return (
     <div className="mt-1 text-[11px] text-slate-400">
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className={`rounded px-1 py-0.5 text-[10px] font-semibold ${tagStyle}`} title="Herkunft des Werts">{tag}</span>
+        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${tagStyle}`} title="Herkunft des Werts">{tag}</span>
         {feature.derived_from
           ? <span className="font-medium text-slate-500">Berechnet: {feature.derived_from}</span>
           : <span>{feature.source_page != null ? `Seite ${feature.source_page}: ` : ""}„{feature.source_text}"</span>}
@@ -270,7 +270,7 @@ function UploadAnsicht() {
   if (busy) return <ProcessingAnsicht schritt={schritt} vergangen={vergangen} />;
 
   return (
-    <div className="px-4 py-6 lg:px-8">
+    <div className="px-5 py-7 lg:px-10 xl:px-12">
       <PageHeader
         back={{ to: "/auswertung", label: "Auswertung" }}
         title="Unternehmer-LV importieren"
@@ -329,7 +329,7 @@ function UploadAnsicht() {
                     {imp.created_at ? new Date(imp.created_at).toLocaleDateString("de-CH") : LEER}
                   </td>
                   <td className="whitespace-nowrap py-2 pr-3">
-                    <span className={`rounded px-1.5 py-0.5 text-[11px] font-semibold ${STATUS_STYLE[imp.status] || STATUS_STYLE.uploaded}`}>
+                    <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${STATUS_STYLE[imp.status] || STATUS_STYLE.uploaded}`}>
                       {statusText(imp.status)}
                     </span>
                   </td>
@@ -450,11 +450,11 @@ function KonditionenEditor({ imp, gesperrt, onSaved }) {
                 onChange={(e) => patchRow(index, { original_label: e.target.value })} />
               {!gesperrt && (
                 <div className="mt-1 flex gap-1">
-                  <select className="rounded border border-slate-200 bg-white px-1 py-0.5 text-[10px]" value={condition.kind}
+                  <select className="rounded-md border border-slate-200 bg-white px-1 py-0.5 text-[10px]" value={condition.kind}
                     onChange={(e) => patchRow(index, { kind: e.target.value })}>
                     <option value="percent">Prozent</option><option value="fixed">Fixbetrag</option>
                   </select>
-                  <select className="rounded border border-slate-200 bg-white px-1 py-0.5 text-[10px]" value={condition.direction}
+                  <select className="rounded-md border border-slate-200 bg-white px-1 py-0.5 text-[10px]" value={condition.direction}
                     onChange={(e) => patchRow(index, { direction: e.target.value })}>
                     <option value="deduction">Abzug</option><option value="surcharge">Zuschlag</option>
                   </select>
@@ -662,13 +662,13 @@ function ReviewAnsicht({ id }) {
   };
 
   return (
-    <div className="px-4 py-6 lg:px-8">
+    <div className="px-5 py-7 lg:px-10 xl:px-12">
       <PageHeader
         back={{ to: "/auswertung/import", label: "LV-Import" }}
         title={imp.filename}
         subtitle={`${imp.page_count} Seite${imp.page_count === 1 ? "" : "n"} · ${M.kopf}`}
         actions={
-          <span className={`rounded px-2 py-0.5 text-xs font-semibold ${STATUS_STYLE[imp.status] || STATUS_STYLE.uploaded}`}>
+          <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${STATUS_STYLE[imp.status] || STATUS_STYLE.uploaded}`}>
             {statusText(imp.status)}
           </span>
         }
@@ -696,14 +696,14 @@ function ReviewAnsicht({ id }) {
           <li key={s.key} className="flex">
             <button type="button" onClick={() => setSchritt(i)}
               className={"flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left transition "
-                + (i === schritt ? "bg-slate-800 text-white" : "bg-white hover:bg-slate-50")}>
-              <span className={"flex size-5 shrink-0 items-center justify-center rounded text-[11px] font-bold "
+                + (i === schritt ? "bg-brand-600 text-white" : "bg-white hover:bg-slate-50")}>
+              <span className={"flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold "
                 + (schrittFertig[i] ? "bg-slate-600 text-white" : i === schritt ? "bg-white text-slate-800" : "bg-slate-100 text-slate-500")}>
                 {schrittFertig[i] ? <Check className="size-3" /> : i + 1}
               </span>
               <span className="truncate text-xs font-semibold">{s.titel}</span>
               {schrittOffen[i] > 0 && (
-                <span className={"ml-auto shrink-0 rounded px-1.5 text-[11px] font-bold tabular-nums "
+                <span className={"ml-auto shrink-0 rounded-full px-1.5 text-[11px] font-bold tabular-nums "
                   + (i === schritt ? "bg-amber-400 text-amber-950" : "bg-amber-100 text-amber-800")}
                   title={`${schrittOffen[i]} offene Angaben in diesem Schritt`}>
                   {schrittOffen[i]}
@@ -889,14 +889,14 @@ function ReviewAnsicht({ id }) {
                       <p className="text-sm font-medium text-slate-900">
                         {c.original_position || `BKP ${c.bkp_nr}`}
                         {c.original_title ? ` ${c.original_title}` : ""}
-                        {c.manual && <span className="ml-1 rounded bg-slate-100 px-1 text-[11px] font-semibold text-slate-500">manuell erfasst</span>}
+                        {c.manual && <span className="ml-1 rounded-full bg-slate-100 px-2 text-[11px] font-semibold text-slate-500">manuell erfasst</span>}
                       </p>
                       {c.positionen > 1 && !c.original_position && (
                         <p className="text-[11px] text-slate-400">({c.positionen} Positionen aggregiert)</p>
                       )}
                       {c.source_text && (
                         <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">
-                          <span className={`rounded px-1 py-0.5 text-[10px] font-semibold ${M.tagStyle}`}>{M.tag}</span>
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${M.tagStyle}`}>{M.tag}</span>
                           <span className="truncate">{c.source_page != null ? `Seite ${c.source_page}` : ""}</span>
                         </div>
                       )}
@@ -931,7 +931,7 @@ function ReviewAnsicht({ id }) {
                         {(() => {
                           const m = c.canonical_key ? MAPPING[c.mapping_method] : NICHT_ZUGEORDNET;
                           return m ? (
-                            <span className={`rounded px-1.5 py-0.5 text-[11px] font-semibold ${m.style}`} title={m.hilfe}>
+                            <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${m.style}`} title={m.hilfe}>
                               {m.label}
                             </span>
                           ) : null;
@@ -968,7 +968,7 @@ function ReviewAnsicht({ id }) {
                           ) : (
                             <button type="button" disabled={gesperrt}
                               onClick={() => setCost(c, { mapping_confirmed: !c.mapping_confirmed })}
-                              className={`shrink-0 rounded border px-2 py-1 text-[11px] font-semibold transition ${c.mapping_confirmed ? "border-slate-300 bg-slate-100 text-slate-600" : "border-slate-300 text-slate-600 hover:bg-slate-50"}`}
+                              className={`shrink-0 rounded-lg border px-2 py-1 text-[11px] font-semibold transition ${c.mapping_confirmed ? "border-slate-300 bg-slate-100 text-slate-600" : "border-slate-300 text-slate-600 hover:bg-slate-50"}`}
                               title="Diese Leistung hat keine Norm-LV-Position. Der Betrag bleibt im Import dokumentiert, fliesst aber nicht in die Referenzkosten.">
                               {c.mapping_confirmed ? "ausgeschlossen ✓" : "Von Referenz ausschliessen"}
                             </button>

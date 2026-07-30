@@ -36,7 +36,7 @@ export default function AuswertungAnalyse() {
   }, [data]);
 
   return (
-    <div className="px-4 py-6 lg:px-8">
+    <div className="px-5 py-7 lg:px-10 xl:px-12">
       <PageHeader
         back={{ to: "/auswertung", label: "Auswertung" }}
         title="Kennwert-Streuung"

@@ -6,19 +6,19 @@
    Diagramm-Palette. Farbe hier ändern = überall geändert.
    ========================================================================= */
 @theme {
-  /* SIREGO-Marke (Rot) */
-  --color-brand-50:  #fef2f2;
-  --color-brand-100: #fee2e2;
-  --color-brand-200: #fecaca;
-  --color-brand-300: #fca5a5;
-  --color-brand-400: #f87171;
-  --color-brand-500: #ef4444;
-  --color-brand-600: #dc2626;
-  --color-brand-700: #b91c1c;
-  --color-brand-800: #991b1b;
+  /* SIREGO-Marke: aus dem Firmenlogo (#12AAFD) abgeleitete Cyan-/Blaureihe. */
+  --color-brand-50:  #eef9ff;
+  --color-brand-100: #d8f2ff;
+  --color-brand-200: #b9e8ff;
+  --color-brand-300: #83d7ff;
+  --color-brand-400: #42c1ff;
+  --color-brand-500: #12aafd;
+  --color-brand-600: #078bd8;
+  --color-brand-700: #0671b0;
+  --color-brand-800: #0a5f8f;
 
   /* Diagramm-Palette (hell-tauglich, gut unterscheidbar) */
-  --color-chart-1: #dc2626; /* Rot    – Marke      */
+  --color-chart-1: #078bd8; /* Blau   – Marke      */
   --color-chart-2: #d97706; /* Amber  – Erzeugung  */
   --color-chart-3: #0d9488; /* Teal   – Verteilung */
   --color-chart-4: #0284c7; /* Sky    – Dämmung    */

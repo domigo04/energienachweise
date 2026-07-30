@@ -161,6 +161,31 @@ def test_bkp_241_11_detailpositionen_zaehlen_auch_ohne_rohr_im_titel():
     assert res["pipe_length_m"]["per_section"] == {"241.110": 32, "241.111": 28}
 
 
+def test_hagmann_rohrmeter_ignorieren_standardlaengen_und_metrische_gewinde():
+    """Regression: 241.11 = 36 m, 243.1 = 252 m, zusammen genau 288 m."""
+    text = (
+        "241.11 Rohrleitungen Primärkreis WP zu Erdsondensammler\n"
+        "Geschweisste Gasrohre, Herstellungslängen von 6 m\n"
+        "Schichtdicke 80 μm\n"
+        "3/4 Zoll DN 20 m 12\n"
+        "Geschweisste Siederohre\n"
+        "76.1 x 2.6 mm DN 65 m 24\n"
+        "Rohrschellen Gewinde M 10 Stk. 12\n"
+        "241.12 Apparate / Armaturen Primärkreis\n"
+        "Schilderhalter 120 mm Stk. 6\n"
+        "241.11 Total Apparate / Armaturen Primärkreis\n"
+        "Befestigung M 8 Stk. 6\n"
+        "243.1 Rohrleitungen\n"
+        "Gasrohre in Herstellungslängen von 6 m\n"
+        "DN 15 m 12\nDN 20 m 18\nDN 25 m 42\n"
+        "DN 32 m 78\nDN 40 m 60\nDN 50 m 42"
+    )
+    res = q.pipe_lengths(_rows(text))
+    assert res["pipe_length_source_m"]["value"] == 36
+    assert res["pipe_length_distribution_m"]["value"] == 252
+    assert res["pipe_length_m"]["value"] == 288
+
+
 def test_quadratmeter_sind_keine_rohrmeter():
     """m² darf nicht als Laufmeter gelesen werden."""
     res = q.pipe_lengths(_rows("243.2 Flächenheizung\nBodenheizung Fläche m2 450"))

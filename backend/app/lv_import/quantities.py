@@ -52,6 +52,10 @@ _M_VOR_EINHEIT = re.compile(
 # Zahlen, die technische Bezeichner sind und nie eine Menge: Nennweite,
 # Durchmesser, Typ-/Grössenangaben.
 _BEZEICHNER_DAVOR = re.compile(r"(?:dn|nw|ø|d|typ|nr\.?|gr\.?|pn)\s*$", re.IGNORECASE)
+_STANDARDLAENGE = (
+    "herstellungslänge", "herstellungslaenge", "lieferlänge",
+    "lieferlaenge", "stangenlänge", "stangenlaenge",
+)
 
 
 def _zahl_mit_einheit(text: str, nach_re, vor_re) -> Optional[float]:
@@ -504,24 +508,30 @@ def pipe_lengths(rows) -> dict:
         low = text.lower()
         section_low = (row.get("section_title") or "").lower()
         section_nr = row.get("section_nr") or ""
-        # BKP 241.11 ist fachlich vollständig «Rohrleitungen Primärkreis».
-        # Echte LVs nummerieren die einzelnen Fabrikate darunter weiter
-        # (z.B. 241.110/241.111), wobei im Detailtitel das Wort «Rohr» fehlen
-        # kann. Eine klar ausgewiesene Menge in m gehört trotzdem zur
-        # Primärkreis-Rohrsumme. Ohne diese Kontextregel gingen genau diese
-        # Positionen verloren.
-        ist_primaerkreis_abschnitt = section_nr.startswith("241.11")
-        if not ist_primaerkreis_abschnitt and \
+        # Nur echte nummerierte Detailpositionen UNTER 241.11 erhalten den
+        # Primärkreis-Kontext automatisch (z.B. 241.110/241.111). Ein exakter
+        # Abschnitt 241.11 muss wie früher über seinen Rohr-Titel qualifizieren.
+        # Das ist wichtig, weil fehlerhafte LVs teils auch ein Armaturen-Total
+        # erneut als 241.11 nummerieren; dort wären M8/M10 Gewinde sonst
+        # fälschlich Laufmeter.
+        ist_primaerkreis_detail = re.fullmatch(r"241\.11\d+", section_nr) is not None
+        if not ist_primaerkreis_detail and \
            not any(t in low for t in PIPE_INCLUDE_TERMS) and \
            not any(t in section_low for t in PIPE_INCLUDE_TERMS):
             continue
-        if any(t in low for t in (
-            "herstellungslänge", "herstellungslaenge", "lieferlänge",
-            "lieferlaenge", "stangenlänge", "stangenlaenge",
-        )):
+        if any(t in low for t in _STANDARDLAENGE):
             continue
         meter, mengen_idx = _menge_im_kontext(rows, i, _menge_meter)
         if meter is None:
+            continue
+        if mengen_idx in verbrauchte_mengen_zeilen:
+            continue
+        mengen_row = rows[mengen_idx] if mengen_idx is not None else row
+        mengen_text = (mengen_row.get("text") or "").lower()
+        # Eine Standard-/Lieferlänge ist Produktinformation, keine bestellte
+        # Rohrmenge. Eine Zeile mit Stückeinheit (z.B. «M10 Stk. 12») ist ein
+        # Befestiger und ebenfalls kein Laufmeter.
+        if any(t in mengen_text for t in _STANDARDLAENGE) or _menge_stk(mengen_row) is not None:
             continue
         if mengen_idx is not None and mengen_idx != i:
             # Beschreibung und darunterliegende Mengenzelle bilden eine

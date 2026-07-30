@@ -289,7 +289,7 @@ export default function AuswertungList() {
         <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
           <table className="w-full min-w-[900px] text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              <tr className="border-b border-brand-200 bg-brand-50/70 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                 <th className="w-9 py-2 pl-3 pr-2" />
                 {SPALTEN.map((s) => (
                   <th key={s.key} className={"py-2 pr-3 font-semibold " + (s.num ? "text-right " : "") + (s.breit ? "w-full" : "whitespace-nowrap")}>
@@ -316,7 +316,8 @@ export default function AuswertungList() {
                   <tr
                     key={r.id}
                     onClick={() => nav(`/auswertung/${r.id}`)}
-                    className={"cursor-pointer transition hover:bg-slate-50 " + (gewaehlt ? "bg-slate-50" : "")}
+                    className={"cursor-pointer transition odd:bg-white even:bg-slate-50/70 hover:bg-brand-50/60 "
+                      + (gewaehlt ? "bg-brand-50! hover:bg-brand-100!" : "")}
                   >
                     <td className="py-2 pl-3 pr-2">
                       <input

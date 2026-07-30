@@ -60,7 +60,7 @@ export default function AuswertungAnalyse() {
           <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
             <table className="w-full min-w-[900px] text-sm">
               <thead>
-                <tr className="border-b border-slate-200 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                <tr className="border-b border-brand-200 bg-brand-50/70 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                   <th className="whitespace-nowrap py-2 pl-3 pr-3">BKP</th>
                   <th className="w-full py-2 pr-3">Position</th>
                   <th className="whitespace-nowrap py-2 pr-3">Einheit</th>
@@ -74,8 +74,8 @@ export default function AuswertungAnalyse() {
               <tbody className="divide-y divide-slate-100">
                 {gruppen.map(([nr, zeilen]) => (
                   <Fragment key={nr}>
-                    <tr className="bg-slate-50">
-                      <td colSpan={8} className="py-1.5 pl-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    <tr className="bg-brand-50/60">
+                      <td colSpan={8} className="py-1.5 pl-3 text-[11px] font-semibold uppercase tracking-wide text-brand-800">
                         {nr} {gruppenNamen[nr] || ""}
                       </td>
                     </tr>
@@ -83,7 +83,7 @@ export default function AuswertungAnalyse() {
                       const duenn = k.count < DUENN;
                       const s = streuung(k);
                       return (
-                        <tr key={k.bkp_nr} className={duenn ? "text-slate-400" : ""}>
+                        <tr key={k.bkp_nr} className={"transition hover:bg-brand-50/50 " + (duenn ? "text-slate-400" : "")}>
                           <td className="whitespace-nowrap py-2 pl-3 pr-3 font-medium tabular-nums text-slate-700">{k.bkp_nr}</td>
                           <td className="max-w-0 truncate py-2 pr-3 text-slate-600">{k.bkp_name}</td>
                           <td className="whitespace-nowrap py-2 pr-3 text-slate-400">{k.einheit}</td>

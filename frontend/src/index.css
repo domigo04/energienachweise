@@ -6,57 +6,51 @@
    Diagramm-Palette. Farbe hier ändern = überall geändert.
    ========================================================================= */
 @theme {
-  /* SIREGO-Marke: aus dem Firmenlogo (#12AAFD) abgeleitete Cyan-/Blaureihe. */
-  --color-brand-50:  #eef9ff;
-  --color-brand-100: #d8f2ff;
-  --color-brand-200: #b9e8ff;
-  --color-brand-300: #83d7ff;
-  --color-brand-400: #42c1ff;
-  --color-brand-500: #12aafd;
-  --color-brand-600: #078bd8;
-  --color-brand-700: #0671b0;
-  --color-brand-800: #0a5f8f;
+  /* SIREGO-Blau, direkt aus sirego.ch und crm.sirego.ch: #087fe5 ist die
+     Aktionsfarbe, #066fc7 der Hover-Zustand. Die übrigen Stufen sind auf
+     demselben Farbton (208°) aufgebaut. */
+  --color-brand-50:  #f0f8ff;
+  --color-brand-100: #dcedfd;
+  --color-brand-200: #bcdefb;
+  --color-brand-300: #8ec8f9;
+  --color-brand-400: #55aef6;
+  --color-brand-500: #2394f1;
+  --color-brand-600: #087fe5;
+  --color-brand-700: #066fc7;
+  --color-brand-800: #085a9f;
+
+  /* Dunkles Marine der Marke — Überschriften und Fliesstext auf sirego.ch. */
+  --color-ink: #082f49;
 
   /* Diagramm-Palette (hell-tauglich, gut unterscheidbar) */
-  --color-chart-1: #078bd8; /* Blau   – Marke      */
+  --color-chart-1: #087fe5; /* Blau   – Marke      */
   --color-chart-2: #d97706; /* Amber  – Erzeugung  */
   --color-chart-3: #0d9488; /* Teal   – Verteilung */
   --color-chart-4: #0284c7; /* Sky    – Dämmung    */
   --color-chart-5: #4f46e5; /* Indigo – Diverses   */
   --color-chart-6: #64748b; /* Slate  – Rest       */
-
-  /* Wie die echte SIREGO-Marke (www.sirego.ch, crm.sirego.ch): grosszügig
-     gerundet statt technisch-scharf, Schatten bleiben flach. Die Utility-
-     Namen bleiben gleich, damit die Sprache auf allen bestehenden Seiten
-     ohne Parallel-Design konsistent aktualisiert wird. */
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 10px;
-  --radius-xl: 12px;
-  --radius-2xl: 16px;
-  --radius-3xl: 20px;
-  --shadow-sm: 0 1px 2px rgb(15 23 42 / 0.05);
-  --shadow-md: 0 8px 20px rgb(15 23 42 / 0.07);
-  --shadow-lg: 0 16px 36px rgb(15 23 42 / 0.10);
 }
 
 @layer base {
   html { -webkit-text-size-adjust: 100%; }
   body {
     @apply bg-slate-100 text-slate-900 antialiased;
-    font-family: "Inter Variable", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-family: "Outfit Variable", Outfit, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
+  /* Überschriften im Marine der Marke, wo keine eigene Textfarbe gesetzt ist. */
+  h1, h2, h3 { color: var(--color-ink); }
   ::selection { @apply bg-brand-100 text-brand-800; }
   button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
 }
 
 /* Wiederverwendbare Bausteine – damit alle Seiten dieselbe Sprache sprechen. */
 @layer components {
-  .card { @apply rounded-2xl border border-slate-300/80 bg-white shadow-sm; }
+  .card { @apply rounded-xl border border-slate-300/80 bg-white shadow-sm; }
 
-  .btn-primary   { @apply inline-flex min-h-9 items-center justify-center gap-2 rounded-xl border border-brand-700 bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50; }
-  .btn-secondary { @apply inline-flex min-h-9 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50; }
-  .btn-ghost     { @apply inline-flex min-h-9 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-200/70 hover:text-slate-900; }
+  /* Wie im SIREGO-CRM: 8px Radius, kurzer Druck-Effekt beim Klicken. */
+  .btn-primary   { @apply inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-brand-700 bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition duration-100 hover:bg-brand-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50; }
+  .btn-secondary { @apply inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition duration-100 hover:border-slate-400 hover:bg-slate-50 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50; }
+  .btn-ghost     { @apply inline-flex min-h-9 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition duration-100 hover:bg-slate-200/70 hover:text-slate-900 active:scale-[0.98]; }
 
   .input { @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 hover:border-slate-400 focus:border-brand-600 focus:ring-1 focus:ring-brand-200; }
   .label { @apply mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500; }

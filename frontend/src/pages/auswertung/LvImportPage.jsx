@@ -302,7 +302,7 @@ function UploadAnsicht() {
         <div className="mt-6 overflow-x-auto rounded-lg border border-slate-200 bg-white">
           <table className="w-full min-w-[640px] text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              <tr className="border-b border-brand-200 bg-brand-50/70 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                 <th className="w-full py-2 pl-3 pr-3">Datei</th>
                 <th className="whitespace-nowrap py-2 pr-3">Projekt</th>
                 <th className="whitespace-nowrap py-2 pr-3">Unternehmer</th>
@@ -314,7 +314,7 @@ function UploadAnsicht() {
             <tbody className="divide-y divide-slate-100">
               {imports.map((imp) => (
                 <tr key={imp.id} onClick={() => navigate(`/auswertung/import/${imp.id}`)}
-                  className="cursor-pointer transition hover:bg-slate-50">
+                  className="cursor-pointer transition odd:bg-white even:bg-slate-50/70 hover:bg-brand-50/60">
                   <td className="max-w-0 truncate py-2 pl-3 pr-3">
                     <Link to={`/auswertung/import/${imp.id}`} onClick={(e) => e.stopPropagation()}
                       className="inline-flex min-w-0 items-center gap-2 font-medium text-slate-900 hover:text-brand-700">

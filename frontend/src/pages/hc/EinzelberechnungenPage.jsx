@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react";
 import {
-  Activity, CircleGauge, Flame, Gauge, MoveHorizontal, RefreshCw, Scale, Waves,
+  Activity, CircleGauge, ExternalLink, FileDown, Flame, Gauge, MoveHorizontal,
+  RefreshCw, Scale, Waves,
 } from "lucide-react";
 import { api } from "../../api";
+import Balken from "../../components/charts/Balken";
 import PageHeader from "../../components/ui/PageHeader";
 import { IconKompressor, IconSpeicher, IconWaermetauscher } from "../../components/ui/fachIcons";
 import { VentilRechner } from "./VentilPage";
@@ -47,6 +49,13 @@ const RECHNER = [
       ["speichervolumen_l", "Berechnetes Volumen", "Liter"],
       ["richtwert_25_l_kw", "Vergleichswert 25 l/kW", "Liter"],
     ],
+    diagramm: (r) => ({
+      einheit: "l",
+      werte: [
+        { label: "Berechnet", wert: r.speichervolumen_l },
+        { label: "Richtwert 25 l/kW", wert: r.richtwert_25_l_kw },
+      ],
+    }),
   },
   {
     id: "rohrausdehnung",
@@ -84,6 +93,15 @@ const RECHNER = [
       ["quellenleistung_kw", "Quellenleistung", "kW"],
       ["elektrische_leistung_kw", "Elektrische Leistung", "kW"],
     ],
+    diagramm: (r) => ({
+      einheit: "kW",
+      dezimalen: 1,
+      werte: [
+        { label: "Heizleistung", wert: r.heizleistung_kw, hinweis: "= Quelle + elektrisch" },
+        { label: "Quellenleistung", wert: r.quellenleistung_kw },
+        { label: "Elektrische Leistung", wert: r.elektrische_leistung_kw },
+      ],
+    }),
   },
   {
     id: "druckverlust_kvs",
@@ -106,20 +124,57 @@ const RECHNER = [
     gruppe: "Wärmeerzeugung",
     icon: Flame,
     titel: "Jahresenergie",
-    kurz: "Jahresenergie für Raumheizung und Warmwasser als schnelle Vorbemessung.",
+    kurz: "Jahresenergiebedarf für Raumheizung, Kühlung und Warmwasser.",
     quelle: "Jahresenergiebedarf Heizung und BWW.xlsx",
-    felder: [
-      ["heizleistung_kw", "Heizleistung", "kW", 30],
-      ["vollbetriebsstunden_h_d", "Vollbetriebsstunden", "h/Tag", 17],
-      ["heizgradtage_kd_a", "Heizgradtage", "Kd/a", 3432],
-      ["auslegungs_delta_t_k", "Auslegungs-ΔT", "K", 28],
-      ["bww_m3_d", "BWW-Tagesverbrauch", "m³/Tag", 0.388],
-      ["bww_verlustfaktor", "BWW-Verlustfaktor", "–", 1.5],
+    // Aufbau wie im Blatt: Heizanteil, Kühlanteil, Warmwasser.
+    abschnitte: [
+      {
+        titel: "1) Jahresenergiebedarf Heizung",
+        felder: [
+          ["vollbetriebsstunden_h_d", "td · Vollbetriebsstunden pro Tag", "h/d", 17],
+          ["heizgradtage_kd_a", "HGT · Heizgradtage", "Kd/a", 3432],
+          ["heizleistung_kw", "Q · Heizleistung der Raumheizgruppen", "kW", 30],
+          ["auslegungs_delta_t_k", "Δθmax · mittl. RT zu grösster AT", "K", 28],
+        ],
+      },
+      {
+        titel: "Kühlanteil — nur ausfüllen, wenn gekühlt wird",
+        felder: [
+          ["kuehl_vollbetriebsstunden_h_d", "td · Vollbetriebsstunden pro Tag", "h/d", 17],
+          ["kuehlgradtage_kd_a", "KGT · Kühlgradtage", "Kd/a", 160],
+          ["kuehlleistung_kw", "Q · Kühlleistung", "kW", 0],
+          ["kuehl_delta_t_k", "Δθmax · Temperaturdifferenz", "K", 0],
+        ],
+      },
+      {
+        titel: "2) Jahresenergiebedarf BWW",
+        felder: [
+          ["bww_tage_a", "ta · Nutzungstage pro Jahr", "d/a", 365],
+          ["bww_m3_d", "Vw,d · Tagesverbrauch", "m³/d", 0.388],
+          ["bww_verlustfaktor", "f · Faktor für Verluste", "–", 1.5],
+          ["bww_dichte_kg_m3", "ρw · Dichte", "kg/m³", 998],
+          ["bww_c_kj_kgk", "c · spezifische Wärmekapazität", "kJ/(kg·K)", 4.187],
+          ["bww_delta_t_k", "Δθ · Kalt- zu Warmwasser", "K", 50],
+        ],
+      },
     ],
     ergebnisse: [
-      ["heizung_kwh_a", "Raumheizung", "kWh/a"],
-      ["bww_kwh_a", "Warmwasser", "kWh/a"],
-      ["total_kwh_a", "Gesamtenergie", "kWh/a"],
+      ["qh_kwh_a", "Jahresenergiebedarf Heizung", "kWh/a"],
+      ["bww_kwh_a", "Jahresenergiebedarf BWW", "kWh/a"],
+      ["total_kwh_a", "Total", "kWh/a"],
+    ],
+    diagramm: (r) => ({
+      einheit: "kWh/a",
+      werte: [
+        { label: "Raumheizung", wert: r.heizung_kwh_a },
+        { label: "Kühlung", wert: r.kuehlung_kwh_a },
+        { label: "Warmwasser", wert: r.bww_kwh_a },
+      ].filter((w) => w.wert > 0),
+    }),
+    hinweise: [
+      { text: "Vollbetriebsstunden nach SIA 2024: Wohnhäuser und Schulen 16–18 h/d, Büro- und Geschäftshäuser 17–18 h/d, Hotels 18–20 h/d." },
+      { text: "Heizgradtage je Ort und Jahr — HEV Schweiz", url: "https://www.hev-schweiz.ch/vermieten/nebenkostenabrechnungen/heizgradtage" },
+      { text: "Kühlgradtage je Ort — zevvy", url: "https://www.zevvy.org/de-CH/wissenswertes/heizkosten/kuehlgradtage" },
     ],
   },
   {
@@ -129,6 +184,9 @@ const RECHNER = [
     titel: "JAZ & Stromkosten",
     kurz: "COP nach Temperaturstunden gewichten und jährlichen Strombedarf abschätzen.",
     quelle: "JAZ.xlsx",
+    // Zwei Spalten, damit COP und Stunden eines Temperaturbands nebeneinander
+    // stehen und nicht über den Zeilenumbruch auseinandergerissen werden.
+    spalten: 2,
     felder: [
       ["cop_1", "COP −8 bis −4 °C", "–", 3], ["h_1", "Stunden", "h/a", 100],
       ["cop_2", "COP −4 bis 0 °C", "–", 3], ["h_2", "Stunden", "h/a", 340],
@@ -154,6 +212,16 @@ const RECHNER = [
       ["stromverbrauch_kwh_a", "Stromverbrauch", "kWh/a"],
       ["stromkosten_chf_a", "Stromkosten", "CHF/a"],
     ],
+    // Das Diagramm zeigt die Gewichtung: welches Temperaturband die JAZ traegt.
+    diagrammAusEingabe: (werte) => ({
+      einheit: "h/a",
+      werte: [
+        ["-8 bis -4 \u00b0C", 1], ["-4 bis 0 \u00b0C", 2], ["0 bis 4 \u00b0C", 3],
+        ["4 bis 8 \u00b0C", 4], ["8 bis 12 \u00b0C", 5], ["\u00fcber 12 \u00b0C", 6],
+      ].map(([label, i]) => ({
+        label, wert: Number(werte[`h_${i}`]), hinweis: `COP ${werte[`cop_${i}`]}`,
+      })),
+    }),
   },
   {
     id: "ventil",
@@ -188,15 +256,21 @@ const RECHNER = [
 // unter der letzten — so fehlt nie einer, wenn eine neue Rubrik dazukommt.
 const GRUPPEN = ["Hydraulik", "Wärmeerzeugung", "Wirtschaftlichkeit"];
 
+// Ein Rechner beschreibt seine Felder entweder flach oder in Abschnitten wie im
+// Excel-Blatt. Alles andere arbeitet mit der flachen Liste.
+const abschnitteVon = (rechner) => rechner.abschnitte || [{ felder: rechner.felder || [] }];
+const felderVon = (rechner) => abschnitteVon(rechner).flatMap((a) => a.felder);
+
 const startwerte = (rechner) =>
-  Object.fromEntries((rechner.felder || []).map(([key, , , wert]) => [key, String(wert)]));
+  Object.fromEntries(felderVon(rechner).map(([key, , , wert]) => [key, String(wert)]));
 
 // So viele Spalten wie Ergebnisse — sonst bleibt neben einem einzelnen Wert
 // eine leere Fläche stehen.
 const SPALTEN = { 1: "", 2: "sm:grid-cols-2" };
 
-function Resultat({ rechner, resultat }) {
+function Resultat({ rechner, resultat, werte }) {
   if (!resultat) return null;
+  const diagramm = rechner.diagramm?.(resultat) || rechner.diagrammAusEingabe?.(werte);
   return (
     <div className="mt-6 border-t border-slate-300 pt-5">
       <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Resultat</div>
@@ -212,6 +286,31 @@ function Resultat({ rechner, resultat }) {
           </div>
         ))}
       </div>
+
+      <div className="mt-5 grid gap-5 lg:grid-cols-2">
+        {diagramm?.werte?.length > 1 && (
+          <div>
+            <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Verteilung</div>
+            <Balken werte={diagramm.werte} einheit={diagramm.einheit} dezimalen={diagramm.dezimalen} />
+          </div>
+        )}
+        {resultat.rechenweg?.length > 0 && (
+          <div>
+            <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Rechenweg</div>
+            <div className="space-y-2.5">
+              {resultat.rechenweg.map((schritt, i) => (
+                <div key={i} className="text-xs">
+                  <div className="font-semibold text-slate-700">{schritt.formel}</div>
+                  <div className="mt-0.5 flex flex-wrap items-baseline justify-between gap-x-3 font-mono text-slate-500">
+                    <span className="break-all">= {schritt.eingesetzt}</span>
+                    <span className="font-semibold text-brand-700">= {schritt.ergebnis}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -222,6 +321,7 @@ export default function EinzelberechnungenPage() {
   const [werteJeRechner, setWerteJeRechner] = useState(() => Object.fromEntries(RECHNER.map((item) => [item.id, startwerte(item)])));
   const [resultate, setResultate] = useState({});
   const [loading, setLoading] = useState(false);
+  const [exportLaeuft, setExportLaeuft] = useState(false);
   const [fehler, setFehler] = useState("");
   const werte = werteJeRechner[rechner.id];
 
@@ -230,22 +330,58 @@ export default function EinzelberechnungenPage() {
     setFehler("");
   };
 
+  const eingabenBauen = () => {
+    const eingaben = rechner.bauen
+      ? rechner.bauen(werte)
+      : Object.fromEntries(felderVon(rechner).map(([key, , , , typ]) => [key, typ === "select" ? werte[key] : ZAHL(werte[key])]));
+    if (Object.values(eingaben).some((wert) => typeof wert === "number" && !Number.isFinite(wert))) {
+      throw new Error("Bitte alle Eingabefelder mit gültigen Zahlen ausfüllen.");
+    }
+    return eingaben;
+  };
+
   const berechnen = async () => {
     setLoading(true);
     setFehler("");
     try {
-      const eingaben = rechner.bauen
-        ? rechner.bauen(werte)
-        : Object.fromEntries(rechner.felder.map(([key, , , , typ]) => [key, typ === "select" ? werte[key] : ZAHL(werte[key])]));
-      if (Object.values(eingaben).some((wert) => typeof wert === "number" && !Number.isFinite(wert))) {
-        throw new Error("Bitte alle Eingabefelder mit gültigen Zahlen ausfüllen.");
-      }
-      const response = await api.post("/api/v1/einzelberechnungen/berechnen", { typ: rechner.id, eingaben });
+      const response = await api.post("/api/v1/einzelberechnungen/berechnen", { typ: rechner.id, eingaben: eingabenBauen() });
       setResultate((alt) => ({ ...alt, [rechner.id]: response.data.resultat }));
     } catch (error) {
       setFehler(error?.response?.data?.detail || error.message || "Berechnung fehlgeschlagen");
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Das PDF rechnet im Backend noch einmal — damit im Export garantiert
+  // dieselben Zahlen stehen wie auf dem Bildschirm.
+  const exportieren = async () => {
+    setExportLaeuft(true);
+    setFehler("");
+    try {
+      const response = await api.post("/api/v1/einzelberechnungen/export", {
+        typ: rechner.id,
+        eingaben: eingabenBauen(),
+        titel: rechner.titel,
+        grundlage: rechner.quelle || "",
+        eingabe_zeilen: felderVon(rechner).map(([key, label, einheit]) => ({
+          label, wert: String(werte[key]), einheit: einheit || "",
+        })),
+        ergebnis_zeilen: rechner.ergebnisse.map(([key, label, einheit]) => ({
+          label, wert: key, einheit: einheit || "",
+        })),
+        hinweise: (rechner.hinweise || []).map((h) => (h.url ? `${h.text}: ${h.url}` : h.text)),
+      }, { responseType: "blob" });
+      const url = URL.createObjectURL(response.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${rechner.id}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setFehler(error?.message || "Export fehlgeschlagen");
+    } finally {
+      setExportLaeuft(false);
     }
   };
 
@@ -302,31 +438,64 @@ export default function EinzelberechnungenPage() {
             <Eigene key={rechner.id} />
           ) : (
             <>
-              <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                {rechner.felder.map(([key, label, einheit, , typ, optionen]) => (
-                  <label key={key} className="block">
-                    <span className="label">{label}{einheit ? ` [${einheit}]` : ""}</span>
-                    {typ === "select" ? (
-                      <select className="input" value={werte[key]} onChange={(e) => set(key, e.target.value)}>
-                        {optionen.map(([value, text]) => <option key={value} value={value}>{text}</option>)}
-                      </select>
-                    ) : (
-                      <input className="input font-mono tabular-nums" type="number" step="any" value={werte[key]}
-                        onChange={(e) => set(key, e.target.value)} />
-                    )}
-                  </label>
-                ))}
-              </div>
+              {abschnitteVon(rechner).map((abschnitt, ai) => (
+                <div key={abschnitt.titel || ai} className={ai === 0 ? "mt-5" : "mt-6"}>
+                  {abschnitt.titel && (
+                    <div className="mb-3 border-b border-slate-200 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                      {abschnitt.titel}
+                    </div>
+                  )}
+                  <div className={"grid gap-4 sm:grid-cols-2 " + (rechner.spalten === 2 ? "" : "xl:grid-cols-3")}>
+                    {abschnitt.felder.map(([key, label, einheit, , typ, optionen]) => (
+                      <label key={key} className="block">
+                        {/* Ohne Grossschreibung: kW ist nicht KW und Δθ nicht ΔΘ. */}
+                        <span className="label normal-case">{label}{einheit ? ` [${einheit}]` : ""}</span>
+                        {typ === "select" ? (
+                          <select className="input" value={werte[key]} onChange={(e) => set(key, e.target.value)}>
+                            {optionen.map(([value, text]) => <option key={value} value={value}>{text}</option>)}
+                          </select>
+                        ) : (
+                          <input className="input font-mono tabular-nums" type="number" step="any" value={werte[key]}
+                            onChange={(e) => set(key, e.target.value)} />
+                        )}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ))}
 
-              <div className="mt-5 flex items-center gap-3 border-t border-slate-200 pt-4">
+              {rechner.hinweise?.length > 0 && (
+                <ul className="mt-5 space-y-1 text-xs text-slate-500">
+                  {rechner.hinweise.map((hinweis) => (
+                    <li key={hinweis.text}>
+                      {hinweis.text}
+                      {hinweis.url && (
+                        <>
+                          {" "}
+                          <a href={hinweis.url} target="_blank" rel="noreferrer"
+                            className="inline-flex items-center gap-1 font-medium text-brand-600 hover:text-brand-700">
+                            öffnen <ExternalLink className="size-3" />
+                          </a>
+                        </>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-slate-200 pt-4">
                 <button type="button" className="btn-primary" disabled={loading} onClick={berechnen}>
                   <RefreshCw className={"size-4 " + (loading ? "animate-spin" : "")} />
                   {loading ? "Berechne…" : "Berechnen"}
                 </button>
+                <button type="button" className="btn-secondary" disabled={exportLaeuft} onClick={exportieren}>
+                  <FileDown className="size-4" />
+                  {exportLaeuft ? "Erstelle…" : "PDF"}
+                </button>
                 <span className="text-xs text-slate-400">Keine Projektdaten werden gespeichert.</span>
               </div>
               {fehler && <div className="mt-4 border-l-2 border-red-500 bg-white px-3 py-2 text-sm text-red-700">{fehler}</div>}
-              <Resultat rechner={rechner} resultat={resultate[rechner.id]} />
+              <Resultat rechner={rechner} resultat={resultate[rechner.id]} werte={werte} />
             </>
           )}
         </section>

@@ -36,9 +36,40 @@ def test_speicher_wp_viertelstunde():
 
 
 def test_jahresenergie_wert_aus_excel():
-    result = jahresenergie(30, 17, 3432, 28, 0.388)
+    """Werte aus «Jahresenergiebedarf Heizung und BWW.xlsx», Zeilen 10–13 und 34–41."""
+    result = jahresenergie(30, 17, 3432, 28, bww_m3_d=0.388)
     assert result["heizung_kwh_a"] == pytest.approx(62511, abs=1)
     assert result["bww_kwh_a"] == pytest.approx(12329, abs=1)
+    # Ohne Kühlanteil ist Qh der reine Heizanteil.
+    assert result["kuehlung_kwh_a"] == 0
+    assert result["qh_kwh_a"] == result["heizung_kwh_a"]
+
+
+def test_jahresenergie_mit_kuehlanteil_wie_excel():
+    """Das Blatt zählt Heiz- und Kühlgradtaganteil zu Qh zusammen (Zelle D20)."""
+    result = jahresenergie(
+        30, 17, 3432, 28,
+        kuehlleistung_kw=64, kuehl_vollbetriebsstunden_h_d=17,
+        kuehlgradtage_kd_a=160, kuehl_delta_t_k=5,
+        bww_m3_d=0.388,
+    )
+    assert result["kuehlung_kwh_a"] == pytest.approx(34816, abs=1)
+    assert result["qh_kwh_a"] == pytest.approx(97327, abs=1)
+    assert result["total_kwh_a"] == pytest.approx(109656, abs=2)
+
+
+def test_jahresenergie_unvollstaendiger_kuehlanteil_faellt_weg():
+    """Fehlt eine der vier Kühlangaben, darf nicht durch 0 geteilt werden."""
+    result = jahresenergie(30, 17, 3432, 28, kuehlleistung_kw=64, kuehlgradtage_kd_a=160)
+    assert result["kuehlung_kwh_a"] == 0
+
+
+def test_rechenweg_zeigt_formel_und_eingesetzte_werte():
+    """Regel 4: jede Formel braucht einen nachvollziehbaren Rechenweg für den Export."""
+    schritte = waermetauscherflaeche(110, 4800, 10.4)["rechenweg"]
+    assert schritte[0]["formel"] == "A = Q · 1000 / (U · Δθlm)"
+    assert schritte[0]["eingesetzt"] == "110 · 1000 / (4800 · 10.4)"
+    assert schritte[0]["ergebnis"] == "2.204 m²"
 
 
 def test_jaz_gewichtung_und_stromkosten():

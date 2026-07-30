@@ -211,16 +211,31 @@ async def upload_lv(
         # Visuell werden nur Kostenzusammenstellung, Konditionsseiten und
         # konkrete Parser-Konflikte geprüft — nie nochmals das ganze PDF.
         review = build_review_packet(features, costs, positions)
-        review_pages = {
-            p["page"] for p in (
-                pipeline.cost_summary_pages + pipeline.conditions_pages
-            ) if p.get("page")
+        # Kostenzusammenstellungen haben Vorrang. Von allgemeinen
+        # Bedingungsseiten werden nur echte Konditionsfundstellen gewählt.
+        priority_review_pages = {
+            p["page"] for p in pipeline.cost_summary_pages if p.get("page")
         }
+        priority_review_pages.update(
+            visual_review.select_commercial_review_pages(
+                pipeline.conditions_pages,
+            )
+        )
+        review_pages = set(priority_review_pages)
         review_pages.update(
             (features.get(key) or {}).get("source_page")
             for key in LV_IMPORT_FEATURE_KEYS
             if (features.get(key) or {}).get("confidence") == "low"
             and (features.get(key) or {}).get("source_page")
+        )
+        # Vollständig fehlende Kennwerte hatten bisher keine source_page und
+        # gelangten deshalb nie zur visuellen KI-Prüfung. Aus den bereits
+        # geparsten Technikseiten werden dafür wenige starke Stichworttreffer
+        # ergänzt; das PDF wird nicht nochmals ausgelesen.
+        review_pages.update(
+            visual_review.select_technical_review_pages(
+                pipeline.technik_pages, features,
+            )
         )
         for check in review["deterministic_checks"]:
             if check.get("severity") != "warning":
@@ -236,7 +251,11 @@ async def upload_lv(
             review_pages.update(
                 all_pages if len(all_pages) <= 6 else all_pages[:2] + all_pages[-4:]
             )
-        review_pages = sorted(review_pages)[:12]
+        prioritized = sorted(priority_review_pages)
+        review_pages = (
+            prioritized
+            + [page for page in sorted(review_pages) if page not in priority_review_pages]
+        )[:12]
         budget = ImportLlmBudget.from_env()
         visual = (
             visual_review.review(

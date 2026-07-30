@@ -256,21 +256,17 @@ def test_to_cost_rows_trennt_positionen_und_gruppentotale(summary):
 
 def test_golden_konditionskette_ergibt_endsumme_260723(summary):
     """Konditionen bleiben separat; die 20 Kostenpositionen werden nie geteilt."""
-    common_basis = 244729.68
     conditions = [
         {"label": "Rabatt", "kind": "percent", "direction": "deduction",
          "rate_percent": 6, "order": 1},
         {"label": "Skonto", "kind": "percent", "direction": "deduction",
          "rate_percent": 2, "order": 2},
         {"label": "Baureinigung/Beschädigungen", "kind": "percent",
-         "direction": "deduction", "rate_percent": 0.5,
-         "basis_amount": common_basis, "order": 3},
+         "direction": "deduction", "rate_percent": 0.5, "order": 3},
         {"label": "Bauwasser und elektrische Energie", "kind": "percent",
-         "direction": "deduction", "rate_percent": 0.3,
-         "basis_amount": common_basis, "order": 4},
+         "direction": "deduction", "rate_percent": 0.3, "order": 4},
         {"label": "Bauwesenversicherung", "kind": "percent",
-         "direction": "deduction", "rate_percent": 0.2,
-         "basis_amount": common_basis, "order": 5},
+         "direction": "deduction", "rate_percent": 0.2, "order": 5},
         {"label": "Baureklame", "kind": "fixed", "direction": "deduction",
          "amount": 200, "order": 6},
     ]
@@ -282,6 +278,18 @@ def test_golden_konditionskette_ergibt_endsumme_260723(summary):
     assert calculated["subtotal_excl_vat"] == 242082.38
     assert calculated["total_incl_vat"] == 260722.72
     assert issues == []
+
+
+def test_ausgewiesener_prozentbetrag_bestimmt_fehlende_basis():
+    result = commercial.calculate_chain(100000, [{
+        "label": "Baureinigung", "kind": "percent",
+        "direction": "deduction", "rate_percent": 0.5,
+        "amount": 450, "order": 1,
+    }])
+    condition = result["conditions"][0]
+    assert condition["basis_amount"] == 90000
+    assert condition["calculated_amount"] == 450
+    assert result["subtotal_excl_vat"] == 99550
 
 
 # ── Freigabe: Gruppentotale dürfen die Referenzkosten nicht verdoppeln ─────

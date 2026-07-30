@@ -65,7 +65,7 @@ LV_IMPORT_FEATURE_KEYS = [
     "generator_type", "generator_count", "generator_power_kw",
     "boreholes_present", "borehole_count", "borehole_length_each_m",
     "borehole_total_m", "pipe_length_m", "floor_heating_pipe_m",
-    "floor_heating_area_m2", "heat_meter_count", "buffer_count",
+    "floor_heating_area_m2", "pump_count", "heat_meter_count", "buffer_count",
     "temporary_heating_present", "geocooling_present",
     "domestic_hot_water_included",
 ]

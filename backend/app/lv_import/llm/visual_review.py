@@ -13,6 +13,8 @@ import base64
 import io
 import json
 import os
+import re
+import unicodedata
 from typing import Any
 
 from app.lv_import import commercial, norm_lv
@@ -30,13 +32,57 @@ oder überlagerter PDF-Text ist nur ein
 Hinweis; wenn Text und Seitenbild widersprechen, gewinnt der sichtbare Wert.
 
 Ermittle nur grobe Kennwerte, bepreiste Kostenpositionen und kommerzielle
-Konditionen. Keine Schrauben, Bögen, Schellen, Dimensionen oder anderen
-unbezahlten Einzelmengen. Pauschalen nie künstlich aufteilen.
+Konditionen. Bei den technischen Kennwerten sind besonders wichtig:
+Wärmeerzeugertyp, Anzahl und Heizleistung in kW; Anzahl, Länge je Sonde und
+Gesamtbohrmeter der Erdsonden; Rohrmeter total ohne Fussbodenheizungsrohre;
+Anzahl Pumpen und Anzahl Wärmemessungen/Wärmezähler. Addiere Rohrmeter nur,
+wenn die sichtbaren Mengen eindeutig sind. Keine Schrauben, Bögen, Schellen,
+Rohrmeter je Dimension oder anderen unbezahlten Einzelmengen als separate
+Kostenpositionen. Pauschalen nie künstlich aufteilen.
 
 Beispiel: sichtbar «Länge/Sonde 150 m» und «Total Sonden 6» bedeutet 6
 Erdsonden, 150 m je Sonde und 900 m total. Erfasse bei Kosten nur bepreiste
 Haupt-/Unterpositionen, Gruppentotale und Gewerktotal. Konditionen bleiben
-getrennt. Erfinde nichts; fehlende Werte bleiben null. Belege kurz."""
+getrennt. Lies Rabatt, Skonto, weitere prozentuale oder fixe Abzüge/Zuschläge
+sowie MWST vollständig. Übernimm bei jeder Kondition den sichtbar ausgewiesenen
+Prozentsatz, Betrag und die Berechnungsbasis, soweit vorhanden. Erfinde nichts;
+fehlende Werte bleiben null. Belege kurz."""
+
+_TECHNICAL_PAGE_TERMS = {
+    "generator": (
+        "heizleistung", "nennleistung", "warmeleistung", "warmepumpe",
+        "warmeerzeuger", "leistungsbereich",
+    ),
+    "boreholes": (
+        "erdsonde", "erdsonden", "erdwarmesonde", "bohrmeter",
+        "sondenlange", "lange sonde",
+    ),
+    "pipe": (
+        "rohrmeter", "laufmeter", "rohrleitung", "rohrleitungen", "lfm",
+    ),
+    "pumps": (
+        "pumpe", "pumpen", "umwalzpumpe", "heizkreispumpe", "ladepumpe",
+    ),
+    "meters": (
+        "warmemessung", "warmemessungen", "warmezahler",
+        "warmwasserzahler",
+    ),
+}
+_TECHNICAL_PAGE_FEATURES = {
+    "generator": ("generator_type", "generator_count", "generator_power_kw"),
+    "boreholes": (
+        "boreholes_present", "borehole_count", "borehole_length_each_m",
+        "borehole_total_m",
+    ),
+    "pipe": ("pipe_length_m",),
+    "pumps": ("pump_count",),
+    "meters": ("heat_meter_count",),
+}
+_COMMERCIAL_PAGE_TERMS = (
+    "rabatt", "skonto", "abzug", "abzuge", "zuschlag", "baureinigung",
+    "bauwasser", "bauwesenversicherung", "baureklame", "mehrwertsteuer",
+    "mwst", "nettosumme", "endsumme",
+)
 
 _NULLABLE_NUMBER = {"anyOf": [{"type": "number"}, {"type": "null"}]}
 RESPONSE_SCHEMA = {
@@ -173,6 +219,90 @@ def _number(value: Any) -> float | None:
         return float(value) if value is not None else None
     except (TypeError, ValueError):
         return None
+
+
+def _fold(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value or "")
+    return re.sub(r"\s+", " ", "".join(
+        char for char in normalized if not unicodedata.combining(char)
+    ).casefold())
+
+
+def select_technical_review_pages(
+    pages: list[dict], features: dict, *, max_pages: int = 8,
+) -> list[int]:
+    """Wählt wenige bereits geparste Seiten für vollständig fehlende Kennwerte.
+
+    Zuerst gelangt je fehlender Merkmalsgruppe der stärkste Texttreffer in die
+    visuelle Prüfung, danach füllen die stärksten weiteren Treffer das kleine
+    Gesamtbudget. Damit werden keine eindeutigen Seiten erneut gesendet und ein
+    vollständig fehlender Parserwert kann trotzdem von der KI gelesen werden.
+    """
+    selected: list[int] = []
+    ranked_by_group: dict[str, list[tuple[int, int]]] = {}
+    for group, keys in _TECHNICAL_PAGE_FEATURES.items():
+        needs_review = any(
+            (features.get(key) or {}).get("value") in (None, "")
+            or (features.get(key) or {}).get("confidence") == "low"
+            for key in keys
+        )
+        if not needs_review:
+            continue
+        ranked: list[tuple[int, int]] = []
+        for page in pages or []:
+            page_number = page.get("page")
+            if not page_number:
+                continue
+            text = _fold(page.get("text") or "")
+            score = sum(text.count(term) for term in _TECHNICAL_PAGE_TERMS[group])
+            if score:
+                ranked.append((score, int(page_number)))
+        if ranked:
+            ranked_by_group[group] = sorted(
+                ranked, key=lambda item: (-item[0], item[1]),
+            )
+
+    # Zuerst jede fehlende Merkmalsgruppe abdecken, damit z.B. Wärmemessungen
+    # nicht durch viele Rohrseiten aus dem Seitenbudget verdrängt werden.
+    for ranked in ranked_by_group.values():
+        page_number = ranked[0][1]
+        if page_number not in selected:
+            selected.append(page_number)
+        if len(selected) >= max_pages:
+            return selected
+
+    # Restplätze gehen an die stärksten weiteren Treffer, unabhängig von der
+    # Gruppe. Das erlaubt zusätzliche Rohrseiten, ohne andere Kennwerte zu
+    # verlieren.
+    extras = sorted(
+        (item for ranked in ranked_by_group.values() for item in ranked[1:]),
+        key=lambda item: (-item[0], item[1]),
+    )
+    for _, page_number in extras:
+        if page_number not in selected:
+            selected.append(page_number)
+        if len(selected) >= max_pages:
+            break
+    return selected
+
+
+def select_commercial_review_pages(
+    pages: list[dict], *, max_pages: int = 4,
+) -> list[int]:
+    """Begrenzt allgemeine Bedingungsseiten auf echte Konditionsfundstellen."""
+    ranked: list[tuple[int, int]] = []
+    for page in pages or []:
+        page_number = page.get("page")
+        if not page_number:
+            continue
+        text = _fold(page.get("text") or "")
+        score = sum(text.count(term) for term in _COMMERCIAL_PAGE_TERMS)
+        if score:
+            ranked.append((score, int(page_number)))
+    return [
+        page for _, page in sorted(ranked, key=lambda item: (-item[0], item[1]))
+        [:max_pages]
+    ]
 
 
 def validate(result: dict) -> list[str]:

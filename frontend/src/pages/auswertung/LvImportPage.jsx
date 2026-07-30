@@ -19,7 +19,7 @@ const KATEGORIEN = [
   { titel: "Wärmeerzeugung", keys: ["generator_type", "generator_count", "generator_power_kw"] },
   { titel: "Erdsonden", keys: ["boreholes_present", "borehole_count", "borehole_length_each_m", "borehole_total_m"] },
   { titel: "Speicher", keys: ["buffer_count"] },
-  { titel: "Wärmeverteilung", keys: ["pipe_length_m", "floor_heating_pipe_m", "floor_heating_area_m2"] },
+  { titel: "Wärmeverteilung", keys: ["pipe_length_m", "pump_count", "floor_heating_pipe_m", "floor_heating_area_m2"] },
   { titel: "Wärmemessung", keys: ["heat_meter_count"] },
   { titel: "Anlagenumfang", keys: ["temporary_heating_present", "geocooling_present", "domestic_hot_water_included"] },
 ];
@@ -131,14 +131,18 @@ function MultiSelect({ optionen, werte, disabled, onChange }) {
 
 // Punkt 24 — sichtbarer Verarbeitungszustand statt scheinbar eingefrorener Seite.
 const PROCESSING = [
-  "Datei eingelesen",
-  "Seiten klassifiziert",
-  "Technische Mengen werden erkannt",
-  "Kosten werden ausgewertet",
-  "Resultat wird vorbereitet",
+  { ab: 0, titel: "PDF wird hochgeladen", detail: "Datei wird sicher an den Import übergeben." },
+  { ab: 2, titel: "Seiten werden gelesen und klassifiziert", detail: "Deckblatt, LV, Technik, Kosten und Konditionen werden getrennt." },
+  { ab: 7, titel: "Technische Kennwerte werden erkannt", detail: "Erzeuger, Erdsonden, Rohrmeter, Pumpen und Wärmemessungen." },
+  { ab: 18, titel: "Kosten und Abzüge werden geprüft", detail: "BKP-Positionen, Rabatt, Skonto, Abzüge und MWST werden nachgerechnet." },
+  { ab: 45, titel: "KI-Prüfung und Resultat werden abgeschlossen", detail: "Nur unsichere Seiten werden visuell geprüft und normalisiert." },
 ];
 
-function ProcessingAnsicht({ schritt }) {
+function ProcessingAnsicht({ schritt, vergangen }) {
+  const aktuell = PROCESSING[schritt];
+  const minuten = Math.floor(vergangen / 60);
+  const sekunden = vergangen % 60;
+  const zeit = minuten ? `${minuten}:${String(sekunden).padStart(2, "0")} min` : `${sekunden} s`;
   return (
     <div className="mx-auto max-w-lg px-4 py-16">
       <div className="card p-6">
@@ -146,18 +150,23 @@ function ProcessingAnsicht({ schritt }) {
           <Loader2 className="size-5 animate-spin text-brand-500" />
           <h1 className="text-base font-bold">PDF wird analysiert …</h1>
         </div>
-        <p className="mt-1 text-xs text-slate-400">
-          Das kann bei grossen LVs einen Moment dauern. Bitte nicht schliessen.
-        </p>
+        <div className="mt-2 rounded-lg bg-brand-50 px-3 py-2">
+          <p className="text-xs font-semibold text-brand-700">Aktueller Schritt (geschätzt): {aktuell.titel}</p>
+          <p className="mt-0.5 text-[11px] text-brand-600">{aktuell.detail}</p>
+        </div>
+        <div className="mt-3 flex items-center justify-between text-[11px] text-slate-400">
+          <span>Vergangene Zeit: {zeit}</span>
+          <span>Typisch etwa 30–120 Sekunden</span>
+        </div>
         <ul className="mt-5 space-y-2.5">
-          {PROCESSING.map((text, i) => (
-            <li key={text} className="flex items-center gap-2.5 text-sm">
+          {PROCESSING.map((item, i) => (
+            <li key={item.titel} className="flex items-center gap-2.5 text-sm">
               {i < schritt
                 ? <CheckCircle2 className="size-4 shrink-0 text-green-600" />
                 : i === schritt
                   ? <Loader2 className="size-4 shrink-0 animate-spin text-brand-500" />
                   : <span className="size-4 shrink-0 rounded-full border border-slate-200" />}
-              <span className={i <= schritt ? "text-slate-700" : "text-slate-300"}>{text}</span>
+              <span className={i <= schritt ? "text-slate-700" : "text-slate-300"}>{item.titel}</span>
             </li>
           ))}
         </ul>
@@ -247,9 +256,16 @@ function UploadAnsicht() {
   // Punkt 24 — der Upload arbeitet synchron; statt Fake-Prozenten laufen die
   // Schritte optisch weiter, damit die Seite nicht eingefroren wirkt.
   const [schritt, setSchritt] = useState(0);
+  const [vergangen, setVergangen] = useState(0);
   useEffect(() => {
-    if (!busy) { setSchritt(0); return undefined; }
-    const t = setInterval(() => setSchritt((s) => Math.min(s + 1, PROCESSING.length - 1)), 1200);
+    if (!busy) { setSchritt(0); setVergangen(0); return undefined; }
+    const started = Date.now();
+    const t = setInterval(() => {
+      const seconds = Math.floor((Date.now() - started) / 1000);
+      setVergangen(seconds);
+      const index = PROCESSING.findLastIndex((item) => seconds >= item.ab);
+      setSchritt(Math.max(0, index));
+    }, 1000);
     return () => clearInterval(t);
   }, [busy]);
 
@@ -268,7 +284,7 @@ function UploadAnsicht() {
     }
   };
 
-  if (busy) return <ProcessingAnsicht schritt={schritt} />;
+  if (busy) return <ProcessingAnsicht schritt={schritt} vergangen={vergangen} />;
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-6 sm:py-8 lg:px-8">

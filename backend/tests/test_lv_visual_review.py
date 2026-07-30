@@ -153,3 +153,51 @@ def test_llm_global_deaktivierbar(monkeypatch):
     result = visual_review.review(b"%PDF-test", client=fake, model="test")
     assert result["called"] is False
     assert fake.calls == []
+
+
+def test_fehlende_technikwerte_waehlen_nur_passende_parserseiten():
+    pages = [
+        {"page": 3, "text": "Allgemeine Bedingungen und Garantie"},
+        {"page": 8, "text": "Wärmepumpe Heizleistung 42 kW"},
+        {"page": 11, "text": "6 Erdsonden, Sondenlänge 150 m"},
+        {"page": 14, "text": "Umwälzpumpen 3 Stk. und Wärmezähler 2 Stk."},
+        {"page": 16, "text": "Rohrleitungen Heizung 325 lfm"},
+    ]
+    pages_selected = visual_review.select_technical_review_pages(pages, {})
+    assert pages_selected == [8, 11, 16, 14]
+    assert 3 not in pages_selected
+
+
+def test_bereits_sichere_technikwerte_werden_nicht_nochmals_ausgewaehlt():
+    pages = [{"page": 8, "text": "Wärmepumpe Heizleistung 42 kW"}]
+    features = {
+        "generator_type": {"value": "waermepumpe", "confidence": "high"},
+        "generator_count": {"value": 1, "confidence": "high"},
+        "generator_power_kw": {"value": 42, "confidence": "high"},
+        "boreholes_present": {"value": False, "confidence": "high"},
+        "borehole_count": {"value": 0, "confidence": "high"},
+        "borehole_length_each_m": {"value": 0, "confidence": "high"},
+        "borehole_total_m": {"value": 0, "confidence": "high"},
+        "pipe_length_m": {"value": 100, "confidence": "high"},
+        "pump_count": {"value": 2, "confidence": "high"},
+        "heat_meter_count": {"value": 1, "confidence": "high"},
+    }
+    assert visual_review.select_technical_review_pages(pages, features) == []
+
+
+def test_pumpen_sind_im_strukturierten_visual_review_erlaubt():
+    enum = (
+        visual_review.RESPONSE_SCHEMA["properties"]["features"]["items"]
+        ["properties"]["key"]["enum"]
+    )
+    assert "pump_count" in enum
+
+
+def test_konditionsseiten_werden_nach_relevanz_begrenzt():
+    pages = [
+        {"page": 2, "text": "Allgemeine Bedingungen SIA 118"},
+        {"page": 40, "text": "Rabatt 6 % Skonto 2 % MWST 7.7 %"},
+        {"page": 41, "text": "Baureinigung 0.5 % Bauwasser 0.3 %"},
+        {"page": 42, "text": "Garantie und Haftung"},
+    ]
+    assert visual_review.select_commercial_review_pages(pages) == [40, 41]

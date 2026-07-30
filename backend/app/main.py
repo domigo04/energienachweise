@@ -38,6 +38,7 @@ from app.routers.hc_groups import router as hc_groups_router
 from app.routers.hc_ventil import router as hc_ventil_router
 from app.routers.hc_druckverlust import router as hc_druckverlust_router
 from app.routers.hc_ravel import router as hc_ravel_router
+from app.routers.hc_einzel import router as hc_einzel_router
 from app.routers.hc_schema import router as hc_schema_router
 from app.routers.hc_hydraulik import router as hc_hydraulik_router
 from app.routers.hc_bkp import router as hc_bkp_router
@@ -61,6 +62,7 @@ app.include_router(hc_groups_router, dependencies=_auth)
 app.include_router(hc_ventil_router, dependencies=_auth)
 app.include_router(hc_druckverlust_router, dependencies=_auth)
 app.include_router(hc_ravel_router, dependencies=_auth)
+app.include_router(hc_einzel_router, dependencies=_auth)
 app.include_router(hc_schema_router, dependencies=_auth)
 app.include_router(hc_hydraulik_router, dependencies=_auth)
 app.include_router(hc_bkp_router, dependencies=_auth)

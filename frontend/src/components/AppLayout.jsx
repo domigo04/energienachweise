@@ -2,7 +2,7 @@ import { useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   Home, FolderKanban, BarChart3, Building2, ShieldCheck, TrendingUp,
-  LogOut, Menu, X, SlidersHorizontal, Gauge, Scale,
+  LogOut, Menu, X, Calculator,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import logo from "../png/logo.png";
@@ -20,9 +20,7 @@ const MAIN = [
 ];
 
 const RECHNER = [
-  { to: "/rechner/ventil",       label: "Ventilauslegung", icon: SlidersHorizontal },
-  { to: "/rechner/druckverlust", label: "Druckverlust", icon: Gauge },
-  { to: "/rechner/ravel",        label: "RAVEL-Wirtschaftlichkeit", icon: Scale },
+  { to: "/rechner", label: "Einzelberechnungen", icon: Calculator },
 ];
 
 function NavItem({ to, label, icon: Icon, onNavigate }) {

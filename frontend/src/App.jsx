@@ -20,6 +20,7 @@ const HeizgruppenPage = lazy(() => import("./pages/hc/HeizgruppenPage"));
 const VentilPage = lazy(() => import("./pages/hc/VentilPage"));
 const DruckverlustPage = lazy(() => import("./pages/hc/DruckverlustPage"));
 const RavelPage = lazy(() => import("./pages/hc/RavelPage"));
+const EinzelberechnungenPage = lazy(() => import("./pages/hc/EinzelberechnungenPage"));
 const AuswertungList = lazy(() => import("./pages/auswertung/AuswertungList"));
 const AuswertungForm = lazy(() => import("./pages/auswertung/AuswertungForm"));
 const AuswertungAnalyse = lazy(() => import("./pages/auswertung/AuswertungAnalyse"));
@@ -69,6 +70,7 @@ export default function App() {
             {/* Alte Grobkosten-Standalone-Routen → Schätzung läuft im Projekt */}
             <Route path="/grobkosten/*" element={<Navigate to="/projekte" replace />} />
 
+            <Route path="/rechner" element={<PageLoader><EinzelberechnungenPage /></PageLoader>} />
             <Route path="/rechner/ventil" element={<PageLoader><VentilPage /></PageLoader>} />
             <Route path="/rechner/druckverlust" element={<PageLoader><DruckverlustPage /></PageLoader>} />
             <Route path="/rechner/ravel" element={<PageLoader><RavelPage /></PageLoader>} />

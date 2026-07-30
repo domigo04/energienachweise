@@ -18,10 +18,10 @@ const CARDS = [
     cta: "Zur Auswertung",
   },
   {
-    to: "/rechner/ventil",
+    to: "/rechner",
     icon: Calculator,
     title: "Rechner",
-    text: "Schnelle Einzelrechner: Ventilauslegung, Druckverlust und RAVEL-Wirtschaftlichkeit.",
+    text: "Schnelle Einzelrechner für Wärmetauscher, Speicher, Wärmepumpen, Energie, JAZ, Ventile und Druckverlust.",
     cta: "Zu den Rechnern",
   },
 ];

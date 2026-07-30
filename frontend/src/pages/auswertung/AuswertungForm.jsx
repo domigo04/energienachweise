@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Download, Trash2 } from "lucide-react";
-import { createRef, deleteRef, exportRefCsv, getRef, getRefKatalog, updateRef } from "../../api/hcApi";
+import {
+  createRef, deleteRef, exportRefCsv, getRef, getRefAnalyse, getRefKatalog, updateRef,
+} from "../../api/hcApi";
 import CheckboxGruppe from "../../components/kv/CheckboxGruppe";
 import AnlagenkonfigurationAuswahl from "../../components/kv/AnlagenkonfigurationAuswahl";
 import PageHeader from "../../components/ui/PageHeader";
 import InfoTip from "../../components/ui/InfoTip";
-import { chf } from "../../lib/format";
+import { chf, zahl } from "../../lib/format";
 import {
   AUSBAUUMFAENGE, GEBAEUDETYPEN, PROJEKTARTEN, WAERMEABGABE, WAERMEERZEUGER, ZERTIFIZIERUNGEN, hasErdsonde,
   konfigurationVorschlag,
@@ -39,6 +41,16 @@ const QUALITAET = [
   { v: 0.7, l: "grob (Schätzung)" },
 ];
 const num = (v) => (v === "" || v == null ? null : Number(v));
+const kw = (n) => zahl(n, Math.abs(Number(n)) < 100 ? 1 : 0);
+
+// Bezugsgrösse je Kostentreiber. Spiegelt `_REF_DRIVER_ATTR` im Backend; die
+// Feldnamen im Formular heissen gleich wie die Spalten am Referenzprojekt.
+const TREIBER_FELD = {
+  ebf: "ebf_m2", kw: "heizleistung_kw", einheiten: "anzahl_einheiten", bohrmeter: "bohrmeter",
+};
+// Ab dieser Abweichung vom Median ist eine Position auffällig genug, um sie zu
+// markieren — darunter ist Streuung normal.
+const AUFFAELLIG_PCT = 50;
 
 export default function AuswertungForm() {
   const { id } = useParams();
@@ -53,6 +65,7 @@ export default function AuswertungForm() {
   const [betraege, setBetraege] = useState({}); // { bkp_nr: "12345" }
   const [katalog, setKatalog] = useState({ positionen: [] });
   const [lvCommercial, setLvCommercial] = useState(null);
+  const [kennwerte, setKennwerte] = useState({}); // bkp_nr → Streuung im Bestand
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -68,6 +81,10 @@ export default function AuswertungForm() {
 
   useEffect(() => {
     getRefKatalog().then(setKatalog).catch(() => {});
+    // Kennwerte des Bestands, um jede Position gegen den Median zu stellen.
+    getRefAnalyse()
+      .then((a) => setKennwerte(Object.fromEntries((a.kennwerte || []).map((k) => [k.bkp_nr, k]))))
+      .catch(() => {});
     if (isEdit) {
       getRef(id)
         .then((r) => {
@@ -107,6 +124,25 @@ export default function AuswertungForm() {
   const skonto = Number(form.skonto_pct) || 0;
   const netto = brutto * (1 - rabatt / 100) * (1 - skonto / 100);
   const erdsonde = hasErdsonde(form.waermeerzeuger);
+  // Massgebend ist derselbe Betrag, den auch die Liste als Netto zeigt.
+  const nettoEffektiv = lvCommercial?.total_incl_vat ?? netto;
+
+  // Vergleich einer Position mit dem Bestand: ohne Betrag der Median als
+  // Orientierung, mit Betrag die eigene Abweichung. Fehlt die Bezugsgrösse,
+  // gibt es nichts zu vergleichen — dann steht dort bewusst nichts.
+  const vergleichFuer = (pos) => {
+    const k = kennwerte[pos.bkp_nr];
+    if (!k) return null;
+    const betrag = Number(betraege[pos.bkp_nr]) || 0;
+    const bezug = Number(form[TREIBER_FELD[pos.treiber]]) || 0;
+    if (!betrag || !bezug) return { text: `Median ${kw(k.median)} ${k.einheit}`, schwach: true };
+    const eigen = betrag / bezug;
+    const abw = k.median > 0 ? (eigen / k.median - 1) * 100 : null;
+    return {
+      text: `${kw(eigen)} ${k.einheit}${abw == null ? "" : ` · ${abw >= 0 ? "+" : "−"}${zahl(Math.abs(abw))} %`}`,
+      auffaellig: abw != null && Math.abs(abw) >= AUFFAELLIG_PCT,
+    };
+  };
 
   const save = async (e) => {
     e.preventDefault();
@@ -227,6 +263,12 @@ export default function AuswertungForm() {
                   <div className="mt-1 text-lg font-semibold tabular-nums text-brand-600">{chf(netto)}</div></div>
               </div>
               )}
+              {(form.ebf_m2 > 0 || form.heizleistung_kw > 0) && nettoEffektiv > 0 && (
+                <div className="mt-4 grid grid-cols-2 gap-px border-t border-slate-200 bg-slate-200 pt-px">
+                  <Kennwert titel="Netto/EBF" wert={form.ebf_m2 > 0 ? `${kw(nettoEffektiv / form.ebf_m2)} CHF/m²` : null} />
+                  <Kennwert titel="Netto/kW" wert={form.heizleistung_kw > 0 ? `${kw(nettoEffektiv / form.heizleistung_kw)} CHF/kW` : null} />
+                </div>
+              )}
               <p className="mt-3 text-xs text-slate-400">Laufend gegen das Leistungsverzeichnis/Devis des Unternehmers prüfen — passt die Summe?</p>
             </div>
           </aside>
@@ -315,11 +357,19 @@ export default function AuswertungForm() {
                     <div className="space-y-1.5">
                       {g.items.map((p) => {
                         const gefuellt = Number(betraege[p.bkp_nr]) > 0;
+                        const vergleich = vergleichFuer(p);
                         return (
                           <div key={p.bkp_nr} className="flex items-center gap-3">
                             <div className="min-w-0 flex-1">
                               <span className="text-sm font-medium text-slate-700">{p.bkp_nr}</span>
                               <span className="ml-2 text-sm text-slate-500">{p.bezeichnung}</span>
+                            </div>
+                            {/* Vergleich mit dem Bestand — auf dem Handy ausgeblendet,
+                                dort zählt das Eingabefeld. */}
+                            <div className={"hidden w-48 shrink-0 text-right text-[11px] tabular-nums sm:block "
+                              + (vergleich?.auffaellig ? "font-semibold text-amber-700" : "text-slate-400")}
+                              title={vergleich?.auffaellig ? `Mehr als ${AUFFAELLIG_PCT} % vom Median des Bestands entfernt.` : undefined}>
+                              {vergleich?.text}
                             </div>
                             <div className="relative w-32 shrink-0 sm:w-36">
                               <input
@@ -356,6 +406,17 @@ export default function AuswertungForm() {
           </div>
         </div>
       </form>
+    </div>
+  );
+}
+
+// Eine Kennzahl in der Zusammenstellung — gleiche Sprache wie die Kennzahlen
+// über der Auswertungsliste.
+function Kennwert({ titel, wert }) {
+  return (
+    <div className="bg-white px-2 py-1.5">
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{titel}</div>
+      <div className="tabular-nums text-slate-900">{wert || "—"}</div>
     </div>
   );
 }

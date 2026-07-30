@@ -55,6 +55,31 @@ FEATURE_DEFS = {
     "pipe_length_source_m": {"typ": "float", "einheit": "m", "label": "Rohrmeter Quelle"},
     "pipe_length_distribution_m": {"typ": "float", "einheit": "m", "label": "Rohrmeter Verteilung"},
     "pipe_length_m": {"typ": "float", "einheit": "m", "label": "Rohrmeter total"},
+
+    # ── Wärmeverteilung und Systemdaten ───────────────────────────────────
+    # Systemtemperaturen und Auslegungsaussentemperatur entscheiden über die
+    # Wahl der Abgabesysteme und sind darum vergleichsrelevant.
+    "distribution_system": {"typ": "text", "einheit": None, "label": "Verteilsystem"},
+    "design_flow_temperature_c": {"typ": "float", "einheit": "°C", "label": "Vorlauftemperatur"},
+    "design_return_temperature_c": {"typ": "float", "einheit": "°C", "label": "Rücklauftemperatur"},
+    "design_outdoor_temperature_c": {"typ": "float", "einheit": "°C", "label": "Auslegungsaussentemperatur"},
+    "fresh_water_station_present": {"typ": "bool", "einheit": None, "label": "Frischwasserstation"},
+    "storage_count": {"typ": "int", "einheit": None, "label": "Anzahl Speicher"},
+    "storage_volume_each_l": {"typ": "float", "einheit": "l", "label": "Volumen je Speicher"},
+
+    # ── Projektmerkmale, die den Preis treiben ────────────────────────────
+    # Bewusst wenige normierte Merkmale statt einer Freitextanalyse: nur was
+    # den Aufwand messbar verändert und in einer Referenz vergleichbar ist.
+    "protected_building": {"typ": "bool", "einheit": None, "label": "Schützenswertes Gebäude"},
+    "reversible_installations_required": {
+        "typ": "bool", "einheit": None, "label": "Reversible Einbauten gefordert",
+    },
+    "installation_height_m": {"typ": "float", "einheit": "m", "label": "Montagehöhe"},
+    "scaffolding_required": {"typ": "bool", "einheit": None, "label": "Gerüst erforderlich"},
+    "integrated_tests_required": {"typ": "bool", "einheit": None, "label": "Integrale Tests"},
+    "contractor_workshop_planning_required": {
+        "typ": "bool", "einheit": None, "label": "Werkplanung durch Unternehmer",
+    },
 }
 
 FEATURE_KEYS = list(FEATURE_DEFS.keys())
@@ -66,6 +91,15 @@ LV_IMPORT_FEATURE_KEYS = [
     "borehole_count", "borehole_length_each_m",
     "borehole_total_m", "pipe_length_m", "pump_count", "heat_meter_count",
     "buffer_count", "domestic_hot_water_included",
+    # Verteilung und Systemdaten — stehen in praktisch jedem LV und ersparen
+    # dem Nutzer nach dem Import manuelle Eingaben.
+    "distribution_system", "design_flow_temperature_c",
+    "design_return_temperature_c", "design_outdoor_temperature_c",
+    "fresh_water_station_present", "storage_count", "storage_volume_each_l",
+    # Projektmerkmale, die den Aufwand treiben.
+    "protected_building", "reversible_installations_required",
+    "installation_height_m", "scaffolding_required",
+    "integrated_tests_required", "contractor_workshop_planning_required",
 ]
 
 # LV-Feature-Schlüssel → ProjectContext-Parameterschlüssel (project_context.PARAMETER).

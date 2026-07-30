@@ -153,18 +153,30 @@ def resolve(positions: list[dict], *, provider: Optional[CostMappingLLM] = None)
         if conf < MIN_CONFIDENCE:
             out[sid] = _offen(conf, f"KI unsicher ({conf:.2f}): {grund}")
             continue
+        # Weitere abgedeckte Norm-Positionen einer Sammelposition. Auch sie
+        # müssen aus der geschlossenen Liste stammen; der Betrag bleibt beim
+        # primären Schlüssel und wird nie aufgeteilt.
+        enthalten = [
+            k for k in norm_lv.pruefe_schluessel(eintrag.get("included_norm_lv_keys"))
+            if k != key and k in allowed_by_source.get(sid, set())
+        ]
         out[sid] = {
             "canonical_key": key,
+            "included_norm_keys": ",".join(enthalten) or None,
+            "amount_allocation": norm_lv.NOT_SPLIT if enthalten else norm_lv.SINGLE,
             "mapping_method": norm_lv.LLM,
             "mapping_confidence": conf,
             "mapping_reason": f"{_confidence_label(conf)} ({conf:.2f}): {grund}"[:200],
+            "requires_review": conf < HIGH_CONFIDENCE,
         }
     return out
 
 
 def _offen(conf: float, grund: str) -> dict:
+    """Keine Zuordnung — bewusst ein Prüffall statt einer geratenen Zahl."""
     return {"canonical_key": None, "mapping_method": None,
-            "mapping_confidence": conf, "mapping_reason": grund[:200]}
+            "mapping_confidence": conf, "mapping_reason": grund[:200],
+            "requires_review": True}
 
 
 def positions_from_rows(rows) -> list[dict]:
@@ -177,7 +189,12 @@ def positions_from_rows(rows) -> list[dict]:
         {"source_id": r.get("original_position") or str(r.get("bkp_nr") or ""),
          "title": r.get("original_title") or "",
          "group": str(r.get("bkp_nr") or "") or None,
-         "section_path": r.get("section_path")}
+         "section_path": r.get("section_path"),
+         # Die Quellhierarchie und der enthaltene Leistungsumfang entscheiden die
+         # Zuordnung stärker als die laufende Nummer — «243.5 Transport, Montage»
+         # kann im Norm-LV unter einer anderen Nummer stehen.
+         "parent_bkp": r.get("source_parent_bkp") or str(r.get("bkp_nr") or "") or None,
+         "scope_summary": (r.get("source_scope_summary") or "")[:400] or None}
         for r in (rows or [])
         if not r.get("is_group_total")
         and not r.get("canonical_key")

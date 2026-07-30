@@ -17,7 +17,7 @@ import re
 import unicodedata
 from typing import Any
 
-from app.lv_import import commercial, norm_lv
+from app.lv_import import commercial, norm_lv, systems
 from app.lv_import.feature_keys import LV_IMPORT_FEATURE_KEYS
 from app.lv_import.llm.budget import (
     ImportLlmBudget, enabled as global_enabled, timeout_seconds,
@@ -60,7 +60,36 @@ Haupt-/Unterpositionen, Gruppentotale und Gewerktotal. Konditionen bleiben
 getrennt. Lies Rabatt, Skonto, weitere prozentuale oder fixe Abzüge/Zuschläge
 sowie MWST vollständig. Übernimm bei jeder Kondition den sichtbar ausgewiesenen
 Prozentsatz, Betrag und die Berechnungsbasis, soweit vorhanden. Erfinde nichts;
-fehlende Werte bleiben null. Belege kurz."""
+fehlende Werte bleiben null. Belege kurz.
+
+Handschrift: Dieses Dokument kann von Hand ergänzt oder korrigiert sein. Eine
+handschriftliche Eintragung ist die gültige Fassung, wenn sie erkennbar eine
+Korrektur ist — etwa wenn der gedruckte Wert durchgestrichen, überschrieben oder
+durch einen Pfeil ersetzt wurde. Ein durchgestrichener Wert gilt NIE. Trage
+solche Fälle zusätzlich in `handwritten_corrections` ein: gedruckter Wert,
+handschriftlicher Wert und welcher gilt. Ist die Handschrift nicht sicher
+lesbar, gib die tiefe `confidence` ehrlich an, statt zu raten.
+
+Konditionen ohne Zahl: Steht bei Rabatt, Skonto oder Sponsoring nur «Anfrage»,
+«nach Vereinbarung» oder gar nichts, setze `status` auf `requested_not_priced`,
+`amount` und `rate_percent` auf null. Das ist kein Abzug von null.
+
+Kostenpositionen: Gib in `scope_summary` in einem Satz an, was die Position alles
+umfasst (z.B. «Transport, Montage, Inbetriebsetzung, Druckproben,
+Revisionsunterlagen»). Dieser Umfang entscheidet später die Zuordnung, nicht die
+laufende Nummer.
+
+Wärmeabgabe: Erfasse in `heat_emission_systems` ALLE vorkommenden Abgabesysteme
+einzeln (Flachröhrenradiatoren, Konvektoren, Luftheizapparate, Fussboden-
+heizung, Deckenstrahlplatten, Heizregister und weitere). Unterscheide dabei
+`supplied_by` (wer liefert) von `installation_by` (wer montiert): bauseits
+geliefert und vom Heizungsunternehmer montiert ist ein häufiger und wichtiger
+Fall. Teile keinen Preis auf einzelne Abgabesysteme auf.
+
+Wärmeerzeugung: Suche in `heat_generation_systems` auch dann nach Angaben, wenn
+das Angebot schwerpunktmässig die Verteilung betrifft. Halte fest, ob eine
+bestehende Erzeugung weiterbetrieben wird (`existing`) oder neu geliefert wird
+(`new`). Fehlt eine Heizleistung, bleibt sie null."""
 
 _TECHNICAL_PAGE_TERMS = {
     "generator": (
@@ -153,13 +182,16 @@ RESPONSE_SCHEMA = {
                     "bkp_group": {"type": "string"},
                     "title": {"type": "string"},
                     "amount": {"type": "number", "minimum": 0},
+                    # Der enthaltene Leistungsumfang trägt die Zuordnung ins
+                    # Norm-LV — die laufende Quellnummer tut das nicht.
+                    "scope_summary": {"type": "string", "maxLength": 300},
                     "source_page": {"type": "integer"},
                     "confidence": {"type": "number", "minimum": 0, "maximum": 1},
                     "evidence": {"type": "string", "maxLength": 160},
                 },
                 "required": [
-                    "position", "bkp_group", "title", "amount", "source_page",
-                    "confidence", "evidence",
+                    "position", "bkp_group", "title", "amount", "scope_summary",
+                    "source_page", "confidence", "evidence",
                 ],
                 "additionalProperties": False,
             },
@@ -195,12 +227,97 @@ RESPONSE_SCHEMA = {
                     "rate_percent": _NULLABLE_NUMBER,
                     "amount": _NULLABLE_NUMBER,
                     "basis_amount": _NULLABLE_NUMBER,
+                    # «Anfrage», leeres Rabattfeld, gewünschtes Sponsoring ohne
+                    # Zahl: sichtbar, aber kein Abzug.
+                    "status": {
+                        "type": "string",
+                        "enum": ["priced", "requested_not_priced"],
+                    },
                     "order": {"type": "integer"},
                     "source_page": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
                 },
                 "required": [
                     "label", "kind", "direction", "rate_percent", "amount",
-                    "basis_amount", "order", "source_page",
+                    "basis_amount", "status", "order", "source_page",
+                ],
+                "additionalProperties": False,
+            },
+        },
+        "heat_emission_systems": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "type": {"type": "string"},
+                    "source_label": {"type": "string", "maxLength": 120},
+                    "count": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+                    "supplied_by": {"type": "string", "enum": ["contractor", "others"]},
+                    "installation_by": {
+                        "anyOf": [
+                            {"type": "string", "enum": ["contractor", "others"]},
+                            {"type": "null"},
+                        ],
+                    },
+                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                    "source_page": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+                    "evidence": {"type": "string", "maxLength": 160},
+                },
+                "required": [
+                    "type", "source_label", "count", "supplied_by",
+                    "installation_by", "confidence", "source_page", "evidence",
+                ],
+                "additionalProperties": False,
+            },
+        },
+        "heat_generation_systems": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "type": {"type": "string"},
+                    "source_label": {"type": "string", "maxLength": 120},
+                    "count": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+                    "capacity_kw": _NULLABLE_NUMBER,
+                    "manufacturer": _NULLABLE_STRING,
+                    "model": _NULLABLE_STRING,
+                    "existing_or_new": {
+                        "anyOf": [
+                            {"type": "string", "enum": ["existing", "new"]},
+                            {"type": "null"},
+                        ],
+                    },
+                    "supplied_by": {"type": "string", "enum": ["contractor", "others"]},
+                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                    "source_page": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+                    "evidence": {"type": "string", "maxLength": 160},
+                },
+                "required": [
+                    "type", "source_label", "count", "capacity_kw", "manufacturer",
+                    "model", "existing_or_new", "supplied_by", "confidence",
+                    "source_page", "evidence",
+                ],
+                "additionalProperties": False,
+            },
+        },
+        "handwritten_corrections": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "field": {"type": "string", "enum": LV_IMPORT_FEATURE_KEYS},
+                    "printed_value": _NULLABLE_STRING,
+                    "corrected_value": _NULLABLE_STRING,
+                    "selected_source": {
+                        "type": "string", "enum": ["printed", "corrected"],
+                    },
+                    "struck_through": {"type": "boolean"},
+                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                    "source_page": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+                    "evidence": {"type": "string", "maxLength": 160},
+                },
+                "required": [
+                    "field", "printed_value", "corrected_value", "selected_source",
+                    "struck_through", "confidence", "source_page", "evidence",
                 ],
                 "additionalProperties": False,
             },
@@ -216,6 +333,7 @@ RESPONSE_SCHEMA = {
     },
     "required": [
         "project_data", "features", "costs", "group_totals", "trade_total", "conditions",
+        "heat_emission_systems", "heat_generation_systems", "handwritten_corrections",
         "vat_rate", "stated_subtotal_excl_vat", "stated_vat_amount",
         "stated_total_incl_vat", "warnings",
     ],
@@ -415,6 +533,32 @@ def validate(result: dict, *, require_costs: bool = True) -> list[str]:
     return issues
 
 
+_BKP_IN_MELDUNG = re.compile(r"BKP\s+([0-9][0-9.]*)")
+
+
+def conflict_pages(result: dict, issues: list[str]) -> list[int]:
+    """Seiten der Positionen, die eine Summenabweichung verursachen.
+
+    Damit prüft der zweite Durchgang gezielt die strittige Stelle nach, statt
+    das ganze Seitenpaket noch einmal zu senden. Im Golden-Test ist genau eine
+    Position handschriftlich und unklar — nur deren Seite muss zurück.
+    """
+    gruppen = {
+        treffer.group(1)
+        for meldung in issues or []
+        for treffer in [_BKP_IN_MELDUNG.search(str(meldung))]
+        if treffer
+    }
+    if not gruppen:
+        return []
+    seiten: set[int] = set()
+    for eintrag in list(result.get("costs") or []) + list(result.get("group_totals") or []):
+        gruppe = str(eintrag.get("bkp_group") or "").strip()
+        if gruppe in gruppen and isinstance(eintrag.get("source_page"), int):
+            seiten.add(eintrag["source_page"])
+    return sorted(seiten)
+
+
 def _response_text(response) -> str:
     direct = getattr(response, "output_text", None)
     if direct:
@@ -538,6 +682,7 @@ def review(
     result: dict = {}
     issues: list[str] = []
     attempts = 0
+    focused_pages: list[int] = []
     try:
         result = _call(
             client, selected_pdf, model, budget, original_pages=page_numbers,
@@ -550,12 +695,28 @@ def review(
             and budget.may_call(max(500, len(selected_pdf) // 80))
         ):
             correction = "\n".join(f"- {issue}" for issue in issues)
+            # Gezielt nachprüfen statt alles nochmals: nur die Seiten der
+            # Positionen, die den Summenkonflikt verursachen. Findet sich keine,
+            # bleibt es beim bisherigen Seitenpaket.
+            fokus = conflict_pages(result, issues)
+            korrektur_seiten = fokus or (page_numbers or [])
+            korrektur_pdf = (
+                _selected_pdf(pdf_bytes, korrektur_seiten)
+                if fokus and set(fokus) != set(page_numbers or []) else selected_pdf
+            )
+            if fokus:
+                correction += (
+                    "\nPrüfe gezielt die angehängten Seiten der strittigen "
+                    "Positionen. Lies handschriftliche Beträge zeichenweise und "
+                    "gib bei Unsicherheit eine tiefe confidence an."
+                )
             result = _call(
-                client, selected_pdf, model, budget, correction,
-                original_pages=page_numbers, parser_context=parser_context,
+                client, korrektur_pdf, model, budget, correction,
+                original_pages=korrektur_seiten, parser_context=parser_context,
             )
             attempts = budget.calls
             issues = validate(result, require_costs=require_costs)
+            focused_pages = fokus
     except Exception as exc:
         issues = [f"{type(exc).__name__}: {str(exc)[:300]}"]
     return {
@@ -565,9 +726,58 @@ def review(
         "result": result,
         "issues": issues,
         "reviewed_pages": sorted(set(page_numbers or [])),
+        "focused_pages": focused_pages,
         **budget.status(),
         **config,
     }
+
+
+def apply_corrections(features: dict, result: dict) -> list[dict]:
+    """Handschriftliche Korrekturen auf die Merkmale anwenden.
+
+    Beide Stände bleiben erhalten: `printed_value` ist der gedruckte Wert,
+    `corrected_value` die Handschrift. Gilt die Korrektur, wird sie zum Wert —
+    der gedruckte Stand bleibt daneben sichtbar. Ist die Handschrift nicht
+    sicher genug, entsteht ein Prüffall statt einer stillen Entscheidung.
+    """
+    offen: list[dict] = []
+    for item in result.get("handwritten_corrections") or []:
+        key = item.get("field")
+        if key not in LV_IMPORT_FEATURE_KEYS:
+            continue
+        gedruckt = item.get("printed_value")
+        korrigiert = item.get("corrected_value")
+        gewaehlt = item.get("selected_source")
+        confidence = _number(item.get("confidence")) or 0
+        # Ein durchgestrichener gedruckter Wert darf nie gelten.
+        if item.get("struck_through") and gewaehlt == "printed" and korrigiert:
+            gewaehlt = "corrected"
+        wert = korrigiert if gewaehlt == "corrected" else gedruckt
+        unsicher = confidence < MIN_FEATURE_CONFIDENCE
+        if wert in (None, ""):
+            unsicher = True
+        bisher = features.get(key) or {}
+        features[key] = {
+            **bisher,
+            "value": wert if not unsicher else bisher.get("value"),
+            "printed_value": gedruckt,
+            "corrected_value": korrigiert,
+            "selected_source": gewaehlt,
+            "requires_review": unsicher,
+            "confidence": "high" if confidence >= 0.9 else "medium" if not unsicher else "low",
+            "source_page": item.get("source_page", bisher.get("source_page")),
+            "source_text": str(item.get("evidence") or "")[:300] or bisher.get("source_text"),
+            "derived_from": (
+                f"Handschriftliche Korrektur, gedruckt war «{gedruckt}»"
+                if gewaehlt == "corrected" else "Gedruckter Wert bestätigt"
+            ),
+        }
+        if unsicher:
+            offen.append({
+                "field": key, "printed_value": gedruckt, "corrected_value": korrigiert,
+                "confidence": confidence, "source_page": item.get("source_page"),
+            })
+    return offen
 
 
 def apply_result(features: dict, result: dict) -> tuple[list[dict], dict]:
@@ -613,10 +823,22 @@ def apply_result(features: dict, result: dict) -> tuple[list[dict], dict]:
         amount = round(float(item["amount"]), 2)
         title = str(item.get("title") or "").strip()
         mapping = norm_lv.match_title(title, group)
+        umfang = str(item.get("scope_summary") or "").strip()[:400]
+        # Eine Sammelposition («Speicher / Frischwasserstation») deckt mehrere
+        # Norm-Positionen ab. Der Betrag zählt trotzdem nur einmal.
+        abgedeckt = [
+            k for k in norm_lv.covered_keys(f"{title} {umfang}", group)
+            if k != mapping.get("canonical_key")
+        ][:4]
         row = {
             "bkp_nr": group,
             "original_position": str(item.get("position") or "").strip(),
             "original_title": title,
+            "source_parent_bkp": group.split(".")[0] if group else None,
+            "source_scope_summary": umfang or None,
+            "included_norm_keys": ",".join(abgedeckt) or None,
+            "amount_allocation": norm_lv.NOT_SPLIT if abgedeckt else norm_lv.SINGLE,
+            "requires_review": not mapping.get("canonical_key"),
             "detected_amount": amount,
             "confidence": "high",
             "source_page": item.get("source_page"),
@@ -643,7 +865,14 @@ def apply_result(features: dict, result: dict) -> tuple[list[dict], dict]:
             "is_group_total": True, "validation_status": "valid",
             "source": "visual_ai_pdf",
         })
+    korrekturen_offen = apply_corrections(features, result)
+    systeme = systems.merge([], (
+        systems.from_llm(result.get("heat_emission_systems"), systems.HEAT_EMISSION)
+        + systems.from_llm(result.get("heat_generation_systems"), systems.HEAT_GENERATION)
+    ))
     return rows, {
+        "systems": systeme,
+        "handwritten_open": korrekturen_offen,
         "project_data": {
             key: (str(value).strip()[:200] if value not in (None, "") else None)
             for key, value in (result.get("project_data") or {}).items()

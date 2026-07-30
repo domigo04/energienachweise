@@ -33,10 +33,17 @@ RESPONSE_SCHEMA: dict = {
                     "source_id": {"type": "string"},
                     # null ist ein ausdrücklich gültiges Ergebnis.
                     "canonical_key": {"type": ["string", "null"]},
+                    # Weitere Norm-Positionen, die dieselbe Quellzeile fachlich
+                    # abdeckt (Sammelposition). Der Betrag bleibt beim primären
+                    # Schlüssel und wird NIE aufgeteilt.
+                    "included_norm_lv_keys": {
+                        "type": "array", "items": {"type": "string"},
+                    },
                     "confidence": {"type": "number"},
                     "reason": {"type": "string", "maxLength": 120},
                 },
-                "required": ["source_id", "canonical_key", "confidence", "reason"],
+                "required": ["source_id", "canonical_key", "included_norm_lv_keys",
+                             "confidence", "reason"],
                 "additionalProperties": False,
             },
         },
@@ -59,7 +66,14 @@ Regeln:
   `confidence`. Das ist ausdrücklich erwünscht und besser als ein Rateschluss.
 - `confidence` ist deine ehrliche Sicherheit zwischen 0 und 1.
 - `reason` ist eine kurze deutsche Begründung (max. 15 Wörter).
-- Gib für JEDE übergebene Position genau einen Eintrag zurück."""
+- Gib für JEDE übergebene Position genau einen Eintrag zurück.
+- Deckt eine Quellzeile mehrere Norm-Positionen ab (z.B. «Speicher /
+  Frischwasserstation»), setze die fachlich führende als `canonical_key` und
+  die weiteren in `included_norm_lv_keys`. Alle müssen aus der Kandidatenliste
+  stammen. Teile den Betrag NICHT auf — er zählt genau einmal.
+- `scope_summary` beschreibt, was in der Quellposition alles enthalten ist.
+  Er wiegt schwerer als die laufende Nummer.
+- Sonst bleibt `included_norm_lv_keys` eine leere Liste."""
 
 
 def build_user_prompt(positions: list[dict], allowed_positions: list[dict]) -> str:
@@ -73,6 +87,8 @@ def build_user_prompt(positions: list[dict], allowed_positions: list[dict]) -> s
         "title": p["title"],
         "bkp_group": p.get("group"),
         "section_path": p.get("section_path"),
+        "parent_bkp": p.get("parent_bkp"),
+        "scope_summary": p.get("scope_summary"),
         "candidates": p.get("candidates") or [],
     } for p in positions]
     return json.dumps({"positions": compact}, ensure_ascii=False, separators=(",", ":"))

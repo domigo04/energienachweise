@@ -49,21 +49,65 @@ GENERATOR_TYPES: list[dict] = [
 ]
 
 # ── Wärmeabgabe (Punkt 7 — Mehrfachauswahl) ────────────────────────────────
+# Reihenfolge ist bedeutsam: `normalize` nimmt den ersten Treffer. Spezifische
+# Bauarten stehen deshalb VOR den allgemeinen. „Flachröhrenradiator" muss
+# `roehrenradiator` ergeben und nicht das allgemeinere `heizkoerper`.
 HEAT_DELIVERY_TYPES: list[dict] = [
     {"code": "fbh", "label": "Fussbodenheizung",
      "synonyme": ["fussbodenheizung", "bodenheizung", "fbh", "flächenheizung"]},
-    {"code": "heizkoerper", "label": "Heizkörper",
-     "synonyme": ["heizkörper", "heizkoerper", "radiator", "radiatoren", "hk"]},
-    {"code": "tabs", "label": "TABS (Betonkernaktivierung)",
-     "synonyme": ["tabs", "betonkernaktivierung", "thermoaktive"]},
-    {"code": "wandheizung", "label": "Wandheizung", "synonyme": ["wandheizung"]},
+    {"code": "roehrenradiator", "label": "Röhrenradiatoren",
+     "synonyme": ["röhrenradiator", "roehrenradiator", "flachröhrenradiator",
+                  "flachroehrenradiator", "röhrenradiatoren", "roehrenradiatoren"]},
+    {"code": "plattenradiator", "label": "Plattenradiatoren",
+     "synonyme": ["plattenradiator", "plattenradiatoren", "flachheizkörper",
+                  "flachheizkoerper", "kompaktheizkörper"]},
+    {"code": "geblaesekonvektor", "label": "Gebläsekonvektoren",
+     "synonyme": ["gebläsekonvektor", "geblaesekonvektor", "gebläsekonvektoren",
+                  "ventilatorkonvektor", "fancoil", "fan coil"]},
     {"code": "konvektoren", "label": "Konvektoren",
      "synonyme": ["konvektor", "konvektoren", "unterflurkonvektor"]},
+    {"code": "luftheizapparat", "label": "Luftheizapparate",
+     "synonyme": ["luftheizapparat", "luftheizapparate", "lha", "warmlufterzeuger",
+                  "torluftschleier"]},
+    {"code": "heizregister", "label": "Heizregister Lüftung",
+     "synonyme": ["heizregister", "lüftungsheizregister", "nacherhitzer",
+                  "vorerhitzer", "erhitzerregister"]},
     {"code": "lufterhitzer", "label": "Lufterhitzer",
      "synonyme": ["lufterhitzer", "luftheizregister", "lüftungsregister"]},
     {"code": "deckenstrahlplatten", "label": "Deckenstrahlplatten",
      "synonyme": ["deckenstrahlplatte", "deckenstrahlplatten", "strahlplatte"]},
+    {"code": "deckenheizung", "label": "Deckenheizung",
+     "synonyme": ["deckenheizung", "kühldecke", "heizdecke"]},
+    {"code": "tabs", "label": "TABS (Betonkernaktivierung)",
+     "synonyme": ["tabs", "betonkernaktivierung", "thermoaktive"]},
+    {"code": "wandheizung", "label": "Wandheizung", "synonyme": ["wandheizung"]},
+    # Allgemeiner Sammelbegriff zuletzt, damit er die Bauarten oben nicht
+    # überstimmt.
+    {"code": "heizkoerper", "label": "Heizkörper",
+     "synonyme": ["heizkörper", "heizkoerper", "radiator", "radiatoren", "hk"]},
     {"code": "sonstige", "label": "Sonstige", "synonyme": []},
+]
+
+# ── Lieferung/Montage-Zuständigkeit und Leistungsumfang ────────────────────
+# Ein LV sagt nicht nur WAS, sondern auch WER liefert und montiert. Genau
+# dieser Unterschied entscheidet, ob eine Position im Preis enthalten ist.
+SCOPE_STATUS: list[dict] = [
+    {"code": "included", "label": "Im Angebot enthalten",
+     "synonyme": ["enthalten", "inklusive", "im angebot"]},
+    {"code": "excluded", "label": "Nicht enthalten",
+     "synonyme": ["nicht enthalten", "exklusive", "ausgeschlossen"]},
+    {"code": "supplied_by_others", "label": "Lieferung bauseits/fremd",
+     "synonyme": ["bauseits geliefert", "lieferung bauseits", "fremdlieferung",
+                  "wird geliefert"]},
+    {"code": "installed_by_contractor", "label": "Montage durch Unternehmer",
+     "synonyme": ["montage durch unternehmer", "montage heizung", "nur montage"]},
+    {"code": "by_others", "label": "Bauseits / anderes Gewerk",
+     "synonyme": ["bauseits", "durch andere", "fremdes gewerk", "andere gewerke"]},
+    {"code": "optional", "label": "Option / Eventualposition",
+     "synonyme": ["option", "optional", "eventualposition", "variante"]},
+    {"code": "requested_not_priced", "label": "Angefragt, nicht beziffert",
+     "synonyme": ["anfrage", "auf anfrage", "nach anfrage", "nicht beziffert"]},
+    {"code": "unknown", "label": "Unklar", "synonyme": []},
 ]
 
 # ── Zertifizierung (Punkt 20 — nie mehr Freitext) ─────────────────────────
@@ -85,8 +129,11 @@ BUILDING_USES: list[dict] = [
     {"code": "efh", "label": "Einfamilienhaus", "synonyme": ["efh", "einfamilienhaus"]},
     {"code": "buero", "label": "Büro / Verwaltung",
      "synonyme": ["büro", "buero", "verwaltung", "dienstleistung"]},
+    {"code": "sporthalle", "label": "Sport- / Turnhalle",
+     "synonyme": ["sporthalle", "turnhalle", "dreifachhalle", "mehrzweckhalle",
+                  "sportanlage", "hallenbad"]},
     {"code": "schule", "label": "Schule / Bildung",
-     "synonyme": ["schule", "schulhaus", "kindergarten", "bildung", "turnhalle"]},
+     "synonyme": ["schule", "schulhaus", "kindergarten", "bildung"]},
     {"code": "gewerbe", "label": "Gewerbe / Industrie",
      "synonyme": ["gewerbe", "industrie", "werkstatt", "lager", "produktion"]},
     {"code": "verkauf", "label": "Verkauf / Gastronomie",
@@ -122,6 +169,7 @@ REGISTRY: dict[str, list[dict]] = {
     "building_uses": BUILDING_USES,
     "project_types": PROJECT_TYPES,
     "scope_levels": SCOPE_LEVELS,
+    "scope_status": SCOPE_STATUS,
 }
 
 # Merkmale, die mehrere Werte gleichzeitig haben dürfen (Punkt 6/7).

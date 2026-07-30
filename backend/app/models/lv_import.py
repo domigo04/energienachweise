@@ -68,6 +68,8 @@ class LvImport(Base):
                          cascade="all, delete-orphan")
     conditions = relationship("LvImportCondition", back_populates="lv_import",
                               cascade="all, delete-orphan")
+    systems = relationship("LvImportSystem", back_populates="lv_import",
+                           cascade="all, delete-orphan")
 
 
 class LvImportFeature(Base):
@@ -89,6 +91,14 @@ class LvImportFeature(Base):
     derived_from = Column(String, nullable=True)
     confirmed_value = Column(String, nullable=True) # vom Nutzer bestätigt/korrigiert
     confirmed = Column(Boolean, nullable=False, default=False)
+    # Handschriftliche Korrekturen: In ausgefüllten Offerten wird der gedruckte
+    # Wert oft durchgestrichen und von Hand überschrieben. Beide Stände bleiben
+    # nachvollziehbar; `selected_source` sagt, welcher gilt, und `requires_review`
+    # zwingt zur menschlichen Prüfung, wenn die Handschrift nicht eindeutig ist.
+    printed_value = Column(String, nullable=True)     # gedruckter Originalwert
+    corrected_value = Column(String, nullable=True)   # handschriftliche Korrektur
+    selected_source = Column(String, nullable=True)   # printed | corrected
+    requires_review = Column(Boolean, nullable=False, default=False)
 
     lv_import = relationship("LvImport", back_populates="features")
 
@@ -102,11 +112,25 @@ class LvImportCost(Base):
     # Punkt 14 — die Detailinformation bleibt erhalten: Originalnummer und
     # Originaltitel der Position, dazu der kanonische Schlüssel (Punkt 17), weil
     # Planer Unterpositionen je Projekt unterschiedlich nummerieren.
-    original_position = Column(String, nullable=True)    # z.B. "241.10"
+    original_position = Column(String, nullable=True)    # Quellnummer, z.B. "243.5"
     original_title = Column(String, nullable=True)
     section_path = Column(String, nullable=True)
     canonical_key = Column(String, nullable=True, index=True)   # Norm-LV-Position
     original_amount = Column(Float, nullable=True)              # wie im LV gelesen
+    # Quellhierarchie getrennt vom Ziel: die laufende Nummer des Unternehmers
+    # ist NICHT die Nummer im Norm-LV. `source_parent_bkp` ist die Haupt-BKP der
+    # Quelle (z.B. "243"), `source_scope_summary` fasst den enthaltenen
+    # Leistungsumfang in einem Satz zusammen — er ist die Grundlage der
+    # semantischen Zuordnung.
+    source_parent_bkp = Column(String, nullable=True)
+    source_scope_summary = Column(Text, nullable=True)
+    source_bbox = Column(String, nullable=True)
+    # Eine Quellposition kann fachlich mehrere Norm-LV-Positionen abdecken
+    # (z.B. „Speicher / Frischwasserstation"). Der Betrag wird dabei NICHT
+    # aufgeteilt — er zählt genau einmal beim primären Schlüssel.
+    included_norm_keys = Column(String, nullable=True)   # kommasepariert
+    amount_allocation = Column(String, nullable=True)    # not_split | single
+    requires_review = Column(Boolean, nullable=False, default=False)
     # Wie die Zuordnung zustande kam: exact | rule | llm | manual. Zusammen mit
     # confidence/reason bleibt später messbar, wie gut die automatische Zuordnung
     # (insbesondere das LLM) wirklich ist.
@@ -150,5 +174,42 @@ class LvImportCondition(Base):
     running_total = Column(Float, nullable=True)
     order_index = Column(Integer, nullable=False, default=0)
     source_page = Column(Integer, nullable=True)
+    # Ein Rabattfeld mit «Anfrage» ist kein Abzug von 0, sondern eine offene
+    # Verhandlungsposition. Ohne diese Unterscheidung würde ein leeres Feld als
+    # bestätigter Nullabzug in die Referenz wandern.
+    status = Column(String, nullable=False, default="priced")  # priced | requested_not_priced
 
     lv_import = relationship("LvImport", back_populates="conditions")
+
+
+class LvImportSystem(Base):
+    """Anlagensysteme aus dem LV — Wärmeabgabe und Wärmeerzeugung.
+
+    Beide sind mehrwertig und tragen mehr als einen Code: Anzahl, Lieferant,
+    Monteur, Fabrikat. Ein einzelnes Feature-Feld kann das nicht abbilden,
+    darum eine schmale gemeinsame Tabelle statt zweier Sonderstrukturen.
+    """
+
+    __tablename__ = "lv_import_systems"
+
+    id = Column(Integer, primary_key=True, index=True)
+    lv_import_id = Column(Integer, ForeignKey("lv_imports.id"), nullable=False, index=True)
+    kind = Column(String, nullable=False)          # heat_emission | heat_generation
+    type_code = Column(String, nullable=False)     # Code aus fachwerte
+    source_label = Column(String, nullable=True)   # Wortlaut im Dokument
+    count = Column(Integer, nullable=True)
+    capacity_kw = Column(Float, nullable=True)
+    manufacturer = Column(String, nullable=True)
+    model = Column(String, nullable=True)
+    # Wer liefert, wer montiert: bauseits geliefert und vom Heizungsunternehmer
+    # montiert ist ein anderer Preis als beides durch den Unternehmer.
+    supplied_by = Column(String, nullable=True)     # contractor | others
+    installation_by = Column(String, nullable=True)
+    scope_status = Column(String, nullable=True)    # fachwerte.scope_status
+    existing_or_new = Column(String, nullable=True)  # existing | new
+    confidence = Column(Float, nullable=True)
+    source_page = Column(Integer, nullable=True)
+    source_text = Column(Text, nullable=True)
+    confirmed = Column(Boolean, nullable=False, default=False)
+
+    lv_import = relationship("LvImport", back_populates="systems")

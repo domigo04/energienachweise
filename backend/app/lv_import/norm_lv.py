@@ -172,6 +172,24 @@ _UNBEKANNT = sorted({r["key"] for r in _RULES} - NORM_KEYS)
 assert not _UNBEKANNT, f"Regel zeigt auf unbekannte Norm-Position: {_UNBEKANNT}"
 
 
+def _kontext_erfuellt(regel: dict, norm: str, bkp_group: Optional[str]) -> bool:
+    """Erfüllt die Position den fachlichen Kontext einer Regel?
+
+    Der Kontext steht meist im Titel («Montage Wärmeverteilung»). Er kann aber
+    auch allein aus der Quellhierarchie kommen: «243.5 Transport, Montage» nennt
+    die Verteilung nicht im Titel — die Haupt-BKP 243 IST der Kontext. Ohne das
+    bliebe eine korrekt einsortierte Position ohne Zuordnung, nur weil der
+    Unternehmer knapp formuliert hat.
+    """
+    kontext = regel.get("kontext")
+    if not kontext:
+        return False
+    if any(begriff in norm for begriff in kontext):
+        return True
+    haupt = str(bkp_group or "").split(".")[0]
+    return bool(haupt) and regel["key"].split(".")[0] == haupt
+
+
 def match_title(title: str, bkp_group: Optional[str] = None) -> dict:
     """Titel → Norm-LV-Position, deterministisch.
 
@@ -198,7 +216,7 @@ def match_title(title: str, bkp_group: Optional[str] = None) -> dict:
         if any(t in norm for t in regel.get("nicht") or ()):
             continue
         kontext = regel.get("kontext")
-        kontext_ok = bool(kontext) and any(k in norm for k in kontext)
+        kontext_ok = _kontext_erfuellt(regel, norm, bkp_group)
         if kontext and not kontext_ok:
             continue
         score = len(regel["terms"]) + (1.0 if kontext_ok else 0.0)
@@ -228,3 +246,65 @@ def match_title(title: str, bkp_group: Optional[str] = None) -> dict:
 def _keine(grund: str) -> dict:
     return {"canonical_key": None, "mapping_method": None,
             "mapping_confidence": None, "mapping_reason": grund}
+
+
+# ── Sammelpositionen ───────────────────────────────────────────────────────
+# Eine Quellposition deckt oft mehrere Norm-LV-Positionen ab: «Speicher /
+# Frischwasserstation» ist eine Zeile mit einem Betrag, im Norm-LV aber zwei
+# Themen. Der Betrag darf dabei NIE aufgeteilt werden — er zählt einmal beim
+# primären Schlüssel, die übrigen sind nur als enthalten vermerkt.
+NOT_SPLIT = "not_split"
+SINGLE = "single"
+
+# Trennzeichen, die im Titel zwei Leistungen verbinden.
+_VERBINDER = (" / ", " + ", " und ", " sowie ", ", ")
+
+
+def ist_sammelposition(title: str) -> bool:
+    """Nennt der Titel mehrere Leistungen in einer Zeile?"""
+    text = f" {str(title or '').strip()} "
+    return any(verbinder in text for verbinder in _VERBINDER)
+
+
+def covered_keys(title: str, bkp_group: str | None = None) -> list[str]:
+    """Alle Norm-LV-Positionen, die der Titel fachlich berührt.
+
+    Anders als `match_title` sucht das keine EINE richtige Antwort, sondern den
+    abgedeckten Umfang. Grundlage für `included_norm_keys`.
+    """
+    norm = falte(title)
+    if not norm:
+        return []
+    treffer: list[tuple[float, str]] = []
+    for regel in _RULES:
+        if not all(t in norm for t in regel["terms"]):
+            continue
+        if any(t in norm for t in regel.get("nicht") or ()):
+            continue
+        kontext = regel.get("kontext")
+        kontext_ok = _kontext_erfuellt(regel, norm, bkp_group)
+        if kontext and not kontext_ok:
+            continue
+        score = len(regel["terms"]) + (1.0 if kontext_ok else 0.0)
+        if bkp_group and regel["key"].startswith(str(bkp_group)):
+            score += 0.25
+        treffer.append((score, regel["key"]))
+    # Exakter Norm-Titel zählt immer dazu.
+    exakt = _EXACT_INDEX.get(norm)
+    if exakt:
+        treffer.append((99.0, exakt))
+    treffer.sort(key=lambda item: -item[0])
+    gesehen: list[str] = []
+    for _, key in treffer:
+        if key not in gesehen:
+            gesehen.append(key)
+    return gesehen
+
+
+def pruefe_schluessel(keys) -> list[str]:
+    """Nur Schlüssel der geschlossenen Liste, ohne Dubletten, in Reihenfolge."""
+    out: list[str] = []
+    for key in keys or []:
+        if ist_norm_position(key) and key not in out:
+            out.append(key)
+    return out

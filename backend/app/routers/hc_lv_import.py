@@ -18,6 +18,7 @@ from app.database import get_db
 from app.models.auth import User
 from app.models.lv_import import (
     LvImport, LvImportFeature, LvImportCost, LvImportCondition, LvImportStatus,
+    LvImportSystem,
 )
 from app.models.kv import (
     RefProjekt, RefKostenzeile, RefProjektFeature, RefProjektGewerk,
@@ -29,6 +30,7 @@ from app.lv_import.cost_summary import parse_cost_summary, to_cost_rows, has_cos
 from app.lv_import.project_extract import extract_project_data
 from app.lv_import import commercial, norm_lv
 from app.lv_import.llm import resolver as llm
+from app.lv_import import systems
 from app import fachwerte
 from app.lv_import.feature_keys import (
     FEATURE_DEFS, LV_IMPORT_FEATURE_KEYS, FEATURE_TO_CONTEXT,
@@ -53,6 +55,26 @@ def _get_import(db: Session, user: User, import_id: int) -> LvImport:
     return imp
 
 
+def _als_text(wert):
+    return None if wert in (None, "") else str(wert)[:255]
+
+
+def _system_out(s: LvImportSystem) -> dict:
+    return {
+        "id": s.id, "kind": s.kind, "type_code": s.type_code,
+        "label": fachwerte.label(
+            "heat_delivery_types" if s.kind == systems.HEAT_EMISSION else "generator_types",
+            s.type_code,
+        ),
+        "source_label": s.source_label, "count": s.count,
+        "capacity_kw": s.capacity_kw, "manufacturer": s.manufacturer, "model": s.model,
+        "supplied_by": s.supplied_by, "installation_by": s.installation_by,
+        "scope_status": s.scope_status, "existing_or_new": s.existing_or_new,
+        "confidence": s.confidence, "source_page": s.source_page,
+        "source_text": s.source_text, "confirmed": s.confirmed,
+    }
+
+
 def _feature_out(f: LvImportFeature) -> dict:
     return {
         "id": f.id, "key": f.key,
@@ -63,6 +85,11 @@ def _feature_out(f: LvImportFeature) -> dict:
         "source_page": f.source_page, "source_text": f.source_text,
         # Punkt 12/22: kompakter Auszug + Rechenweg abgeleiteter Werte.
         "source_excerpt": f.source_excerpt, "derived_from": f.derived_from,
+        # Handschriftliche Korrektur: beide Stände bleiben sichtbar, damit im
+        # Review nachvollziehbar ist, was gedruckt stand und was von Hand kam.
+        "printed_value": f.printed_value, "corrected_value": f.corrected_value,
+        "selected_source": f.selected_source,
+        "requires_review": bool(f.requires_review),
         "effective_value": f.confirmed_value if f.confirmed_value not in (None, "") else f.value,
     }
 
@@ -103,6 +130,18 @@ def _cost_out(c: LvImportCost) -> dict:
         "detected_amount": c.detected_amount, "confirmed_amount": c.confirmed_amount,
         "confidence": c.confidence, "source_page": c.source_page, "source_text": c.source_text,
         "positionen": c.positionen, "confirmed": c.confirmed, "manual": c.manual,
+        # Quellhierarchie getrennt vom Ziel — die Quellnummer ist NICHT die
+        # Norm-LV-Nummer.
+        "source_parent_bkp": c.source_parent_bkp,
+        "source_scope_summary": c.source_scope_summary,
+        "included_norm_keys": [
+            k for k in (c.included_norm_keys or "").split(",") if k
+        ],
+        "included_norm_labels": [
+            norm_lv.norm_label(k) for k in (c.included_norm_keys or "").split(",") if k
+        ],
+        "amount_allocation": c.amount_allocation,
+        "requires_review": bool(c.requires_review),
         "effective_amount": _cost_effective(c),
     }
 
@@ -115,6 +154,8 @@ def _condition_out(c: LvImportCondition) -> dict:
         "calculated_amount": c.calculated_amount,
         "running_total": c.running_total, "order": c.order_index,
         "source_page": c.source_page,
+        # «Anfrage» ist kein Abzug von null, sondern eine offene Position.
+        "status": c.status or "priced",
     }
 
 
@@ -144,6 +185,7 @@ def _import_out(imp: LvImport, detail: bool = False) -> dict:
             _condition_out(c)
             for c in sorted(imp.conditions, key=lambda x: x.order_index)
         ]
+        base["systems"] = [_system_out(s) for s in imp.systems]
         # Punkt 25 — Verarbeitungsbericht für die Import-Zusammenfassung.
         base["report"] = _report(imp)
     return base
@@ -348,6 +390,7 @@ async def upload_lv(
                     running_total=item.get("running_total"),
                     order_index=int(item.get("order") or 0),
                     source_page=item.get("source_page"),
+                    status=item.get("status") or "priced",
                 ))
         # Erst nach der autoritativen visuellen Auswertung offene Titel gegen
         # das geschlossene Norm-LV auflösen.
@@ -368,6 +411,10 @@ async def upload_lv(
                 source_excerpt=f.get("source_excerpt") if f else None,
                 source_bbox=",".join(str(round(v, 1)) for v in bbox) if bbox else None,
                 derived_from=f.get("derived_from") if f else None,
+                printed_value=_als_text((f or {}).get("printed_value")),
+                corrected_value=_als_text((f or {}).get("corrected_value")),
+                selected_source=(f or {}).get("selected_source"),
+                requires_review=bool((f or {}).get("requires_review", False)),
             ))
         for c in costs:
             db.add(LvImportCost(
@@ -386,7 +433,23 @@ async def upload_lv(
                 detected_amount=c.get("detected_amount"), confidence=c.get("confidence"),
                 source_page=c.get("source_page"), source_text=c.get("source_text"),
                 positionen=c.get("positionen", 1),
+                source_parent_bkp=c.get("source_parent_bkp")
+                or (str(c.get("bkp_nr") or "").split(".")[0] or None),
+                source_scope_summary=c.get("source_scope_summary"),
+                included_norm_keys=c.get("included_norm_keys"),
+                amount_allocation=c.get("amount_allocation"),
+                requires_review=bool(c.get("requires_review", False)),
             ))
+        # Anlagensysteme: Wärmeabgabe und Wärmeerzeugung. Der Parser findet sie
+        # in born-digital LVs, die visuelle Prüfung in Scans — beide Wege enden
+        # in derselben Struktur.
+        systeme = systems.merge(
+            systems.detect(pipeline.technik_pages, systems.HEAT_EMISSION)
+            + systems.detect(pipeline.technik_pages, systems.HEAT_GENERATION),
+            visual_apply.get("systems") or [],
+        )
+        for eintrag in systeme:
+            db.add(LvImportSystem(lv_import_id=imp.id, **eintrag))
         # Punkt 25/30 — Verarbeitungsbericht: was wurde erkannt, was muss geprüft
         # werden. Speist die Import-Zusammenfassung und den Debug-Dump.
         erkannte = [
@@ -421,6 +484,11 @@ async def upload_lv(
             "visual_review_attempts": visual["attempts"],
             "visual_review_issues": visual["issues"],
             "visual_review_pages": visual.get("reviewed_pages") or [],
+            "visual_review_focused_pages": visual.get("focused_pages") or [],
+            "systeme_waermeabgabe": len(systems.delivery_codes(systeme)),
+            "systeme_waermeerzeugung": len(systems.generator_codes(systeme)),
+            "handschrift_offen": len(visual_apply.get("handwritten_open") or []),
+            "kosten_pruefen": len([c for c in costs if c.get("requires_review")]),
             **budget.status(),
             **visual_review.status(),
             **visual_apply,

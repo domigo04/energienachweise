@@ -78,11 +78,16 @@ PIPE_EXCLUDE_TERMS: tuple[str, ...] = (
     "flaechenheizungsschlange", "flaechenheizungsschlangen",
     "heizkreisschlaufe", "heizkreisschlaufen", "bodenheizungsverteiler",
     "fussbodenheizungsrohr", "fussbodenheizungsrohre",
+    # Dämmpositionen messen DIESELBEN Rohre nochmals in Laufmetern. Wer sie
+    # mitzählt, verdoppelt die Rohrmeter — im Golden-Test aus 306 m würden 612 m.
+    "isolation", "isolierung", "dämmung", "daemmung", "dämmschale",
+    "daemmschale", "wärmedämmung", "waermedaemmung", "isolierschale",
 )
 # Abschnittstitel, unter denen Rohrmeter nicht als Verteilrohre zählen.
 PIPE_EXCLUDE_SECTION_TERMS: tuple[str, ...] = (
     "flächenheizung", "flaechenheizung", "bodenheizung", "fussbodenheizung",
     "fussbodenheizungen", "wandheizung", "tabs",
+    "dämmung", "daemmung", "dämmungen", "daemmungen", "isolation", "isolierung",
 )
 # Quellenseite (Primärkreis/Erdsondensammler) vs. Verteilung.
 PIPE_SOURCE_TERMS: tuple[str, ...] = (

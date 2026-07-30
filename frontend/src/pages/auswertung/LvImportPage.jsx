@@ -21,11 +21,38 @@ const MULTI_FEATURES = {};
 const KATEGORIEN = [
   { titel: "Wärmeerzeugung", keys: ["generator_type", "generator_power_kw"] },
   { titel: "Erdsonden", keys: ["borehole_count", "borehole_length_each_m", "borehole_total_m"] },
-  { titel: "Speicher", keys: ["buffer_count"] },
-  { titel: "Wärmeverteilung", keys: ["pipe_length_m", "pump_count"] },
+  { titel: "Speicher / Frischwasserstation",
+    keys: ["buffer_count", "storage_count", "storage_volume_each_l", "fresh_water_station_present"] },
+  { titel: "Wärmeverteilung", keys: ["pipe_length_m", "pump_count", "distribution_system"] },
+  { titel: "Systemtemperaturen",
+    keys: ["design_flow_temperature_c", "design_return_temperature_c", "design_outdoor_temperature_c"] },
   { titel: "Wärmemessung", keys: ["heat_meter_count"] },
   { titel: "Warmwasser", keys: ["domestic_hot_water_included"] },
+  { titel: "Projektmerkmale",
+    keys: ["protected_building", "reversible_installations_required", "installation_height_m",
+           "scaffolding_required", "integrated_tests_required",
+           "contractor_workshop_planning_required"] },
 ];
+
+// Wer liefert, wer montiert — für die Anzeige der Anlagensysteme.
+const WER = { contractor: "Unternehmer", others: "bauseits/fremd" };
+
+// Merkmale mit Ja/Nein statt Zahleneingabe.
+const BOOL_FEATURES = new Set([
+  "domestic_hot_water_included", "boreholes_present", "fresh_water_station_present",
+  "protected_building", "reversible_installations_required", "scaffolding_required",
+  "integrated_tests_required", "contractor_workshop_planning_required",
+]);
+const SCOPE_LABEL = {
+  included: "enthalten",
+  installed_by_contractor: "Lieferung bauseits, Montage Unternehmer",
+  by_others: "bauseits",
+  supplied_by_others: "Lieferung bauseits",
+  excluded: "nicht enthalten",
+  optional: "Option",
+  requested_not_priced: "angefragt, nicht beziffert",
+  unknown: "unklar",
+};
 
 const CONF_STYLE = {
   high: "bg-green-100 text-green-700", medium: "bg-amber-100 text-amber-800", low: "bg-slate-100 text-slate-500",
@@ -117,6 +144,93 @@ function Quelle({ feature, tag, tagStyle }) {
         </pre>
       )}
     </div>
+  );
+}
+
+// Handschriftliche Korrektur: beide Stände nebeneinander, damit im Review
+// sichtbar bleibt, was gedruckt stand und was von Hand kam.
+function Handschrift({ feature }) {
+  if (!feature.corrected_value && !feature.printed_value) return null;
+  const gilt = feature.selected_source === "corrected" ? feature.corrected_value : feature.printed_value;
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 border-l-2 border-l-brand-300 bg-brand-50/50 px-2.5 py-1.5 text-[11px]">
+      <span className="font-semibold uppercase tracking-wide text-slate-500">Handschrift</span>
+      <span className="text-slate-500">
+        gedruckt <span className="font-mono line-through">{feature.printed_value ?? "—"}</span>
+      </span>
+      <span className="text-slate-500">
+        korrigiert <span className="font-mono font-semibold text-slate-800">{feature.corrected_value ?? "—"}</span>
+      </span>
+      <span className="font-semibold text-brand-700">gilt: {gilt ?? "—"}</span>
+      {feature.source_page != null && <span className="text-slate-400">Seite {feature.source_page}</span>}
+      {feature.requires_review && (
+        <span className="rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-800">
+          unsicher — bitte prüfen
+        </span>
+      )}
+    </div>
+  );
+}
+
+// Wärmeabgabe und Wärmeerzeugung. Mehrere Systeme gleichzeitig sind der
+// Normalfall, darum eine Liste statt eines einzelnen Feldes.
+function AnlagenSysteme({ systeme }) {
+  if (!systeme?.length) return null;
+  const gruppen = [
+    ["heat_emission", "Wärmeabgabe"],
+    ["heat_generation", "Wärmeerzeugung"],
+  ];
+  return (
+    <section className="card overflow-hidden">
+      <div className="border-b border-slate-100 bg-slate-50/60 px-4 py-3 sm:px-5">
+        <h2 className="text-sm font-bold text-slate-800">Anlagensysteme</h2>
+      </div>
+      {gruppen.map(([kind, titel]) => {
+        const rows = systeme.filter((s) => s.kind === kind);
+        if (!rows.length) return null;
+        return (
+          <div key={kind}>
+            <div className="border-b border-slate-100 bg-white px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500 sm:px-5">
+              {titel}
+            </div>
+            <div className="divide-y divide-slate-100">
+              {rows.map((s) => (
+                <div key={s.id ?? `${s.kind}-${s.type_code}`} className="px-4 py-3 sm:px-5">
+                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                    <span className="font-medium text-slate-900">{s.label || s.type_code}</span>
+                    {s.count != null && (
+                      <span className="font-mono text-sm tabular-nums text-slate-700">{s.count} Stk.</span>
+                    )}
+                    {s.capacity_kw != null && (
+                      <span className="font-mono text-sm tabular-nums text-slate-700">{s.capacity_kw} kW</span>
+                    )}
+                    {(s.manufacturer || s.model) && (
+                      <span className="text-xs text-slate-500">{[s.manufacturer, s.model].filter(Boolean).join(" ")}</span>
+                    )}
+                    {s.existing_or_new && (
+                      <span className="text-xs text-slate-400">
+                        {s.existing_or_new === "existing" ? "bestehend" : "neu"}
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
+                    {s.scope_status && (
+                      <span className={"rounded-full px-2 py-0.5 font-semibold "
+                        + (s.scope_status === "included" ? "bg-slate-100 text-slate-600" : "bg-brand-50 text-brand-800")}>
+                        {SCOPE_LABEL[s.scope_status] || s.scope_status}
+                      </span>
+                    )}
+                    {s.supplied_by && <span>Lieferung: {WER[s.supplied_by] || s.supplied_by}</span>}
+                    {s.installation_by && <span>Montage: {WER[s.installation_by] || s.installation_by}</span>}
+                    {s.source_page != null && <span>Seite {s.source_page}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </section>
   );
 }
 
@@ -469,7 +583,13 @@ function KonditionenEditor({ imp, gesperrt, onSaved }) {
               <span className="mt-0.5 block text-[10px] text-slate-400">{condition.kind === "percent" ? "%" : "CHF"}</span>
             </div>
             <div className={`text-right text-sm font-medium ${condition.direction === "deduction" ? "text-slate-700" : "text-green-700"}`}>
-              {condition.calculated_amount != null
+              {condition.status === "requested_not_priced" ? (
+                // «Anfrage» ist kein Abzug von null, sondern eine offene
+                // Verhandlungsposition — sie darf nicht als Betrag erscheinen.
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                  angefragt, nicht beziffert
+                </span>
+              ) : condition.calculated_amount != null
                 ? `${condition.direction === "deduction" ? "−" : "+"} ${chf(Math.abs(condition.calculated_amount))}`
                 : "wird beim Speichern berechnet"}
             </div>
@@ -768,6 +888,7 @@ function ReviewAnsicht({ id }) {
       {/* Schritt 2 — Technischer Fingerprint nach Kategorien */}
       {schritt === 1 && (
       <div className="max-w-5xl space-y-6">
+        <AnlagenSysteme systeme={imp.systems} />
         {KATEGORIEN.filter((kat) =>
           kat.titel !== "Erdsonden"
           || featureByKey.generator_type?.effective_value === "ews_wp"
@@ -789,6 +910,7 @@ function ReviewAnsicht({ id }) {
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-medium text-slate-900">{f.label}</span>
                       </div>
+                      <Handschrift feature={f} />
                       {multi && listen && (
                         <div className="mt-2">
                           <MultiSelect
@@ -816,7 +938,7 @@ function ReviewAnsicht({ id }) {
                             <option key={type.value} value={type.value}>{type.label}</option>
                           ))}
                         </select>
-                      ) : f.key === "domestic_hot_water_included" || f.key === "boreholes_present" ? (
+                      ) : BOOL_FEATURES.has(f.key) ? (
                         <select className="input w-36" disabled={gesperrt}
                           value={String(f.confirmed_value ?? f.value ?? "")}
                           onChange={(e) => setFeature(f, { confirmed_value: e.target.value, confirmed: true })}>
@@ -827,7 +949,7 @@ function ReviewAnsicht({ id }) {
                       ) : (
                         <input
                           className="input w-36"
-                          type="number"
+                          type={f.key === "distribution_system" ? "text" : "number"}
                           step={["borehole_count", "pump_count", "heat_meter_count", "buffer_count"].includes(f.key) ? "1" : "0.1"}
                           disabled={gesperrt}
                           defaultValue={f.confirmed_value ?? (f.value ?? "")}
@@ -893,6 +1015,19 @@ function ReviewAnsicht({ id }) {
                       </p>
                       {c.positionen > 1 && !c.original_position && (
                         <p className="text-[11px] text-slate-400">({c.positionen} Positionen aggregiert)</p>
+                      )}
+                      {c.source_scope_summary && (
+                        <p className="mt-0.5 text-[11px] leading-snug text-slate-500">
+                          Umfang: {c.source_scope_summary}
+                        </p>
+                      )}
+                      {c.included_norm_labels?.length > 0 && (
+                        // Sammelposition: mehrere Norm-Positionen, aber nur ein
+                        // Betrag. Sichtbar machen, damit niemand doppelt zählt.
+                        <p className="mt-0.5 text-[11px] text-slate-500">
+                          Enthält zusätzlich: {c.included_norm_labels.join(" · ")}
+                          <span className="ml-1 text-slate-400">(Betrag zählt einmal)</span>
+                        </p>
                       )}
                       {c.source_text && (
                         <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">

@@ -133,6 +133,8 @@ def _ensure_columns():
         "lv_import_features": [
             ("source_excerpt", "TEXT"), ("source_bbox", "VARCHAR"),
             ("derived_from", "VARCHAR"),
+            ("printed_value", "VARCHAR"), ("corrected_value", "VARCHAR"),
+            ("selected_source", "VARCHAR"), ("requires_review", "BOOLEAN"),
         ],
         "lv_import_costs": [
             ("original_position", "VARCHAR"), ("original_title", "VARCHAR"),
@@ -141,7 +143,11 @@ def _ensure_columns():
             ("original_amount", "FLOAT"), ("mapping_method", "VARCHAR"),
             ("mapping_confidence", "FLOAT"), ("mapping_reason", "VARCHAR"),
             ("mapping_confirmed", "BOOLEAN"),
+            ("source_parent_bkp", "VARCHAR"), ("source_scope_summary", "TEXT"),
+            ("source_bbox", "VARCHAR"), ("included_norm_keys", "VARCHAR"),
+            ("amount_allocation", "VARCHAR"), ("requires_review", "BOOLEAN"),
         ],
+        "lv_import_conditions": [("status", "VARCHAR")],
     }
     is_sqlite = engine.url.get_backend_name().startswith("sqlite")
     with engine.connect() as conn:
@@ -165,6 +171,9 @@ def _ensure_columns():
         conn.execute(text("UPDATE ref_kostenzeilen SET gewerk = 'heizung' WHERE gewerk IS NULL"))
         conn.execute(text("UPDATE lv_import_costs SET is_group_total = FALSE WHERE is_group_total IS NULL"))
         conn.execute(text("UPDATE lv_import_costs SET mapping_confirmed = FALSE WHERE mapping_confirmed IS NULL"))
+        conn.execute(text("UPDATE lv_import_costs SET requires_review = FALSE WHERE requires_review IS NULL"))
+        conn.execute(text("UPDATE lv_import_features SET requires_review = FALSE WHERE requires_review IS NULL"))
+        conn.execute(text("UPDATE lv_import_conditions SET status = 'priced' WHERE status IS NULL"))
         conn.commit()
 
 

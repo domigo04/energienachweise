@@ -62,15 +62,19 @@ npm run build
 - `ADMIN_INITIAL_PASSWORD`
 - `ALLOWED_ORIGINS`
 - Frontend: `VITE_API_BASE`
-- LV-KI-Prüfung (empfohlen): `OPENAI_API_KEY`; optional
-  `LV_REVIEW_LLM_MODEL` (Standard `gpt-5.6`) und
-  `LV_REVIEW_LLM_PROVIDER=openai`
+- Visuelle LV-PDF-Auswertung (für freigabefähige Importe erforderlich):
+  `OPENAI_API_KEY`; optional `LV_VISUAL_REVIEW_MODEL` (Standard `gpt-5.6`),
+  `LV_VISUAL_REVIEW_REASONING` (Standard `high`) und
+  `LV_VISUAL_REVIEW_TIMEOUT_SECONDS` (Standard `180`)
+- Nur als bewusster Notbetrieb kann das Freigabegate mit
+  `LV_VISUAL_REVIEW_REQUIRED=false` deaktiviert werden.
 - Alternativ Claude: `ANTHROPIC_API_KEY`,
   `LV_REVIEW_LLM_PROVIDER=anthropic` und eine explizite
   `LV_REVIEW_LLM_MODEL`
 
-Ohne Modellschlüssel bleibt der LV-Import vollständig parserbasiert aktiv und
-zeigt im Review sichtbar an, dass keine KI-Normalisierung ausgeführt wurde.
+Ohne OpenAI-Schlüssel bleibt die deterministische Vorverarbeitung aktiv. Der
+Import wird aber nicht als freigabebereit markiert, weil überlagerte
+Formularwerte nur im gerenderten PDF zuverlässig gelesen werden können.
 
 Ein Git-Push darf keine Benutzer oder Projekte löschen. Das ist gewährleistet,
 wenn `DATABASE_URL` auf eine persistente PostgreSQL-Instanz zeigt. Der

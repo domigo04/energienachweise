@@ -193,19 +193,20 @@ function ImportZusammenfassung({ report, imp, offen }) {
         {offen > 0 && (
           <li className="font-semibold text-amber-600">· {offen} Angaben müssen geprüft werden</li>
         )}
-        {report.parser_first && (
-          <li>· Parser-First: kompaktes KI-Prüfpaket ca. {report.llm_review_estimated_tokens ?? "—"} Tokens</li>
-        )}
-        {report.llm_review_available ? (
+        {report.visual_review_success ? (
           <li className="font-semibold text-green-700">
-            · KI-Normalisierung {report.llm_review_called ? "ausgeführt" : "bereit"}
-            {(report.llm_review_features_applied || report.llm_review_costs_applied)
-              ? `: ${report.llm_review_features_applied || 0} Mengen, ${report.llm_review_costs_applied || 0} Preise ergänzt`
-              : ""}
+            · Visuelle KI-PDF-Auswertung bestanden
+            {`: ${report.visual_review_attempts || 1} Durchgang/Durchgänge, ${report.visual_review_features_applied || 0} Mengen, ${report.visual_review_costs_applied || 0} Preise`}
           </li>
+        ) : report.visual_review_required ? (
+          <li className="font-semibold text-red-700">
+            · Noch nicht freigabebereit: visuelle PDF-Auswertung nicht bestanden
+          </li>
+        ) : report.visual_review_available ? (
+          <li className="font-semibold text-amber-700">· Visuelle KI-PDF-Auswertung bereit</li>
         ) : (
           <li className="text-amber-600">
-            · KI-Prüfung nicht konfiguriert: {report.llm_review_reason || "API-Zugang fehlt"}
+            · Visuelle KI-Prüfung nicht konfiguriert: {report.visual_review_reason || "API-Zugang fehlt"}
           </li>
         )}
       </ul>
@@ -214,14 +215,21 @@ function ImportZusammenfassung({ report, imp, offen }) {
           Plausibilitätsprüfung: {check.message}
         </p>
       ))}
-      {(report.llm_review_warnings || []).map((warning, index) => (
+      {(report.visual_review_issues || []).map((warning, index) => (
+        <p key={`${warning}-${index}`} className="mt-1 text-[11px] font-semibold text-red-700">
+          Auswertung blockiert: {warning}
+        </p>
+      ))}
+      {(report.visual_review_warnings || []).map((warning, index) => (
         <p key={`${warning}-${index}`} className="mt-1 text-[11px] font-medium text-amber-700">
-          KI-Prüfung: {warning}
+          Visuelle KI-Prüfung: {warning}
         </p>
       ))}
       {report.cost_source && (
         <p className="mt-1.5 text-[11px] text-slate-400">
-          Kostenquelle: {report.cost_source === "cost_summary"
+          Kostenquelle: {report.cost_source === "visual_ai_pdf"
+            ? "visuell geprüfte PDF-Kostenzusammenstellung"
+            : report.cost_source === "cost_summary"
             ? "Kostenzusammenstellung (bevorzugt)"
             : "LV-Positionstotale (keine Kostenzusammenstellung gefunden)"}
         </p>

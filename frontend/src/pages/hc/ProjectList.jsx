@@ -15,7 +15,7 @@ const PROJEKTARTEN = ["Neubau", "Sanierung", "Erweiterung", "Ersatz Wärmeerzeug
 
 function StatusBadge({ status }) {
   if (status === "archiviert") return <span className="badge bg-slate-100 text-slate-500">Archiviert</span>;
-  return <span className="badge bg-green-100 text-green-700">Aktiv</span>;
+  return <span className="badge border-green-200 bg-green-50 text-green-700">Aktiv</span>;
 }
 
 export default function ProjectList() {

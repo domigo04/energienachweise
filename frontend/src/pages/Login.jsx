@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
+import { CheckCircle2, LogIn, UserPlus } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 
 // Login / Registrieren gegen das echte Backend. Registrieren erzeugt ein
@@ -20,7 +21,7 @@ export default function Login() {
   const [busy, setBusy] = useState(false);
 
   const tab = (aktiv) =>
-    `flex-1 rounded-lg py-2 text-sm font-semibold transition ${aktiv ? "bg-slate-900 text-white" : "text-slate-500 hover:text-slate-800"}`;
+    `flex flex-1 items-center justify-center gap-2 border-b-2 px-2 py-2.5 text-sm font-semibold transition ${aktiv ? "border-brand-600 text-slate-950" : "border-transparent text-slate-400 hover:text-slate-700"}`;
 
   const submit = async (e) => {
     e.preventDefault();
@@ -46,20 +47,22 @@ export default function Login() {
   const wechsel = (m) => { setModus(m); setGesendet(""); setError(""); };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50 px-6 py-16">
-      <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-7 shadow-sm">
+    <div className="flex min-h-screen items-center justify-center bg-slate-100 px-6 py-16">
+      <div className="w-full max-w-sm rounded-md border border-slate-300 bg-white p-7 shadow-sm">
         <Link to="/" className="text-sm text-slate-400 hover:text-slate-600">← Startseite</Link>
         <h1 className="mt-3 text-2xl font-bold text-slate-900">
           Heizungs<span className="text-brand-600">cockpit</span>
         </h1>
 
-        <div className="mt-6 flex gap-1 rounded-xl bg-slate-100 p-1">
-          <button className={tab(modus === "login")} onClick={() => wechsel("login")}>Anmelden</button>
-          <button className={tab(modus === "register")} onClick={() => wechsel("register")}>Registrieren</button>
+        <div className="mt-6 flex border-b border-slate-200">
+          <button className={tab(modus === "login")} onClick={() => wechsel("login")}><LogIn className="size-4" /> Anmelden</button>
+          <button className={tab(modus === "register")} onClick={() => wechsel("register")}><UserPlus className="size-4" /> Registrieren</button>
         </div>
 
         {gesendet ? (
-          <div className="mt-6 rounded-lg bg-green-50 p-4 text-sm text-green-800">✓ {gesendet}</div>
+          <div className="mt-6 flex gap-2 rounded-sm border border-green-200 border-l-2 border-l-green-600 bg-white p-4 text-sm text-slate-700">
+            <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-green-700" /> {gesendet}
+          </div>
         ) : (
           <form className="mt-6 space-y-3" onSubmit={submit}>
             {modus === "register" && (
@@ -70,13 +73,13 @@ export default function Login() {
                 </div>
                 <div>
                   <label className="label">Konto-Typ</label>
-                  <div className="flex gap-1 rounded-xl bg-slate-100 p-1">
+                  <div className="flex gap-px rounded-sm border border-slate-200 bg-slate-200 p-px">
                     <button type="button" onClick={() => setKontoTyp("einzelperson")}
-                      className={"flex-1 rounded-lg py-1.5 text-xs font-semibold transition " + (kontoTyp === "einzelperson" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500")}>
+                      className={"flex-1 rounded-sm py-1.5 text-xs font-semibold transition " + (kontoTyp === "einzelperson" ? "bg-white text-slate-900" : "bg-slate-50 text-slate-500")}>
                       Einzelperson
                     </button>
                     <button type="button" onClick={() => setKontoTyp("firma")}
-                      className={"flex-1 rounded-lg py-1.5 text-xs font-semibold transition " + (kontoTyp === "firma" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500")}>
+                      className={"flex-1 rounded-sm py-1.5 text-xs font-semibold transition " + (kontoTyp === "firma" ? "bg-white text-slate-900" : "bg-slate-50 text-slate-500")}>
                       Firma
                     </button>
                   </div>
@@ -109,7 +112,7 @@ export default function Login() {
                 <input type="password" required value={pw2} onChange={(e) => setPw2(e.target.value)} placeholder="••••••••" className="input" />
               </div>
             )}
-            {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div>}
+            {error && <div className="rounded-sm border border-red-200 border-l-2 border-l-red-600 bg-white px-3 py-2 text-xs text-red-700">{error}</div>}
             <button type="submit" disabled={busy} className="btn-primary mt-2 w-full">
               {busy ? "…" : modus === "login" ? "Anmelden" : "Anfrage abschicken"}
             </button>

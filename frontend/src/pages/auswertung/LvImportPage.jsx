@@ -62,13 +62,13 @@ const methodeOf = (imp) => METHODE[imp.extract_method] ? imp.extract_method : (i
 // die Methode (deterministisch oder Vorschlag), nicht der Anbieter dahinter;
 // welches Modell geantwortet hat, gehört in den Debug-Bereich, nicht hierher.
 const MAPPING = {
-  exact: { label: "Exakt", style: "bg-green-100 text-green-700",
+  exact: { label: "Exakt", style: "border border-slate-200 bg-slate-50 text-slate-700",
     hilfe: "Titel stimmt wörtlich mit der Norm-LV-Position überein." },
-  rule: { label: "Regel", style: "bg-green-100 text-green-700",
+  rule: { label: "Regel", style: "border border-slate-200 bg-slate-50 text-slate-700",
     hilfe: "Feste Zuordnungsregel im Backend — kein Modell beteiligt." },
-  llm: { label: "KI", style: "bg-violet-100 text-violet-700",
-    hilfe: "Vorschlag einer KI. Bitte prüfen — er gilt erst, wenn du ihn bestätigst." },
-  manual: { label: "Manuell", style: "bg-slate-100 text-slate-600",
+  llm: { label: "Vorschlag", style: "border border-amber-200 bg-amber-50 text-amber-800",
+    hilfe: "Automatischer Vorschlag. Bitte prüfen — er gilt erst, wenn du ihn bestätigst." },
+  manual: { label: "Manuell", style: "border border-slate-200 bg-white text-slate-600",
     hilfe: "Von Hand zugeordnet." },
 };
 const NICHT_ZUGEORDNET = { label: "Nicht zugeordnet", style: "bg-amber-100 text-amber-700",
@@ -78,7 +78,7 @@ const NICHT_ZUGEORDNET = { label: "Nicht zugeordnet", style: "bg-amber-100 text-
 function Gespeichert({ an }) {
   if (!an) return null;
   return (
-    <span className="inline-flex items-center gap-0.5 whitespace-nowrap text-[11px] font-medium text-green-600">
+    <span className="inline-flex items-center gap-0.5 whitespace-nowrap text-[11px] font-medium text-slate-600">
       <Check className="size-3" /> gespeichert
     </span>
   );
@@ -112,7 +112,7 @@ function Quelle({ feature, tag, tagStyle }) {
         )}
       </div>
       {offen && (
-        <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-50 p-2 text-[10px] leading-relaxed text-slate-500">
+        <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-sm border border-slate-200 bg-slate-50 p-2 text-[10px] leading-relaxed text-slate-500">
           {feature.source_page != null ? `Seite ${feature.source_page}\n` : ""}{feature.source_excerpt}
         </pre>
       )}

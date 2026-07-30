@@ -634,7 +634,7 @@ export default function GrobkostenSchaetzung() {
                     <span className="text-sm font-semibold text-slate-700">Prüfstand</span>
                   </div>
                   <button type="button" onClick={() => setAufgabenFilter("alle")}
-                    className={`rounded px-2 py-1 text-xs font-medium ${aufgabenFilter === "alle" ? "bg-slate-700 text-white" : "bg-green-50 text-green-700"}`}>
+                    className={`rounded-sm border px-2 py-1 text-xs font-medium ${aufgabenFilter === "alle" ? "border-slate-700 bg-slate-700 text-white" : "border-slate-200 bg-white text-slate-600"}`}>
                     {belastbarePositionen.length} belastbar
                   </button>
                   <button type="button" onClick={() => setAufgabenFilter("einzelfaelle")}
@@ -650,7 +650,7 @@ export default function GrobkostenSchaetzung() {
                     {ignoriertePositionen.length} ignoriert
                   </button>
                   <button type="button" onClick={() => setAufgabenFilter("manuell")}
-                    className={`rounded px-2 py-1 text-xs font-medium ${aufgabenFilter === "manuell" ? "bg-blue-600 text-white" : "bg-blue-50 text-blue-700"}`}>
+                    className={`rounded-sm border px-2 py-1 text-xs font-medium ${aufgabenFilter === "manuell" ? "border-brand-700 bg-brand-600 text-white" : "border-slate-200 bg-white text-slate-600"}`}>
                     {manuellePositionen.length} manuell
                   </button>
                   <button type="button" onClick={() => setAufgabenFilter("ausgeschlossen")}
@@ -918,7 +918,7 @@ function GruppenBlock({
               <td className="py-1.5 pl-8 pr-2 tabular-nums text-slate-500">{p.bkp_nr}</td>
               <td className={"px-2 py-1.5 " + (hasBetrag ? "text-slate-700" : "text-slate-400")}>
                 {p.bezeichnung}
-                {p.quelle === "manuell" && <span className="ml-2 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">manuell</span>}
+                {p.quelle === "manuell" && <span className="ml-2 rounded-sm border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700">manuell</span>}
                 {ausgeschlossen && <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">nicht erforderlich</span>}
               </td>
               <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">
@@ -928,7 +928,7 @@ function GruppenBlock({
                 <span className="inline-flex items-center justify-end gap-1.5">
                   <span>{ausgeschlossen ? "Nicht erforderlich" : hasBetrag ? chf(p.betrag) : "Keine Angaben"}</span>
                   {!ausgeschlossen && <button type="button" title="Betrag bearbeiten"
-                    className="rounded p-1 text-slate-400 hover:bg-blue-50 hover:text-blue-700"
+                    className="rounded-sm p-1 text-slate-400 hover:bg-slate-100 hover:text-brand-700"
                     onClick={(e) => {
                       e.stopPropagation();
                       positionOeffnen(key, false);
@@ -1074,7 +1074,7 @@ function ManuellerBetragEditor({ p, variante, wert, notiz, autoFocus, onSpeicher
     inputRef.current?.focus();
   };
   return (
-    <form className={`mt-3 rounded-md border p-3 ${autoFocus ? "border-blue-300 bg-blue-50/40" : "border-slate-200 bg-white"}`}
+    <form className={`mt-3 rounded-md border p-3 ${autoFocus ? "border-brand-300 bg-brand-50/30" : "border-slate-200 bg-white"}`}
       onSubmit={(e) => {
         e.preventDefault();
         if (gueltig) onSpeichern(zahlWert, { begruendung: begruendung.trim(), quelle: quelle.trim() });
@@ -1088,7 +1088,7 @@ function ManuellerBetragEditor({ p, variante, wert, notiz, autoFocus, onSpeicher
               : "Kein berechneter Vorschlag vorhanden."}
           </div>
         </div>
-        {p.quelle === "manuell" && <span className="rounded bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-700">Manueller Wert aktiv</span>}
+        {p.quelle === "manuell" && <span className="rounded-sm border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-700">Manueller Wert aktiv</span>}
       </div>
       {p.berechneter_betrag != null && (
         <div className="mb-2 flex flex-wrap items-center gap-1.5">

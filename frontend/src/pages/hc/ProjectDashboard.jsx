@@ -128,7 +128,7 @@ export default function ProjectDashboard() {
               <h1 className="text-xl font-bold text-slate-900">{project.name}</h1>
               {archiviert
                 ? <span className="badge bg-slate-100 text-slate-500">Archiviert</span>
-                : <span className="badge bg-green-100 text-green-700">Aktiv</span>}
+                : <span className="badge border-green-200 bg-green-50 text-green-700">Aktiv</span>}
             </div>
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-600">
               {project.standort && <span className="inline-flex items-center gap-1"><MapPin className="size-4 text-slate-400" /> {project.standort}</span>}
@@ -165,7 +165,7 @@ export default function ProjectDashboard() {
       <section className="card mt-6 overflow-hidden">
         <button type="button" onClick={toggleProtokoll}
           className="flex min-h-16 w-full items-center gap-3 px-4 py-4 text-left transition hover:bg-slate-50 sm:px-5">
-          <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600"><History className="size-5" /></div>
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-sm border border-slate-200 bg-slate-50 text-slate-600"><History className="size-5" /></div>
           <div className="min-w-0 flex-1">
             <div className="font-semibold text-slate-900">Activity</div>
             <div className="text-xs text-slate-500">Bearbeiter, Änderung und genauer Zeitpunkt.</div>
@@ -231,7 +231,7 @@ function ProjectUniverse({ nodes, hovered, setHovered, completion }) {
     const dot = STATUS_DOT[n?.status] || STATUS_DOT.not_started;
     const inner = (
       <div
-        className="w-40 rounded-xl border bg-white px-3 py-2.5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-md"
+        className="w-40 rounded-md border bg-white px-3 py-2.5 text-left transition hover:border-slate-500 hover:bg-slate-50"
         style={{ opacity: dimmed ? 0.45 : 1, borderColor: hovered === m.key ? "#a5b4fc" : "#e2e8f0" }}
       >
         <div className="flex items-center justify-between gap-1">

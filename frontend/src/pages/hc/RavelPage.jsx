@@ -155,7 +155,7 @@ export default function RavelPage() {
       {results && (
         <div>
           {/* Günstigste Variante */}
-          <div className="mb-5 flex items-center gap-3 rounded-xl border border-green-200 bg-green-50 px-4 py-3">
+          <div className="mb-5 flex items-center gap-3 rounded-sm border border-green-200 border-l-2 border-l-green-600 bg-white px-4 py-3">
             <span className="text-2xl">🏆</span>
             <div>
               <div className="font-bold text-green-700">{results.guenstigste}</div>

@@ -96,7 +96,7 @@ export default function BenutzerFreischaltung() {
         <p className="mt-1 text-sm text-slate-500">Firmen, Registrierungen und globale Zugänge verwalten.</p>
       </header>
 
-      {error && <div className="mb-5 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+      {error && <div className="mb-5 rounded-sm border border-red-200 border-l-2 border-l-red-600 bg-white p-3 text-sm text-red-700">{error}</div>}
       {loading ? (
         <div className="py-16 text-center text-sm text-slate-400">Plattformdaten werden geladen…</div>
       ) : (
@@ -158,7 +158,7 @@ export default function BenutzerFreischaltung() {
             </div>
             <div className="grid gap-4 lg:grid-cols-2">
               {(overview?.firmen || []).map((firma) => (
-                <article key={firma.id} className={`rounded-2xl border bg-white p-5 ${firma.is_active ? "border-slate-200" : "border-red-200"}`}>
+                <article key={firma.id} className={`rounded-md border bg-white p-5 ${firma.is_active ? "border-slate-300/80" : "border-red-300"}`}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="truncate font-semibold text-slate-950">{firma.name}</div>
@@ -208,14 +208,14 @@ export default function BenutzerFreischaltung() {
               {filteredUsers.map((user) => (
                 <div key={user.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex min-w-0 items-center gap-3">
-                    <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-sm font-semibold text-slate-600">
+                    <div className="flex size-9 shrink-0 items-center justify-center rounded-sm border border-slate-200 bg-slate-50 text-sm font-semibold text-slate-600">
                       {(user.name || user.email).slice(0, 1).toUpperCase()}
                     </div>
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="truncate font-medium text-slate-900">{user.name || user.email}</span>
                         {user.role === "admin" && <span className="badge bg-brand-50 text-brand-700">Plattformadmin</span>}
-                        {user.role !== "admin" && user.firma_role === "admin" && <span className="badge bg-blue-50 text-blue-700">Firmenadmin</span>}
+                        {user.role !== "admin" && user.firma_role === "admin" && <span className="badge border-slate-200 bg-slate-50 text-slate-700">Firmenadmin</span>}
                         {!user.is_verified && <span className="badge bg-amber-50 text-amber-700">Nicht freigeschaltet</span>}
                         {!user.is_active && <span className="badge bg-slate-100 text-slate-500">Deaktiviert</span>}
                       </div>

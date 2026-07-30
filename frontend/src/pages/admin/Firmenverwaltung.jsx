@@ -77,7 +77,7 @@ function MemberCard({ member, onPatch, busy }) {
           <div className="mt-2 flex flex-wrap gap-1.5">
             {!member.is_verified && <span className="badge bg-amber-100 text-amber-800">Freigabe offen</span>}
             {!member.is_active && <span className="badge bg-slate-100 text-slate-600">Deaktiviert</span>}
-            {member.firma_role === "admin" && <span className="badge bg-blue-50 text-blue-700">Firmenadmin</span>}
+            {member.firma_role === "admin" && <span className="badge border-slate-200 bg-slate-50 text-slate-700">Firmenadmin</span>}
             {member.role === "admin" && <span className="badge bg-brand-50 text-brand-700">Plattformadmin</span>}
           </div>
         </div>
@@ -255,7 +255,7 @@ export default function Firmenverwaltung() {
         <span className="badge w-fit bg-slate-100 px-3 py-1.5 text-slate-600">Plan: {data.firma.abo_plan}</span>
       </header>
 
-      {error && <div className="mb-5 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+      {error && <div className="mb-5 rounded-sm border border-red-200 border-l-2 border-l-red-600 bg-white p-3 text-sm text-red-700">{error}</div>}
 
       <div className="mb-6 overflow-x-auto border-b border-slate-200">
         <nav className="flex min-w-max gap-1" aria-label="Firmenverwaltung">

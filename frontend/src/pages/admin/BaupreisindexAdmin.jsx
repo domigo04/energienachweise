@@ -70,7 +70,7 @@ export default function BaupreisindexAdmin() {
           unten funktioniert immer zusätzlich.
         </p>
         {meldung && (
-          <div className={"mt-3 rounded-lg p-3 text-sm " + (meldung.erfolg ? "bg-green-50 text-green-800" : "bg-amber-50 text-amber-800")}>
+          <div className={"mt-3 rounded-sm border border-l-2 bg-white p-3 text-sm " + (meldung.erfolg ? "border-green-200 border-l-green-600 text-slate-700" : "border-amber-200 border-l-amber-500 text-amber-800")}>
             {meldung.erfolg ? `✓ ${meldung.meldung} (${meldung.neue_eintraege} neu)` : `⚠ ${meldung.meldung}`}
           </div>
         )}

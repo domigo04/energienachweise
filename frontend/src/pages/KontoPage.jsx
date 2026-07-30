@@ -104,7 +104,7 @@ export default function KontoPage() {
             : "Projekte und Auswertungsdaten sind für die Mitglieder dieser Firma gemeinsam verfügbar."}
         </p>
         {!istEinzelperson && (
-          <div className="mt-4 flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="mt-4 flex flex-col gap-3 rounded-sm border border-slate-200 border-l-2 border-l-brand-500 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
                 <ShieldCheck className="size-4 text-brand-600" />
@@ -137,9 +137,9 @@ export default function KontoPage() {
         <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-700">
           <CreditCard className="size-4 text-brand-600" /> Plan & Zahlung
         </div>
-        <div className="flex items-center justify-between rounded-lg bg-slate-50 p-3 text-sm">
+        <div className="flex items-center justify-between rounded-sm border border-slate-200 bg-slate-50 p-3 text-sm">
           <span className="text-slate-600">Aktueller Tarif</span>
-          <span className="badge bg-green-100 text-green-700">{ABO_LABEL[konto.abo_plan] || konto.abo_plan}</span>
+          <span className="badge border-slate-200 bg-white text-slate-700">{ABO_LABEL[konto.abo_plan] || konto.abo_plan}</span>
         </div>
         <p className="mt-3 text-xs text-slate-400">Bezahlte Tarife (z.B. nach Anzahl auswertbarer Projekte) folgen später.</p>
       </div>
@@ -162,8 +162,8 @@ export default function KontoPage() {
           <div><label className="label">Aktuelles Passwort</label><input type="password" className="input" value={aktuellesPw} onChange={(e) => setAktuellesPw(e.target.value)} /></div>
           <div><label className="label">Neues Passwort</label><input type="password" className="input" value={neuesPw} onChange={(e) => setNeuesPw(e.target.value)} /></div>
           <div><label className="label">Neues Passwort wiederholen</label><input type="password" className="input" value={neuesPw2} onChange={(e) => setNeuesPw2(e.target.value)} /></div>
-          {pwError && <div className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{pwError}</div>}
-          {pwMsg && <div className="rounded-lg bg-green-50 px-3 py-2 text-xs text-green-800">{pwMsg}</div>}
+          {pwError && <div className="rounded-sm border border-red-200 border-l-2 border-l-red-600 bg-white px-3 py-2 text-xs text-red-700">{pwError}</div>}
+          {pwMsg && <div className="rounded-sm border border-green-200 border-l-2 border-l-green-600 bg-white px-3 py-2 text-xs text-slate-700">{pwMsg}</div>}
           <button type="submit" disabled={savingPw} className="btn-primary">{savingPw ? "Speichere…" : "Passwort ändern"}</button>
         </form>
       </div>

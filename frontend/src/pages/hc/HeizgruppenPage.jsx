@@ -12,9 +12,9 @@ import {
 import PageHeader from "../../components/ui/PageHeader";
 
 const STATUS_COLORS = {
-  aktiv: "bg-green-100 text-green-700",
-  inaktiv: "bg-amber-100 text-amber-700",
-  ignoriert: "bg-slate-100 text-slate-400",
+  aktiv: "border-green-200 bg-green-50 text-green-700",
+  inaktiv: "border-amber-200 bg-amber-50 text-amber-700",
+  ignoriert: "border-slate-200 bg-white text-slate-400",
 };
 
 const STATUS_LABELS = { aktiv: "Aktiv", inaktiv: "Inaktiv", ignoriert: "Ignoriert" };
@@ -25,7 +25,7 @@ const defaultForm = { name: "", typ: "FBH", leistung_kw: "", vorlauf: "", rueckl
 
 function Stat({ label, value, sub }) {
   return (
-    <div className="rounded-xl bg-slate-50 p-3 text-center">
+    <div className="rounded-sm border border-slate-200 bg-slate-50 p-3 text-center">
       <div className="text-lg font-bold text-slate-900">{value}</div>
       <div className="text-xs text-slate-500">{label}</div>
       {sub && <div className="text-xs text-slate-400">{sub}</div>}
@@ -308,7 +308,7 @@ export default function HeizgruppenPage() {
                       </td>
                       <td className="px-4 py-3 text-center">
                         <button onClick={() => handleStatus(g.id, g.status)}
-                          className={"cursor-pointer rounded px-2 py-0.5 text-xs font-medium transition " + STATUS_COLORS[g.status]}
+                          className={"cursor-pointer rounded-sm border px-2 py-0.5 text-xs font-medium transition " + STATUS_COLORS[g.status]}
                           title="Klicken zum Wechseln">
                           {STATUS_LABELS[g.status]}
                         </button>

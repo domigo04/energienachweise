@@ -18,7 +18,9 @@ const ERKL = {
   autoritaet: "Wie stark das Ventil den Durchfluss wirklich steuert. Unter 30 % regelt es schlecht, über 80 % ist es überdimensioniert. Ideal: 30–80 %.",
 };
 
-export default function VentilPage() {
+// Nur der Rechner, ohne Seitenrahmen: so kann er auf der Einzelberechnungs-Seite
+// im selben rechten Bereich stehen wie alle anderen Auslegungen.
+export function VentilRechner() {
   const [form, setForm] = useState({ volumenstrom_m3h: "", dp_var_kpa: "", kvs_gewaehlt: "" });
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -55,16 +57,9 @@ export default function VentilPage() {
   };
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8 lg:px-8">
-      <PageHeader
-        back={{ to: "/start", label: "Start" }}
-        title="Ventilauslegung"
-        subtitle="kvs-Wert und Ventilautorität eines Regelventils — nach deinem Excel-Blatt (M3)."
-      />
-
+    <>
       {/* Eingaben */}
-      <div className="card p-6">
-        <h2 className="mb-4 font-semibold text-slate-800">Eingaben</h2>
+      <div className="mt-5">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label className="label flex items-center gap-1">Volumenstrom V' [m³/h] * <InfoTip text={ERKL.volumenstrom} /></label>
@@ -92,13 +87,13 @@ export default function VentilPage() {
         )}
       </div>
 
-      {error && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+      {error && <div className="mt-4 border-l-2 border-red-500 bg-white px-3 py-2 text-sm text-red-700">{error}</div>}
 
       {/* Resultate */}
       {result && !result.fehler && (
-        <div className="card mt-6 overflow-hidden">
-          <div className="border-b border-slate-200 bg-slate-50 px-6 py-3 text-sm font-semibold text-slate-700">Resultate</div>
-          <div className="p-6">
+        <div className="mt-6 border-t border-slate-300 pt-5">
+          <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Resultat</div>
+          <div>
             {/* Ventilautorität gross + Balken */}
             <div className="mb-6 flex flex-col items-center gap-6 sm:flex-row">
               <div className="text-center">
@@ -149,7 +144,7 @@ export default function VentilPage() {
             {result.warnings?.length > 0 && (
               <div className="mt-4 space-y-2">
                 {result.warnings.map((w, i) => (
-                  <div key={i} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">⚠️ {w}</div>
+                  <div key={i} className="border-l-2 border-amber-500 bg-amber-50 px-3 py-2 text-xs text-amber-800">{w}</div>
                 ))}
               </div>
             )}
@@ -158,8 +153,22 @@ export default function VentilPage() {
       )}
 
       {result?.fehler && (
-        <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{result.fehler}</div>
+        <div className="mt-4 border-l-2 border-red-500 bg-white px-3 py-2 text-sm text-red-700">{result.fehler}</div>
       )}
+    </>
+  );
+}
+
+// Eigene Route bleibt bestehen (Deeplinks aus dem Schema-Editor und dem Menü).
+export default function VentilPage() {
+  return (
+    <div className="mx-auto max-w-3xl px-4 py-8 lg:px-8">
+      <PageHeader
+        back={{ to: "/rechner", label: "Einzelberechnungen" }}
+        title="Ventilauslegung"
+        subtitle="kvs-Wert und Ventilautorität eines Regelventils — nach deinem Excel-Blatt (M3)."
+      />
+      <VentilRechner />
     </div>
   );
 }

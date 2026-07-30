@@ -52,7 +52,8 @@ function NumInput({ value, onChange, placeholder = "0" }) {
   );
 }
 
-export default function DruckverlustPage() {
+// Nur der Rechner, ohne Seitenrahmen — siehe VentilPage.
+export function DruckverlustRechner() {
   const [kreise, setKreise] = useState(DEFAULT_KREISE);
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -109,15 +110,9 @@ export default function DruckverlustPage() {
   const res = results?.[activeTab];
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8 lg:px-8">
-      <PageHeader
-        back={{ to: "/start", label: "Start" }}
-        title="Druckverlust approximativ"
-        subtitle="Rohrsystem + Apparate je Pumpenkreis — nach deinem Excel-Blatt (M4)."
-      />
-
+    <>
       {/* Tabs (Pumpenkreise) */}
-      <div className="mb-5 flex flex-wrap gap-1.5">
+      <div className="mb-5 mt-5 flex flex-wrap gap-1.5">
         {kreise.map((kr, i) => (
           <button key={i} onClick={() => setActiveTab(i)}
             className={"rounded-lg px-4 py-2 text-sm font-semibold transition " +
@@ -129,9 +124,9 @@ export default function DruckverlustPage() {
       </div>
 
       {/* Aktiver Kreis */}
-      <div className="card mb-5 overflow-hidden">
+      <div className="mb-5 overflow-hidden border border-slate-300 bg-white">
         {/* Rohrsystem */}
-        <div className="border-b border-slate-100 bg-slate-50 p-5">
+        <div className="border-b border-slate-200 bg-slate-50 p-5">
           <div className="mb-3 font-semibold text-slate-800">Rohrsystem</div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
@@ -201,13 +196,13 @@ export default function DruckverlustPage() {
         {loading ? "Berechne…" : "Alle Kreise berechnen"}
       </button>
 
-      {error && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+      {error && <div className="mt-4 border-l-2 border-red-500 bg-white px-3 py-2 text-sm text-red-700">{error}</div>}
 
       {/* Resultate */}
       {results && (
-        <div className="mt-6">
-          <h2 className="mb-3 font-semibold text-slate-800">Resultate</h2>
-          <div className="card mb-4 overflow-hidden">
+        <div className="mt-6 border-t border-slate-300 pt-5">
+          <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Resultat</div>
+          <div className="mb-4 overflow-hidden border border-slate-300 bg-white">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -236,7 +231,7 @@ export default function DruckverlustPage() {
 
           {/* Detail aktiver Kreis */}
           {res && res.apparate_details?.length > 0 && (
-            <div className="card p-5">
+            <div className="border border-slate-300 bg-white p-5">
               <div className="mb-3 text-sm font-semibold text-slate-700">Detail: {res.kreis_name}</div>
               <table className="w-full text-sm">
                 <tbody>
@@ -260,6 +255,20 @@ export default function DruckverlustPage() {
           )}
         </div>
       )}
+    </>
+  );
+}
+
+// Eigene Route bleibt bestehen (Deeplinks aus dem Menü).
+export default function DruckverlustPage() {
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-8 lg:px-8">
+      <PageHeader
+        back={{ to: "/rechner", label: "Einzelberechnungen" }}
+        title="Druckverlust approximativ"
+        subtitle="Rohrsystem + Apparate je Pumpenkreis — nach deinem Excel-Blatt (M4)."
+      />
+      <DruckverlustRechner />
     </div>
   );
 }

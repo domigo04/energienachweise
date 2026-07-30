@@ -1,18 +1,24 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import {
-  Activity, ArrowRight, BatteryCharging, CircleGauge, Flame, Gauge,
-  MoveHorizontal, RefreshCw, Scale, ThermometerSun, Waves,
+  Activity, CircleGauge, Flame, Gauge, MoveHorizontal, RefreshCw, Scale, Waves,
 } from "lucide-react";
 import { api } from "../../api";
 import PageHeader from "../../components/ui/PageHeader";
 import { IconKompressor, IconSpeicher, IconWaermetauscher } from "../../components/ui/fachIcons";
+import { VentilRechner } from "./VentilPage";
+import { DruckverlustRechner } from "./DruckverlustPage";
+import { RavelRechner } from "./RavelPage";
 
 const ZAHL = (wert) => Number(String(wert).replace(",", "."));
 
+// Alle Auslegungen in einer Liste, gleich dargestellt und am gleichen Ort
+// gerechnet. Die meisten beschreiben nur ihre Felder und ihr Resultat und
+// nutzen dieselbe Maske; die drei älteren Rechner bringen als `komponente`
+// ihre eigene Maske mit, sitzen aber im selben Bereich.
 const RECHNER = [
   {
     id: "waermetauscher",
+    gruppe: "Hydraulik",
     icon: IconWaermetauscher,
     titel: "Wärmetauscher",
     kurz: "Benötigte Tauscherfläche aus Leistung, U-Wert und logarithmischer Temperaturdifferenz.",
@@ -26,6 +32,7 @@ const RECHNER = [
   },
   {
     id: "speicher_wp",
+    gruppe: "Hydraulik",
     icon: IconSpeicher,
     titel: "Technischer Speicher",
     kurz: "Wasservolumen für eine definierte Überbrückungszeit der Wärmepumpe.",
@@ -43,6 +50,7 @@ const RECHNER = [
   },
   {
     id: "rohrausdehnung",
+    gruppe: "Hydraulik",
     icon: MoveHorizontal,
     titel: "Rohrausdehnung",
     kurz: "Thermische Längenänderung und Endlänge eines geraden Rohrabschnitts.",
@@ -59,6 +67,7 @@ const RECHNER = [
   },
   {
     id: "waermepumpe",
+    gruppe: "Wärmeerzeugung",
     icon: IconKompressor,
     titel: "WP-Leistungen",
     kurz: "Heiz-, Quellen- und elektrische Leistung über den COP umrechnen.",
@@ -78,6 +87,7 @@ const RECHNER = [
   },
   {
     id: "druckverlust_kvs",
+    gruppe: "Hydraulik",
     icon: CircleGauge,
     titel: "Δp über kvs",
     kurz: "Druckverlust eines Ventils aus Volumenstrom und effektivem kvs-Wert.",
@@ -93,6 +103,7 @@ const RECHNER = [
   },
   {
     id: "jahresenergie",
+    gruppe: "Wärmeerzeugung",
     icon: Flame,
     titel: "Jahresenergie",
     kurz: "Jahresenergie für Raumheizung und Warmwasser als schnelle Vorbemessung.",
@@ -113,6 +124,7 @@ const RECHNER = [
   },
   {
     id: "jaz",
+    gruppe: "Wärmeerzeugung",
     icon: Activity,
     titel: "JAZ & Stromkosten",
     kurz: "COP nach Temperaturstunden gewichten und jährlichen Strombedarf abschätzen.",
@@ -143,22 +155,53 @@ const RECHNER = [
       ["stromkosten_chf_a", "Stromkosten", "CHF/a"],
     ],
   },
+  {
+    id: "ventil",
+    gruppe: "Hydraulik",
+    icon: Gauge,
+    titel: "Ventilauslegung",
+    kurz: "kvs-Wert und Ventilautorität eines Regelventils.",
+    quelle: "Ventilauslegung.xlsx (M3)",
+    komponente: VentilRechner,
+  },
+  {
+    id: "druckverlust",
+    gruppe: "Hydraulik",
+    icon: Waves,
+    titel: "Pumpendruckverlust",
+    kurz: "Rohrsystem und Apparate je Pumpenkreis, approximativ.",
+    quelle: "Druckverlust.xlsx (M4)",
+    komponente: DruckverlustRechner,
+  },
+  {
+    id: "ravel",
+    gruppe: "Wirtschaftlichkeit",
+    icon: Scale,
+    titel: "RAVEL-Vergleich",
+    kurz: "Mittlere Jahreskosten mehrerer Varianten nach der Annuitätenmethode.",
+    quelle: "RAVEL-Leitfaden BfK 1994 (M10)",
+    komponente: RavelRechner,
+  },
 ];
 
-const BESTEHEND = [
-  { to: "/rechner/ventil", icon: Gauge, titel: "Ventilauslegung", text: "kvs-Auswahl und Ventilautorität" },
-  { to: "/rechner/druckverlust", icon: CircleGauge, titel: "Pumpendruckverlust", text: "Rohrsystem und Apparate je Kreis" },
-  { to: "/rechner/ravel", icon: Scale, titel: "RAVEL", text: "Wirtschaftlichkeit von Varianten" },
-];
+// Reihenfolge der Rubriken in der Liste. Steht ein Rechner in keiner, landet er
+// unter der letzten — so fehlt nie einer, wenn eine neue Rubrik dazukommt.
+const GRUPPEN = ["Hydraulik", "Wärmeerzeugung", "Wirtschaftlichkeit"];
 
-const startwerte = (rechner) => Object.fromEntries(rechner.felder.map(([key, , , wert]) => [key, String(wert)]));
+const startwerte = (rechner) =>
+  Object.fromEntries((rechner.felder || []).map(([key, , , wert]) => [key, String(wert)]));
+
+// So viele Spalten wie Ergebnisse — sonst bleibt neben einem einzelnen Wert
+// eine leere Fläche stehen.
+const SPALTEN = { 1: "", 2: "sm:grid-cols-2" };
 
 function Resultat({ rechner, resultat }) {
   if (!resultat) return null;
   return (
     <div className="mt-6 border-t border-slate-300 pt-5">
       <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Resultat</div>
-      <div className="grid gap-px border border-slate-300 bg-slate-300 sm:grid-cols-2 lg:grid-cols-3">
+      <div className={"grid gap-px border border-slate-300 bg-slate-300 " +
+        (SPALTEN[rechner.ergebnisse.length] ?? "sm:grid-cols-2 lg:grid-cols-3")}>
         {rechner.ergebnisse.map(([key, label, einheit], index) => (
           <div key={key} className={"bg-white p-4 " + (index === 0 ? "border-l-2 border-l-brand-600" : "")}>
             <div className="text-xs font-medium text-slate-500">{label}</div>
@@ -206,32 +249,39 @@ export default function EinzelberechnungenPage() {
     }
   };
 
+  const Eigene = rechner.komponente;
+
   return (
-    <div className="mx-auto max-w-6xl px-4 py-8 lg:px-8">
+    <div className="mx-auto max-w-7xl px-4 py-8 lg:px-8">
       <PageHeader
         back={{ to: "/start", label: "Start" }}
         title="Einzelberechnungen"
         subtitle="Schnelle technische Auslegungen ohne Projekt. Die Formeln laufen geprüft im Backend und basieren auf deinen Excel-Arbeitsblättern."
       />
 
-      <div className="grid items-start gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
+      <div className="grid items-start gap-5 lg:grid-cols-[300px_minmax(0,1fr)]">
         <aside className="card overflow-hidden">
-          <div className="border-b border-slate-300 bg-slate-50 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-            Auslegung wählen
-          </div>
-          <div className="divide-y divide-slate-200">
-            {RECHNER.map(({ id, icon: Icon, titel, kurz }) => (
-              <button key={id} type="button" onClick={() => { setAktiv(id); setFehler(""); }}
-                className={"flex w-full gap-3 border-l-2 px-4 py-3 text-left transition " +
-                  (id === aktiv ? "border-brand-600 bg-slate-50" : "border-transparent bg-white hover:bg-slate-50")}>
-                <Icon className={"mt-0.5 size-5 shrink-0 " + (id === aktiv ? "text-brand-600" : "text-slate-400")} />
-                <span className="min-w-0">
-                  <span className="block text-sm font-semibold text-slate-800">{titel}</span>
-                  <span className="mt-0.5 block text-xs leading-snug text-slate-500">{kurz}</span>
-                </span>
-              </button>
-            ))}
-          </div>
+          {GRUPPEN.map((gruppe, gi) => (
+            <div key={gruppe}>
+              <div className={"border-b border-slate-300 bg-slate-50 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500 " +
+                (gi > 0 ? "border-t" : "")}>
+                {gruppe}
+              </div>
+              <div className="divide-y divide-slate-200">
+                {RECHNER.filter((item) => item.gruppe === gruppe).map(({ id, icon: Icon, titel, kurz }) => (
+                  <button key={id} type="button" onClick={() => { setAktiv(id); setFehler(""); }}
+                    className={"flex w-full gap-3 border-l-2 px-4 py-3 text-left transition " +
+                      (id === aktiv ? "border-brand-600 bg-brand-50/70" : "border-transparent bg-white hover:bg-slate-50")}>
+                    <Icon className={"mt-0.5 size-5 shrink-0 " + (id === aktiv ? "text-brand-600" : "text-slate-400")} />
+                    <span className="min-w-0">
+                      <span className={"block text-sm font-semibold " + (id === aktiv ? "text-brand-800" : "text-slate-800")}>{titel}</span>
+                      <span className="mt-0.5 block text-xs leading-snug text-slate-500">{kurz}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
         </aside>
 
         <section className="card p-5 sm:p-6">
@@ -246,46 +296,41 @@ export default function EinzelberechnungenPage() {
             </div>
           </div>
 
-          <div className="mt-5 grid gap-4 sm:grid-cols-2">
-            {rechner.felder.map(([key, label, einheit, , typ, optionen]) => (
-              <label key={key} className="block">
-                <span className="label">{label}{einheit ? ` [${einheit}]` : ""}</span>
-                {typ === "select" ? (
-                  <select className="input" value={werte[key]} onChange={(e) => set(key, e.target.value)}>
-                    {optionen.map(([value, text]) => <option key={value} value={value}>{text}</option>)}
-                  </select>
-                ) : (
-                  <input className="input font-mono tabular-nums" type="number" step="any" value={werte[key]}
-                    onChange={(e) => set(key, e.target.value)} />
-                )}
-              </label>
-            ))}
-          </div>
+          {Eigene ? (
+            // Rechner mit eigener Maske: gleicher Rahmen, gleicher Kopf, gleicher
+            // Ort — nur der Inhalt dazwischen ist seiner.
+            <Eigene key={rechner.id} />
+          ) : (
+            <>
+              <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                {rechner.felder.map(([key, label, einheit, , typ, optionen]) => (
+                  <label key={key} className="block">
+                    <span className="label">{label}{einheit ? ` [${einheit}]` : ""}</span>
+                    {typ === "select" ? (
+                      <select className="input" value={werte[key]} onChange={(e) => set(key, e.target.value)}>
+                        {optionen.map(([value, text]) => <option key={value} value={value}>{text}</option>)}
+                      </select>
+                    ) : (
+                      <input className="input font-mono tabular-nums" type="number" step="any" value={werte[key]}
+                        onChange={(e) => set(key, e.target.value)} />
+                    )}
+                  </label>
+                ))}
+              </div>
 
-          <div className="mt-5 flex items-center gap-3 border-t border-slate-200 pt-4">
-            <button type="button" className="btn-primary" disabled={loading} onClick={berechnen}>
-              <RefreshCw className={"size-4 " + (loading ? "animate-spin" : "")} />
-              {loading ? "Berechne…" : "Berechnen"}
-            </button>
-            <span className="text-xs text-slate-400">Keine Projektdaten werden gespeichert.</span>
-          </div>
-          {fehler && <div className="mt-4 border-l-2 border-red-500 bg-white px-3 py-2 text-sm text-red-700">{fehler}</div>}
-          <Resultat rechner={rechner} resultat={resultate[rechner.id]} />
+              <div className="mt-5 flex items-center gap-3 border-t border-slate-200 pt-4">
+                <button type="button" className="btn-primary" disabled={loading} onClick={berechnen}>
+                  <RefreshCw className={"size-4 " + (loading ? "animate-spin" : "")} />
+                  {loading ? "Berechne…" : "Berechnen"}
+                </button>
+                <span className="text-xs text-slate-400">Keine Projektdaten werden gespeichert.</span>
+              </div>
+              {fehler && <div className="mt-4 border-l-2 border-red-500 bg-white px-3 py-2 text-sm text-red-700">{fehler}</div>}
+              <Resultat rechner={rechner} resultat={resultate[rechner.id]} />
+            </>
+          )}
         </section>
       </div>
-
-      <section className="mt-6">
-        <h2 className="mb-3 text-sm font-semibold text-slate-800">Weitere bestehende Rechner</h2>
-        <div className="grid gap-3 sm:grid-cols-3">
-          {BESTEHEND.map(({ to, icon: Icon, titel, text }) => (
-            <Link key={to} to={to} className="card group flex items-center gap-3 p-4 transition hover:border-slate-400">
-              <div className="flex size-9 shrink-0 items-center justify-center rounded-sm border border-slate-300 bg-slate-50 text-slate-600"><Icon className="size-5" /></div>
-              <div className="min-w-0 flex-1"><div className="text-sm font-semibold text-slate-800">{titel}</div><div className="text-xs text-slate-500">{text}</div></div>
-              <ArrowRight className="size-4 text-slate-400 transition group-hover:translate-x-0.5" />
-            </Link>
-          ))}
-        </div>
-      </section>
     </div>
   );
 }

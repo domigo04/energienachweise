@@ -69,4 +69,13 @@ describe("canStartHydraulicLine — Zeichnen nur im expliziten Modus", () => {
     expect(canStartHydraulicLine(false, true)).toBe(true);
     expect(canStartHydraulicLine(true, true)).toBe(true);
   });
+
+  it("ein Klick direkt auf einen Anschluss startet auch im Grundzustand", () => {
+    expect(canStartHydraulicLine(false, false, true)).toBe(true);
+  });
+
+  it("hält die freie Fläche weiterhin gesperrt", () => {
+    // Derselbe Klick ohne Anschlusstreffer bleibt wirkungslos.
+    expect(canStartHydraulicLine(false, false, false)).toBe(false);
+  });
 });

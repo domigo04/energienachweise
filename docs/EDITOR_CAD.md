@@ -81,6 +81,39 @@ Regeln:
 - Nach Abschluss eines Befehls gilt wieder `modify`, ausser der Befehl wurde
   ausdrücklich als dauerhaft gewählt (`persistent`).
 - Der aktive Modus steht immer in der Statusleiste.
+- `draw-pipe` startet auch ohne Tastendruck, wenn direkt ein **Bauteilanschluss**
+  angeklickt wird. Der Anschluss ist ein kleines, bewusst getroffenes Ziel — die
+  Sperre gegen zufällige Leitungen (`canStartHydraulicLine`) gilt weiter für die
+  freie Fläche, wo ein Versehen möglich wäre.
+- Der Leitungsknopf hat drei Stufen: aus → einmalig → dauerhaft → aus. „Dauerhaft"
+  ist kein eigenes Werkzeug, sondern eine Eigenschaft des Befehls.
+
+## Leitung beenden
+
+| Geste | Wirkung |
+|---|---|
+| Doppelklick | beendet am letzten gesetzten Eckpunkt |
+| zweiter Klick auf denselben Punkt | dasselbe — es entsteht kein Nullsegment |
+| Enter | beendet an der aktuellen Cursorposition |
+| ESC | beendet am letzten gesetzten Eckpunkt, Dauerbefehl endet mit |
+| Rechtsklick | bricht ab, ohne etwas zu erzeugen |
+
+## Auswahlstufen an einer Leitung
+
+Ein Klick trifft das **Teilstück**. `Tab` erweitert auf das **Leitungssystem** und
+`Tab` führt zurück. Zusammen gehören Leitungen, die über eine `junction` hängen
+(freier Anker, Eckknoten, T-Stück). Ein Bauteil trennt das System: sonst würde ein
+Klick auf den Vorlauf über die Pumpe hinweg den Rücklauf mitmarkieren. Die
+Geometrie dazu liegt rein und getestet in `schema/cadEdit.js::leitungsSystem`;
+die Statusleiste sagt jederzeit, welche Stufe gewählt ist.
+
+## Ruhe im Grundzustand
+
+Die Anschlusszone (`.hc-zone-frame` an Speicher, Wärmeerzeuger, BWW) erscheint
+ausschliesslich, solange der Leitungsbefehl läuft. Im Grundzustand ist sie
+Information ohne Anlass, und ein Hover-Effekt macht das Bauteil beim blossen
+Darüberfahren nervös. Dasselbe gilt für die Anschlusspunkte selbst: sie wachsen
+nicht mehr unter der Maus — das verschob nebenbei ihren gemessenen Mittelpunkt.
 
 ## Fensterauswahl — bewusst eine Betriebsart (Sprint-Entscheid)
 

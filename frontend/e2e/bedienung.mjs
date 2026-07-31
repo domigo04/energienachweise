@@ -141,6 +141,103 @@ kopf('90°-Drehung dreht das ganze Bauteil-DIV');
     nachher.nr === '1', `Nr «${nachher.nr}»`);
 }
 
+// ── 4. Klick auf einen Anschluss zeichnet sofort ───────────────────────────
+kopf('Anschluss anklicken startet die Leitung ohne Umweg');
+{
+  await w.graphSetzen({
+    nodes: [{ id: 'p1', type: 'pump', position: { x: 600, y: 400 }, data: { nr: 1 } }],
+    edges: [], layer_config: {},
+  });
+  await w.laden();
+  await w.mausWeg();
+
+  pruefe('A1', 'Vorher steht der Editor im Grundzustand',
+    /Modify/.test(await w.status()), await w.status());
+
+  const ports = await w.portsVon('p1');
+  const oben = ports.find(p => p.handleId === 'top') || ports[0];
+  await page.mouse.click(oben.x, oben.y);
+  await page.waitForTimeout(400);
+
+  const status = await w.status();
+  pruefe('A2', 'Der Klick auf den Anschluss startet den Leitungsbefehl',
+    /Leitung/.test(status), status);
+
+  // Und es hängt wirklich eine Leitung am Cursor: die gestrichelte Vorschau
+  // wird gezeichnet, sobald sich die Maus vom Startpunkt wegbewegt.
+  await page.mouse.move(oben.x, oben.y - 180);
+  await page.waitForTimeout(350);
+  const zieht = await page.locator('path[stroke-dasharray="12 7"]').count();
+  pruefe('A3', 'Es hängt sofort eine Leitung am Cursor', zieht > 0, `${zieht} Vorschaupfad(e)`);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+}
+
+// ── 5. Anschlusszone nur während des Leitungsbefehls ───────────────────────
+kopf('Kein Hover-Effekt an den Anschlusszonen');
+{
+  await w.graphSetzen({
+    nodes: [{ id: 'sp1', type: 'speicher', position: { x: 600, y: 300 }, data: { nr: 1 } }],
+    edges: [], layer_config: {},
+  });
+  await w.laden();
+
+  const rahmenFarbe = () => page.evaluate(() => {
+    const rahmen = document.querySelector('.react-flow__node[data-id="sp1"] .hc-zone-frame');
+    return rahmen ? getComputedStyle(rahmen).borderTopColor : null;
+  });
+  const unsichtbar = (farbe) => farbe === 'rgba(0, 0, 0, 0)' || farbe === 'transparent';
+
+  await w.mausWeg();
+  pruefe('Z1', 'Im Grundzustand ist die Anschlusszone unsichtbar',
+    unsichtbar(await rahmenFarbe()), await rahmenFarbe());
+
+  // Darüberfahren darf nichts ändern — genau das war die Unruhe.
+  const kasten = await page.locator('.react-flow__node[data-id="sp1"]').boundingBox();
+  await page.mouse.move(Math.round(kasten.x + kasten.width / 2), Math.round(kasten.y + kasten.height / 2));
+  await page.waitForTimeout(350);
+  pruefe('Z2', 'Hover schaltet die Zone NICHT ein',
+    unsichtbar(await rahmenFarbe()), await rahmenFarbe());
+
+  await page.keyboard.press('l');
+  await page.waitForTimeout(350);
+  pruefe('Z3', 'Im Leitungsbefehl ist die Zone sichtbar',
+    !unsichtbar(await rahmenFarbe()), await rahmenFarbe());
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(250);
+  pruefe('Z4', 'Nach Esc ist sie wieder weg',
+    unsichtbar(await rahmenFarbe()), await rahmenFarbe());
+}
+
+// ── 6. Entschlackte Toolbar ────────────────────────────────────────────────
+kopf('Toolbar: ein Leitungsknopf statt zwei, ein Stände-Knopf statt zwei');
+{
+  const knopfText = () => page.locator('.hc-editor-toolbar').innerText();
+  pruefe('U1', 'Der separate «Dauer»-Knopf ist weg',
+    !/Dauer/.test(await knopfText()), (await knopfText()).replace(/\n/g, ' · ').slice(0, 120));
+
+  const leitung = page.locator('.hc-editor-toolbar button', { hasText: 'Leitung' }).first();
+  await leitung.click();
+  await page.waitForTimeout(300);
+  pruefe('U2', 'Ein Klick startet den Leitungsbefehl einmalig',
+    /Leitung zeichnen …/.test(await leitung.innerText()), await leitung.innerText());
+
+  await leitung.click();
+  await page.waitForTimeout(300);
+  pruefe('U3', 'Ein zweiter Klick macht ihn dauerhaft',
+    /dauerhaft/.test(await leitung.innerText()), await leitung.innerText());
+
+  await leitung.click();
+  await page.waitForTimeout(300);
+  pruefe('U4', 'Ein dritter Klick schaltet ihn aus',
+    /Leitung zeichnen$/.test((await leitung.innerText()).trim()), await leitung.innerText());
+
+  const kopfzeile = await page.locator('.hc-editor-header').innerText();
+  pruefe('U5', 'Speichern und Verlauf liegen unter einem «Stände»-Knopf',
+    /Stände/.test(kopfzeile) && !/Stand speichern/.test(kopfzeile),
+    kopfzeile.replace(/\n/g, ' · ').slice(0, 120));
+}
+
 pruefe('X', 'keine Konsolenfehler', w.fehler.length === 0, w.fehler.slice(0, 3).join(' || '));
 await page.screenshot({ path: `${OUT}/bedienung.png` });
 const offen = bilanz(OUT);

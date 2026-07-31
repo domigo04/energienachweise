@@ -11,11 +11,15 @@
 //   - gültiger Layer
 //
 // Gibt die fertige Edge zurück oder null, wenn eine Regel verletzt ist.
-// Eine NEUE hydraulische Leitung darf NUR im expliziten Zeichenmodus (oder bei
-// bereits laufendem Entwurf) beginnen. Ausserhalb davon erzeugt kein Klick/Drag
-// auf Nodes oder Handles eine Leitung → exakt 0 neue Edges.
-export function canStartHydraulicLine(zeichenModus, hasDraft) {
-  return Boolean(zeichenModus || hasDraft);
+// Eine NEUE hydraulische Leitung beginnt nur nach einer eindeutigen Geste:
+// im expliziten Zeichenmodus, bei bereits laufendem Entwurf — oder mit einem
+// Klick direkt auf einen Bauteilanschluss. Der Anschluss ist ein kleines,
+// bewusst getroffenes Ziel; dort ist ein Versehen nicht möglich, und der Planer
+// muss nicht erst L drücken, um von einer Pumpe wegzuzeichnen (Dominic
+// 2026-07-31). Auf der freien Fläche bleibt die Sperre bestehen: dort erzeugt
+// ohne Zeichenmodus kein Klick und kein Ziehen eine Leitung.
+export function canStartHydraulicLine(zeichenModus, hasDraft, amAnschluss = false) {
+  return Boolean(zeichenModus || hasDraft || amAnschluss);
 }
 
 export function createHydraulicEdge(params, existingEdges = []) {

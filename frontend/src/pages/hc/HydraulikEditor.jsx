@@ -2898,12 +2898,18 @@ function EditorInner() {
     if (layer.role === 'rl' && handleId?.startsWith('vl')) return;
     const point = handlePosition(nodeId, handleId);
     if (!point) return;
-    // Handles sind nur Fang-/Zielpunkte: eine NEUE Leitung darf von hier nur im
-    // expliziten Zeichenmodus starten (kein versehentliches Ziehen).
-    if (!canStartHydraulicLine(zeichenModusRef.current, Boolean(draft))) return;
+    // Ein Klick direkt auf einen Anschluss ist eindeutig — er startet den
+    // Leitungsbefehl gleich mit, statt vorher L zu verlangen. Auf der freien
+    // Fläche bleibt die Sperre bestehen (siehe `canStartHydraulicLine`).
+    if (!canStartHydraulicLine(zeichenModusRef.current, Boolean(draft), true)) return;
     event.preventDefault();
     event.stopPropagation();
     if (!draft) {
+      // Der Befehl muss auch im Zustand stehen, sonst zeigt die Statusleiste
+      // weiter „Modify", während schon eine Leitung am Cursor hängt.
+      if (!zeichenModusRef.current) {
+        setEditorMode(mode => startCommand(DRAW_PIPE, { persistent:mode.persistent }));
+      }
       leitungsEntwurfStarten(point, { nodeId, handleId });
       return;
     }
@@ -4864,14 +4870,21 @@ function EditorInner() {
           <button onClick={redo} className="hc-icon-button" title="Wiederherstellen (⌘/Ctrl + Shift + Z)">
             <Redo2 size={17} />
           </button>
-          <button onClick={()=>{ setStandFehler(''); setStandDialogOpen(true); }}
-            disabled={!schemaId} className="hc-stand-save-button" title="Unveränderlichen Schema-Stand speichern">
-            <SaveIcon size={15} /><span>Stand speichern</span>
-          </button>
-          <button onClick={revisionenOeffnen} disabled={!schemaId}
-            className="hc-icon-button" title="Gespeicherte Stände und Änderungen">
-            <History size={17} />
-          </button>
+          {/* Speichern und Nachschauen sind eine Sache: ein Knopf, zwei Wege.
+              Der laufende Stand wird ohnehin automatisch gespeichert — dafür
+              steht die Anzeige links. */}
+          <ToolbarMenu label="Stände" icon={SaveIcon}>
+            <button disabled={!schemaId}
+              onClick={event=>{ setStandFehler(''); setStandDialogOpen(true); closeToolbarMenu(event); }}
+              style={{ ...menuActionStyle, opacity:schemaId ? 1 : .45 }}>
+              <SaveIcon size={14} /> Stand speichern …
+            </button>
+            <button disabled={!schemaId}
+              onClick={event=>{ revisionenOeffnen(); closeToolbarMenu(event); }}
+              style={{ ...menuActionStyle, opacity:schemaId ? 1 : .45 }}>
+              <History size={14} /> Gespeicherte Stände und Änderungen
+            </button>
+          </ToolbarMenu>
           <ToolbarMenu label={exportState === 'loading' ? 'PDF wird erstellt …' : 'Exportieren'} icon={Download} primary align="right">
             {[['schema','Schema als PDF'],['berechnungen','Berechnungen als PDF'],['beides','Schema + Berechnungen']].map(([key,text])=>(
               <button key={key} disabled={!schemaId || exportState === 'loading'} onClick={event=>{ downloadPdf(key); closeToolbarMenu(event); }}
@@ -4902,27 +4915,39 @@ function EditorInner() {
           ))}
         </ToolbarMenu>
 
-        <ToolbarMenu label="Zeichnen" icon={Settings2}>
+        <ToolbarMenu label="Ansicht" icon={Eye}>
+          <button onClick={event=>{ setPaletteOpen(value=>!value); closeToolbarMenu(event); }} style={menuActionStyle}>
+            {paletteOpen ? <PanelLeftClose size={14} /> : <PanelLeftOpen size={14} />} Bauteilpalette
+          </button>
+          <button onClick={event=>{ setInspectorOpen(value=>!value); closeToolbarMenu(event); }} style={menuActionStyle}>
+            {inspectorOpen ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />} Eigenschaften
+          </button>
+          <button onClick={event=>{ setShowMiniMap(value=>!value); closeToolbarMenu(event); }} style={menuActionStyle}>
+            <Eye size={14} /> {showMiniMap?'Übersichtskarte ausblenden':'Übersichtskarte einblenden'}
+          </button>
+          <button onClick={event=>{ setShowLegende(value=>!value); setShowWarnungen(false); closeToolbarMenu(event); }} style={menuActionStyle}>
+            <Layers3 size={14} /> {showLegende?'Legende schliessen':'Legende öffnen'}
+          </button>
+          <button onClick={event=>{ setShowUnderlayPanel(value=>!value); closeToolbarMenu(event); }} style={menuActionStyle}>
+            <ImageIcon size={14} /> {showUnderlayPanel ? 'Plan-Underlay schliessen' : 'Plan-Underlay …'}
+          </button>
+        </ToolbarMenu>
+
+        <ToolbarMenu label="Einstellungen" icon={Settings2}>
           <div style={{ width:270, padding:6 }}>
             <label style={{ display:'grid', gridTemplateColumns:'88px 1fr 42px', alignItems:'center', gap:7, marginBottom:10, fontSize:10, color:'#475569' }}>
               Bogenradius
               <input type="range" min="0" max="40" step="1" value={drawingConfig.corner_radius} onChange={event=>drawingConfigAktualisieren('corner_radius', event.target.value)} />
               <input type="number" min="0" max="40" value={drawingConfig.corner_radius} onChange={event=>drawingConfigAktualisieren('corner_radius', event.target.value)} style={{ width:42, border:'1px solid #cbd5e1', borderRadius:5, padding:3, fontSize:10 }}/>
             </label>
-            <label style={{ display:'grid', gridTemplateColumns:'88px 1fr', alignItems:'center', gap:7, marginBottom:10, fontSize:10, color:'#475569' }}>
-              mm-Raster
-              <select value={drawingConfig.grid_size} onChange={event=>drawingConfigAktualisieren('grid_size', event.target.value)} style={{ border:'1px solid #cbd5e1', borderRadius:5, padding:4, background:'white', fontSize:10 }}>
-                {GRID_OPTIONEN.map(mm => <option key={mm} value={mm}>{mm} mm</option>)}
-              </select>
-            </label>
+            {/* mm-Raster und Auto-Rücklauf standen hier ein zweites Mal — sie
+                liegen in der Statusleiste bzw. neben der Layerwahl, also dort,
+                wo man sie beim Zeichnen braucht. */}
             <label style={{ display:'grid', gridTemplateColumns:'88px 1fr', alignItems:'center', gap:7, marginBottom:10, fontSize:10, color:'#475569' }}>
               Fangtoleranz
               <select value={drawingConfig.snap_tolerance} onChange={event=>drawingConfigAktualisieren('snap_tolerance', event.target.value)} style={{ border:'1px solid #cbd5e1', borderRadius:5, padding:4, background:'white', fontSize:10 }}>
                 {TOLERANZ_OPTIONEN.map(mm => <option key={mm} value={mm}>{mm} mm{mm === 4 ? ' · exakt' : mm === 20 ? ' · grosszügig' : ''}</option>)}
               </select>
-            </label>
-            <label style={{ display:'flex', gap:7, alignItems:'center', padding:'8px 0', borderTop:'1px solid #f1f5f9', fontSize:10, fontWeight:700, color:'#334155' }}>
-              <input type="checkbox" checked={drawingConfig.auto_return} onChange={event=>drawingConfigAktualisieren('auto_return', event.target.checked)}/> Auto-Rücklauf bei passenden VL/RL-Anschlüssen
             </label>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 38px', gap:6, alignItems:'center', paddingTop:8, borderTop:'1px solid #f1f5f9', fontSize:10, color:'#475569' }}>
               {[
@@ -4957,24 +4982,6 @@ function EditorInner() {
           </div>
         </ToolbarMenu>
 
-        <ToolbarMenu label="Ansicht" icon={Eye}>
-          <button onClick={event=>{ setPaletteOpen(value=>!value); closeToolbarMenu(event); }} style={menuActionStyle}>
-            {paletteOpen ? <PanelLeftClose size={14} /> : <PanelLeftOpen size={14} />} Bauteilpalette
-          </button>
-          <button onClick={event=>{ setInspectorOpen(value=>!value); closeToolbarMenu(event); }} style={menuActionStyle}>
-            {inspectorOpen ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />} Eigenschaften
-          </button>
-          <button onClick={event=>{ setShowMiniMap(value=>!value); closeToolbarMenu(event); }} style={menuActionStyle}>
-            <Eye size={14} /> {showMiniMap?'Übersichtskarte ausblenden':'Übersichtskarte einblenden'}
-          </button>
-          <button onClick={event=>{ setShowLegende(value=>!value); setShowWarnungen(false); closeToolbarMenu(event); }} style={menuActionStyle}>
-            <Layers3 size={14} /> {showLegende?'Legende schliessen':'Legende öffnen'}
-          </button>
-          <button onClick={event=>{ setShowUnderlayPanel(value=>!value); closeToolbarMenu(event); }} style={menuActionStyle}>
-            <ImageIcon size={14} /> {showUnderlayPanel ? 'Plan-Underlay schliessen' : 'Plan-Underlay …'}
-          </button>
-        </ToolbarMenu>
-
         <button onClick={()=>{ setShowWarnungen(value=>!value); setShowLegende(false); }}
           className={`hc-warning-button${alleWarnungen.length ? ' has-warnings' : ''}`}>
           <AlertTriangle size={14} />
@@ -4982,17 +4989,17 @@ function EditorInner() {
         </button>
 
         <div style={{ display:'inline-flex', gap:4 }}>
+          {/* Ein Knopf, drei Stufen: aus → einmalig → dauerhaft → aus.
+              „Dauerhaft" ist kein eigenes Werkzeug, sondern eine Eigenschaft
+              des Leitungsbefehls — darum steht sie auch an ihm. */}
           <button
-            onClick={() => setEditorMode(m => toggleCommand(m, DRAW_PIPE, { persistent:m.persistent }))}
+            onClick={() => setEditorMode(m => (zeichnetLeitung(m)
+              ? (m.persistent ? escapeMode(m) : startCommand(DRAW_PIPE, { persistent:true }))
+              : startCommand(DRAW_PIPE, { persistent:false })))}
             className={`hc-auto-return${zeichenModus ? ' is-active' : ''}`}
-            title="Leitung zeichnen (Taste L/P) · Esc oder Rechtsklick bricht ab">
-            ✏ Leitung {zeichenModus ? 'zeichnen …' : 'zeichnen'}
-          </button>
-          <button
-            onClick={() => setEditorMode(m => startCommand(DRAW_PIPE, { persistent:!(zeichnetLeitung(m) && m.persistent) }))}
-            className={`hc-auto-return${dauerLeitung ? ' is-active' : ''}`}
-            title="Dauerhafter Leitungsmodus: bleibt nach jeder Leitung aktiv, bis Esc oder Rechtsklick">
-            ⤾ Dauer {dauerLeitung ? 'an' : 'aus'}
+            title="Leitung zeichnen (Taste L/P). Nochmal klicken hält den Befehl nach jeder Leitung aktiv. Esc oder Rechtsklick beendet ihn."
+            aria-pressed={zeichenModus}>
+            ✏ Leitung {dauerLeitung ? 'dauerhaft …' : zeichenModus ? 'zeichnen …' : 'zeichnen'}
           </button>
           <button
             onClick={() => (verschiebung ? (setVerschiebung(null), setEditorMode(escapeMode(editorModeRef.current))) : verschiebenStarten(false))}
@@ -5119,7 +5126,8 @@ function EditorInner() {
             // dargestellt werden kann; für grosse Anlagen auch weiter raus.
             minZoom={0.2}
             maxZoom={4}
-            className={`hc-hydraulik-flow${spacePan ? ' hc-flow--pan' : istGrundzustand ? '' : ' hc-flow--draw'}`}
+            className={`hc-hydraulik-flow${spacePan ? ' hc-flow--pan' : istGrundzustand ? '' : ' hc-flow--draw'}`
+              + ((zeichenModus || leitungsEntwurf) ? ' hc-flow--pipe' : '')}
           >
             {/* CAD-Optik (§ Editor #4): Millimeterpapier — feine Minor-Punkte am
                 Raster (bleiben beim Rauszoomen ruhig) plus kräftigere Major-Linien

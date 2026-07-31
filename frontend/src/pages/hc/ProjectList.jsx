@@ -3,15 +3,14 @@ import { useNavigate } from "react-router-dom";
 import { Plus, MapPin, User, UserRoundCheck, CalendarDays, Trash2, FolderPlus } from "lucide-react";
 import { getProjects, createProject, deleteProjectPermanent, deleteAllArchived } from "../../api/hcApi";
 import { useAuth } from "../../auth/AuthContext";
-import { GEBAEUDEKATEGORIEN, KLIMASTATIONEN } from "../../data/sia";
 
-const LEER_FORM = {
-  name: "", standort: "", kunde: "", beschreibung: "",
-  gebaeudekategorie: "", klimastation: "", t_aussen: -8,
-  ebf_m2: "", anzahl_nutzungseinheiten: "", projektart: "", region: "", zertifizierung: "",
-};
-
-const PROJEKTARTEN = ["Neubau", "Sanierung", "Erweiterung", "Ersatz Wärmeerzeuger"];
+// Beim Anlegen wird nur gefragt, was man beim Anlegen wirklich weiss
+// (Dominic 2026-07-31): Name und Standort. Gebäudekategorie, Klimastation,
+// EBF, Projektart, Region und Zertifizierung standen hier als leere Pflicht-
+// anmutung, obwohl nur der Name Pflicht ist — und sie werden ohnehin auf der
+// Projektseite oder aus dem LV-Import gefüllt. Kein Feld geht verloren:
+// alle stehen unverändert unter «Projektinformationen».
+const LEER_FORM = { name: "", standort: "" };
 
 function StatusBadge({ status }) {
   if (status === "archiviert") return <span className="badge bg-slate-100 text-slate-500">Archiviert</span>;
@@ -65,19 +64,10 @@ export default function ProjectList() {
       const project = await createProject({
         name: form.name,
         standort: form.standort || null,
-        kunde: form.kunde || null,
-        beschreibung: form.beschreibung || null,
-        base_data: {
-          t_aussen: Number(form.t_aussen) || -8,
-          t_innen: 20,
-          gebaeudekategorie: form.gebaeudekategorie || null,
-          klimastation: form.klimastation || null,
-          ebf_m2: form.ebf_m2 === "" ? null : Number(form.ebf_m2),
-          anzahl_nutzungseinheiten: form.anzahl_nutzungseinheiten === "" ? null : Number(form.anzahl_nutzungseinheiten),
-          projektart: form.projektart || null,
-          region: form.region || null,
-          zertifizierung: form.zertifizierung || null,
-        },
+        // Auslegungstemperatur und Raumtemperatur bleiben als Standard gesetzt,
+        // damit eine Berechnung sofort rechnen kann; beide sind auf der
+        // Projektseite überschreibbar.
+        base_data: { t_aussen: -8, t_innen: 20 },
       });
       navigate(`/projekte/${project.id}`);
     } catch {
@@ -115,7 +105,12 @@ export default function ProjectList() {
       {/* Neues-Projekt-Formular */}
       {showForm && (
         <div className="card mb-6 p-6">
-          <h2 className="mb-4 font-semibold text-slate-800">Neues Projekt anlegen</h2>
+          <h2 className="font-semibold text-slate-800">Neues Projekt anlegen</h2>
+          <p className="mb-4 mt-1 text-sm text-slate-500">
+            Name genügt. Gebäudedaten, Klimastation, EBF und Zertifizierung stehen
+            danach unter «Projektinformationen» — dort im Zusammenhang, statt hier
+            als leere Felder.
+          </p>
           <form onSubmit={handleCreate} className="space-y-4">
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div>
@@ -126,77 +121,13 @@ export default function ProjectList() {
                   Projektnummer: wird automatisch vergeben
                 </p>
                 <input className="input" placeholder="z.B. EFH Muster, Winterthur" value={form.name}
-                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} required />
+                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} required autoFocus />
               </div>
               <div>
                 <label className="label">Standort</label>
+                <p className="mb-1.5 text-xs text-slate-400">optional</p>
                 <input className="input" placeholder="z.B. Winterthur" value={form.standort}
                   onChange={(e) => setForm((f) => ({ ...f, standort: e.target.value }))} />
-              </div>
-              <div>
-                <label className="label">Kunde / Bauherr</label>
-                <input className="input" placeholder="z.B. Familie Muster" value={form.kunde}
-                  onChange={(e) => setForm((f) => ({ ...f, kunde: e.target.value }))} />
-              </div>
-              <div>
-                <label className="label">Beschreibung</label>
-                <input className="input" placeholder="Kurze Beschreibung" value={form.beschreibung}
-                  onChange={(e) => setForm((f) => ({ ...f, beschreibung: e.target.value }))} />
-              </div>
-              <div>
-                <label className="label">Gebäudekategorie (SIA 380/1)</label>
-                <select className="input" value={form.gebaeudekategorie}
-                  onChange={(e) => setForm((f) => ({ ...f, gebaeudekategorie: e.target.value }))}>
-                  <option value="">— bitte wählen —</option>
-                  {GEBAEUDEKATEGORIEN.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="label">Klimastation (SIA 2028)</label>
-                <select className="input" value={form.klimastation}
-                  onChange={(e) => {
-                    const station = KLIMASTATIONEN.find((s) => s.name === e.target.value);
-                    setForm((f) => ({ ...f, klimastation: e.target.value, t_aussen: station ? station.theta_e : f.t_aussen }));
-                  }}>
-                  <option value="">— bitte wählen —</option>
-                  {KLIMASTATIONEN.map((s) => <option key={s.name} value={s.name}>{s.name} ({s.theta_e} °C)</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="label">Auslegungstemperatur aussen [°C]</label>
-                <input type="number" className="input" value={form.t_aussen}
-                  onChange={(e) => setForm((f) => ({ ...f, t_aussen: e.target.value }))} />
-                <p className="mt-1 text-xs text-slate-400">aus SIA 2028, überschreibbar</p>
-              </div>
-              <div>
-                <label className="label">Energiebezugsfläche EBF [m²]</label>
-                <input type="number" className="input" placeholder="z.B. 1420" value={form.ebf_m2}
-                  onChange={(e) => setForm((f) => ({ ...f, ebf_m2: e.target.value }))} />
-                <p className="mt-1 text-xs text-slate-400">wird von der Kostenschätzung übernommen</p>
-              </div>
-              <div>
-                <label className="label">Nutzungseinheiten (Wohnungen)</label>
-                <input type="number" className="input" placeholder="z.B. 10" value={form.anzahl_nutzungseinheiten}
-                  onChange={(e) => setForm((f) => ({ ...f, anzahl_nutzungseinheiten: e.target.value }))} />
-              </div>
-              <div>
-                <label className="label">Projektart</label>
-                <select className="input" value={form.projektart}
-                  onChange={(e) => setForm((f) => ({ ...f, projektart: e.target.value }))}>
-                  <option value="">— bitte wählen —</option>
-                  {PROJEKTARTEN.map((a) => <option key={a} value={a}>{a}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="label">Region</label>
-                <input className="input" placeholder="z.B. Zürich" value={form.region}
-                  onChange={(e) => setForm((f) => ({ ...f, region: e.target.value }))} />
-                <p className="mt-1 text-xs text-slate-400">für den Baupreisindex</p>
-              </div>
-              <div>
-                <label className="label">Zertifizierung</label>
-                <input className="input" placeholder="z.B. Minergie" value={form.zertifizierung}
-                  onChange={(e) => setForm((f) => ({ ...f, zertifizierung: e.target.value }))} />
               </div>
             </div>
             <div className="flex gap-2 pt-1">

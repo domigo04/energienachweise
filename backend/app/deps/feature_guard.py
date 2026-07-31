@@ -47,6 +47,12 @@ def pruefe_feature(db: Session, user: User, feature_key: str) -> None:
     if firma is None or not firma.is_active:
         raise _fehler(403, SUBSCRIPTION_INACTIVE, "Firma ist nicht aktiv.")
 
+    # Der globale Plattformadmin muss produktive Funktionen prüfen und
+    # Supportfälle bearbeiten können, unabhängig vom Plan seiner Stammfirma.
+    # Inaktive Benutzer oder Firmen bleiben auch für ihn weiterhin gesperrt.
+    if user.role == Role.admin:
+        return
+
     zustand = feature_service.company_plan(db, user.tenant_id)
     if not zustand.active:
         raise _fehler(

@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models.auth import User
+from app.models.auth import Role, User
 from app.models.lv_import import (
     LvImport, LvImportFeature, LvImportCost, LvImportCondition, LvImportStatus,
     LvImportSystem,
@@ -333,8 +333,12 @@ async def upload_lv(
         # Trennung der beiden Stufen: `lv_import` deckt Upload, Parser und
         # Review ab, `lv_ai_review` zusätzlich jede kostenpflichtige
         # LLM-Auswertung. Fehlt die zweite, bleibt der Import trotzdem nutzbar.
-        ki_erlaubt = feature_service.get_effective_feature(
-            db, user.tenant_id, Feature.LV_AI_REVIEW.value).enabled
+        ki_erlaubt = (
+            user.role == Role.admin
+            or feature_service.get_effective_feature(
+                db, user.tenant_id, Feature.LV_AI_REVIEW.value
+            ).enabled
+        )
         if not ki_erlaubt:
             review_pages = []
         visual = (

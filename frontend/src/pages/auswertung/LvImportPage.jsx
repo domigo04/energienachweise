@@ -19,6 +19,16 @@ import { PROCESSING, processingSchritt } from "./lvImportProgress";
 // als Checkbox-Gruppe dargestellt, nicht als Zahlenfeld.
 const MULTI_FEATURES = {};
 
+// FastAPI liefert Fehler teils als Text und teils strukturiert als
+// { code, message }. React darf dieses Objekt nie direkt rendern.
+const apiFehlertext = (err, fallback) => {
+  const detail = err?.response?.data?.detail;
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (typeof detail?.message === "string" && detail.message.trim()) return detail.message;
+  if (typeof err?.message === "string" && err.message.trim()) return err.message;
+  return fallback;
+};
+
 const KATEGORIEN = [
   // Bewusst kurz: nur Kennwerte, die für die Kostenauswertung belastbar sind.
   // Speicher, Verteilsystem, Temperaturen und Bauablaufmerkmale sind entfallen —
@@ -369,7 +379,7 @@ function UploadAnsicht() {
       const imp = await uploadLvImport(file);
       navigate(`/auswertung/import/${imp.id}`);
     } catch (err) {
-      setError(err?.response?.data?.detail || "Upload fehlgeschlagen. Nur PDF wird unterstützt.");
+      setError(apiFehlertext(err, "Upload fehlgeschlagen. Nur PDF wird unterstützt."));
     } finally {
       setBusy(false);
     }
@@ -527,8 +537,7 @@ function KonditionenEditor({ imp, gesperrt, onSaved }) {
       });
       onSaved(result);
     } catch (err) {
-      const detail = err?.response?.data?.detail;
-      setError(typeof detail === "string" ? detail : detail?.message || "Konditionen konnten nicht gespeichert werden.");
+      setError(apiFehlertext(err, "Konditionen konnten nicht gespeichert werden."));
     } finally {
       setSaving(false);
     }
@@ -770,10 +779,7 @@ function ReviewAnsicht({ id }) {
       const res = await approveLvImport(id);
       setImp((cur) => ({ ...cur, ...res.import }));
     } catch (err) {
-      const detail = err?.response?.data?.detail;
-      setError(typeof detail === "string"
-        ? detail
-        : detail?.message || "Freigabe fehlgeschlagen — bitte alle Werte und Kosten prüfen.");
+      setError(apiFehlertext(err, "Freigabe fehlgeschlagen — bitte alle Werte und Kosten prüfen."));
     } finally {
       setApproving(false);
     }

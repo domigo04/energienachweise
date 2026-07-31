@@ -83,6 +83,11 @@ def test_plan_verbietet_feature(welt):
     assert fehler.value.detail["code"] == "FEATURE_NOT_AVAILABLE"
 
 
+def test_plattformadmin_bleibt_unabhaengig_vom_firmenplan(welt):
+    firma = _firma(welt, "basic")
+    pruefe_feature(welt, _user(welt, firma, role=Role.admin), LV)
+
+
 # ── Firmen-Override ────────────────────────────────────────────────────────
 
 def test_override_aktiviert_feature_ausserhalb_des_plans(welt):

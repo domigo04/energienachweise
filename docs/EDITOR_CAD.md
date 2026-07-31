@@ -88,6 +88,38 @@ Regeln:
 - Der Leitungsknopf hat drei Stufen: aus → einmalig → dauerhaft → aus. „Dauerhaft"
   ist kein eigenes Werkzeug, sondern eine Eigenschaft des Befehls.
 
+## Werkzeugleiste am Canvasrand
+
+Alle Zeichenbefehle stehen senkrecht am linken Rand der Zeichenfläche
+(`.hc-toolrail`), nur als Symbol, mit der Taste am Knopf und im Tooltip:
+
+| Werkzeug | Befehl |
+|---|---|
+| Leitung zeichnen | `draw-pipe`, drei Stufen (aus → einmalig → dauerhaft) |
+| Verschieben | `move` |
+| Bauteil drehen | 90°-Drehung des gewählten Bauteils |
+| Bauteil spiegeln | waagrechte Spiegelung |
+| Ausrichten | `align` |
+| Mit Lücke trennen | `break` |
+| Dehnen | `stretch` |
+| Notiz-Stecknadel | Eintrag im Projektjournal |
+
+Drei Gründe für die Leiste:
+
+1. **Fünf dieser Befehle gab es vorher nur als Taste** — wer sie nicht auswendig
+   kannte, wusste nicht, dass es sie gibt.
+2. **Die Kopfzeile mischte vier Dinge**: Zustand, Menüs, eine Meldung und
+   Werkzeuge. Jetzt bleibt dort, was das Projekt betrifft; die Werkzeuge stehen
+   dort, wo gezeichnet wird.
+3. **Ein Werkzeug ohne passende Auswahl ist abgeblendet**, nicht still
+   wirkungslos. Drehen ohne gewähltes Bauteil und Trennen ohne gewählte Leitung
+   sagen das, statt beim Klick nichts zu tun.
+
+Knopf und Taste gehen durch **dieselbe** Funktion (`leitungBefehl`,
+`trennenStarten`, `dehnenStarten`, `ausrichtenUmschalten`). Zwei Kopien desselben
+Befehls laufen früher oder später auseinander, und dann tut der Knopf etwas
+anderes als die Taste.
+
 ## Leitung beenden
 
 | Geste | Wirkung |

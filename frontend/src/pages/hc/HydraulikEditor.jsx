@@ -1,8 +1,10 @@
 import React, { useCallback, useState, useMemo, useRef, useEffect } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  AlertTriangle, ArrowLeft, Check, ChevronDown, Download, Eye, History,
-  Image as ImageIcon, Layers3, LayoutTemplate, Lock, Unlock, PanelLeftClose, PanelLeftOpen, RotateCcw,
+  AlertTriangle, AlignHorizontalJustifyCenter, ArrowLeft, Check, ChevronDown, Download, Eye,
+  FlipHorizontal2, History,
+  Image as ImageIcon, Layers3, LayoutTemplate, Lock, Unlock, MapPin, Move, MoveHorizontal,
+  PanelLeftClose, PanelLeftOpen, RotateCcw, RotateCw, Scissors, Spline,
   PanelRightClose, PanelRightOpen, Redo2, Save as SaveIcon, Settings, Settings2, Trash2, Undo2, X,
 } from 'lucide-react';
 import {
@@ -2162,6 +2164,10 @@ function EditorInner() {
   const deleteNodeRef = useRef(null);
   nodesRef.current = nodes;
   edgesRef.current = edges;
+  // Die Befehlsstarter dürfen nicht bei jeder Auswahl neu entstehen — sonst
+  // hängt die halbe Tastaturbehandlung daran.
+  const selectedEdgeIdRef = useRef(null);
+  selectedEdgeIdRef.current = selectedEdgeId;
 
   const activeLayer = LEITUNGS_LAYER.find(layer => layer.id === activeLayerId) || LEITUNGS_LAYER[0];
   const connectionLineRenderer = useCallback((props) => <ConstrainedConnectionLine {...props} shift={shiftPressed} ortho={orthoAn} />, [shiftPressed, orthoAn]);
@@ -3550,6 +3556,38 @@ function EditorInner() {
     return true;
   }, [verschiebeZiele]);
 
+  // ── Befehlsstarter ────────────────────────────────────────────────────────
+  // Werkzeugleiste und Tastatur gehen denselben Weg. Zwei Kopien desselben
+  // Befehls würden früher oder später auseinanderlaufen — und dann tut der
+  // Knopf etwas anderes als die Taste.
+  const leitungBefehl = useCallback(() => {
+    // Drei Stufen an EINEM Befehl: aus → einmalig → dauerhaft → aus.
+    setEditorMode(mode => (zeichnetLeitung(mode)
+      ? (mode.persistent ? escapeMode(mode) : startCommand(DRAW_PIPE, { persistent:true }))
+      : startCommand(DRAW_PIPE, { persistent:false })));
+  }, []);
+
+  const trennenStarten = useCallback(() => {
+    if (!selectedEdgeIdRef.current) {
+      setBefehlHinweis('Zuerst die Leitung anklicken, die getrennt werden soll.');
+      return;
+    }
+    setBefehlHinweis(null);
+    setLuecke({ edgeId:selectedEdgeIdRef.current, erster:null });
+    setEditorMode(startCommand(BREAK));
+  }, []);
+
+  const dehnenStarten = useCallback(() => {
+    setBefehlHinweis(null);
+    setDehnen({ ecke1:null, ecke2:null, basis:null, cursor:null });
+    setEditorMode(startCommand(STRETCH));
+  }, []);
+
+  const ausrichtenUmschalten = useCallback(() => {
+    setAusrichtenHinweis(null);
+    setEditorMode(mode => toggleCommand(mode, ALIGN));
+  }, []);
+
   // ── Mit Lücke trennen (AutoCAD BREAK) ────────────────────────────────────
   // Zwei Punkte auf derselben Leitung; das Stück dazwischen fällt weg. Das
   // trennt AUCH die hydraulische Verbindung — beide Teile enden danach an einem
@@ -3953,8 +3991,7 @@ function EditorInner() {
         // gewählte Bauteil aufs Raster — ein Befehl, eine Taste.
         if (key === drawingConfig.shortcut_align && !ev.shiftKey) {
           ev.preventDefault();
-          setAusrichtenHinweis(null);
-          setEditorMode(toggleCommand(editorModeRef.current, ALIGN));
+          ausrichtenUmschalten();
           return;
         }
         if (ev.key === 'Enter' && leitungsEntwurfRef.current && leitungsCursorRef.current) {
@@ -3985,21 +4022,13 @@ function EditorInner() {
         // Mit Lücke trennen (BREAK): braucht eine gewählte Leitung.
         if (key === drawingConfig.shortcut_break) {
           ev.preventDefault();
-          if (!selectedEdgeId) {
-            setBefehlHinweis('Zuerst die Leitung anklicken, die getrennt werden soll.');
-            return;
-          }
-          setBefehlHinweis(null);
-          setLuecke({ edgeId:selectedEdgeId, erster:null });
-          setEditorMode(startCommand(BREAK));
+          trennenStarten();
           return;
         }
         // Dehnen (STRETCH): Fenster, Basispunkt, Zielpunkt.
         if (key === drawingConfig.shortcut_stretch) {
           ev.preventDefault();
-          setBefehlHinweis(null);
-          setDehnen({ ecke1:null, ecke2:null, basis:null, cursor:null });
-          setEditorMode(startCommand(STRETCH));
+          dehnenStarten();
           return;
         }
         // Verschieben (CAD-MOVE): frei belegbare Taste. Mit Shift wandert die
@@ -4047,7 +4076,7 @@ function EditorInner() {
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [undo, redo, selected, selectedEdgeId, selectedEdgePoint, selectedLabelEdgeId, markierteEdgeIds, beschriftungSetzen, punktEntfernen, snap, rotateNode, mirrorNode, alignNode, nudgeNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, spiegelAchse, drawingConfig, setNodes, laengeAnwenden, entwurfAmLetztenPunktAbschliessen, verschiebenStarten]);
+  }, [undo, redo, selected, selectedEdgeId, selectedEdgePoint, selectedLabelEdgeId, markierteEdgeIds, beschriftungSetzen, punktEntfernen, snap, rotateNode, mirrorNode, alignNode, nudgeNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, spiegelAchse, drawingConfig, setNodes, laengeAnwenden, entwurfAmLetztenPunktAbschliessen, verschiebenStarten, ausrichtenUmschalten, trennenStarten, dehnenStarten]);
 
   // Berechnete Werte (Backend) in die Node-Daten spiegeln — nur für die Anzeige.
   // Verteiler-Rahmen: nur die Balken sind greifbar (dragHandle), die Lücke
@@ -5133,35 +5162,10 @@ function EditorInner() {
           <span>{alleWarnungen.length ? `${alleWarnungen.length} Warnungen` : 'Keine Warnungen'}</span>
         </button>
 
-        <div style={{ display:'inline-flex', gap:4 }}>
-          {/* Ein Knopf, drei Stufen: aus → einmalig → dauerhaft → aus.
-              „Dauerhaft" ist kein eigenes Werkzeug, sondern eine Eigenschaft
-              des Leitungsbefehls — darum steht sie auch an ihm. */}
-          <button
-            onClick={() => setEditorMode(m => (zeichnetLeitung(m)
-              ? (m.persistent ? escapeMode(m) : startCommand(DRAW_PIPE, { persistent:true }))
-              : startCommand(DRAW_PIPE, { persistent:false })))}
-            className={`hc-auto-return${zeichenModus ? ' is-active' : ''}`}
-            title="Leitung zeichnen (Taste L/P). Nochmal klicken hält den Befehl nach jeder Leitung aktiv. Esc oder Rechtsklick beendet ihn."
-            aria-pressed={zeichenModus}>
-            ✏ Leitung {dauerLeitung ? 'dauerhaft …' : zeichenModus ? 'zeichnen …' : 'zeichnen'}
-          </button>
-          <button
-            onClick={() => (verschiebung ? (setVerschiebung(null), setEditorMode(escapeMode(editorModeRef.current))) : verschiebenStarten(false))}
-            disabled={!verschiebung && !selected && !selectedEdgeId && !markierteEdgeIds.length}
-            className={`hc-auto-return${verschiebung ? ' is-active' : ''}`}
-            title={`Verschieben (Taste ${String(drawingConfig.shortcut_move).toUpperCase()}): Auswahl treffen, Startpunkt und Zielpunkt klicken. Shift beim Start verschiebt die ganze Leitung.`}>
-            ✥ Verschieben
-          </button>
-          <button
-            onClick={() => setNadelModus(value => !value)}
-            disabled={!schemaId}
-            className={`hc-auto-return${nadelModus ? ' is-active' : ''}`}
-            title="Notiz-Stecknadel setzen: danach auf die Stelle im Schema klicken. Der Eintrag landet in der Dokumentation.">
-            📍 Notiz {nadelModus ? '· Stelle wählen' : notizen.length ? `(${notizen.length})` : ''}
-          </button>
-        </div>
-
+        {/* Die Werkzeuge stehen nicht mehr hier, sondern in der senkrechten
+            Leiste am Canvasrand (`hc-toolrail`). In der Kopfzeile bleibt, was
+            das Projekt betrifft: Vorlagen, Ansicht, Einstellungen, Warnungen,
+            Layer. */}
         <div className="hc-editor-toolbar__spacer" />
 
         <div className="hc-layer-control">
@@ -5226,6 +5230,66 @@ function EditorInner() {
         {/* Canvas */}
         <main className="hc-canvas-wrap" onPointerDownCapture={cadHandlePointerDown}
           onPointerMove={canvasMouseMove} onDoubleClick={canvasDoppelklick}>
+          {/* ── Werkzeugleiste am Canvasrand ────────────────────────────────
+              Alle Zeichenbefehle an einer Stelle, senkrecht, nur Symbole. Vier
+              davon (Drehen, Spiegeln, Ausrichten, Trennen, Dehnen) gab es
+              bisher nur als Taste — wer sie nicht auswendig kannte, wusste
+              nicht, dass es sie gibt. Der aktive Befehl ist hervorgehoben, die
+              Taste steht im Tooltip, und ein Werkzeug ohne passende Auswahl ist
+              abgeblendet statt still wirkungslos. */}
+          <div className="hc-toolrail" role="toolbar" aria-label="Werkzeuge">
+            {[
+              { id:'leitung', Icon:Spline, name:'Leitung zeichnen',
+                taste:drawingConfig.shortcut_line,
+                hinweis:'Nochmal klicken hält den Befehl nach jeder Leitung aktiv.',
+                aktiv:zeichenModus, dauer:dauerLeitung, aktion:leitungBefehl },
+              { id:'verschieben', Icon:Move, name:'Verschieben',
+                taste:drawingConfig.shortcut_move,
+                hinweis:'Auswahl treffen, Startpunkt und Zielpunkt klicken. Shift verschiebt die ganze Leitung.',
+                aktiv:Boolean(verschiebung),
+                gesperrt:!verschiebung && !selected && !selectedEdgeId && !markierteEdgeIds.length,
+                aktion:() => (verschiebung
+                  ? (setVerschiebung(null), setEditorMode(escapeMode(editorModeRef.current)))
+                  : verschiebenStarten(false)) },
+              { id:'drehen', Icon:RotateCw, name:'Bauteil drehen',
+                taste:drawingConfig.shortcut_rotate,
+                hinweis:'Dreht das gewählte Bauteil um 90°.',
+                gesperrt:!selected || !ROTATABLE.has(selected.type),
+                aktion:() => selected && rotateNode(selected.id) },
+              { id:'spiegeln', Icon:FlipHorizontal2, name:'Bauteil spiegeln',
+                taste:drawingConfig.shortcut_mirror,
+                hinweis:'Spiegelt das gewählte Bauteil waagrecht.',
+                gesperrt:!selected || !ROTATABLE.has(selected.type),
+                aktion:() => selected && mirrorNode(selected.id) },
+              { id:'ausrichten', Icon:AlignHorizontalJustifyCenter, name:'Ausrichten',
+                taste:drawingConfig.shortcut_align,
+                hinweis:'Referenzsegment wählen, dann das Segment, das auf dieselbe Flucht soll.',
+                aktiv:istBefehl(editorMode, ALIGN), aktion:ausrichtenUmschalten },
+              { id:'trennen', Icon:Scissors, name:'Mit Lücke trennen',
+                taste:drawingConfig.shortcut_break,
+                hinweis:'Zwei Punkte auf der Leitung; das Stück dazwischen fällt weg. Trennt auch die hydraulische Verbindung.',
+                aktiv:Boolean(luecke), gesperrt:!selectedEdgeId && !luecke, aktion:trennenStarten },
+              { id:'dehnen', Icon:MoveHorizontal, name:'Dehnen',
+                taste:drawingConfig.shortcut_stretch,
+                hinweis:'Fenster aufziehen, Basispunkt, Zielpunkt. Was im Fenster liegt, wandert mit.',
+                aktiv:Boolean(dehnen), aktion:dehnenStarten },
+              { id:'notiz', Icon:MapPin, name:'Notiz-Stecknadel',
+                hinweis:'Danach auf die Stelle im Schema klicken. Der Eintrag landet im Projektjournal.',
+                aktiv:nadelModus, gesperrt:!schemaId, marke:notizen.length,
+                aktion:() => setNadelModus(value => !value) },
+            ].map(werkzeug => (
+              <button key={werkzeug.id} type="button" onClick={werkzeug.aktion}
+                disabled={werkzeug.gesperrt}
+                aria-pressed={Boolean(werkzeug.aktiv)}
+                data-werkzeug={werkzeug.id}
+                className={`hc-toolrail__button${werkzeug.aktiv ? ' is-active' : ''}${werkzeug.dauer ? ' is-persistent' : ''}`}
+                title={`${werkzeug.name}${werkzeug.taste ? ` (Taste ${String(werkzeug.taste).toUpperCase()})` : ''}\n${werkzeug.hinweis}`}>
+                <werkzeug.Icon size={17} />
+                {werkzeug.taste && <span className="hc-toolrail__key">{String(werkzeug.taste).toUpperCase()}</span>}
+                {werkzeug.marke > 0 && <span className="hc-toolrail__badge">{werkzeug.marke}</span>}
+              </button>
+            ))}
+          </div>
           <ReactFlow
             nodes={displayNodes} edges={displayEdges}
             onNodesChange={onNodesChange}

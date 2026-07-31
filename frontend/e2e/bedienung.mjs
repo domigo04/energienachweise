@@ -209,33 +209,66 @@ kopf('Kein Hover-Effekt an den Anschlusszonen');
     unsichtbar(await rahmenFarbe()), await rahmenFarbe());
 }
 
-// ── 6. Entschlackte Toolbar ────────────────────────────────────────────────
-kopf('Toolbar: ein Leitungsknopf statt zwei, ein Stände-Knopf statt zwei');
+// ── 6. Werkzeugleiste am Canvasrand ───────────────────────────────────────
+kopf('Werkzeuge stehen in der Leiste am Canvasrand, nicht in der Kopfzeile');
 {
-  const knopfText = () => page.locator('.hc-editor-toolbar').innerText();
-  pruefe('U1', 'Der separate «Dauer»-Knopf ist weg',
-    !/Dauer/.test(await knopfText()), (await knopfText()).replace(/\n/g, ' · ').slice(0, 120));
+  await w.frischLaden();
+  const rail = page.locator('.hc-toolrail');
+  const werkzeug = (id) => rail.locator(`[data-werkzeug="${id}"]`);
 
-  const leitung = page.locator('.hc-editor-toolbar button', { hasText: 'Leitung' }).first();
+  pruefe('U1', 'Alle acht Zeichenbefehle sind sichtbar',
+    (await rail.locator('.hc-toolrail__button').count()) === 8,
+    `${await rail.locator('.hc-toolrail__button').count()} Werkzeuge`);
+
+  // Fünf davon gab es bisher nur als Taste — sie waren schlicht unauffindbar.
+  const vorherUnsichtbar = ['drehen', 'spiegeln', 'ausrichten', 'trennen', 'dehnen'];
+  const gefunden = [];
+  for (const id of vorherUnsichtbar) {
+    if (await werkzeug(id).count()) gefunden.push(id);
+  }
+  pruefe('U2', 'Auch die bisher nur per Taste erreichbaren Befehle sind da',
+    gefunden.length === vorherUnsichtbar.length, gefunden.join(' · '));
+
+  const kopfzeile = await page.locator('.hc-editor-toolbar').innerText();
+  pruefe('U3', 'Die Kopfzeile enthält keine Werkzeuge mehr',
+    !/Verschieben|Notiz|Leitung zeichnen/.test(kopfzeile),
+    kopfzeile.replace(/\n/g, ' · ').slice(0, 110));
+
+  // Der Leitungsknopf hat weiterhin drei Stufen.
+  const leitung = werkzeug('leitung');
   await leitung.click();
   await page.waitForTimeout(300);
-  pruefe('U2', 'Ein Klick startet den Leitungsbefehl einmalig',
-    /Leitung zeichnen …/.test(await leitung.innerText()), await leitung.innerText());
+  pruefe('U4', 'Ein Klick startet den Leitungsbefehl',
+    (await leitung.getAttribute('class')).includes('is-active'), await leitung.getAttribute('class'));
 
   await leitung.click();
   await page.waitForTimeout(300);
-  pruefe('U3', 'Ein zweiter Klick macht ihn dauerhaft',
-    /dauerhaft/.test(await leitung.innerText()), await leitung.innerText());
+  pruefe('U5', 'Ein zweiter Klick macht ihn dauerhaft',
+    (await leitung.getAttribute('class')).includes('is-persistent'), await leitung.getAttribute('class'));
 
   await leitung.click();
   await page.waitForTimeout(300);
-  pruefe('U4', 'Ein dritter Klick schaltet ihn aus',
-    /Leitung zeichnen$/.test((await leitung.innerText()).trim()), await leitung.innerText());
+  pruefe('U6', 'Ein dritter Klick schaltet ihn aus',
+    !(await leitung.getAttribute('class')).includes('is-active'), await leitung.getAttribute('class'));
 
-  const kopfzeile = await page.locator('.hc-editor-header').innerText();
-  pruefe('U5', 'Speichern und Verlauf liegen unter einem «Stände»-Knopf',
-    /Stände/.test(kopfzeile) && !/Stand speichern/.test(kopfzeile),
-    kopfzeile.replace(/\n/g, ' · ').slice(0, 120));
+  // Ein Werkzeug ohne passende Auswahl ist abgeblendet statt still wirkungslos.
+  pruefe('U7', 'Drehen ist ohne gewähltes Bauteil gesperrt',
+    await werkzeug('drehen').isDisabled(), 'disabled');
+  pruefe('U8', 'Trennen ist ohne gewählte Leitung gesperrt',
+    await werkzeug('trennen').isDisabled(), 'disabled');
+
+  // Und die Leiste tut dasselbe wie die Taste — ein Weg, nicht zwei.
+  await werkzeug('dehnen').click();
+  await page.waitForTimeout(350);
+  pruefe('U9', 'Der Knopf startet denselben Befehl wie die Taste',
+    /Dehnen/.test(await w.status()), await w.status());
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(250);
+
+  const kopf2 = await page.locator('.hc-editor-header').innerText();
+  pruefe('U10', 'Speichern und Verlauf liegen unter einem «Stände»-Knopf',
+    /Stände/.test(kopf2) && !/Stand speichern/.test(kopf2),
+    kopf2.replace(/\n/g, ' · ').slice(0, 110));
 }
 
 // ── 7. Zahnrad: persönliche Tastenbelegung ────────────────────────────────

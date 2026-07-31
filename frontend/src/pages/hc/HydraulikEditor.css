@@ -1352,3 +1352,99 @@
   border-color: #4f46e5;
   box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.14);
 }
+
+/* ── Werkzeugleiste am Canvasrand ─────────────────────────────────────────
+   Alle Zeichenbefehle an EINER Stelle, senkrecht, nur Symbole — die
+   CAD-Anordnung. Vorher standen drei davon in der Kopfzeile zwischen Menüs
+   und Meldungen, und fünf weitere gab es überhaupt nur als Taste.
+   Sie schwebt über der Zeichenfläche, damit die Canvasgrösse unverändert
+   bleibt und ein eingepasstes Schema nicht springt. */
+.hc-toolrail {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.1);
+  backdrop-filter: blur(4px);
+}
+.hc-toolrail__button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #475569;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.hc-toolrail__button:hover:not(:disabled) {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+.hc-toolrail__button:disabled {
+  color: #cbd5e1;
+  cursor: not-allowed;
+}
+/* Der laufende Befehl ist der wichtigste Zustand im Editor — er darf nicht
+   dezent sein. */
+.hc-toolrail__button.is-active {
+  background: #4f46e5;
+  color: #fff;
+}
+/* Dauerbefehl: derselbe Knopf, aber sichtbar «bleibt an». */
+.hc-toolrail__button.is-persistent::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border: 2px solid #4f46e5;
+  border-radius: 8px;
+}
+/* Die Taste steht klein am Knopf: so lernt man sie beim Klicken nebenbei. */
+.hc-toolrail__key {
+  position: absolute;
+  right: 2px;
+  bottom: 1px;
+  font-size: 8px;
+  font-weight: 800;
+  line-height: 1;
+  color: #94a3b8;
+  pointer-events: none;
+}
+.hc-toolrail__button.is-active .hc-toolrail__key { color: rgba(255, 255, 255, 0.75); }
+.hc-toolrail__button:disabled .hc-toolrail__key { color: #e2e8f0; }
+.hc-toolrail__badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 15px;
+  pointer-events: none;
+}
+
+/* Auf kleinen Bildschirmen legt sich die Leiste waagrecht an den oberen Rand —
+   senkrecht würde sie dort die halbe Zeichenfläche verdecken. */
+@media (max-width: 900px) {
+  .hc-toolrail {
+    flex-direction: row;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+}

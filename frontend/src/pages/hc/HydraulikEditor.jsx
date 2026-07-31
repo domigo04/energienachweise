@@ -18,7 +18,8 @@ import { EDGE_TYPES } from '../../components/hc/edges/FlowEdge';
 import { pairedHandleId, parallelWaypoints, roundedPolylinePath, splitRouteAtCorner, splitRouteAtPoint, reconnectThroughNode, adaptivePolyline, segmentAchse, mitgezogeneWaypoints } from '../../components/hc/edges/geometry';
 import { createHydraulicEdge, canStartHydraulicLine } from './schema/edgeFactory';
 import {
-  ALIGN, DRAW_PIPE, HOME, MOVE, PLACE, escape as escapeMode, finishCommand, initialMode,
+  ALIGN, BREAK, DRAW_PIPE, HOME, MOVE, PLACE, STRETCH,
+  escape as escapeMode, finishCommand, initialMode,
   istBefehl, istModify, modeLabel, startCommand, toggleCommand, zeichnetLeitung,
 } from './schema/editorMode';
 import {
@@ -28,8 +29,9 @@ import {
 } from './schema/cadConstraints';
 import { CORNER, ENDPOINT, GRID, MIDPOINT, NEAREST, PORT, fangStil } from './schema/cadSnap';
 import {
-  abzweigPunkt, labelVerschoben, labelVersatz, leitungVerschieben,
-  routeBereinigen, segmentAusrichten, segmentVerschieben,
+  abzweigPunkt, fensterAus, labelVerschoben, labelVersatz,
+  leitungMitLueckeTrennen, leitungVerschieben, routeBereinigen, routeDehnen,
+  segmentAusrichten, segmentVerschieben,
   entwurfFuerEscape, segmentZumVerschieben, verschiebungLabel,
 } from './schema/cadEdit';
 import {
@@ -1678,6 +1680,15 @@ function EditorInner() {
   const [verschiebung, setVerschiebung] = useState(null);
   const verschiebungRef = useRef(null);
   verschiebungRef.current = verschiebung;
+  // Mit Lücke trennen (BREAK): { edgeId, erster } — der zweite Klick trennt.
+  const [luecke, setLuecke] = useState(null);
+  const lueckeRef = useRef(null);
+  lueckeRef.current = luecke;
+  // Dehnen (STRETCH): erst das Fenster, dann Basis- und Zielpunkt.
+  const [dehnen, setDehnen] = useState(null);   // { ecke1, ecke2, basis, cursor }
+  const dehnenRef = useRef(null);
+  dehnenRef.current = dehnen;
+  const [befehlHinweis, setBefehlHinweis] = useState(null);
   const [schemaName, setSchemaName] = useState('Schema');
   const [projectName, setProjectName] = useState('');
   const [schemaId, setSchemaId]     = useState(null);
@@ -3456,6 +3467,146 @@ function EditorInner() {
     return true;
   }, [verschiebeZiele]);
 
+  // ── Mit Lücke trennen (AutoCAD BREAK) ────────────────────────────────────
+  // Zwei Punkte auf derselben Leitung; das Stück dazwischen fällt weg. Das
+  // trennt AUCH die hydraulische Verbindung — beide Teile enden danach an einem
+  // freien Anker. Genau das ist der Zweck des Befehls, darum sagt es der
+  // Hinweis auch ausdrücklich.
+  const lueckeTrennen = useCallback((edgeId, trefferA, trefferB) => {
+    const edge = edgesRef.current.find(item => item.id === edgeId);
+    if (!edge) return;
+    const route = routePunkte(edge);
+    const ergebnis = leitungMitLueckeTrennen(route, trefferA, trefferB);
+    if (ergebnis.fehler) { setBefehlHinweis(ergebnis.fehler); return; }
+    const layer = layerVonEdge(edge);
+    const ankerA = newId();
+    const ankerB = newId();
+    const zweiteId = newId();
+    snap();
+    setNodes(items => [
+      ...items,
+      cadAnker(ankerA, ergebnis.erste.at(-1), layer),
+      cadAnker(ankerB, ergebnis.zweite[0], layer),
+    ]);
+    setEdges(items => items.flatMap(item => {
+      if (item.id !== edgeId) return [item];
+      const daten = { ...(item.data || {}), cad_polyline:true, polyline_version:1 };
+      // Die eingetragene Länge stimmt nach dem Trennen nicht mehr; sie wird
+      // entfernt statt stillschweigend halbiert (keine erfundene Zahl).
+      delete daten.laenge_m;
+      delete daten.paired_edge_id;
+      return [
+        { ...item, target:ankerA, targetHandle:'center-target', selected:false,
+          data:{ ...daten, points:ergebnis.erste.slice(1, -1) } },
+        { ...item, id:zweiteId, source:ankerB, sourceHandle:'center-source', selected:false,
+          data:{ ...daten, points:ergebnis.zweite.slice(1, -1) } },
+      ];
+    }));
+    setBefehlHinweis(null);
+    setLuecke(null);
+    setSelectedEdgeId(null);
+    setSelectedEdgeSegment(null);
+    setEditorMode(finishCommand(editorModeRef.current));
+  }, [cadAnker, routePunkte, setEdges, setNodes, snap]);
+
+  const lueckeKlick = useCallback((event) => {
+    const aktuell = lueckeRef.current;
+    if (!aktuell) return false;
+    if (event.button != null && event.button !== 0) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    const welt = screenToFlowPosition({ x:event.clientX, y:event.clientY });
+    const edge = edgesRef.current.find(item => item.id === aktuell.edgeId);
+    if (!edge) { setLuecke(null); return true; }
+    const route = routePunkte(edge);
+    let treffer = null;
+    for (let index = 0; index < route.length - 1; index += 1) {
+      const hit = projektionAufSegment(welt, route[index], route[index + 1]);
+      if (hit && (!treffer || hit.distance < treffer.distance)) {
+        treffer = { segmentIndex:index, x:hit.x, y:hit.y, distance:hit.distance };
+      }
+    }
+    if (!treffer) {
+      setBefehlHinweis('Punkt liegt nicht auf der gewählten Leitung.');
+      return true;
+    }
+    if (!aktuell.erster) {
+      setBefehlHinweis(null);
+      setLuecke({ ...aktuell, erster:treffer });
+      return true;
+    }
+    lueckeTrennen(aktuell.edgeId, aktuell.erster, treffer);
+    return true;
+  }, [lueckeTrennen, routePunkte, screenToFlowPosition]);
+
+  // ── Dehnen (AutoCAD STRETCH) ─────────────────────────────────────────────
+  // Fenster aufziehen, Basispunkt, Zielpunkt: was im Fenster liegt, wandert;
+  // der Rest bleibt stehen. Dadurch werden Leitungen länger statt versetzt.
+  const dehnenAnwenden = useCallback((fenster, delta) => {
+    if (!delta.x && !delta.y) return;
+    // Bauteile und freie Enden im Fenster wandern mit; ihre Leitungen folgen
+    // ohnehin den Anschlüssen.
+    const bewegteNodes = nodesRef.current.filter(node => {
+      const punkt = node.type === 'junction'
+        ? node.position
+        : { x:(node.position?.x || 0) + 20, y:(node.position?.y || 0) + 20 };
+      return punkt && punkt.x >= fenster.x1 && punkt.x <= fenster.x2
+        && punkt.y >= fenster.y1 && punkt.y <= fenster.y2;
+    }).map(node => node.id);
+    const bewegteIds = new Set(bewegteNodes);
+
+    const neuePunkte = new Map();
+    edgesRef.current.forEach(edge => {
+      const route = routePunkte(edge);
+      if (route.length < 2) return;
+      // Ein Ende, dessen Node ohnehin mitwandert, muss hier nicht zusätzlich
+      // gedehnt werden — sonst bewegt es sich doppelt.
+      const ergebnis = routeDehnen(route, fenster, delta, {
+        startFest:true, endFest:true,
+      });
+      if (ergebnis.bewegt > 0) neuePunkte.set(edge.id, ergebnis.route.slice(1, -1));
+    });
+
+    if (!bewegteIds.size && !neuePunkte.size) {
+      setBefehlHinweis('Im Fenster liegt nichts Dehnbares.');
+      return;
+    }
+    snap();
+    if (bewegteIds.size) {
+      setNodes(items => items.map(node => (bewegteIds.has(node.id)
+        ? { ...node, position:{ x:(node.position?.x || 0) + delta.x, y:(node.position?.y || 0) + delta.y } }
+        : node)));
+    }
+    if (neuePunkte.size) {
+      setEdges(items => items.map(edge => (neuePunkte.has(edge.id)
+        ? { ...edge, data:{ ...(edge.data || {}), cad_polyline:true, points:neuePunkte.get(edge.id) } }
+        : edge)));
+    }
+    setBefehlHinweis(null);
+  }, [routePunkte, setEdges, setNodes, snap]);
+
+  const dehnenKlick = useCallback((event) => {
+    const aktuell = dehnenRef.current;
+    if (!aktuell) return false;
+    if (event.button != null && event.button !== 0) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    const raw = screenToFlowPosition({ x:event.clientX, y:event.clientY });
+    const punkt = rasterPunkt(raw, drawingConfig.grid_size);
+    if (!aktuell.ecke1) { setDehnen({ ...aktuell, ecke1:punkt, cursor:punkt }); return true; }
+    if (!aktuell.ecke2) { setDehnen({ ...aktuell, ecke2:punkt, cursor:punkt }); return true; }
+    if (!aktuell.basis) { setDehnen({ ...aktuell, basis:punkt, cursor:punkt }); return true; }
+    const ziel = constrainPoint(aktuell.basis, raw, {
+      ortho:orthoAnRef.current, shift:event.shiftKey, grid:drawingConfig.grid_size,
+    });
+    dehnenAnwenden(fensterAus(aktuell.ecke1, aktuell.ecke2), {
+      x:ziel.x - aktuell.basis.x, y:ziel.y - aktuell.basis.y,
+    });
+    setDehnen(null);
+    setEditorMode(finishCommand(editorModeRef.current));
+    return true;
+  }, [dehnenAnwenden, drawingConfig.grid_size, screenToFlowPosition]);
+
   const verschiebenKlick = useCallback((event) => {
     const aktuell = verschiebungRef.current;
     if (!aktuell) return false;
@@ -3701,6 +3852,9 @@ function EditorInner() {
           setLeitungsGuides([]);
           setLaengenPuffer(null);
           setVerschiebung(null);
+          setLuecke(null);
+          setDehnen(null);
+          setBefehlHinweis(null);
           platzierVorschauRef.current = null;
           setPlatzierVorschau(null);
           setInlineTreffer(null);
@@ -3733,6 +3887,26 @@ function EditorInner() {
           };
           leitungsEntwurfRef.current = next;
           setLeitungsEntwurf(next);
+          return;
+        }
+        // Mit Lücke trennen (BREAK): braucht eine gewählte Leitung.
+        if (key === drawingConfig.shortcut_break) {
+          ev.preventDefault();
+          if (!selectedEdgeId) {
+            setBefehlHinweis('Zuerst die Leitung anklicken, die getrennt werden soll.');
+            return;
+          }
+          setBefehlHinweis(null);
+          setLuecke({ edgeId:selectedEdgeId, erster:null });
+          setEditorMode(startCommand(BREAK));
+          return;
+        }
+        // Dehnen (STRETCH): Fenster, Basispunkt, Zielpunkt.
+        if (key === drawingConfig.shortcut_stretch) {
+          ev.preventDefault();
+          setBefehlHinweis(null);
+          setDehnen({ ecke1:null, ecke2:null, basis:null, cursor:null });
+          setEditorMode(startCommand(STRETCH));
           return;
         }
         // Verschieben (CAD-MOVE): frei belegbare Taste. Mit Shift wandert die
@@ -4197,6 +4371,7 @@ function EditorInner() {
     }
     // Im Verschieben-Befehl setzt jeder Klick einen Punkt — auch auf einem
     // Bauteil. Sonst liesse sich der Basispunkt nie an ein Bauteil legen.
+    if (dehnenKlick(event)) return;
     if (verschiebenKlick(event)) return;
     // Im Zeichenmodus oder bei aktivem Entwurf: Klick auf ein Bauteil startet/
     // führt die Leitung an dessen Anschluss (nur bei Anschluss-Treffer).
@@ -4211,7 +4386,7 @@ function EditorInner() {
     setSelectedEdgeSegment(null);
     setSelectedLabelEdgeId(null);
     setInspectorOpen(true);
-  }, [cadKlick, platzierenKlick, verschiebenKlick, nadelSetzen, screenToFlowPosition]);
+  }, [cadKlick, platzierenKlick, verschiebenKlick, nadelSetzen, screenToFlowPosition, dehnenKlick]);
   const onNodeDoubleClick = useCallback((_, node) => {
     if (node.type === 'label') return; // Textblock: Doppelklick editiert inline
     if (!leitungsEntwurfRef.current) setAuslegung(node);
@@ -4280,6 +4455,10 @@ function EditorInner() {
 
   const onEdgeClick = useCallback((event, edge) => {
     if (istBefehl(editorModeRef.current, ALIGN)) { ausrichtenKlick(event); return; }
+    // Der Trennbefehl braucht die Punkte AUF der Leitung — der Klick darf
+    // deshalb nicht bei der Auswahl hängen bleiben.
+    if (lueckeKlick(event)) return;
+    if (dehnenKlick(event)) return;
     if (verschiebenKlick(event)) return;
     // Im Platzierungsbefehl setzt ein Klick auf eine Leitung das Bauteil — und
     // teilt sie dabei. Ohne das würde die Leitung den Klick verschlucken,
@@ -4302,7 +4481,7 @@ function EditorInner() {
     setSelected(null);
     setSelectedLabelEdgeId(null);
     setInspectorOpen(true);
-  }, [ausrichtenKlick, cadKlick, platzierenKlick, routePunkte, screenToFlowPosition, verschiebenKlick]);
+  }, [ausrichtenKlick, cadKlick, platzierenKlick, routePunkte, screenToFlowPosition, verschiebenKlick, lueckeKlick, dehnenKlick]);
 
   const spiegelKopieErstellen = useCallback((edgeId, axisStart, axisEnd) => {
     const edge = edgesRef.current.find(item => item.id === edgeId);
@@ -4354,6 +4533,8 @@ function EditorInner() {
       nadelSetzen(screenToFlowPosition({ x:event.clientX, y:event.clientY }));
       return;
     }
+    if (dehnenKlick(event)) return;
+    if (lueckeKlick(event)) return;
     if (verschiebenKlick(event)) return;
     if (spiegelAchse) {
       event.preventDefault();
@@ -4381,7 +4562,7 @@ function EditorInner() {
     setSelectedEdgeSegment(null);
     setSelectedLabelEdgeId(null);
     setMarkierteEdgeIds([]);
-  }, [cadKlick, drawingConfig.grid_size, screenToFlowPosition, selected, selectedEdgeId, spiegelAchse, spiegelKopieErstellen, platzierenKlick, verschiebenKlick, nadelSetzen]);
+  }, [cadKlick, drawingConfig.grid_size, screenToFlowPosition, selected, selectedEdgeId, spiegelAchse, spiegelKopieErstellen, platzierenKlick, verschiebenKlick, nadelSetzen, dehnenKlick, lueckeKlick]);
 
   const canvasMouseMove = useCallback((event) => {
     // Platzierungsvorschau folgt dem Cursor — mit Raster und Ausrichtungslinien.
@@ -4421,6 +4602,16 @@ function EditorInner() {
     }
     // Verschieben: der Vorschaupfeil hängt am gefangenen Zielpunkt — angezeigt
     // wird exakt der Vektor, den der nächste Klick anwendet.
+    if (dehnenRef.current) {
+      const raw = screenToFlowPosition({ x:event.clientX, y:event.clientY });
+      const aktuell = dehnenRef.current;
+      const cursor = aktuell.basis
+        ? constrainPoint(aktuell.basis, raw, {
+          ortho:orthoAnRef.current, shift:event.shiftKey, grid:drawingConfig.grid_size })
+        : rasterPunkt(raw, drawingConfig.grid_size);
+      setDehnen(current => (current ? { ...current, cursor } : current));
+      return;
+    }
     if (verschiebungRef.current?.basis) {
       const raw = screenToFlowPosition({ x:event.clientX, y:event.clientY });
       const cursor = constrainPoint(verschiebungRef.current.basis, raw, {
@@ -4714,6 +4905,8 @@ function EditorInner() {
                 ['shortcut_mirror', 'Bauteil spiegeln'],
                 ['shortcut_align', 'Ausrichten (Shift: Bauteil aufs Raster)'],
                 ['shortcut_move', 'Verschieben (Shift: ganze Leitung)'],
+                ['shortcut_break', 'Mit Lücke trennen'],
+                ['shortcut_stretch', 'Dehnen'],
               ].map(([feld, label]) => (
                 <React.Fragment key={feld}>
                   <label htmlFor={feld}>{label}</label>
@@ -4939,6 +5132,22 @@ function EditorInner() {
                 </div>
               </Panel>
             )}
+            {(luecke || dehnen || befehlHinweis) && (
+              <Panel position="top-center">
+                <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:8, padding:'7px 12px', borderRadius:18,
+                  background:befehlHinweis ? '#b91c1c' : '#0f766e', color:'white', fontSize:10, fontWeight:700,
+                  boxShadow:'0 6px 16px rgba(15,118,110,.28)' }}>
+                  {befehlHinweis
+                    || (luecke && (luecke.erster
+                      ? 'Mit Lücke trennen · zweiten Punkt auf der Leitung klicken (trennt die hydraulische Verbindung)'
+                      : 'Mit Lücke trennen · ersten Punkt auf der Leitung klicken'))
+                    || (dehnen && (!dehnen.ecke1 ? 'Dehnen · erste Fensterecke klicken'
+                      : !dehnen.ecke2 ? 'Dehnen · zweite Fensterecke klicken'
+                      : !dehnen.basis ? 'Dehnen · Basispunkt klicken'
+                      : 'Dehnen · Zielpunkt klicken (Shift kehrt den Fang um)'))}
+                </div>
+              </Panel>
+            )}
             {verschiebung && (
               <Panel position="top-center">
                 <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:8, padding:'7px 12px', borderRadius:18,
@@ -5076,6 +5285,43 @@ function EditorInner() {
                   <line x1={spiegelAchse.start.x} y1={spiegelAchse.start.y}
                     x2={spiegelAchse.cursor.x} y2={spiegelAchse.cursor.y}
                     stroke="#7c3aed" strokeWidth="2" strokeDasharray="9 6" />
+                )}
+                {/* Mit Lücke trennen: der bereits gesetzte erste Punkt. */}
+                {luecke?.erster && (
+                  <g pointerEvents="none">
+                    <circle cx={luecke.erster.x} cy={luecke.erster.y} r={5 / zoomAnzeige}
+                      fill="white" stroke="#0f766e" strokeWidth={2 / zoomAnzeige} />
+                    <line x1={luecke.erster.x} y1={luecke.erster.y - 11 / zoomAnzeige}
+                      x2={luecke.erster.x} y2={luecke.erster.y + 11 / zoomAnzeige}
+                      stroke="#0f766e" strokeWidth={1.5 / zoomAnzeige} />
+                  </g>
+                )}
+                {/* Dehnen: Auswahlfenster und Verschiebevektor. */}
+                {dehnen?.ecke1 && (
+                  <g pointerEvents="none">
+                    <rect
+                      x={Math.min(dehnen.ecke1.x, (dehnen.ecke2 || dehnen.cursor || dehnen.ecke1).x)}
+                      y={Math.min(dehnen.ecke1.y, (dehnen.ecke2 || dehnen.cursor || dehnen.ecke1).y)}
+                      width={Math.abs((dehnen.ecke2 || dehnen.cursor || dehnen.ecke1).x - dehnen.ecke1.x)}
+                      height={Math.abs((dehnen.ecke2 || dehnen.cursor || dehnen.ecke1).y - dehnen.ecke1.y)}
+                      fill="rgba(15,118,110,0.10)" stroke="#0f766e"
+                      strokeWidth={1.5 / zoomAnzeige}
+                      strokeDasharray={`${6 / zoomAnzeige} ${4 / zoomAnzeige}`} />
+                    {dehnen.basis && dehnen.cursor && (
+                      <>
+                        <line x1={dehnen.basis.x} y1={dehnen.basis.y}
+                          x2={dehnen.cursor.x} y2={dehnen.cursor.y}
+                          stroke="#0f766e" strokeWidth={2 / zoomAnzeige}
+                          strokeDasharray={`${9 / zoomAnzeige} ${6 / zoomAnzeige}`} />
+                        <text x={dehnen.cursor.x + 12 / zoomAnzeige} y={dehnen.cursor.y - 12 / zoomAnzeige}
+                          fill="#0f766e" fontSize={11 / zoomAnzeige} fontWeight="700"
+                          stroke="#ffffff" strokeWidth={3 / zoomAnzeige}
+                          strokeLinejoin="round" paintOrder="stroke">
+                          {verschiebungLabel({ x:dehnen.cursor.x - dehnen.basis.x, y:dehnen.cursor.y - dehnen.basis.y })}
+                        </text>
+                      </>
+                    )}
+                  </g>
                 )}
                 {/* Notiz-Stecknadeln: sitzen in Weltkoordinaten, zeigen beim
                     Überfahren den Titel und öffnen den Journaleintrag. */}

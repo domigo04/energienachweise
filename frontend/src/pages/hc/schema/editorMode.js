@@ -19,11 +19,15 @@ export const ALIGN = 'align';
 // Die Auswahl steht bereits fest, wenn der Befehl startet — sie liegt in der
 // Nutzlast, damit ein Klick auf die Zeichenfläche sie nicht abwählt.
 export const MOVE = 'move';
+// Mit Lücke trennen (AutoCAD BREAK): zwei Punkte auf derselben Leitung.
+export const BREAK = 'break';
+// Dehnen (AutoCAD STRETCH): Fenster aufziehen, dann Basis- und Zielpunkt.
+export const STRETCH = 'stretch';
 
 // Der Grundzustand. Nach dem Laden und nach jedem ESC gilt genau das.
 export const HOME = Object.freeze({ type: MODIFY, persistent: false, payload: null });
 
-const BEFEHLE = new Set([MODIFY, DRAW_PIPE, PLACE, MIRROR, ALIGN, MOVE]);
+const BEFEHLE = new Set([MODIFY, DRAW_PIPE, PLACE, MIRROR, ALIGN, MOVE, BREAK, STRETCH]);
 
 /** Grundzustand. Absichtlich eine Funktion — nie eine gemeinsame Referenz teilen. */
 export function initialMode() {
@@ -84,6 +88,8 @@ export const MODE_LABEL = {
   [MIRROR]: 'Spiegeln',
   [ALIGN]: 'Ausrichten',
   [MOVE]: 'Verschieben',
+  [BREAK]: 'Mit Lücke trennen',
+  [STRETCH]: 'Dehnen',
 };
 
 export function modeLabel(mode) {

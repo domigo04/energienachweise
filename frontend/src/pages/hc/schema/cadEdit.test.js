@@ -3,8 +3,8 @@ import {
   abzweigPunkt,
   entwurfFuerEscape,
   eckpunktEntfernen, eckpunktSetzen, gripsFuerRoute,
-  istKollinear, labelSichtbar, labelVerschoben, labelVersatz,
-  leitungVerschieben, routeBereinigen, routeIstGueltig,
+  fensterAus, imFenster, istKollinear, labelSichtbar, labelVerschoben, labelVersatz,
+  leitungMitLueckeTrennen, leitungVerschieben, routeBereinigen, routeDehnen, routeIstGueltig,
   segmentAusrichten, segmentOrientierung, segmentVerschieben,
   segmentZumVerschieben, verschiebungLabel,
 } from './cadEdit';
@@ -374,5 +374,88 @@ describe('Leitungsbeschriftung', () => {
     expect(labelVerschoben({ x: 10, y: 0 }, { x: 5, y: -3 })).toEqual({ x: 15, y: -3 });
     expect(labelVerschoben({ x: 0, y: 0 }, { x: 12, y: 7 }, { grid: 10 })).toEqual({ x: 10, y: 10 });
     expect(labelVerschoben(null, null)).toEqual({ x: 0, y: 0 });
+  });
+});
+
+
+describe('Mit Lücke trennen (BREAK)', () => {
+  //  A ────────── B ────────── C   (0,0) (600,0) (600,400)
+  const route = [{ x: 0, y: 0 }, { x: 600, y: 0 }, { x: 600, y: 400 }];
+
+  it('schneidet das Stück zwischen den zwei Punkten heraus', () => {
+    const { erste, zweite } = leitungMitLueckeTrennen(
+      route, { segmentIndex: 0, x: 200, y: 0 }, { segmentIndex: 0, x: 400, y: 0 });
+    expect(erste).toEqual([{ x: 0, y: 0 }, { x: 200, y: 0 }]);
+    expect(zweite).toEqual([{ x: 400, y: 0 }, { x: 600, y: 0 }, { x: 600, y: 400 }]);
+  });
+
+  it('ist unabhängig von der Reihenfolge der zwei Klicks', () => {
+    const vorwaerts = leitungMitLueckeTrennen(
+      route, { segmentIndex: 0, x: 200, y: 0 }, { segmentIndex: 1, x: 600, y: 100 });
+    const rueckwaerts = leitungMitLueckeTrennen(
+      route, { segmentIndex: 1, x: 600, y: 100 }, { segmentIndex: 0, x: 200, y: 0 });
+    expect(vorwaerts).toEqual(rueckwaerts);
+  });
+
+  it('trennt über eine Ecke hinweg und lässt die Ecke im richtigen Teil', () => {
+    const { erste, zweite } = leitungMitLueckeTrennen(
+      route, { segmentIndex: 0, x: 300, y: 0 }, { segmentIndex: 1, x: 600, y: 250 });
+    expect(erste).toEqual([{ x: 0, y: 0 }, { x: 300, y: 0 }]);
+    expect(zweite).toEqual([{ x: 600, y: 250 }, { x: 600, y: 400 }]);
+  });
+
+  it('verweigert zwei Punkte auf derselben Stelle', () => {
+    const { fehler } = leitungMitLueckeTrennen(
+      route, { segmentIndex: 0, x: 300, y: 0 }, { segmentIndex: 0, x: 300, y: 0 });
+    expect(fehler).toMatch(/Lücke/);
+  });
+
+  it('verweigert einen Punkt neben der Leitung', () => {
+    expect(leitungMitLueckeTrennen(route, { segmentIndex: 9, x: 0, y: 0 },
+      { segmentIndex: 0, x: 100, y: 0 }).fehler).toBeTruthy();
+  });
+});
+
+describe('Dehnen (STRETCH)', () => {
+  const route = [{ x: 0, y: 0 }, { x: 500, y: 0 }, { x: 500, y: 300 }];
+
+  it('bewegt nur die Punkte im Fenster — das Segment wird dadurch länger', () => {
+    const fenster = fensterAus({ x: 400, y: -100 }, { x: 700, y: 100 });
+    const { route: neu, bewegt } = routeDehnen(route, fenster, { x: 200, y: 0 },
+      { startFest: true, endFest: true });
+    expect(bewegt).toBe(1);
+    expect(neu[0]).toEqual({ x: 0, y: 0 });        // ausserhalb: bleibt
+    expect(neu[1]).toEqual({ x: 700, y: 0 });      // im Fenster: wandert
+    expect(neu[2]).toEqual({ x: 500, y: 300 });    // ausserhalb: bleibt
+    // Genau das ist der Unterschied zum Verschieben: die Länge ändert sich.
+    expect(neu[1].x - neu[0].x).toBe(700);
+  });
+
+  it('schützt die hydraulischen Enden, auch wenn sie im Fenster liegen', () => {
+    const alles = fensterAus({ x: -1000, y: -1000 }, { x: 1000, y: 1000 });
+    const { route: neu, bewegt } = routeDehnen(route, alles, { x: 50, y: 50 });
+    expect(neu[0]).toEqual({ x: 0, y: 0 });
+    expect(neu[2]).toEqual({ x: 500, y: 300 });
+    expect(bewegt).toBe(1);
+  });
+
+  it('lässt freie Enden mitwandern, wenn sie nicht geschützt sind', () => {
+    const alles = fensterAus({ x: -1000, y: -1000 }, { x: 1000, y: 1000 });
+    const { bewegt } = routeDehnen(route, alles, { x: 50, y: 0 },
+      { startFest: false, endFest: false });
+    expect(bewegt).toBe(3);
+  });
+
+  it('meldet eine wirkungslose Dehnung über bewegt = 0', () => {
+    const daneben = fensterAus({ x: 900, y: 900 }, { x: 1000, y: 1000 });
+    expect(routeDehnen(route, daneben, { x: 50, y: 0 }).bewegt).toBe(0);
+  });
+
+  it('kennt das Fenster unabhängig von der Ecken-Reihenfolge', () => {
+    const a = fensterAus({ x: 100, y: 100 }, { x: 0, y: 0 });
+    expect(a).toEqual({ x1: 0, y1: 0, x2: 100, y2: 100 });
+    expect(imFenster({ x: 50, y: 50 }, a)).toBe(true);
+    expect(imFenster({ x: 150, y: 50 }, a)).toBe(false);
+    expect(imFenster(null, a)).toBe(false);
   });
 });

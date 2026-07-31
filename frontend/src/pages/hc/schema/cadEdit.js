@@ -146,6 +146,83 @@ export function leitungVerschieben(route, delta, { startFrei = false, endFrei = 
   };
 }
 
+/**
+ * Eine Leitung MIT LÜCKE trennen (AutoCAD BREAK).
+ *
+ * Zwei Punkte auf derselben Leitung; alles dazwischen fällt weg. Zurück kommen
+ * die beiden Teilrouten — die erste endet am ersten Punkt, die zweite beginnt
+ * am zweiten. Die Reihenfolge der beiden Klicks ist egal: massgebend ist die
+ * Lage entlang der Leitung, nicht die Reihenfolge der Eingabe.
+ *
+ * `a` und `b`: { segmentIndex, x, y } — Treffer auf der Route.
+ * Rückgabe: { erste, zweite } (je eine vollständige Punktliste) oder
+ * { fehler } — es wird nie geraten.
+ */
+export function leitungMitLueckeTrennen(route, a, b) {
+  if (!Array.isArray(route) || route.length < 2) return { fehler: 'Keine Leitung.' };
+  const gueltig = (h) => h && Number.isInteger(h.segmentIndex)
+    && h.segmentIndex >= 0 && h.segmentIndex < route.length - 1
+    && Number.isFinite(h.x) && Number.isFinite(h.y);
+  if (!gueltig(a) || !gueltig(b)) return { fehler: 'Beide Punkte müssen auf der Leitung liegen.' };
+
+  // Position entlang der Leitung: Segmentindex, dann Abstand zum Segmentanfang.
+  const laengsmass = (h) => h.segmentIndex
+    + Math.hypot(h.x - route[h.segmentIndex].x, h.y - route[h.segmentIndex].y)
+      / (Math.hypot(route[h.segmentIndex + 1].x - route[h.segmentIndex].x,
+                    route[h.segmentIndex + 1].y - route[h.segmentIndex].y) || 1);
+  const [vorn, hinten] = laengsmass(a) <= laengsmass(b) ? [a, b] : [b, a];
+  if (Math.hypot(hinten.x - vorn.x, hinten.y - vorn.y) < 0.5) {
+    return { fehler: 'Die zwei Punkte liegen aufeinander — es entstünde keine Lücke.' };
+  }
+
+  const erste = [...route.slice(0, vorn.segmentIndex + 1), { x: vorn.x, y: vorn.y }];
+  const zweite = [{ x: hinten.x, y: hinten.y }, ...route.slice(hinten.segmentIndex + 1)];
+  if (erste.length < 2 || zweite.length < 2) {
+    return { fehler: 'Die Lücke würde ein Leitungsende verschlucken.' };
+  }
+  return { erste, zweite };
+}
+
+// ── Dehnen (AutoCAD STRETCH) ───────────────────────────────────────────────
+//
+// Im Auswahlfenster liegende Punkte wandern, alle übrigen bleiben stehen. Ein
+// Segment, von dem nur ein Ende im Fenster liegt, wird dadurch länger oder
+// kürzer — genau das ist der Unterschied zum Verschieben.
+
+/** Rechteck aus zwei beliebigen Ecken (Reihenfolge egal). */
+export const fensterAus = (a, b) => ({
+  x1: Math.min(a.x, b.x), y1: Math.min(a.y, b.y),
+  x2: Math.max(a.x, b.x), y2: Math.max(a.y, b.y),
+});
+
+export const imFenster = (punkt, fenster) => Boolean(punkt) && Boolean(fenster)
+  && punkt.x >= fenster.x1 && punkt.x <= fenster.x2
+  && punkt.y >= fenster.y1 && punkt.y <= fenster.y2;
+
+/**
+ * Route dehnen: nur Punkte im Fenster erhalten den Vektor.
+ *
+ * `endenFest` schützt die beiden hydraulischen Enden — sie hängen an einem
+ * Bauteil und dürfen sich nie allein bewegen (dieselbe Regel wie beim
+ * Ausrichten und Verschieben).
+ *
+ * Rückgabe: { route, bewegt } — `bewegt` zählt die tatsächlich verschobenen
+ * Punkte, damit der Aufrufer eine wirkungslose Dehnung erkennen kann.
+ */
+export function routeDehnen(route, fenster, delta, { startFest = true, endFest = true } = {}) {
+  if (!Array.isArray(route) || !fenster) return { route: route || [], bewegt: 0 };
+  const dx = Number(delta?.x) || 0;
+  const dy = Number(delta?.y) || 0;
+  let bewegt = 0;
+  const neu = route.map((punkt, index) => {
+    const geschuetzt = (index === 0 && startFest) || (index === route.length - 1 && endFest);
+    if (geschuetzt || !imFenster(punkt, fenster)) return { x: punkt.x, y: punkt.y };
+    bewegt += 1;
+    return { x: punkt.x + dx, y: punkt.y + dy };
+  });
+  return { route: neu, bewegt };
+}
+
 // ── Leitungsbeschriftung (DN / m') ────────────────────────────────────────
 //
 // Die Beschriftung sitzt normalerweise in der Streckenmitte. Im echten Plan

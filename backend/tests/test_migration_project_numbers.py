@@ -5,6 +5,10 @@ Datenbank, die bereits Firmen und Projekte enthält. Nichts darf verloren gehen,
 und ein zweiter Lauf darf nichts kaputt machen.
 """
 from datetime import datetime
+import os
+import shutil
+import subprocess
+import sys
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -251,3 +255,37 @@ def test_neustart_nach_migration_verliert_keine_daten(bestand):
     with engine.connect() as conn:
         anzahl = conn.execute(text("SELECT COUNT(*) FROM hc_projects")).scalar()
     assert anzahl == vorher
+
+
+def test_alembic_upgrade_laed_alle_fremdschluessel_zieltabellen(tmp_path):
+    """Der Railway-Pre-Deploy muss mit einer leeren Datenbank durchlaufen.
+
+    Das deckt insbesondere vergessene Modellimporte in ``alembic/env.py`` ab:
+    SQLAlchemy kann die Metadaten sonst wegen eines unbekannten FK-Ziels nicht
+    sortieren und Railway beendet den Deploy noch vor dem App-Start.
+    """
+    backend = Path(__file__).resolve().parents[1]
+    clean_backend = tmp_path / "backend"
+    shutil.copytree(
+        backend / "alembic",
+        clean_backend / "alembic",
+        ignore=shutil.ignore_patterns("* 2.py", "__pycache__"),
+    )
+    shutil.copy2(backend / "alembic.ini", clean_backend / "alembic.ini")
+    env = os.environ.copy()
+    env.update({
+        "DATABASE_URL": f"sqlite:///{tmp_path / 'railway-predeploy.db'}",
+        "ENVIRONMENT": "test",
+        "PYTHONPATH": os.pathsep.join(
+            filter(None, [str(backend), env.get("PYTHONPATH")])
+        ),
+    })
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", "-c", "alembic.ini", "upgrade", "head"],
+        cwd=clean_backend,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

@@ -429,6 +429,63 @@ kopf('Gedrehtes Bauteil: die Flussachse bleibt eine Achse');
   }
 }
 
+// ── 10. 180°-Drehung dreht auch die Anschlüsse mit ────────────────────────
+kopf('Gedrehtes Bauteil: die Leitung von oben kommt weiter von oben');
+{
+  // Pumpe in einer senkrechten Leitung: A kommt von oben an «top»,
+  // B geht unten an «bottom» weiter.
+  const senkrecht = (id, source, sourceHandle, target, targetHandle) => ({
+    id, source, sourceHandle, target, targetHandle, type: 'flow',
+    data: { layer_id: 'heizung_vl', cad_polyline: true, polyline_version: 1, points: [], dn: 32 },
+    style: { stroke: '#ef4444', strokeWidth: 4.5 },
+  });
+  await w.graphSetzen({
+    nodes: [
+      { id: 'oben', type: 'junction', position: { x: 517, y: 120 }, data: { cad_anchor: true } },
+      { id: 'unten', type: 'junction', position: { x: 517, y: 800 }, data: { cad_anchor: true } },
+      { id: 'p1', type: 'pump', position: { x: 500, y: 400 }, data: { nr: 1 } },
+    ],
+    edges: [
+      senkrecht('e1', 'oben', 'center-source', 'p1', 'top'),
+      senkrecht('e2', 'p1', 'bottom', 'unten', 'center-target'),
+    ],
+    layer_config: {},
+  });
+  await w.laden();
+
+  const anschluesse = async () => {
+    const g = await w.graphLesen();
+    const e1 = (g.edges || []).find(e => e.id === 'e1');
+    const e2 = (g.edges || []).find(e => e.id === 'e2');
+    return { e1: e1?.targetHandle, e2: e2?.sourceHandle };
+  };
+
+  const vorher = await anschluesse();
+  pruefe('P1', 'Ausgangslage: von oben an «top», nach unten an «bottom»',
+    vorher.e1 === 'top' && vorher.e2 === 'bottom', JSON.stringify(vorher));
+
+  // Zweimal drehen = 180°.
+  await page.locator('.react-flow__node[data-id="p1"]').click();
+  await page.waitForTimeout(300);
+  await page.keyboard.press('d');
+  await page.waitForTimeout(400);
+  await page.keyboard.press('d');
+  await page.waitForTimeout(1600);
+
+  const nachher = await anschluesse();
+  pruefe('P2', 'Nach 180° hängt die Leitung von oben am jetzt oberen Anschluss',
+    nachher.e1 === 'bottom' && nachher.e2 === 'top', JSON.stringify(nachher));
+
+  // Und die Leitungen laufen weiterhin gerade durch — keine Schlaufe untendurch.
+  const breite = await page.evaluate(() => {
+    const kasten = [...document.querySelectorAll('.react-flow__edge path')]
+      .map(p => p.getBBox());
+    return Math.max(...kasten.map(b => b.width));
+  });
+  pruefe('P3', 'Keine Leitung läuft um das Bauteil herum',
+    breite <= 4, `breitester Leitungsverlauf ${Math.round(breite)} px`);
+}
+
 pruefe('X', 'keine Konsolenfehler', w.fehler.length === 0, w.fehler.slice(0, 3).join(' || '));
 await page.screenshot({ path: `${OUT}/bedienung.png` });
 const offen = bilanz(OUT);

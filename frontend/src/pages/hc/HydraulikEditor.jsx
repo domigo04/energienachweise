@@ -16,7 +16,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import './HydraulikEditor.css';
 import { NODE_TYPES, NUMMERIERT, ROTATABLE } from '../../components/hc/nodes/HydraulikNodes';
-import { gedrehteSeite } from '../../components/hc/nodes/anschlussSeite';
+import { anfahrtsSeite, anschluesseNachDrehung, gedrehteSeite } from '../../components/hc/nodes/anschlussSeite';
 import { EDGE_TYPES } from '../../components/hc/edges/FlowEdge';
 import { pairedHandleId, parallelWaypoints, roundedPolylinePath, splitRouteAtCorner, splitRouteAtPoint, reconnectThroughNode, adaptivePolyline, segmentAchse, mitgezogeneWaypoints } from '../../components/hc/edges/geometry';
 import { createHydraulicEdge, canStartHydraulicLine } from './schema/edgeFactory';
@@ -2104,28 +2104,6 @@ function EditorInner() {
     return () => document.getElementById('hc-flow-anim')?.remove();
   }, []);
 
-  // 90°-Drehung des gewählten Bauteils (nur Armaturen; Anschlüsse drehen mit).
-  const rotateNode = useCallback((id) => {
-    snap();
-    setNodes(ns => ns.map(x => (x.id === id && ROTATABLE.has(x.type))
-      ? { ...x, data: { ...x.data, rotation: (((x.data?.rotation || 0) + 90) % 360) } }
-      : x));
-    // Nach dem Neuzeichnen der Drehung erneut vermessen — zwei Frames, damit die
-    // Handle-Bounds zuverlässig NACH dem Layout stimmen (sonst bleibt der
-    // Fangpunkt teilweise auf der alten Position stehen).
-    requestAnimationFrame(() => requestAnimationFrame(() => updateNodeInternals(id)));
-  }, [setNodes, snap, updateNodeInternals]);
-
-  // Bauteil horizontal spiegeln (Feedback Dominic). Wie beim Drehen müssen die
-  // Handle-Bounds nach der Transformation neu vermessen werden.
-  const mirrorNode = useCallback((id) => {
-    snap();
-    setNodes(ns => ns.map(x => (x.id === id && ROTATABLE.has(x.type))
-      ? { ...x, data: { ...x.data, mirrored: !x.data?.mirrored } }
-      : x));
-    requestAnimationFrame(() => requestAnimationFrame(() => updateNodeInternals(id)));
-  }, [setNodes, snap, updateNodeInternals]);
-
   // Bauteil auf das Raster ausrichten (an Ebene ausrichten).
   const alignNode = useCallback((id) => {
     snap();
@@ -2204,6 +2182,89 @@ function EditorInner() {
     ];
     return anschlussSeite(bounds.find(item => item.id === handleId), internal);
   }, [getInternalNode]);
+
+  // Die Leitungen eines Bauteils nach einer Drehung/Spiegelung neu zuordnen.
+  //
+  // Dreht man ein Bauteil um 180°, wandert der Anschluss, der oben lag, nach
+  // unten. Die Leitung bliebe daran hängen und müsste unter dem Bauteil
+  // durchlaufen — sie käme von unten statt von oben (Dominic 2026-07-31).
+  // Richtig ist: die Leitung, die von oben kommt, hängt danach an dem
+  // Anschluss, der jetzt oben liegt.
+  //
+  // Die Regel selbst ist rein und getestet (`nodes/anschlussSeite.js`); hier
+  // werden nur die Anfahrten gemessen und das Ergebnis eingetragen.
+  const leitungenNeuZuordnen = useCallback((id, rotation, mirrored) => {
+    const internal = getInternalNode(id);
+    const handles = [
+      ...(internal?.internals?.handleBounds?.source || []),
+      ...(internal?.internals?.handleBounds?.target || []),
+    ]
+      .filter(handle => handle?.id && handle?.position)
+      .map(handle => ({ id:handle.id, position:String(handle.position).toLowerCase() }));
+    if (!handles.length) return;
+
+    // Die Anfahrt kommt aus der GEZEICHNETEN Geometrie: dem ersten Eckpunkt der
+    // Leitung, sonst ihrem anderen Ende. Die berechnete Route taugt hier nicht —
+    // ihr Anschluss-Eckpunkt richtet sich nach der alten Seite.
+    const anschluesse = [];
+    for (const edge of edgesRef.current) {
+      for (const ende of ['source', 'target']) {
+        if (edge[ende] !== id) continue;
+        const handleId = ende === 'source' ? edge.sourceHandle : edge.targetHandle;
+        if (!handleId) continue;
+        const punkte = Array.isArray(edge.data?.points) ? edge.data.points : [];
+        const anderesEnde = handlePosition(
+          ende === 'source' ? edge.target : edge.source,
+          ende === 'source' ? edge.targetHandle : edge.sourceHandle,
+        );
+        const nachbar = (ende === 'source' ? punkte[0] : punkte.at(-1)) || anderesEnde;
+        const punkt = handlePosition(id, handleId);
+        const anfahrt = anfahrtsSeite(punkt, nachbar);
+        if (anfahrt) anschluesse.push({ edgeId:edge.id, ende, handleId, anfahrt });
+      }
+    }
+    if (!anschluesse.length) return;
+
+    const wechsel = anschluesseNachDrehung(handles, anschluesse, rotation, mirrored);
+    if (!wechsel.length) return;
+    const proEdge = new Map(wechsel.map(w => [`${w.edgeId}:${w.ende}`, w.handleId]));
+    setEdges(items => items.map(edge => {
+      const neuerSource = proEdge.get(`${edge.id}:source`);
+      const neuerTarget = proEdge.get(`${edge.id}:target`);
+      if (!neuerSource && !neuerTarget) return edge;
+      return {
+        ...edge,
+        ...(neuerSource ? { sourceHandle:neuerSource } : {}),
+        ...(neuerTarget ? { targetHandle:neuerTarget } : {}),
+      };
+    }));
+  }, [getInternalNode, handlePosition, setEdges]);
+
+  // 90°-Drehung des gewählten Bauteils (nur Armaturen; Anschlüsse drehen mit).
+  const rotateNode = useCallback((id) => {
+    const node = nodesRef.current.find(item => item.id === id);
+    if (!node || !ROTATABLE.has(node.type)) return;
+    snap();
+    const rotation = ((node.data?.rotation || 0) + 90) % 360;
+    setNodes(ns => ns.map(x => x.id === id ? { ...x, data: { ...x.data, rotation } } : x));
+    leitungenNeuZuordnen(id, rotation, Boolean(node.data?.mirrored));
+    // Nach dem Neuzeichnen der Drehung erneut vermessen — zwei Frames, damit die
+    // Handle-Bounds zuverlässig NACH dem Layout stimmen (sonst bleibt der
+    // Fangpunkt teilweise auf der alten Position stehen).
+    requestAnimationFrame(() => requestAnimationFrame(() => updateNodeInternals(id)));
+  }, [leitungenNeuZuordnen, setNodes, snap, updateNodeInternals]);
+
+  // Bauteil horizontal spiegeln (Feedback Dominic). Wie beim Drehen müssen die
+  // Handle-Bounds nach der Transformation neu vermessen werden.
+  const mirrorNode = useCallback((id) => {
+    const node = nodesRef.current.find(item => item.id === id);
+    if (!node || !ROTATABLE.has(node.type)) return;
+    snap();
+    const mirrored = !node.data?.mirrored;
+    setNodes(ns => ns.map(x => x.id === id ? { ...x, data: { ...x.data, mirrored } } : x));
+    leitungenNeuZuordnen(id, node.data?.rotation || 0, mirrored);
+    requestAnimationFrame(() => requestAnimationFrame(() => updateNodeInternals(id)));
+  }, [leitungenNeuZuordnen, setNodes, snap, updateNodeInternals]);
 
   // Punkt 20 — Geometrie nach einem Edit normalisieren. Nullsegmente und
   // funktionslose kollineare Ecken werden nicht gespeichert. Läuft am Ende eines

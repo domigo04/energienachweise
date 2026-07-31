@@ -244,17 +244,25 @@ function AnlagenSysteme({ systeme, listen, gesperrt, onUpdate, onDelete, onAdd, 
             <div className="divide-y divide-slate-100">
               {rows.map((s) => (
                 <div key={s.id} className={`px-4 py-3 sm:px-5 ${!s.confirmed ? "border-l-4 border-l-amber-400 bg-amber-50/70" : ""}`}>
-                  <div className="grid gap-2 sm:grid-cols-[minmax(220px,1fr)_100px_110px_auto] sm:items-center">
+                  <div className={`grid gap-2 sm:items-center ${kind === "heat_generation"
+                    ? "sm:grid-cols-[minmax(220px,1fr)_100px_110px_auto]"
+                    : s.type_code === "fbh"
+                      ? "sm:grid-cols-[minmax(220px,1fr)_auto]"
+                      : "sm:grid-cols-[minmax(220px,1fr)_100px_auto]"}`}>
                     <select className="input" disabled={gesperrt} value={s.type_code}
                       onChange={(e) => onUpdate(s, { type_code: e.target.value, confirmed: true })}>
                       {optionen.map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}
                     </select>
-                    <input className="input" type="number" min="0" step="1" disabled={gesperrt}
-                      defaultValue={s.count ?? ""} placeholder="Anzahl"
-                      onBlur={(e) => onUpdate(s, { count: e.target.value, confirmed: true })} />
-                    <input className="input" type="number" min="0" step="0.1" disabled={gesperrt || kind !== "heat_generation"}
-                      defaultValue={s.capacity_kw ?? ""} placeholder="kW"
-                      onBlur={(e) => onUpdate(s, { capacity_kw: e.target.value, confirmed: true })} />
+                    {s.type_code !== "fbh" && (
+                      <input className="input" type="number" min="0" step="1" disabled={gesperrt}
+                        defaultValue={s.count ?? ""} placeholder="Anzahl"
+                        onBlur={(e) => onUpdate(s, { count: e.target.value, confirmed: true })} />
+                    )}
+                    {kind === "heat_generation" && (
+                      <input className="input" type="number" min="0" step="0.1" disabled={gesperrt}
+                        defaultValue={s.capacity_kw ?? ""} placeholder="kW"
+                        onBlur={(e) => onUpdate(s, { capacity_kw: e.target.value, confirmed: true })} />
+                    )}
                     <div className="flex items-center justify-end gap-2">
                       <label className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-600">
                         <input type="checkbox" disabled={gesperrt} checked={!!s.confirmed}

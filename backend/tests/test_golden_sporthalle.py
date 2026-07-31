@@ -198,6 +198,13 @@ def test_alle_drei_abgabesysteme_erkannt():
     assert codes == ["konvektoren", "luftheizapparat", "roehrenradiator"]
 
 
+def test_abgabesysteme_werden_in_auswertungskategorien_uebernommen():
+    _, angewendet = visual_review.apply_result({}, _visual_result())
+    assert systems.reference_delivery_types(angewendet["systems"]) == [
+        "Heizkörper", "Lufterhitzer", "Konvektoren",
+    ]
+
+
 def test_heizkoerperzubehoer_ist_keine_zusaetzliche_waermeabgabe():
     pages = [{"page": 26, "text": (
         "Flachröhrenradiator Typ Excelsior Stk. 3\n"

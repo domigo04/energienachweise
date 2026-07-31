@@ -1086,6 +1086,11 @@ def _apply_system_body(row: LvImportSystem, body: dict) -> None:
         row.scope_status = code
     if "confirmed" in body:
         row.confirmed = bool(body["confirmed"])
+    # Bei FBH ist nur «vorhanden» relevant. Alte oder manuell mitgesendete
+    # Mengen/Leistungen dürfen nicht wieder in die Review-Daten gelangen.
+    if row.kind == systems.HEAT_EMISSION and row.type_code == "fbh":
+        row.count = None
+        row.capacity_kw = None
 
 
 @router.post("/{import_id}/systems")
@@ -1218,9 +1223,16 @@ def approve_lv(import_id: int, user: User = Depends(get_current_user), db: Sessi
     # Mehrfacherfassung mit Anzahl und Lieferant. Das frühere Sammelmerkmal
     # `heat_delivery_types` wird nicht mehr gefüllt; ohne diesen Weg bliebe die
     # Abgabe im Referenzprojekt leer und fehlte im Ähnlichkeitsscore.
-    abgabe = systems.delivery_codes(system_dicts)
+    abgabe = systems.reference_delivery_types(system_dicts)
     if not imp.systems:
-        abgabe = fachwerte.normalize_list("heat_delivery_types", eff.get("heat_delivery_types"))
+        legacy_systems = [{
+            "kind": systems.HEAT_EMISSION,
+            "type_code": code,
+            "scope_status": "included",
+        } for code in fachwerte.normalize_list(
+            "heat_delivery_types", eff.get("heat_delivery_types")
+        )]
+        abgabe = systems.reference_delivery_types(legacy_systems)
 
     generator_power = num("generator_power_kw")
     if generator_power is None:

@@ -367,6 +367,8 @@ def test_bearbeitete_systeme_datum_und_bww_fliessen_in_referenz():
                        scope_status="included", confirmed=True),
         LvImportSystem(lv_import_id=imp.id, kind="heat_emission", type_code="luftheizapparat",
                        scope_status="installed_by_contractor", confirmed=True),
+        LvImportSystem(lv_import_id=imp.id, kind="heat_emission", type_code="fbh",
+                       count=12, capacity_kw=48, scope_status="included", confirmed=True),
         LvImportSystem(lv_import_id=imp.id, kind="heat_generation", type_code="lwwp",
                        scope_status="by_others", confirmed=True),
     ])
@@ -376,7 +378,7 @@ def test_bearbeitete_systeme_datum_und_bww_fliessen_in_referenz():
     approve_lv(imp.id, user=user, db=db)
     ref = db.query(RefProjekt).one()
     assert ref.waermeerzeuger == ["fernwaerme"]
-    assert ref.waermeabgabe == ["luftheizapparat"]
+    assert ref.waermeabgabe == ["FBH", "Lufterhitzer"]
     assert ref.anlagenkonfiguration == "monovalent"
     assert ref.bww_bei_heizung is True
     assert ref.datum == date(2025, 12, 14)

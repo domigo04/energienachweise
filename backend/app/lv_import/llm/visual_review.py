@@ -99,7 +99,9 @@ einzeln (Flachröhrenradiatoren, Konvektoren, Luftheizapparate, Fussboden-
 heizung, Deckenstrahlplatten, Heizregister und weitere). Unterscheide dabei
 `supplied_by` (wer liefert) von `installation_by` (wer montiert): bauseits
 geliefert und vom Heizungsunternehmer montiert ist ein häufiger und wichtiger
-Fall. Teile keinen Preis auf einzelne Abgabesysteme auf.
+Fall. Teile keinen Preis auf einzelne Abgabesysteme auf. Bei einer
+Fussbodenheizung genügt die Erkennung des Systems: setze `count` auf null und
+suche dafür weder eine Anzahl noch eine Leistung.
 
 Wärmeerzeugung: Suche in `heat_generation_systems` auch dann nach Angaben, wenn
 das Angebot schwerpunktmässig die Verteilung betrifft. Halte fest, ob eine

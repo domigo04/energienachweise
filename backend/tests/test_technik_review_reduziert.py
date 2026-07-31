@@ -253,7 +253,7 @@ def test_waermeabgabe_kommt_aus_der_systemtabelle():
         if hasattr(hc_lv_import, "approve_lv") else None
     if quelle is None:
         quelle = open(hc_lv_import.__file__, encoding="utf-8").read()
-    assert "systems.delivery_codes" in quelle
+    assert "systems.reference_delivery_types" in quelle
     assert "systems.generator_codes" in quelle
 
 

@@ -120,7 +120,10 @@ def detect(pages, kind: str = HEAT_EMISSION) -> list[dict]:
             "kind": kind,
             "type_code": code,
             "source_label": text[:120],
-            "count": _menge(text),
+            # Bei einer Fussbodenheizung reicht die Aussage, dass sie vorhanden
+            # ist. Eine vermeintliche «Anzahl» stammt im LV fast immer von
+            # Heizkreisen/Verteilern und beschreibt nicht das Abgabesystem.
+            "count": None if kind == HEAT_EMISSION and code == "fbh" else _menge(text),
             "supplied_by": supplied_by,
             "installation_by": installation_by,
             "scope_status": scope,
@@ -167,8 +170,12 @@ def from_llm(items, kind: str) -> list[dict]:
             "kind": kind,
             "type_code": code,
             "source_label": str(item.get("source_label") or "")[:120] or None,
-            "count": _ganzzahl(item.get("count")),
-            "capacity_kw": _zahl(item.get("capacity_kw")),
+            # FBH wird nur als vorhandenes System erfasst. Anzahl und Leistung
+            # sind dafür weder fachlich eindeutig noch für die Auswertung nötig.
+            "count": None if kind == HEAT_EMISSION and code == "fbh"
+            else _ganzzahl(item.get("count")),
+            "capacity_kw": None if kind == HEAT_EMISSION
+            else _zahl(item.get("capacity_kw")),
             "manufacturer": _text(item.get("manufacturer")),
             "model": _text(item.get("model")),
             "supplied_by": supplied_by,
@@ -258,6 +265,41 @@ def delivery_codes(systeme: list[dict]) -> list[str]:
     """Codes der Wärmeabgabe — füllt das bestehende Merkmal `heat_delivery_types`."""
     return sorted({s["type_code"] for s in systeme or []
                    if s.get("kind") == HEAT_EMISSION and _kostenrelevant(s)})
+
+
+# Die bestehende Auswertung und ihre BKP-Filter arbeiten noch mit diesen
+# fachlichen Kategorien. Die LV-Systemtabelle darf detaillierter sein (z.B.
+# Röhren- und Plattenradiatoren), beim Übertrag ins Referenzprojekt müssen die
+# Werte aber auf die Kategorien des Auswertungsformulars verdichtet werden.
+_REFERENCE_DELIVERY_TYPE = {
+    "fbh": "FBH",
+    "roehrenradiator": "Heizkörper",
+    "plattenradiator": "Heizkörper",
+    "heizkoerper": "Heizkörper",
+    "geblaesekonvektor": "Konvektoren",
+    "konvektoren": "Konvektoren",
+    "luftheizapparat": "Lufterhitzer",
+    "heizregister": "Lufterhitzer",
+    "lufterhitzer": "Lufterhitzer",
+    "deckenstrahlplatten": "Deckenstrahlplatten",
+    "tabs": "TABS",
+    "wandheizung": "Wandheizung",
+}
+
+
+def reference_delivery_types(systeme: list[dict]) -> list[str]:
+    """Kostenrelevante LV-Systeme für ``RefProjekt.waermeabgabe``.
+
+    Unbekannte/sonstige Typen werden nicht erfunden. Die Reihenfolge ist stabil
+    und entspricht der Auswahlliste in der Auswertung.
+    """
+    codes = set(delivery_codes(systeme))
+    reihenfolge = (
+        "FBH", "Heizkörper", "TABS", "Deckenstrahlplatten",
+        "Lufterhitzer", "Wandheizung", "Konvektoren",
+    )
+    mapped = {_REFERENCE_DELIVERY_TYPE[c] for c in codes if c in _REFERENCE_DELIVERY_TYPE}
+    return [wert for wert in reihenfolge if wert in mapped]
 
 
 def generator_codes(systeme: list[dict]) -> list[str]:

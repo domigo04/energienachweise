@@ -232,8 +232,21 @@ def test_echte_solewaermepumpe_wird_weiterhin_erkannt():
 
 
 def test_fussbodenheizung_wird_erkannt():
-    seiten = [{"page": 9, "text": "243.3 Bodenheizung, Verteiler und Rohr"}]
-    assert [t["type_code"] for t in systems.detect(seiten, systems.HEAT_EMISSION)] == ["fbh"]
+    seiten = [{"page": 9, "text": "243.3 Bodenheizung, Verteiler und Rohr, 12 Stk."}]
+    treffer = systems.detect(seiten, systems.HEAT_EMISSION)
+    assert [t["type_code"] for t in treffer] == ["fbh"]
+    assert treffer[0]["count"] is None
+
+
+def test_fussbodenheizung_aus_llm_hat_keine_anzahl_oder_leistung():
+    treffer = systems.from_llm([{
+        "type": "Fussbodenheizung", "count": 12, "capacity_kw": 48,
+        "confidence": 0.9, "source_page": 9,
+        "evidence": "243.3 Fussbodenheizung",
+    }], systems.HEAT_EMISSION)
+    assert treffer[0]["type_code"] == "fbh"
+    assert treffer[0]["count"] is None
+    assert treffer[0]["capacity_kw"] is None
 
 
 def test_llm_vorschlag_ohne_quellbeleg_wird_verworfen():

@@ -37,14 +37,27 @@ Hinweis; wenn Text und Seitenbild widersprechen, gewinnt der sichtbare Wert.
 Ermittle nur grobe Kennwerte, bepreiste Kostenpositionen und kommerzielle
 Konditionen. Lies zusätzlich den sichtbaren Projektkopf: Projektname,
 Projektnummer, Ort, Unternehmer und Offertdatum. Fehlende Kopfangaben bleiben
-null. Bei den technischen Kennwerten sind besonders wichtig:
-Wärmeerzeugertyp und Heizleistung in kW; Anzahl, Länge je Sonde und
-Gesamtbohrmeter der Erdsonden; Rohrmeter total ohne Fussbodenheizungsrohre,
-dabei die Rohrmeter aus BKP 241.11 (Primärkreis) und BKP 243.1
-(Wärmeverteilung) addieren;
-Anzahl technische Pufferspeicher, Pumpen und Wärmemessungen/Wärmezähler.
-Prüfe jeden im Schema erlaubten technischen Schlüssel; wenn der sichtbare
-Nachweis fehlt, gib dafür null zurück statt den Schlüssel still auszulassen.
+null.
+
+Technisch werden NUR diese Kennwerte gebraucht — nach nichts anderem suchen:
+Wärmeerzeugertyp und Heizleistung in kW; Anzahl Bohrungen und Länge je Bohrung
+(die Bohrmeter werden daraus gerechnet, gib sie nur an, wenn ausschliesslich
+die Gesamtzahl sichtbar ist); Frischwasserstation ja/nein; Rohrmeter total ohne
+Fussbodenheizungsrohre, dabei die Rohrmeter aus BKP 241.11 (Primärkreis) und
+BKP 243.1 (Wärmeverteilung) addieren; Anzahl Umwälzpumpen; ob eine Wärmemessung
+vorkommt und wenn erkennbar deren Anzahl.
+
+Nicht mehr erfassen: Speicher, Pufferspeicher, Verteilsystem, System- und
+Auslegungstemperaturen, Warmwasserbereitung, Montagehöhe, Gerüst, integrale
+Tests, Werkplanung und Gebäudeschutz. Prüfe jeden im Schema erlaubten
+technischen Schlüssel; wenn der sichtbare Nachweis fehlt, gib dafür null zurück
+statt den Schlüssel still auszulassen.
+
+Zähle als Pumpe nur hydraulische Umwälz- oder Zirkulationspumpen mit
+Projektbezug — keine blossen Erwähnungen in Fliesstexten, keine Ersatzpumpen
+und keine Wiederholungen aus Datenblättern. Ohne eindeutige Anzahl null.
+Leite aus einer einzelnen Pauschalposition «Wärmemessung» keine Anzahl 1 ab:
+setze dann heat_metering_present auf true und heat_meter_count auf null.
 Für `generator_type` sind nur diese Codes zulässig: `ews_wp` für
 Sole/Wasser- oder Erdsonden-WP, `lwwp` für Luft/Wasser-WP, `wasser_wp` nur für
 Grundwasser/Wasser-Wasser-WP, ferner `co2_wp`, `fernwaerme`, `holz`, `elektro`
@@ -732,6 +745,51 @@ def review(
     }
 
 
+def berechne_bohrmeter(features: dict) -> dict | None:
+    """Bohrmeter aus Anzahl und Länge je Bohrung ableiten.
+
+    Die Gesamtzahl ist keine eigene Eingabe, sondern ein Ergebnis — sonst gäbe
+    es drei Zahlen, von denen zwei einander widersprechen können. Multipliziert
+    wird nur, wenn BEIDE Eingaben vorliegen.
+
+    Ein bereits erkannter Gesamtwert wird nicht stillschweigend überschrieben:
+    weicht er ab, bleibt er als `conflict_value` sichtbar und der Wert geht in
+    die manuelle Prüfung.
+    """
+    anzahl = _number((features.get("borehole_count") or {}).get("value"))
+    laenge = _number((features.get("borehole_length_each_m") or {}).get("value"))
+    bestehend = _number((features.get("borehole_total_m") or {}).get("value"))
+
+    if anzahl is None or laenge is None:
+        # Nur die Gesamtzahl bekannt: das ist ein gültiger Teilbefund.
+        if bestehend is not None:
+            features["borehole_total_m"] = {
+                **(features.get("borehole_total_m") or {}),
+                "status": "partial_data",
+                "derived_from": "Nur Gesamtbohrmeter erkannt; Anzahl und Länge fehlen",
+            }
+            return features["borehole_total_m"]
+        return None
+
+    gerechnet = round(anzahl * laenge, 2)
+    konflikt = bestehend is not None and abs(bestehend - gerechnet) > 1.0
+    features["borehole_total_m"] = {
+        "value": gerechnet,
+        "confidence": "high",
+        "source_page": (features.get("borehole_count") or {}).get("source_page"),
+        "source_text": f"{anzahl:g} Bohrungen × {laenge:g} m",
+        "source_excerpt": f"{anzahl:g} × {laenge:g} m = {gerechnet:g} m",
+        "derived_from": (
+            f"Berechnet aus Anzahl und Länge; abweichend erkannt war {bestehend:g} m"
+            if konflikt else "Berechnet aus Anzahl Bohrungen × Länge je Bohrung"
+        ),
+        "conflict_value": bestehend if konflikt else None,
+        "requires_review": konflikt,
+        "status": "conflict" if konflikt else "derived",
+    }
+    return features["borehole_total_m"]
+
+
 def apply_corrections(features: dict, result: dict) -> list[dict]:
     """Handschriftliche Korrekturen auf die Merkmale anwenden.
 
@@ -805,16 +863,7 @@ def apply_result(features: dict, result: dict) -> tuple[list[dict], dict]:
         }
         applied += 1
 
-    count = _number((features.get("borehole_count") or {}).get("value"))
-    each = _number((features.get("borehole_length_each_m") or {}).get("value"))
-    if count is not None and each is not None:
-        features["borehole_total_m"] = {
-            "value": round(count * each, 2), "confidence": "high",
-            "source_page": (features.get("borehole_count") or {}).get("source_page"),
-            "source_text": f"{count:g} Erdsonden × {each:g} m",
-            "source_excerpt": f"{count:g} × {each:g} m = {count * each:g} m",
-            "derived_from": "Deterministisch aus visuell geprüfter Anzahl und Länge",
-        }
+    berechne_bohrmeter(features)
 
     rows: list[dict] = []
     costs_by_group: dict[str, list[dict]] = {}

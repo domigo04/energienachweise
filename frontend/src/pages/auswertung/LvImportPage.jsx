@@ -19,32 +19,34 @@ import { LEER, chf, zahl } from "../../lib/format";
 const MULTI_FEATURES = {};
 
 const KATEGORIEN = [
-  { titel: "Wärmeerzeugung",
-    keys: ["generator_type", "generator_count", "generator_power_kw", "boreholes_present"] },
-  { titel: "Erdsonden", keys: ["borehole_count", "borehole_length_each_m", "borehole_total_m"] },
-  { titel: "Speicher / Frischwasserstation",
-    keys: ["buffer_count", "storage_count", "storage_volume_each_l", "fresh_water_station_present"] },
-  { titel: "Wärmeverteilung",
-    keys: ["pipe_length_m", "floor_heating_pipe_m", "pump_count", "distribution_system"] },
-  { titel: "Systemtemperaturen",
-    keys: ["design_flow_temperature_c", "design_return_temperature_c", "design_outdoor_temperature_c"] },
-  { titel: "Wärmemessung", keys: ["heat_meter_count"] },
-  { titel: "Warmwasser", keys: ["domestic_hot_water_included"] },
-  { titel: "Projektmerkmale",
-    keys: ["protected_building", "reversible_installations_required", "installation_height_m",
-           "scaffolding_required", "integrated_tests_required",
-           "contractor_workshop_planning_required"] },
+  // Bewusst kurz: nur Kennwerte, die für die Kostenauswertung belastbar sind.
+  // Speicher, Verteilsystem, Temperaturen und Bauablaufmerkmale sind entfallen —
+  // technisch interessant, für den Kostenvergleich aber ohne Nutzen.
+  { titel: "Wärmeerzeuger", keys: ["generator_type", "generator_power_kw"] },
+  {
+    titel: "Erdsonden",
+    keys: ["borehole_count", "borehole_length_each_m", "borehole_total_m"],
+    // Nur zeigen, wenn Bohrungen erkannt wurden oder ein Sole-System vorliegt.
+    nurWenn: (byKey) =>
+      Number(byKey.borehole_count?.effective_value) > 0
+      || Number(byKey.borehole_total_m?.effective_value) > 0
+      || byKey.generator_type?.effective_value === "ews_wp",
+  },
+  { titel: "Frischwasserstation", keys: ["fresh_water_station_present"] },
+  { titel: "Rohrmeter", keys: ["pipe_length_m"] },
+  { titel: "Pumpen", keys: ["pump_count"] },
+  { titel: "Wärmemessung", keys: ["heat_metering_present", "heat_meter_count"] },
 ];
+
+// Wird gerechnet, nicht eingegeben — im Review nur lesbar.
+const ABGELEITET = new Set(["borehole_total_m"]);
 
 // Wer liefert, wer montiert — für die Anzeige der Anlagensysteme.
 const WER = { contractor: "Unternehmer", others: "bauseits/fremd" };
 
 // Merkmale mit Ja/Nein statt Zahleneingabe.
 const BOOL_FEATURES = new Set([
-  "domestic_hot_water_included", "boreholes_present", "fresh_water_station_present",
-  "protected_building",
-  "protected_building", "reversible_installations_required", "scaffolding_required",
-  "integrated_tests_required", "contractor_workshop_planning_required",
+  "fresh_water_station_present", "heat_metering_present",
 ]);
 const SCOPE_LABEL = {
   included: "enthalten",
@@ -892,10 +894,7 @@ function ReviewAnsicht({ id }) {
       {schritt === 1 && (
       <div className="max-w-5xl space-y-6">
         <AnlagenSysteme systeme={imp.systems} />
-        {KATEGORIEN.filter((kat) =>
-          kat.titel !== "Erdsonden"
-          || featureByKey.generator_type?.effective_value === "ews_wp"
-        ).map((kat) => {
+        {KATEGORIEN.filter((kat) => !kat.nurWenn || kat.nurWenn(featureByKey)).map((kat) => {
           const rows = kat.keys.map((k) => featureByKey[k]).filter(Boolean);
           if (!rows.length) return null;
           return (
@@ -912,6 +911,13 @@ function ReviewAnsicht({ id }) {
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-medium text-slate-900">{f.label}</span>
+                        {f.key === "heat_meter_count"
+                          && featureByKey.heat_metering_present?.effective_value === "True"
+                          && !f.effective_value && (
+                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                            vorhanden, Anzahl nicht erkannt
+                          </span>
+                        )}
                       </div>
                       <Handschrift feature={f} />
                       {multi && listen && (
@@ -949,10 +955,20 @@ function ReviewAnsicht({ id }) {
                           <option value="true">Ja</option>
                           <option value="false">Nein</option>
                         </select>
+                      ) : ABGELEITET.has(f.key) ? (
+                        // Bohrmeter entstehen aus Anzahl × Länge. Ein eigenes
+                        // Eingabefeld wäre eine dritte Zahl, die den beiden
+                        // anderen widersprechen kann.
+                        <div className="text-right">
+                          <div className="font-mono text-sm tabular-nums text-slate-800">
+                            {f.effective_value ? `${f.effective_value} m` : "—"}
+                          </div>
+                          <div className="text-[11px] text-slate-400">automatisch berechnet</div>
+                        </div>
                       ) : (
                         <input
                           className="input w-36"
-                          type={f.key === "distribution_system" ? "text" : "number"}
+                          type="number"
                           step={["borehole_count", "pump_count", "heat_meter_count", "buffer_count"].includes(f.key) ? "1" : "0.1"}
                           disabled={gesperrt}
                           defaultValue={f.confirmed_value ?? (f.value ?? "")}

@@ -19,10 +19,10 @@ FEATURE_DEFS = {
                             "registry": "heat_delivery_types"},
     "generator_count": {"typ": "int", "einheit": None, "label": "Wärmeerzeuger"},
     "generator_power_kw": {"typ": "float", "einheit": "kW", "label": "Erzeugerleistung"},
-    "borehole_count": {"typ": "int", "einheit": None, "label": "Erdsonden"},
+    "borehole_count": {"typ": "int", "einheit": None, "label": "Anzahl Bohrungen"},
     "boreholes_present": {"typ": "bool", "einheit": None, "label": "Erdsonden vorhanden"},
-    "borehole_length_each_m": {"typ": "float", "einheit": "m", "label": "Länge je Sonde"},
-    "borehole_total_m": {"typ": "float", "einheit": "m", "label": "Bohrmeter"},
+    "borehole_length_each_m": {"typ": "float", "einheit": "m", "label": "Länge je Bohrung"},
+    "borehole_total_m": {"typ": "float", "einheit": "m", "label": "Bohrmeter total (berechnet)"},
     "buffer_count": {"typ": "int", "einheit": None, "label": "Pufferspeicher"},
     "storage_volume_l": {"typ": "float", "einheit": "l", "label": "Speichervolumen"},
     "pump_count": {"typ": "int", "einheit": None, "label": "Pumpen"},
@@ -30,7 +30,7 @@ FEATURE_DEFS = {
     "valve_3way_count": {"typ": "int", "einheit": None, "label": "3-Weg-Ventile"},
     "balancing_valve_count": {"typ": "int", "einheit": None, "label": "Abgleichventile (STAD)"},
     "radiator_count": {"typ": "int", "einheit": None, "label": "Heizkörper"},
-    "heat_meter_count": {"typ": "int", "einheit": None, "label": "Wärmezähler"},
+    "heat_meter_count": {"typ": "int", "einheit": None, "label": "Anzahl Wärmemessungen"},
     "floor_heating_manifold_count": {
         "typ": "int", "einheit": None, "label": "Fussbodenheizungsverteiler",
     },
@@ -54,7 +54,15 @@ FEATURE_DEFS = {
     # bleibt der Kostentreiber für die bestehende Ähnlichkeit.
     "pipe_length_source_m": {"typ": "float", "einheit": "m", "label": "Rohrmeter Quelle"},
     "pipe_length_distribution_m": {"typ": "float", "einheit": "m", "label": "Rohrmeter Verteilung"},
-    "pipe_length_m": {"typ": "float", "einheit": "m", "label": "Rohrmeter total"},
+    "pipe_length_m": {
+        "typ": "float", "einheit": "m",
+        "label": "Rohrmeter total exkl. Fussbodenheizung",
+    },
+    # Eine pauschale Position «Wärmemessung» belegt, DASS gemessen wird, aber
+    # nicht wie oft. Beides getrennt zu führen verhindert eine erfundene Anzahl.
+    "heat_metering_present": {
+        "typ": "bool", "einheit": None, "label": "Wärmemessung vorhanden",
+    },
 
     # ── Wärmeverteilung und Systemdaten ───────────────────────────────────
     # Systemtemperaturen und Auslegungsaussentemperatur entscheiden über die
@@ -87,23 +95,40 @@ FEATURE_KEYS = list(FEATURE_DEFS.keys())
 # Im LV-Review werden bewusst nur grobe, kostenrelevante Kennwerte gespeichert.
 # Die übrigen Definitionen bleiben für bestehende Referenzprojekte kompatibel.
 LV_IMPORT_FEATURE_KEYS = [
-    # Anzahl Erzeuger und «Erdsonden vorhanden» waren definiert, aber im
-    # LV-Review nicht freigeschaltet — sie konnten deshalb nie gefüllt werden.
-    "generator_type", "generator_count", "generator_power_kw", "boreholes_present",
-    "borehole_count", "borehole_length_each_m",
-    "borehole_total_m", "pipe_length_m", "floor_heating_pipe_m",
-    "pump_count", "heat_meter_count",
-    "buffer_count", "domestic_hot_water_included",
-    # Verteilung und Systemdaten — stehen in praktisch jedem LV und ersparen
-    # dem Nutzer nach dem Import manuelle Eingaben.
+    # Wärmeerzeuger: Typ und Leistung. `generator_count` und `generator_types`
+    # sind bewusst NICHT dabei — sie waren ein zweites Feld für dieselbe Sache.
+    "generator_type", "generator_power_kw",
+    # Bohrungen: Anzahl und Länge werden erfasst, die Bohrmeter daraus gerechnet.
+    # `boreholes_present` entfällt: eine Bohrung ist vorhanden, sobald die Anzahl
+    # grösser als null ist — ein eigenes Ja/Nein-Feld wäre eine zweite Wahrheit.
+    "borehole_count", "borehole_length_each_m", "borehole_total_m",
+    "fresh_water_station_present",
+    # Rohrmeter ohne Fussbodenheizung. Der Schlüssel bleibt `pipe_length_m`,
+    # weil bestehende Importe und Referenzprojekte darunter gespeichert sind;
+    # die Beschriftung sagt jetzt ausdrücklich, was gemeint ist.
+    "pipe_length_m",
+    "pump_count", "heat_metering_present", "heat_meter_count",
+]
+
+# Wird gerechnet, nicht eingegeben: Bohrmeter = Anzahl × Länge je Bohrung.
+# Im Review nur lesbar, damit keine widersprüchliche dritte Zahl entsteht.
+ABGELEITETE_FEATURE_KEYS = ("borehole_total_m",)
+
+# Merkmale, die frühere Fassungen erhoben haben und die weiterhin in der
+# Datenbank stehen dürfen, aber nicht mehr erfasst, angezeigt oder für die
+# Ähnlichkeit verwendet werden. Bewusst keine Spaltenlöschung — bestehende
+# Importe und Referenzprojekte bleiben unangetastet lesbar.
+STILLGELEGTE_FEATURE_KEYS = frozenset({
+    "generator_count", "generator_types", "boreholes_present",
+    "buffer_count", "storage_count", "storage_volume_each_l", "storage_volume_l",
+    "floor_heating_pipe_m", "floor_heating_area_m2", "floor_heating_manifold_count",
+    "domestic_hot_water_included",
     "distribution_system", "design_flow_temperature_c",
     "design_return_temperature_c", "design_outdoor_temperature_c",
-    "fresh_water_station_present", "storage_count", "storage_volume_each_l",
-    # Projektmerkmale, die den Aufwand treiben.
     "protected_building", "reversible_installations_required",
     "installation_height_m", "scaffolding_required",
     "integrated_tests_required", "contractor_workshop_planning_required",
-]
+})
 
 # LV-Feature-Schlüssel → ProjectContext-Parameterschlüssel (project_context.PARAMETER).
 # Nur hier gepflegt (B12). generator_type ist beidseitig gleich benannt.

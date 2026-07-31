@@ -88,11 +88,14 @@ def _visual_result(betrag_243_4: float = 21030) -> dict:
              "confidence": 0.9, "source_page": 4, "evidence": "bauseits geliefert"},
         ],
         "heat_generation_systems": [],
+        # Speicherangaben gehören seit der Verschlankung nicht mehr zum
+        # Technik-Review. Der Handschriftmechanismus bleibt derselbe und wird
+        # hier an zwei weiterhin erfassten Kennwerten geprüft.
         "handwritten_corrections": [
-            {"field": "storage_count", "printed_value": "1", "corrected_value": "2",
+            {"field": "pump_count", "printed_value": "1", "corrected_value": "2",
              "selected_source": "corrected", "struck_through": True,
              "confidence": 0.91, "source_page": 7, "evidence": "1 durchgestrichen, 2"},
-            {"field": "storage_volume_each_l", "printed_value": "1500",
+            {"field": "pipe_length_m", "printed_value": "1500",
              "corrected_value": "800", "selected_source": "corrected",
              "struck_through": True, "confidence": 0.91, "source_page": 7,
              "evidence": "1500 durchgestrichen, 800"},
@@ -252,15 +255,15 @@ def test_fehlende_heizleistung_bleibt_leer():
 def test_handschrift_ersetzt_gedruckten_wert_und_haelt_beide_fest():
     features: dict = {}
     visual_review.apply_corrections(features, _visual_result())
-    speicher = features["storage_count"]
-    assert speicher["value"] == "2"
-    assert speicher["printed_value"] == "1"
-    assert speicher["selected_source"] == "corrected"
-    assert speicher["requires_review"] is False
+    pumpen = features["pump_count"]
+    assert pumpen["value"] == "2"
+    assert pumpen["printed_value"] == "1"
+    assert pumpen["selected_source"] == "corrected"
+    assert pumpen["requires_review"] is False
 
-    volumen = features["storage_volume_each_l"]
-    assert volumen["value"] == "800"
-    assert volumen["printed_value"] == "1500"
+    rohrmeter = features["pipe_length_m"]
+    assert rohrmeter["value"] == "800"
+    assert rohrmeter["printed_value"] == "1500"
 
 
 def test_durchgestrichener_wert_gilt_nie():
@@ -270,7 +273,7 @@ def test_durchgestrichener_wert_gilt_nie():
     result["handwritten_corrections"][0]["selected_source"] = "printed"
     features: dict = {}
     visual_review.apply_corrections(features, result)
-    assert features["storage_count"]["value"] == "2"
+    assert features["pump_count"]["value"] == "2"
 
 
 def test_unsichere_handschrift_erzeugt_pruefall_statt_entscheidung():
@@ -278,8 +281,8 @@ def test_unsichere_handschrift_erzeugt_pruefall_statt_entscheidung():
     result["handwritten_corrections"][0]["confidence"] = 0.4
     features: dict = {}
     offen = visual_review.apply_corrections(features, result)
-    assert [e["field"] for e in offen] == ["storage_count"]
-    assert features["storage_count"]["requires_review"] is True
+    assert [e["field"] for e in offen] == ["pump_count"]
+    assert features["pump_count"]["requires_review"] is True
 
 
 # ── Rohrmeter ──────────────────────────────────────────────────────────────
@@ -507,9 +510,9 @@ def test_importergebnis_wird_vollstaendig_gespeichert_und_ausgegeben():
     assert lha["installation_by"] == "contractor"
 
     merkmale = {f["key"]: f for f in (_feature_out(f) for f in imp.features)}
-    assert merkmale["storage_count"]["printed_value"] == "1"
-    assert merkmale["storage_count"]["corrected_value"] == "2"
-    assert merkmale["storage_count"]["selected_source"] == "corrected"
+    assert merkmale["pump_count"]["printed_value"] == "1"
+    assert merkmale["pump_count"]["corrected_value"] == "2"
+    assert merkmale["pump_count"]["selected_source"] == "corrected"
 
     konditionen = [_condition_out(c) for c in imp.conditions]
     assert all(k["status"] == "requested_not_priced" for k in konditionen)

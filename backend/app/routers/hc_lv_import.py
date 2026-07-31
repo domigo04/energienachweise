@@ -36,7 +36,8 @@ from app.plan_features import Feature
 from app.services import features as feature_service
 from app import fachwerte
 from app.lv_import.feature_keys import (
-    FEATURE_DEFS, LV_IMPORT_FEATURE_KEYS, FEATURE_TO_CONTEXT,
+    ABGELEITETE_FEATURE_KEYS, FEATURE_DEFS, LV_IMPORT_FEATURE_KEYS,
+    FEATURE_TO_CONTEXT,
 )
 from app.lv_import import page_classifier as pc
 from app.lv_import.review_packet import build_review_packet
@@ -716,13 +717,54 @@ def update_feature(
     f = next((x for x in imp.features if x.id == feature_id), None)
     if not f:
         raise HTTPException(status_code=404, detail="Feature nicht gefunden")
+    # Abgeleitete Werte sind Ergebnisse, keine Eingaben. Wer sie von Hand setzen
+    # könnte, erzeugte eine dritte Zahl neben Anzahl und Länge.
+    if f.key in ABGELEITETE_FEATURE_KEYS and "confirmed_value" in body:
+        raise HTTPException(status_code=422, detail={
+            "code": "FEATURE_IS_DERIVED",
+            "message": ("Die Bohrmeter werden aus Anzahl und Länge je Bohrung "
+                        "berechnet und können nicht direkt gesetzt werden."),
+        })
     if "confirmed_value" in body:
         cv = body["confirmed_value"]
         f.confirmed_value = None if cv in (None, "") else str(cv)
     if "confirmed" in body:
         f.confirmed = bool(body["confirmed"])
+    db.flush()
+    # Ändert sich Anzahl oder Länge, gilt sofort die neue Multiplikation.
+    abgeleitet = bohrmeter_neu_berechnen(imp) if f.key in BOHR_EINGABEN else None
     db.commit()
-    return _feature_out(f)
+    return {**_feature_out(f),
+            "derived": _feature_out(abgeleitet) if abgeleitet is not None else None}
+
+
+# Eingaben, aus denen die Bohrmeter entstehen.
+BOHR_EINGABEN = ("borehole_count", "borehole_length_each_m")
+
+
+def bohrmeter_neu_berechnen(imp: LvImport):
+    """Bohrmeterzeile eines Imports aus den geltenden Eingaben nachziehen."""
+    def wert(key):
+        zeile = next((x for x in imp.features if x.key == key), None)
+        if zeile is None:
+            return None
+        roh = zeile.confirmed_value if zeile.confirmed_value not in (None, "") else zeile.value
+        try:
+            return float(roh) if roh not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
+
+    anzahl, laenge = wert("borehole_count"), wert("borehole_length_each_m")
+    ziel = next((x for x in imp.features if x.key == "borehole_total_m"), None)
+    if ziel is None or anzahl is None or laenge is None:
+        return ziel
+    gerechnet = round(anzahl * laenge, 2)
+    ziel.value = str(gerechnet)
+    ziel.confirmed_value = None
+    ziel.derived_from = f"Berechnet aus {anzahl:g} Bohrungen × {laenge:g} m"
+    ziel.confidence = "high"
+    ziel.requires_review = False
+    return ziel
 
 
 @router.patch("/{import_id}/costs/{cost_id}")
@@ -998,7 +1040,22 @@ def approve_lv(import_id: int, user: User = Depends(get_current_user), db: Sessi
     erzeuger = fachwerte.normalize_list("generator_types", eff.get("generator_types"))
     if not erzeuger and eff.get("generator_type"):
         erzeuger = fachwerte.normalize_list("generator_types", eff["generator_type"])
-    abgabe = fachwerte.normalize_list("heat_delivery_types", eff.get("heat_delivery_types"))
+    # Wärmeabgabe kommt aus der Systemtabelle — dort liegt sie seit der
+    # Mehrfacherfassung mit Anzahl und Lieferant. Das frühere Sammelmerkmal
+    # `heat_delivery_types` wird nicht mehr gefüllt; ohne diesen Weg bliebe die
+    # Abgabe im Referenzprojekt leer und fehlte im Ähnlichkeitsscore.
+    abgabe = systems.delivery_codes(
+        [{"kind": s.kind, "type_code": s.type_code} for s in imp.systems]
+    )
+    if not abgabe:
+        abgabe = fachwerte.normalize_list("heat_delivery_types", eff.get("heat_delivery_types"))
+    # Erzeuger ebenso: erkannte Systeme ergänzen den Einzelwert.
+    aus_systemen = systems.generator_codes(
+        [{"kind": s.kind, "type_code": s.type_code} for s in imp.systems]
+    )
+    for code in aus_systemen:
+        if code not in erzeuger:
+            erzeuger.append(code)
 
     ref = RefProjekt(
         tenant_id=user.tenant_id, erstellt_von=user.id,

@@ -30,7 +30,7 @@ import {
 import { CORNER, ENDPOINT, GRID, MIDPOINT, NEAREST, PORT, fangStil } from './schema/cadSnap';
 import {
   abzweigPunkt, fensterAus, labelVerschoben, labelVersatz,
-  leitungMitLueckeTrennen, leitungVerschieben, routeBereinigen, routeDehnen,
+  leitungMitLueckeTrennen, leitungsSystem, leitungVerschieben, routeBereinigen, routeDehnen,
   segmentAusrichten, segmentVerschieben,
   entwurfFuerEscape, segmentZumVerschieben, verschiebungLabel,
 } from './schema/cadEdit';
@@ -2857,11 +2857,30 @@ function EditorInner() {
       shift:event.shiftKey || shiftPressed,
       grid:drawingConfig.grid_size,
     });
+    // Ein zweiter Klick auf denselben Punkt beendet die Leitung — dieselbe
+    // Bewegung, die ein Doppelklick auslöst. Der Punkt liegt bereits im
+    // Entwurf; der Abschluss nimmt ihn heraus und macht ihn zum Leitungsende,
+    // statt ein Nullsegment anzuhängen.
+    if (previous && Math.hypot(point.x - previous.x, point.y - previous.y) <= 0.5) {
+      entwurfAmLetztenPunktAbschliessen();
+      return true;
+    }
     const next = { ...draft, points:[...(draft.points || []), point] };
     leitungsEntwurfRef.current = next;
     setLeitungsEntwurf(next);
     return true;
-  }, [activeLayer, drawingConfig, getZoom, letzterEntwurfsPunkt, leitungsEntwurfAbschliessen, leitungsEntwurfStarten, naechsteLeitung, naechsterBauteilAnschluss, naechsterEckpunkt, naechsterFreierLeitungsEndpunkt, naechsterMittelpunkt, objektFangpunkte, screenToFlowPosition, shiftPressed]);
+  }, [activeLayer, drawingConfig, entwurfAmLetztenPunktAbschliessen, getZoom, letzterEntwurfsPunkt, leitungsEntwurfAbschliessen, leitungsEntwurfStarten, naechsteLeitung, naechsterBauteilAnschluss, naechsterEckpunkt, naechsterFreierLeitungsEndpunkt, naechsterMittelpunkt, objektFangpunkte, screenToFlowPosition, shiftPressed]);
+
+  // Doppelklick beendet die laufende Leitung. Der zweite Klick des Doppelklicks
+  // schliesst sie meist schon über die Punktgleichheit oben ab; landet er durch
+  // eine kleine Mausbewegung auf einem anderen Rasterpunkt, greift dieser
+  // Handler — der Doppelklick beendet dann immer.
+  const canvasDoppelklick = useCallback((event) => {
+    if (!leitungsEntwurfRef.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+    entwurfAmLetztenPunktAbschliessen();
+  }, [entwurfAmLetztenPunktAbschliessen]);
 
   const cadHandlePointerDown = useCallback((event) => {
     if (event.button !== 0 || spacePanRef.current) return;
@@ -3877,6 +3896,16 @@ function EditorInner() {
           leitungsEntwurfAbschliessen(leitungsCursorRef.current, leitungsSnap, ev.shiftKey || shiftPressed);
           return;
         }
+        // Tab erweitert die Auswahl: ein Klick wählt nur das Teilstück, Tab
+        // nimmt den ganzen zusammenhängenden Strang dazu. Nochmal Tab führt
+        // zurück aufs Teilstück.
+        if (ev.key === 'Tab' && !leitungsEntwurfRef.current && selectedEdgeId) {
+          ev.preventDefault();
+          setMarkierteEdgeIds(markierteEdgeIds.length
+            ? []
+            : leitungsSystem(edgesRef.current, nodesRef.current, selectedEdgeId));
+          return;
+        }
         if (ev.key === 'Backspace' && leitungsEntwurfRef.current?.points?.length) {
           ev.preventDefault();
           const next = {
@@ -3952,7 +3981,7 @@ function EditorInner() {
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [undo, redo, selected, selectedEdgeId, selectedEdgePoint, selectedLabelEdgeId, beschriftungSetzen, punktEntfernen, snap, rotateNode, mirrorNode, alignNode, nudgeNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, spiegelAchse, drawingConfig, setNodes, laengeAnwenden, entwurfAmLetztenPunktAbschliessen, verschiebenStarten]);
+  }, [undo, redo, selected, selectedEdgeId, selectedEdgePoint, selectedLabelEdgeId, markierteEdgeIds, beschriftungSetzen, punktEntfernen, snap, rotateNode, mirrorNode, alignNode, nudgeNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, spiegelAchse, drawingConfig, setNodes, laengeAnwenden, entwurfAmLetztenPunktAbschliessen, verschiebenStarten]);
 
   // Berechnete Werte (Backend) in die Node-Daten spiegeln — nur für die Anzeige.
   // Verteiler-Rahmen: nur die Balken sind greifbar (dragHandle), die Lücke
@@ -5044,7 +5073,7 @@ function EditorInner() {
 
         {/* Canvas */}
         <main className="hc-canvas-wrap" onPointerDownCapture={cadHandlePointerDown}
-          onPointerMove={canvasMouseMove}>
+          onPointerMove={canvasMouseMove} onDoubleClick={canvasDoppelklick}>
           <ReactFlow
             nodes={displayNodes} edges={displayEdges}
             onNodesChange={onNodesChange}
@@ -5532,6 +5561,14 @@ function EditorInner() {
             {laengenPuffer !== null
               ? <span className="hc-statusbar__mass is-input">{laengenPuffer || '0'} mm ⌫</span>
               : cadMass && <span className="hc-statusbar__mass">{cadMass.label}</span>}
+            {/* Auswahlstufe: ein Klick trifft das Teilstück, Tab den Strang. */}
+            {selectedEdgeId && (
+              <span className="hc-statusbar__hint">
+                {markierteEdgeIds.length > 1
+                  ? `Leitungssystem · ${markierteEdgeIds.length} Leitungen · Tab zurück`
+                  : 'Teilstück · Tab wählt das System'}
+              </span>
+            )}
             {spacePan && <span className="hc-statusbar__hint">Pan (Space)</span>}
             <span className="hc-statusbar__zoom">{Math.round(zoomAnzeige * 100)} %</span>
           </div>

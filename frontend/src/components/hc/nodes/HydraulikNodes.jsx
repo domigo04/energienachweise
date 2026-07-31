@@ -845,6 +845,15 @@ function mitNr(Comp) {
     const kompakt = KOMPAKTE_BAUTEILE.has(props.type);
     const { setNodes, getZoom } = useReactFlow();
     const captionDrag = useRef(null);
+    // Gedreht wird das ganze Bauteil-DIV (siehe mitRotation) — damit der
+    // Auswahlrahmen mitdreht. Nummer und Beschriftung sind Text und werden
+    // hier wieder geradegestellt: `scaleX() rotate()` ist genau die Umkehrung
+    // von `rotate() scaleX()` am äusseren DIV.
+    const rot = ((Number(props.data?.rotation) || 0) % 360 + 360) % 360;
+    const mirrored = Boolean(props.data?.mirrored);
+    const aufrecht = (rot || mirrored)
+      ? `scaleX(${mirrored ? -1 : 1}) rotate(${-rot}deg)`
+      : '';
     const caption = props.data?.label || {
       erzeuger:'Wärmeerzeuger', erdsonden:'Erdsondenfeld', speicher:'Speicher',
       bww:'BWW-Speicher', verteiler:'Verteiler', gruppe:'Verbrauchergruppe',
@@ -867,8 +876,16 @@ function mitNr(Comp) {
         const drag = captionDrag.current;
         if (!drag) return;
         const zoom = Math.max(getZoom(), 0.05);
-        const nextX = drag.offsetX + (moveEvent.clientX - drag.x) / zoom;
-        const nextY = Math.max(0, drag.offsetY + (moveEvent.clientY - drag.y) / zoom);
+        // Der Griff sitzt im gedrehten DIV: die Mausbewegung muss in die
+        // lokalen Achsen des Bauteils zurückgerechnet werden, sonst zieht die
+        // Beschriftung quer zur Maus.
+        const dx = (moveEvent.clientX - drag.x) / zoom;
+        const dy = (moveEvent.clientY - drag.y) / zoom;
+        const bogen = (-rot * Math.PI) / 180;
+        const lokalX = dx * Math.cos(bogen) - dy * Math.sin(bogen);
+        const lokalY = dx * Math.sin(bogen) + dy * Math.cos(bogen);
+        const nextX = drag.offsetX + (mirrored ? -lokalX : lokalX);
+        const nextY = Math.max(0, drag.offsetY + lokalY);
         setNodes(nodes => nodes.map(node => node.id === props.id
           ? { ...node, data:{ ...node.data, caption_offset_x:nextX, caption_offset_y:nextY } }
           : node));
@@ -892,6 +909,7 @@ function mitNr(Comp) {
             color: '#dc2626', fontSize: kompakt ? 7 : 9, fontWeight: 700,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             padding: kompakt ? '0 3px' : '0 4px', zIndex: 20, pointerEvents: 'none',
+            ...(aufrecht ? { transform: aufrecht } : {}),
           }}>{nr}</div>
         )}
         {nr != null && (
@@ -900,7 +918,7 @@ function mitNr(Comp) {
             title="Beschriftung verschieben"
             style={{
               position:'absolute', top:'100%', left:'50%',
-              transform:`translate(calc(-50% + ${Number(props.data?.caption_offset_x) || 0}px), ${10 + Math.max(0, Number(props.data?.caption_offset_y) || 0)}px)`,
+              transform:`translate(calc(-50% + ${Number(props.data?.caption_offset_x) || 0}px), ${10 + Math.max(0, Number(props.data?.caption_offset_y) || 0)}px) ${aufrecht}`,
               minWidth:54, maxWidth:160, padding:'3px 7px',
               border:'1px solid #94a3b8', borderRadius:3, background:'white',
               color:'#334155', fontSize:9, lineHeight:1.2, textAlign:'center',
@@ -950,6 +968,11 @@ export const ROTATABLE = new Set([
   'expansion', 'anschluss',
 ]);
 
+// Gedreht wird das ÄUSSERSTE DIV des Bauteils, nicht nur das Symbol darin
+// (Dominic-Feedback): sonst bleibt der Auswahlrahmen — React Flow setzt ihn auf
+// das erste Kind des Node-Elements — waagrecht stehen, während das Zeichen
+// schon quer liegt. Nummer und Beschriftung liegen jetzt im gedrehten DIV und
+// werden in `mitNr` wieder geradegestellt.
 // eslint-disable-next-line no-unused-vars
 function mitRotation(Comp) {
   function MitRotation(props) {
@@ -970,8 +993,8 @@ function mitRotation(Comp) {
 // eslint-disable-next-line react-refresh/only-export-components
 export const NODE_TYPES = Object.fromEntries(
   Object.entries(BASIS_TYPES).map(([k, C]) => {
-    let W = ROTATABLE.has(k) ? mitRotation(C) : C;
-    if (NUMMERIERT.includes(k)) W = mitNr(W);   // Nr-Badge liegt ausserhalb der Drehung
+    let W = NUMMERIERT.includes(k) ? mitNr(C) : C;
+    if (ROTATABLE.has(k)) W = mitRotation(W);   // Drehung umschliesst das ganze Bauteil
     return [k, W];
   })
 );

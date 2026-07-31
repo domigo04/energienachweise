@@ -15,7 +15,7 @@ const HIER = path.dirname(fileURLToPath(import.meta.url));
 
 // Reihenfolge bewusst: erst die abgesicherte Basis (Regressionsschutz), dann das
 // Neue. Bricht die Basis, ist alles Weitere ohnehin nicht aussagekräftig.
-const LAEUFE = ['portsnap', 'geometrie', 'mirror', 'copy', 'underlay', 'inline', 'topologie'];
+const LAEUFE = ['portsnap', 'geometrie', 'mirror', 'copy', 'underlay', 'inline', 'topologie', 'bedienung'];
 const nurDiese = process.argv.slice(2).filter((a) => !a.startsWith('-'));
 const auswahl = nurDiese.length ? LAEUFE.filter((l) => nurDiese.includes(l)) : LAEUFE;
 

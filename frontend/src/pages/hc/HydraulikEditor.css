@@ -1247,6 +1247,9 @@
   font-weight: 700;
   color: #0f172a;
 }
+.hc-statusbar__hint {
+  color: #64748b;
+}
 .hc-statusbar__zoom {
   margin-left: auto;
   font-variant-numeric: tabular-nums;

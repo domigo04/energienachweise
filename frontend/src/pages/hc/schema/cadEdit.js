@@ -464,3 +464,37 @@ export function routeBereinigen(points, { start = null, end = null, toleranz = 0
 export function routeIstGueltig(route) {
   return Array.isArray(route) && route.filter(ENDLICH).length >= 2;
 }
+
+/**
+ * Alle Leitungen EINES Leitungssystems (Tab-Auswahl).
+ *
+ * Ein Klick wählt bewusst nur das Teilstück. Wer den ganzen Strang braucht,
+ * erweitert die Auswahl mit Tab. Zusammen gehören Leitungen, die über einen
+ * freien Anker, einen Eck- oder einen T-Knoten hängen — also über `junction`.
+ *
+ * Ein Bauteil trennt das System. Sonst würde ein Klick auf den Vorlauf über die
+ * Pumpe hinweg auch den Rücklauf markieren; das sind zwei Systeme, keine
+ * durchgehende Leitung.
+ */
+export function leitungsSystem(edges = [], nodes = [], startEdgeId) {
+  const start = edges.find(edge => edge?.id === startEdgeId);
+  if (!start) return [];
+  const verbindend = new Set(
+    nodes.filter(node => node?.type === 'junction').map(node => node.id),
+  );
+  const gefunden = new Set([start.id]);
+  const offen = [start];
+  while (offen.length) {
+    const aktuell = offen.pop();
+    for (const knotenId of [aktuell.source, aktuell.target]) {
+      if (!verbindend.has(knotenId)) continue;
+      for (const kandidat of edges) {
+        if (gefunden.has(kandidat.id)) continue;
+        if (kandidat.source !== knotenId && kandidat.target !== knotenId) continue;
+        gefunden.add(kandidat.id);
+        offen.push(kandidat);
+      }
+    }
+  }
+  return [...gefunden];
+}

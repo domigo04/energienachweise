@@ -4,7 +4,8 @@ import {
   entwurfFuerEscape,
   eckpunktEntfernen, eckpunktSetzen, gripsFuerRoute,
   fensterAus, imFenster, istKollinear, labelSichtbar, labelVerschoben, labelVersatz,
-  leitungMitLueckeTrennen, leitungVerschieben, routeBereinigen, routeDehnen, routeIstGueltig,
+  leitungMitLueckeTrennen, leitungsSystem, leitungVerschieben,
+  routeBereinigen, routeDehnen, routeIstGueltig,
   segmentAusrichten, segmentOrientierung, segmentVerschieben,
   segmentZumVerschieben, verschiebungLabel,
 } from './cadEdit';
@@ -457,5 +458,48 @@ describe('Dehnen (STRETCH)', () => {
     expect(imFenster({ x: 50, y: 50 }, a)).toBe(true);
     expect(imFenster({ x: 150, y: 50 }, a)).toBe(false);
     expect(imFenster(null, a)).toBe(false);
+  });
+});
+
+describe('Leitungssystem (Tab-Auswahl)', () => {
+  // vl1 ── anker ── vl2 ── tstueck ── vl3
+  //                          └────────── vl4
+  // pumpe trennt: rl1 hängt am selben Bauteil, gehört aber nicht dazu.
+  const nodes = [
+    { id: 'anker', type: 'junction' },
+    { id: 'tstueck', type: 'junction' },
+    { id: 'ende', type: 'junction' },
+    { id: 'rlAnker', type: 'junction' },
+    { id: 'pumpe', type: 'pump' },
+    { id: 'kessel', type: 'erzeuger' },
+  ];
+  const edges = [
+    { id: 'vl1', source: 'pumpe', target: 'anker' },
+    { id: 'vl2', source: 'anker', target: 'tstueck' },
+    { id: 'vl3', source: 'tstueck', target: 'ende' },
+    { id: 'vl4', source: 'tstueck', target: 'kessel' },
+    { id: 'rl1', source: 'pumpe', target: 'rlAnker' },
+    { id: 'rl2', source: 'rlAnker', target: 'kessel' },
+  ];
+
+  it('zieht über Anker und T-Stücke alles zusammen, was zusammenhängt', () => {
+    expect(leitungsSystem(edges, nodes, 'vl1').sort())
+      .toEqual(['vl1', 'vl2', 'vl3', 'vl4']);
+  });
+
+  it('findet dasselbe System, egal wo man hineinklickt', () => {
+    expect(leitungsSystem(edges, nodes, 'vl4').sort())
+      .toEqual(['vl1', 'vl2', 'vl3', 'vl4']);
+  });
+
+  it('läuft nicht über ein Bauteil hinweg — Vorlauf bleibt vom Rücklauf getrennt', () => {
+    // Beide hängen an der Pumpe und am Kessel — trotzdem zwei Systeme.
+    expect(leitungsSystem(edges, nodes, 'vl1')).not.toContain('rl1');
+    expect(leitungsSystem(edges, nodes, 'rl1').sort()).toEqual(['rl1', 'rl2']);
+  });
+
+  it('gibt bei unbekannter Leitung nichts zurück', () => {
+    expect(leitungsSystem(edges, nodes, 'gibtsnicht')).toEqual([]);
+    expect(leitungsSystem([], [], 'vl1')).toEqual([]);
   });
 });

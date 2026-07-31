@@ -238,6 +238,112 @@ kopf('Toolbar: ein Leitungsknopf statt zwei, ein Stände-Knopf statt zwei');
     kopfzeile.replace(/\n/g, ' · ').slice(0, 120));
 }
 
+// ── 7. Zahnrad: persönliche Tastenbelegung ────────────────────────────────
+kopf('Tastenbelegung hinter dem Zahnrad, pro Benutzer gespeichert');
+{
+  await w.frischLaden();
+  await page.locator('.hc-editor-toolbar button[title*="Benutzerdefinierte"]').click();
+  await page.waitForTimeout(400);
+  pruefe('S1', 'Das Zahnrad öffnet die Tastenbelegung',
+    await page.locator('.hc-shortcut-grid').isVisible(), 'Dialog offen');
+
+  const feld = page.locator('#sc-shortcut_line');
+  pruefe('S2', 'Die Standardbelegung steht drin', (await feld.inputValue()) === 'l',
+    `Leitung = «${await feld.inputValue()}»`);
+
+  await feld.fill('q');
+  await page.waitForTimeout(700);
+  await page.locator('.hc-stand-dialog__actions .is-primary').click();
+  await page.waitForTimeout(300);
+
+  // Die neue Taste wirkt sofort …
+  const frei = await w.freieFlaeche();
+  await page.mouse.move(frei.x, frei.y);
+  await page.keyboard.press('q');
+  await page.waitForTimeout(350);
+  pruefe('S3', 'Die neue Taste startet den Leitungsbefehl',
+    /Leitung/.test(await w.status()), await w.status());
+  await page.keyboard.press('Escape');
+
+  // … und die alte ist frei.
+  await page.keyboard.press('l');
+  await page.waitForTimeout(350);
+  pruefe('S4', 'Die alte Taste löst nichts mehr aus',
+    /Modify/.test(await w.status()), await w.status());
+
+  // Über einen Neustart hinweg: sie ist beim Benutzer gespeichert, nicht am Schema.
+  await w.laden();
+  await page.waitForTimeout(400);
+  await page.mouse.move(frei.x, frei.y);
+  await page.keyboard.press('q');
+  await page.waitForTimeout(350);
+  pruefe('S5', 'Nach dem Neuladen gilt sie weiterhin',
+    /Leitung/.test(await w.status()), await w.status());
+  await page.keyboard.press('Escape');
+
+  // Aufräumen: zurück auf Standard, damit die späteren Läufe l/p vorfinden.
+  await page.locator('.hc-editor-toolbar button[title*="Benutzerdefinierte"]').click();
+  await page.waitForTimeout(300);
+  await page.locator('.hc-stand-dialog__actions button', { hasText: 'Standardbelegung' }).click();
+  await page.waitForTimeout(600);
+  pruefe('S6', '«Standardbelegung» stellt sie wieder her',
+    (await page.locator('#sc-shortcut_line').inputValue()) === 'l',
+    `Leitung = «${await page.locator('#sc-shortcut_line').inputValue()}»`);
+  await page.locator('.hc-stand-dialog__actions .is-primary').click();
+  await page.waitForTimeout(300);
+}
+
+// ── 8. Schema als Vorlage speichern und wiederverwenden ───────────────────
+kopf('Schemas als Vorlage speichern und wiederverwenden');
+{
+  await w.graphSetzen({
+    nodes: [
+      { id: 'e1', type: 'erzeuger', position: { x: 300, y: 300 }, data: { nr: 1 } },
+      { id: 'sp1', type: 'speicher', position: { x: 800, y: 300 }, data: { nr: 2 } },
+    ],
+    edges: [], layer_config: {},
+  });
+  await w.laden();
+
+  const vorlagenMenu = page.locator('.hc-toolbar-menu__trigger', { hasText: 'Vorlagen' }).first();
+  await vorlagenMenu.click();
+  await page.waitForTimeout(300);
+  await page.locator('button', { hasText: 'Dieses Schema als Vorlage speichern' }).click();
+  await page.waitForTimeout(300);
+
+  await page.locator('.hc-stand-field input').fill('E2E-Standardschaltung');
+  await page.locator('.hc-stand-dialog__actions .is-primary').click();
+  await page.waitForTimeout(1200);
+
+  await vorlagenMenu.click();
+  await page.waitForTimeout(300);
+  const eintrag = page.locator('.hc-toolbar-menu__content button', { hasText: 'E2E-Standardschaltung' }).first();
+  pruefe('V1', 'Die Vorlage steht im Menü', await eintrag.count() > 0,
+    `${await eintrag.count()} Einträge`);
+
+  // Leeres Schema, dann Vorlage laden — sie muss die Bauteile zurückbringen.
+  await page.keyboard.press('Escape');
+  await w.graphSetzen({ nodes: [], edges: [], layer_config: {} });
+  await w.laden();
+  pruefe('V2', 'Ausgangslage ist leer',
+    (await page.locator('.react-flow__node').count()) === 0,
+    `${await page.locator('.react-flow__node').count()} Nodes`);
+
+  await vorlagenMenu.click();
+  await page.waitForTimeout(300);
+  await page.locator('.hc-toolbar-menu__content button', { hasText: 'E2E-Standardschaltung' }).first().click();
+  await page.waitForTimeout(900);
+  const nachher = await page.locator('.react-flow__node').count();
+  pruefe('V3', 'Die Vorlage bringt die Bauteile zurück', nachher === 2, `${nachher} Nodes`);
+
+  // Rückgängig muss das Laden als EINE Aktion zurücknehmen.
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(700);
+  pruefe('V4', 'Rückgängig nimmt das Laden als EINE Aktion zurück',
+    (await page.locator('.react-flow__node').count()) === 0,
+    `${await page.locator('.react-flow__node').count()} Nodes`);
+}
+
 pruefe('X', 'keine Konsolenfehler', w.fehler.length === 0, w.fehler.slice(0, 3).join(' || '));
 await page.screenshot({ path: `${OUT}/bedienung.png` });
 const offen = bilanz(OUT);

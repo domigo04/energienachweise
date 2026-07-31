@@ -216,3 +216,13 @@ export const updateProjectNote = (projectId, noteId, data) =>
   api.patch(`${BASE}/projects/${projectId}/notizen/${noteId}`, data).then(r => r.data);
 export const deleteProjectNote = (projectId, noteId) =>
   api.delete(`${BASE}/projects/${projectId}/notizen/${noteId}`);
+
+// --- Persönliche Editor-Einstellungen (Tastenbelegung, pro Benutzer) ---
+export const getUserSettings = () => api.get(`${BASE}/user-settings`).then(r => r.data);
+export const saveUserSettings = (data) => api.put(`${BASE}/user-settings`, data).then(r => r.data);
+
+// --- Firmenweite Schema-Vorlagen (Standardschaltungen) ---
+export const getSchemaTemplates = () => api.get(`${BASE}/schema-templates`).then(r => r.data);
+export const getSchemaTemplate = (id) => api.get(`${BASE}/schema-templates/${id}`).then(r => r.data);
+export const createSchemaTemplate = (data) => api.post(`${BASE}/schema-templates`, data).then(r => r.data);
+export const deleteSchemaTemplate = (id) => api.delete(`${BASE}/schema-templates/${id}`);

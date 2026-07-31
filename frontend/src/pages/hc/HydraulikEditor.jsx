@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   AlertTriangle, ArrowLeft, Check, ChevronDown, Download, Eye, History,
   Image as ImageIcon, Layers3, LayoutTemplate, Lock, Unlock, PanelLeftClose, PanelLeftOpen, RotateCcw,
-  PanelRightClose, PanelRightOpen, Redo2, Save as SaveIcon, Settings2, Trash2, Undo2, X,
+  PanelRightClose, PanelRightOpen, Redo2, Save as SaveIcon, Settings, Settings2, Trash2, Undo2, X,
 } from 'lucide-react';
 import {
   ReactFlow, Background, BackgroundVariant, Controls, MiniMap,
@@ -52,6 +52,12 @@ import {
   deleteSchemaUnderlay,
   getProjectNotes,
   getSchemaEditor,
+  getUserSettings,
+  saveUserSettings,
+  getSchemaTemplates,
+  getSchemaTemplate,
+  createSchemaTemplate,
+  deleteSchemaTemplate,
   getSchemaUnderlay,
   hydraulikBerechnen,
   listSchemaRevisions,
@@ -1602,6 +1608,19 @@ function EditorInner() {
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [shiftPressed, setShiftPressed] = useState(false);
   const [drawingConfig, setDrawingConfig] = useState(DEFAULT_DRAWING_CONFIG);
+  // Persönliche Tastenbelegung (pro Benutzer gespeichert, nicht am Projekt).
+  // Der Ref hält sie ausserhalb des Renderzyklus bereit, weil das Laden eines
+  // Schemas sie sofort über die Schemawerte legen muss.
+  const eigeneShortcutsRef = useRef({});
+  const [shortcutDialogOpen, setShortcutDialogOpen] = useState(false);
+  const [shortcutFehler, setShortcutFehler] = useState('');
+  // Firmenweite Schema-Vorlagen (Standardschaltungen).
+  const [vorlagen, setVorlagen] = useState([]);
+  const [vorlageDialogOpen, setVorlageDialogOpen] = useState(false);
+  const [vorlageName, setVorlageName] = useState('');
+  const [vorlageBeschreibung, setVorlageBeschreibung] = useState('');
+  const [vorlageSaving, setVorlageSaving] = useState(false);
+  const [vorlageFehler, setVorlageFehler] = useState('');
   const [leitungsEntwurf, setLeitungsEntwurf] = useState(null);
   // EIN zentraler Befehlszustand (`schema/editorMode.js`). `modify` ist der
   // Grundzustand; ESC führt aus jedem Befehl dorthin zurück. Die beiden Booleans
@@ -1811,7 +1830,10 @@ function EditorInner() {
 
   const editorGraphAnwenden = useCallback((graph) => {
     const geladen = graphFuerEditor(graph);
-    setDrawingConfig(geladen.drawingConfig);
+    // Zeichnungseinstellungen kommen aus dem Schema, die Tastenbelegung aus den
+    // persönlichen Einstellungen: sie gehört dem Planer, nicht dem Projekt.
+    // Ohne diesen Vorrang würde ein fremdes Schema die eigenen Tasten umstellen.
+    setDrawingConfig({ ...geladen.drawingConfig, ...eigeneShortcutsRef.current });
     // Genau EINMAL einpassen, mit Deckel bei 1:1. Ein Schema mit einem einzigen
     // Bauteil soll nicht auf 400 % aufgezogen werden.
     if (geladen.nodes.length) {
@@ -2000,6 +2022,44 @@ function EditorInner() {
     setSelected(null);
     setSelectedEdgeId(null);
   }, [setNodes, setEdges]);
+
+  // ── Persönliche Tastenbelegung ────────────────────────────────────────────
+  // Sie kommt vom Server und überschreibt die Belegung aus dem Schema. Eine
+  // leere Taste heisst «dieser Befehl hat keine» — sie darf nicht auf den
+  // Standard zurückfallen, sonst entstünde genau die Doppelbelegung, die der
+  // Server gerade aufgelöst hat.
+  const shortcutsAnwenden = useCallback((satz) => {
+    const eintraege = Object.entries(satz?.shortcuts || {});
+    if (!eintraege.length) return;
+    const shortcuts = Object.fromEntries(eintraege.map(([feld, taste]) => [feld, taste || '']));
+    eigeneShortcutsRef.current = shortcuts;
+    setDrawingConfig(current => ({ ...current, ...shortcuts }));
+  }, []);
+
+  React.useEffect(() => {
+    // Schlägt das Laden fehl (alter Server, offline), bleibt die Standard-
+    // belegung stehen — der Editor ist trotzdem vollständig bedienbar.
+    getUserSettings().then(shortcutsAnwenden).catch(() => {});
+  }, [shortcutsAnwenden]);
+
+  const shortcutSetzen = useCallback((feld, wert) => {
+    const taste = String(wert || '').trim().slice(-1).toLowerCase();
+    const naechste = { ...eigeneShortcutsRef.current, [feld]:taste };
+    setShortcutFehler('');
+    // Optimistisch anzeigen, damit die Eingabe nicht springt; die Wahrheit
+    // (Konfliktauflösung) kommt gleich darauf vom Server zurück.
+    setDrawingConfig(current => ({ ...current, [feld]:taste }));
+    saveUserSettings({ shortcuts:naechste })
+      .then(shortcutsAnwenden)
+      .catch(() => setShortcutFehler('Die Belegung konnte nicht gespeichert werden.'));
+  }, [shortcutsAnwenden]);
+
+  const shortcutsZuruecksetzen = useCallback(() => {
+    setShortcutFehler('');
+    saveUserSettings({ shortcuts:{} })
+      .then(shortcutsAnwenden)
+      .catch(() => setShortcutFehler('Die Belegung konnte nicht zurückgesetzt werden.'));
+  }, [shortcutsAnwenden]);
 
   const drawingConfigAktualisieren = useCallback((key, value) => {
     const next = normalisiereDrawingConfig({ ...drawingConfig, [key]:value });
@@ -4149,6 +4209,72 @@ function EditorInner() {
     setSelected(null);
   };
 
+  // ── Firmenweite Schema-Vorlagen ───────────────────────────────────────────
+  // Eine Vorlage ist eine Kopie des Graphen zum Zeitpunkt des Speicherns. Sie
+  // ersetzt beim Laden den Zeichnungsinhalt — als EINE Rückgängig-Aktion, damit
+  // ein versehentliches Laden nicht die halbe Arbeit kostet.
+  const vorlagenLaden = useCallback(() => {
+    getSchemaTemplates().then(setVorlagen).catch(() => setVorlagen([]));
+  }, []);
+
+  React.useEffect(() => { vorlagenLaden(); }, [vorlagenLaden]);
+
+  const vorlageAnwenden = useCallback(async (templateId) => {
+    setVorlageFehler('');
+    try {
+      const vorlage = await getSchemaTemplate(templateId);
+      const graph = vorlage?.graph || {};
+      const geladen = graphFuerEditor(graph);
+      snap();
+      setNodes(geladen.nodes);
+      setEdges(geladen.edges);
+      setSelected(null);
+      setSelectedEdgeId(null);
+      requestAnimationFrame(() => fitView({ padding:0.25, duration:0, minZoom:0.2, maxZoom:1 }));
+    } catch {
+      setVorlageFehler('Die Vorlage konnte nicht geladen werden.');
+    }
+  }, [fitView, setEdges, setNodes, snap]);
+
+  const vorlageSpeichern = useCallback(async (event) => {
+    event.preventDefault();
+    const name = vorlageName.trim();
+    if (!name || !nodesRef.current.length) return;
+    setVorlageSaving(true);
+    setVorlageFehler('');
+    try {
+      // Der aktuelle Stand aus dem Editor, nicht der zuletzt gespeicherte —
+      // sonst würde eine gerade gezeichnete Schaltung nicht in der Vorlage sein.
+      const graph = graphFuerSpeicherung(
+        nodesRef.current,
+        edgesRef.current,
+        { active_layer_id:activeLayerId, visibility:layerVisibility },
+        drawingConfig,
+      );
+      await createSchemaTemplate({ name, beschreibung:vorlageBeschreibung.trim(), graph });
+      setVorlageName('');
+      setVorlageBeschreibung('');
+      setVorlageDialogOpen(false);
+      vorlagenLaden();
+    } catch (fehler) {
+      setVorlageFehler(fehler?.response?.data?.detail || 'Die Vorlage konnte nicht gespeichert werden.');
+    } finally {
+      setVorlageSaving(false);
+    }
+  }, [activeLayerId, drawingConfig, layerVisibility, vorlageBeschreibung, vorlageName, vorlagenLaden]);
+
+  const vorlageEntfernen = useCallback(async (templateId) => {
+    setVorlageFehler('');
+    try {
+      await deleteSchemaTemplate(templateId);
+      vorlagenLaden();
+    } catch (fehler) {
+      setVorlageFehler(fehler?.response?.status === 403
+        ? 'Nur die Erstellerin oder ein Firmenadmin darf diese Vorlage löschen.'
+        : 'Die Vorlage konnte nicht gelöscht werden.');
+    }
+  }, [vorlagenLaden]);
+
   const downloadPdf = async (inhalt) => {
     if (!schemaId) return;
     setExportState('loading');
@@ -4907,7 +5033,36 @@ function EditorInner() {
             : leitungsEntwurf ? 'Leitung wird gezeichnet' : `${modeLabel(editorMode)} — Klick setzt Punkt`}</span>
         </div>
 
-        <ToolbarMenu label="Vorlagen" icon={LayoutTemplate}>
+        <ToolbarMenu label="Vorlagen" icon={LayoutTemplate} badge={vorlagen.length}>
+          {/* Eigene Vorlagen zuerst: sie sind die Standardschaltungen der Firma
+              und werden häufiger gebraucht als die mitgelieferten Beispiele. */}
+          {vorlagen.length > 0 && (
+            <div style={{ padding:'2px 8px 4px', fontSize:9, fontWeight:800, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'.06em' }}>
+              Unsere Vorlagen
+            </div>
+          )}
+          {vorlagen.map(vorlage => (
+            <div key={vorlage.id} style={{ display:'flex', alignItems:'center', gap:2 }}>
+              <button onClick={event=>{ vorlageAnwenden(vorlage.id); closeToolbarMenu(event); }}
+                style={{ ...menuActionStyle, flex:1 }}
+                title={vorlage.beschreibung || `${vorlage.node_count} Bauteile · ${vorlage.edge_count} Leitungen`}>
+                <LayoutTemplate size={14} /> {vorlage.name}
+              </button>
+              <button onClick={()=>vorlageEntfernen(vorlage.id)} title="Vorlage löschen"
+                style={{ ...menuActionStyle, width:26, padding:0, justifyContent:'center', color:'#94a3b8' }}>
+                <Trash2 size={13} />
+              </button>
+            </div>
+          ))}
+          <button onClick={event=>{ setVorlageFehler(''); setVorlageDialogOpen(true); closeToolbarMenu(event); }}
+            disabled={!nodes.length}
+            style={{ ...menuActionStyle, color:'#4f46e5', opacity:nodes.length ? 1 : .45,
+              borderTop:'1px solid #f1f5f9', paddingTop:8, marginTop:2 }}>
+            <SaveIcon size={14} /> Dieses Schema als Vorlage speichern …
+          </button>
+          <div style={{ padding:'8px 8px 2px', fontSize:9, fontWeight:800, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'.06em', borderTop:'1px solid #f1f5f9', marginTop:4 }}>
+            Beispielschaltungen
+          </div>
           {Object.entries(SCHALTUNGEN).map(([key, schema])=>(
             <button key={key} onClick={event=>{ loadSchema(key); closeToolbarMenu(event); }} style={menuActionStyle}>
               <LayoutTemplate size={14} /> {schema.name}
@@ -4949,38 +5104,28 @@ function EditorInner() {
                 {TOLERANZ_OPTIONEN.map(mm => <option key={mm} value={mm}>{mm} mm{mm === 4 ? ' · exakt' : mm === 20 ? ' · grosszügig' : ''}</option>)}
               </select>
             </label>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 38px', gap:6, alignItems:'center', paddingTop:8, borderTop:'1px solid #f1f5f9', fontSize:10, color:'#475569' }}>
-              {[
-                ['shortcut_line', 'Leitung starten'],
-                ['shortcut_polyline', 'Polylinie starten'],
-                ['shortcut_rotate', 'Bauteil drehen'],
-                ['shortcut_mirror', 'Bauteil spiegeln'],
-                ['shortcut_align', 'Ausrichten (Shift: Bauteil aufs Raster)'],
-                ['shortcut_move', 'Verschieben (Shift: ganze Leitung)'],
-                ['shortcut_break', 'Mit Lücke trennen'],
-                ['shortcut_stretch', 'Dehnen'],
-              ].map(([feld, label]) => (
-                <React.Fragment key={feld}>
-                  <label htmlFor={feld}>{label}</label>
-                  <input id={feld} maxLength="1" value={drawingConfig[feld]} onFocus={event=>event.currentTarget.select()}
-                    onChange={event=>drawingConfigAktualisieren(feld, event.target.value)}
-                    style={{ textAlign:'center', textTransform:'uppercase', border:'1px solid #cbd5e1', borderRadius:5, padding:4, fontWeight:800 }}/>
-                </React.Fragment>
-              ))}
-              <div style={{ gridColumn:'1 / -1', color:'#94a3b8', fontSize:9, marginTop:2 }}>
-                Verschieben: Auswahl · Taste · Startpunkt · Zielpunkt (orthogonal gefangen).
-                Feinversatz weiterhin mit den Pfeiltasten (Shift = grosser Schritt).
-              </div>
-            </div>
+            {/* Die Tastenbelegung ist persönlich und liegt darum nicht mehr
+                hier, sondern hinter dem Zahnrad — sie gehört dem Planer, nicht
+                dem Schema. */}
+            <button onClick={event=>{ setShortcutDialogOpen(true); closeToolbarMenu(event); }}
+              style={{ ...menuActionStyle, paddingLeft:0, borderTop:'1px solid #f1f5f9', paddingTop:8, marginTop:2 }}>
+              <Settings size={14} /> Meine Tastenbelegung …
+            </button>
             <button onClick={event=>{
-              setDrawingConfig(DEFAULT_DRAWING_CONFIG);
+              setDrawingConfig({ ...DEFAULT_DRAWING_CONFIG, ...eigeneShortcutsRef.current });
               setEdges(items => items.map(edge => ({ ...edge, data:{ ...(edge.data || {}), corner_radius:DEFAULT_DRAWING_CONFIG.corner_radius } })));
               closeToolbarMenu(event);
-            }} style={{ ...menuActionStyle, marginTop:8, paddingLeft:0, color:'#4f46e5' }}>
-              Standard wiederherstellen
+            }} style={{ ...menuActionStyle, marginTop:2, paddingLeft:0, color:'#4f46e5' }}>
+              Zeichnung auf Standard zurücksetzen
             </button>
           </div>
         </ToolbarMenu>
+
+        {/* Zahnrad: benutzerdefinierte Einstellungen, pro Benutzer gespeichert. */}
+        <button onClick={()=>setShortcutDialogOpen(true)} className="hc-icon-button"
+          title="Benutzerdefinierte Einstellungen — meine Tastenbelegung">
+          <Settings size={16} />
+        </button>
 
         <button onClick={()=>{ setShowWarnungen(value=>!value); setShowLegende(false); }}
           className={`hc-warning-button${alleWarnungen.length ? ' has-warnings' : ''}`}>
@@ -5607,6 +5752,102 @@ function EditorInner() {
           </aside>
         )}
       </div>
+
+      {/* Schema als Vorlage speichern. Die Vorlage ist eine Kopie: ändert sich
+          dieses Projekt später, bleibt die Standardschaltung, wie sie war. */}
+      {vorlageDialogOpen && (
+        <div className="hc-revision-overlay" onPointerDown={()=>!vorlageSaving && setVorlageDialogOpen(false)}>
+          <form className="hc-stand-dialog" onSubmit={vorlageSpeichern} onPointerDown={event=>event.stopPropagation()}>
+            <div className="hc-revision-panel__header">
+              <div>
+                <span>Wiederverwenden</span>
+                <strong>Als Vorlage speichern</strong>
+              </div>
+              <button type="button" className="hc-icon-button" onClick={()=>setVorlageDialogOpen(false)} disabled={vorlageSaving}>
+                <X size={17} />
+              </button>
+            </div>
+            <p className="hc-stand-dialog__intro">
+              Die Vorlage steht der ganzen Firma zur Verfügung und ist eine Kopie
+              des jetzigen Standes. Spätere Änderungen an diesem Projekt lassen
+              sie unberührt.
+            </p>
+            <label className="hc-stand-field">
+              <span>Name</span>
+              <input autoFocus maxLength={120} value={vorlageName}
+                onChange={event=>setVorlageName(event.target.value)}
+                placeholder="Zum Beispiel: EWS-WP mit zwei Heizgruppen" />
+            </label>
+            <label className="hc-stand-field">
+              <span>Beschreibung <small>optional</small></span>
+              <textarea maxLength={500} rows={3} value={vorlageBeschreibung}
+                onChange={event=>setVorlageBeschreibung(event.target.value)}
+                placeholder="Wofür eignet sich diese Schaltung?" />
+            </label>
+            {vorlageFehler && <div className="hc-revision-error">{vorlageFehler}</div>}
+            <div className="hc-stand-dialog__facts">
+              <span>{nodes.length} Bauteile</span>
+              <span>{edges.length} Leitungen</span>
+            </div>
+            <div className="hc-stand-dialog__actions">
+              <button type="button" onClick={()=>setVorlageDialogOpen(false)} disabled={vorlageSaving}>Abbrechen</button>
+              <button type="submit" className="is-primary" disabled={vorlageSaving || !vorlageName.trim() || !nodes.length}>
+                <SaveIcon size={15} /> {vorlageSaving ? 'Wird gespeichert …' : 'Vorlage speichern'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Benutzerdefinierte Einstellungen: die Tastenbelegung gehört dem
+          Planer, nicht dem Projekt. Sie wird pro Benutzer gespeichert und gilt
+          in jedem Schema, das er öffnet. */}
+      {shortcutDialogOpen && (
+        <div className="hc-revision-overlay" onPointerDown={()=>setShortcutDialogOpen(false)}>
+          <div className="hc-stand-dialog" onPointerDown={event=>event.stopPropagation()}>
+            <div className="hc-revision-panel__header">
+              <div>
+                <span>Benutzerdefiniert</span>
+                <strong>Meine Tastenbelegung</strong>
+              </div>
+              <button type="button" className="hc-icon-button" onClick={()=>setShortcutDialogOpen(false)}>
+                <X size={17} />
+              </button>
+            </div>
+            <p className="hc-stand-dialog__intro">
+              Gilt für dich in jedem Schema und wird sofort gespeichert. Ziffern
+              bleiben der Längeneingabe vorbehalten. Vergibst du eine Taste
+              doppelt, behält sie der zuletzt geänderte Befehl — der andere
+              bleibt frei und kann neu belegt werden.
+            </p>
+            <div className="hc-shortcut-grid">
+              {[
+                ['shortcut_line', 'Leitung starten'],
+                ['shortcut_polyline', 'Polylinie starten'],
+                ['shortcut_rotate', 'Bauteil drehen'],
+                ['shortcut_mirror', 'Bauteil spiegeln'],
+                ['shortcut_align', 'Ausrichten (Shift: Bauteil aufs Raster)'],
+                ['shortcut_move', 'Verschieben (Shift: ganze Leitung)'],
+                ['shortcut_break', 'Mit Lücke trennen'],
+                ['shortcut_stretch', 'Dehnen'],
+              ].map(([feld, label]) => (
+                <React.Fragment key={feld}>
+                  <label htmlFor={`sc-${feld}`}>{label}</label>
+                  <input id={`sc-${feld}`} maxLength="1" value={drawingConfig[feld] || ''}
+                    onFocus={event=>event.currentTarget.select()}
+                    placeholder="—"
+                    onChange={event=>shortcutSetzen(feld, event.target.value)} />
+                </React.Fragment>
+              ))}
+            </div>
+            {shortcutFehler && <div className="hc-revision-error">{shortcutFehler}</div>}
+            <div className="hc-stand-dialog__actions">
+              <button type="button" onClick={shortcutsZuruecksetzen}>Standardbelegung</button>
+              <button type="button" className="is-primary" onClick={()=>setShortcutDialogOpen(false)}>Fertig</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {standDialogOpen && (
         <div className="hc-revision-overlay" onPointerDown={()=>!standSaving && setStandDialogOpen(false)}>

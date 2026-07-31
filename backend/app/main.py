@@ -50,6 +50,8 @@ from app.routers.hc_grobkostenschaetzung import router as hc_grobkostenschaetzun
 from app.routers.hc_company_admin import router as hc_company_admin_router
 from app.routers.hc_lv_import import router as hc_lv_import_router
 from app.routers.hc_notizen import router as hc_notizen_router
+from app.routers.hc_user_settings import router as hc_user_settings_router
+from app.routers.hc_schema_templates import router as hc_schema_templates_router
 
 from app.auth import get_current_user
 
@@ -75,6 +77,8 @@ app.include_router(hc_grobkostenschaetzung_router, dependencies=_auth)
 app.include_router(hc_company_admin_router, dependencies=_auth)
 app.include_router(hc_lv_import_router, dependencies=_auth)
 app.include_router(hc_notizen_router, dependencies=_auth)
+app.include_router(hc_user_settings_router, dependencies=_auth)
+app.include_router(hc_schema_templates_router, dependencies=_auth)
 
 # Die Exportrouten prüfen den Bearer-Token und die Firma zusätzlich selbst.
 app.include_router(hc_export_router)

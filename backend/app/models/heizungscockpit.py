@@ -405,3 +405,48 @@ class HcProjectNote(Base):
     bearbeitet_at = Column(DateTime, nullable=True)
     bearbeitet_von_id = Column(Integer, nullable=True)
     bearbeitet_von_name = Column(String, nullable=True)
+
+
+class HcUserSettings(Base):
+    """Persönliche Editor-Einstellungen eines Benutzers (Tastenbelegung).
+
+    Die Belegung gehört dem Benutzer, nicht dem Projekt: zwei Planer am selben
+    Schema behalten ihre eigene. Bewusst EIN JSON-Feld statt einer Spalte je
+    Einstellung — eine neue Taste soll keine Migration brauchen. Die Regeln
+    dazu stehen rein und getestet in `app/user_settings.py`.
+    """
+
+    __tablename__ = "hc_user_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, default=1, nullable=False, index=True)
+    user_id = Column(Integer, nullable=False, unique=True, index=True)
+    settings_json = Column(Text, nullable=False, default="{}")
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class HcSchemaTemplate(Base):
+    """Ein Anlagenschema, das als Vorlage wiederverwendbar ist.
+
+    Vorlagen sind firmenweit (Regel 5/6): wer in der Firma arbeitet, sieht und
+    verwendet sie. Sie sind eine KOPIE des Graphen zum Zeitpunkt des Speicherns
+    — spätere Änderungen am Ursprungsprojekt lassen die Vorlage unberührt, sonst
+    würde sich eine Standardschaltung unter der Hand verändern.
+    """
+
+    __tablename__ = "hc_schema_templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, default=1, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    beschreibung = Column(Text, nullable=False, default="")
+    graph_json = Column(Text, nullable=False, default="{}")
+    node_count = Column(Integer, nullable=False, default=0)
+    edge_count = Column(Integer, nullable=False, default=0)
+    # Herkunft nur zur Nachvollziehbarkeit — die Vorlage hängt nicht daran.
+    quelle_project_id = Column(Integer, nullable=True)
+    quelle_schema_id = Column(Integer, nullable=True)
+    created_by = Column(Integer, nullable=True, index=True)
+    created_by_name = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

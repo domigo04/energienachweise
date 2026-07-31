@@ -2030,11 +2030,9 @@ function EditorInner() {
         content: ''; position: absolute;
         inset: -7px; border-radius: 7px;
       }
-      .react-flow__handle:hover {
-        transform: scale(1.25) !important;
-        box-shadow: 0 0 0 3px rgba(59,130,246,.35) !important;
-        z-index: 1000 !important;
-      }
+      /* Kein Hover-Effekt an den Anschlüssen (Dominic 2026-07-31): das
+         Aufpoppen beim Darüberfahren war Unruhe ohne Nutzen — und es
+         verschob den gemessenen Mittelpunkt des Anschlusses. */
       /* Bei der kleinen Pumpe darf die Hitbox nicht das ganze Symbol abdecken:
          Mitte bleibt frei zum Anwählen und Verschieben. */
       .react-flow__handle.hc-pump-handle {

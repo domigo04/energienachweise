@@ -20,14 +20,17 @@ export function SymPump() {
 export function SymValve2V() {
   return (
     <svg viewBox="0 0 100 100" width="34" height="24">
-      <line x1="50" y1="0" x2="50" y2="8" stroke="#1e293b" strokeWidth="2.6" />
-      <line x1="50" y1="92" x2="50" y2="100" stroke="#1e293b" strokeWidth="2.6" />
-      <rect x="4" y="36" width="26" height="28" fill="#ffd34d" stroke="#ff9f00" strokeWidth="2.4" strokeLinejoin="round" />
-      <path d="M10 43 H23 L15 50 L23 57 H10" fill="none" stroke="#ff9f00" strokeWidth="2.4" strokeLinejoin="round" />
-      <line x1="30" y1="50" x2="39" y2="50" stroke="#ff9f00" strokeWidth="2.4" strokeLinecap="round" />
-      <polygon points="36,8 64,8 50,50" fill="white" stroke="#1e293b" strokeWidth="2.4" strokeLinejoin="round" />
-      <polygon points="36,92 64,92 50,50" fill="white" stroke="#1e293b" strokeWidth="2.4" strokeLinejoin="round" />
-      <circle cx="50" cy="50" r="6" fill="#1e293b" />
+      {/* Dominic 2026-07-31: die Doppelkegel waren fast so hoch wie das ganze
+          Symbol und wirkten dadurch in die Länge gezogen. Sie sind jetzt
+          gestaucht und etwas breiter — dasselbe Zeichen, ruhigere Proportion. */}
+      <line x1="50" y1="0" x2="50" y2="22" stroke="#1e293b" strokeWidth="2.6" />
+      <line x1="50" y1="78" x2="50" y2="100" stroke="#1e293b" strokeWidth="2.6" />
+      <rect x="4" y="38" width="24" height="24" fill="#ffd34d" stroke="#ff9f00" strokeWidth="2.4" strokeLinejoin="round" />
+      <path d="M9 44 H22 L14 50 L22 56 H9" fill="none" stroke="#ff9f00" strokeWidth="2.4" strokeLinejoin="round" />
+      <line x1="28" y1="50" x2="34" y2="50" stroke="#ff9f00" strokeWidth="2.4" strokeLinecap="round" />
+      <polygon points="32,22 68,22 50,50" fill="white" stroke="#1e293b" strokeWidth="2.4" strokeLinejoin="round" />
+      <polygon points="32,78 68,78 50,50" fill="white" stroke="#1e293b" strokeWidth="2.4" strokeLinejoin="round" />
+      <circle cx="50" cy="50" r="5.5" fill="#1e293b" />
     </svg>
   );
 }

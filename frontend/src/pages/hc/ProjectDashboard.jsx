@@ -125,7 +125,12 @@ export default function ProjectDashboard() {
         <div className="flex flex-col items-stretch gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <div className="mb-2 flex items-center gap-3">
-              <h1 className="text-xl font-bold text-slate-900">{project.name}</h1>
+              <h1 className="text-xl font-bold text-slate-900">
+                {project.projektnummer && (
+                  <span className="font-mono tabular-nums text-slate-500">{project.projektnummer} – </span>
+                )}
+                {project.name}
+              </h1>
               {archiviert
                 ? <span className="badge bg-slate-100 text-slate-500">Archiviert</span>
                 : <span className="badge border-green-200 bg-green-50 text-green-700">Aktiv</span>}

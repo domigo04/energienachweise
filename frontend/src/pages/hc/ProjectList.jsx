@@ -120,6 +120,11 @@ export default function ProjectList() {
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div>
                 <label className="label">Projektname *</label>
+                {/* Die Nummer kommt vom Server — im Formular gibt es dafür
+                    bewusst kein Feld, nur den Hinweis. */}
+                <p className="mb-1.5 text-xs text-slate-400">
+                  Projektnummer: wird automatisch vergeben
+                </p>
                 <input className="input" placeholder="z.B. EFH Muster, Winterthur" value={form.name}
                   onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} required />
               </div>
@@ -224,7 +229,12 @@ export default function ProjectList() {
             <div key={p.id} onClick={() => navigate(`/projekte/${p.id}`)}
               className="card group cursor-pointer border-l-2 border-l-transparent p-5 text-left transition hover:border-slate-400 hover:border-l-brand-600 hover:bg-slate-50/60">
               <div className="mb-2 flex items-start justify-between gap-3">
-                <h3 className="truncate font-semibold text-slate-900 group-hover:text-brand-700">{p.name}</h3>
+                <h3 className="truncate font-semibold text-slate-900 group-hover:text-brand-700">
+                  {p.projektnummer && (
+                    <span className="font-mono tabular-nums text-slate-500">{p.projektnummer} – </span>
+                  )}
+                  {p.name}
+                </h3>
                 <div className="flex shrink-0 items-center gap-2">
                   <StatusBadge status={p.status} />
                   {kannEndgueltigLoeschen && p.status === "archiviert" && (

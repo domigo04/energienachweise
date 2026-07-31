@@ -7,6 +7,7 @@ import Login from "./pages/Login";
 import { AuthProvider } from "./auth/AuthContext";
 import ProtectedRoute from "./auth/ProtectedRoute";
 import AppLayout from "./components/AppLayout";
+import { FeatureProvider } from "./lib/features";
 
 // Die öffentliche Landingpage lädt keinen internen Projektcode. Jede grössere
 // Arbeitsseite wird erst beim Öffnen als eigenes Paket nachgeladen.
@@ -28,6 +29,7 @@ const LvImportPage = lazy(() => import("./pages/auswertung/LvImportPage"));
 const GrobkostenSchaetzung = lazy(() => import("./pages/grobkosten/GrobkostenSchaetzung"));
 const BenutzerFreischaltung = lazy(() => import("./pages/admin/BenutzerFreischaltung"));
 const Firmenverwaltung = lazy(() => import("./pages/admin/Firmenverwaltung"));
+const Abonnement = lazy(() => import("./pages/admin/Abonnement"));
 const BaupreisindexAdmin = lazy(() => import("./pages/admin/BaupreisindexAdmin"));
 const HydraulikEditor = lazy(() => import("./pages/hc/HydraulikEditor"));
 
@@ -42,6 +44,7 @@ function PageLoader({ children }) {
 export default function App() {
   return (
     <AuthProvider>
+      <FeatureProvider>
       <Router>
         <Routes>
           {/* Öffentlich */}
@@ -78,6 +81,7 @@ export default function App() {
             <Route path="/admin/benutzer" element={<PageLoader><BenutzerFreischaltung /></PageLoader>} />
             <Route path="/admin/baupreisindex" element={<PageLoader><BaupreisindexAdmin /></PageLoader>} />
             <Route path="/firma/verwaltung" element={<PageLoader><Firmenverwaltung /></PageLoader>} />
+            <Route path="/firma/abonnement" element={<PageLoader><Abonnement /></PageLoader>} />
           </Route>
 
           {/* Schema-Editor: Vollbild-Canvas, ausserhalb der gepolsterten Shell */}
@@ -88,6 +92,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/start" replace />} />
         </Routes>
       </Router>
+      </FeatureProvider>
     </AuthProvider>
   );
 }

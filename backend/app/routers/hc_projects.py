@@ -27,6 +27,7 @@ from app.schemas.hc_schemas import (
     ProjectUpdate,
 )
 from app.calculations.heizgruppen import berechne_rl_gemischt, pruefe_plausibilitaet
+from app.services import project_number as projekt_nummer
 from app.project_context import PARAMETER_BY_KEY, context_fuer_projekt
 from app.project_status import status_fuer_projekt
 
@@ -61,6 +62,9 @@ def _build_detail(project: HcProject) -> ProjectDetailOut:
         standort=project.standort,
         kunde=project.kunde,
         projektnummer=project.projektnummer,
+        project_year=project.project_year,
+        project_sequence=project.project_sequence,
+        opened_at=project.opened_at,
         strasse=project.strasse,
         plz=project.plz,
         ort=project.ort,
@@ -107,6 +111,17 @@ def list_projects(user: User = Depends(get_current_user), db: Session = Depends(
 
 @router.post("", response_model=ProjectDetailOut, status_code=201)
 def create_project(body: ProjectCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Die Projektnummer entsteht hier und nirgends sonst. Sie liegt in derselben
+    # Transaktion wie das Projekt: bricht das Anlegen ab, ist auch die Nummer
+    # nicht verbraucht.
+    eroeffnet = body.opened_at or datetime.utcnow()
+    try:
+        nummer, jahr, folge = projekt_nummer.naechste_nummer(
+            db, user.tenant_id, projekt_nummer.jahr_von(eroeffnet))
+    except projekt_nummer.ProjectSequenceLimitReached as exc:
+        raise HTTPException(status_code=409, detail={
+            "code": exc.code, "message": str(exc)}) from exc
+
     project = HcProject(
         tenant_id=user.tenant_id,
         erstellt_von=user.id,
@@ -114,7 +129,10 @@ def create_project(body: ProjectCreate, user: User = Depends(get_current_user), 
         name=body.name,
         standort=body.standort,
         kunde=body.kunde,
-        projektnummer=body.projektnummer,
+        projektnummer=nummer,
+        project_year=jahr,
+        project_sequence=folge,
+        opened_at=eroeffnet,
         strasse=body.strasse,
         plz=body.plz,
         ort=body.ort,
@@ -302,8 +320,10 @@ def update_project(project_id: int, body: ProjectUpdate, user: User = Depends(ge
 
     before = {}
     after = {}
+    # projektnummer, project_year und project_sequence fehlen bewusst: eine
+    # vergebene Projektnummer ist unveränderlich.
     for field in (
-        "name", "standort", "kunde", "projektnummer", "strasse", "plz", "ort",
+        "name", "standort", "kunde", "strasse", "plz", "ort",
         "bauherr", "sia_phase", "projektfortschritt_pct", "planbezeichnung",
         "beschreibung", "status",
     ):

@@ -33,6 +33,8 @@ from app.data.beispiel_referenzprojekte import BEISPIEL_PREFIX, BEISPIEL_PROJEKT
 from app.data.bkp_positionen import BKP_POSITIONEN, abgabe_klassen_von
 from app.data.waermeerzeuger import erzeuger_signatur_von
 from app.database import get_db
+from app.deps.feature_guard import require_feature
+from app.plan_features import Feature
 from app.export.grobkostenschaetzung import (
     erzeuge_grobkostenschaetzung_excel,
     erzeuge_grobkostenschaetzung_pdf,
@@ -316,7 +318,7 @@ def _berechne(body: SchaetzungIn, user: User, db: Session) -> tuple:
 # ── Schätzung ────────────────────────────────────────────────────────────────
 
 @router.post("/schaetzen")
-def schaetzen(body: SchaetzungIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def schaetzen(body: SchaetzungIn, user: User = Depends(require_feature(Feature.COST_ESTIMATION.value)), db: Session = Depends(get_db)):
     _, result = _berechne(body, user, db)
     return result
 
@@ -363,7 +365,7 @@ def get_saved(project_id: int, user: User = Depends(get_current_user), db: Sessi
 
 
 @router.put("/projekt/{project_id}")
-def compute_and_save(project_id: int, body: SchaetzungIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def compute_and_save(project_id: int, body: SchaetzungIn, user: User = Depends(require_feature(Feature.COST_ESTIMATION.value)), db: Session = Depends(get_db)):
     project = (
         db.query(HcProject)
         .filter(HcProject.id == project_id, HcProject.tenant_id == user.tenant_id)

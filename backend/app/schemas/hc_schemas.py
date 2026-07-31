@@ -48,10 +48,17 @@ class ProjectBaseDataIn(BaseModel):
 
 
 class ProjectCreate(BaseModel):
+    # Die Projektnummer vergibt der Server. Ein mitgesendetes Feld wird nicht
+    # still ignoriert, sondern mit 422 abgelehnt — sonst glaubt der Aufrufer,
+    # seine Nummer sei übernommen worden.
+    model_config = {"extra": "forbid"}
+
     name: str
     standort: Optional[str] = None
     kunde: Optional[str] = None
-    projektnummer: Optional[str] = None
+    # Eröffnungsdatum bestimmt das Jahr der Projektnummer. Ohne Angabe gilt die
+    # Serverzeit; ein Browserdatum wird nie ungeprüft übernommen.
+    opened_at: Optional[datetime] = None
     strasse: Optional[str] = None
     plz: Optional[str] = None
     ort: Optional[str] = None
@@ -64,10 +71,13 @@ class ProjectCreate(BaseModel):
 
 
 class ProjectUpdate(BaseModel):
+    # Nummer, Jahr und laufende Nummer fehlen hier bewusst: sie dürfen über
+    # keine generische Update-Route änderbar sein — auch nicht vom Firmenadmin.
+    model_config = {"extra": "forbid"}
+
     name: Optional[str] = None
     standort: Optional[str] = None
     kunde: Optional[str] = None
-    projektnummer: Optional[str] = None
     strasse: Optional[str] = None
     plz: Optional[str] = None
     ort: Optional[str] = None
@@ -155,6 +165,9 @@ class ProjectOut(BaseModel):
     standort: Optional[str]
     kunde: Optional[str]
     projektnummer: Optional[str] = None
+    project_year: Optional[int] = None
+    project_sequence: Optional[int] = None
+    opened_at: Optional[datetime] = None
     strasse: Optional[str] = None
     plz: Optional[str] = None
     ort: Optional[str] = None

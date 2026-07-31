@@ -71,7 +71,7 @@ export default function ProjektInfoPage() {
     try {
       const payload = {
         name: form.name, standort: form.standort, kunde: form.kunde, beschreibung: form.beschreibung,
-        projektnummer: form.projektnummer, strasse: form.strasse, plz: form.plz,
+        strasse: form.strasse, plz: form.plz,
         ort: form.ort, bauherr: form.bauherr, sia_phase: form.sia_phase,
         projektfortschritt_pct: Number(form.projektfortschritt_pct) || 0,
         planbezeichnung: form.planbezeichnung || "Prinzipschema",
@@ -137,7 +137,14 @@ export default function ProjektInfoPage() {
           <h2 className="mb-4 text-sm font-bold text-slate-800">Allgemein</h2>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div><label className="label">Projektname *</label><input className="input" value={form.name} onChange={(e) => set("name", e.target.value)} /></div>
-            <div><label className="label">Projektnummer</label><input className="input" value={form.projektnummer} onChange={(e) => set("projektnummer", e.target.value)} /></div>
+            <div>
+              <label className="label">Projektnummer</label>
+              {/* Unveränderlich: sie wird beim Anlegen vergeben und darf danach
+                  nicht mehr wechseln — auch nicht durch den Firmenadmin. */}
+              <input className="input bg-slate-50 font-mono tabular-nums text-slate-600"
+                value={form.projektnummer} readOnly disabled />
+              <p className="mt-1 text-xs text-slate-400">Automatisch vergeben</p>
+            </div>
             <div><label className="label">Bauherr</label><input className="input" value={form.bauherr} onChange={(e) => set("bauherr", e.target.value)} /></div>
             <div><label className="label">Kunde / Auftraggeber</label><input className="input" value={form.kunde} onChange={(e) => set("kunde", e.target.value)} /></div>
             <div className="md:col-span-2"><label className="label">Strasse</label><input className="input" value={form.strasse} onChange={(e) => set("strasse", e.target.value)} /></div>

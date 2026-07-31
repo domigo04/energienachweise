@@ -39,6 +39,7 @@ from app.routers.hc_ventil import router as hc_ventil_router
 from app.routers.hc_druckverlust import router as hc_druckverlust_router
 from app.routers.hc_ravel import router as hc_ravel_router
 from app.routers.hc_einzel import router as hc_einzel_router
+from app.routers.hc_plans import router as hc_plans_router
 from app.routers.hc_schema import router as hc_schema_router
 from app.routers.hc_hydraulik import router as hc_hydraulik_router
 from app.routers.hc_bkp import router as hc_bkp_router
@@ -63,6 +64,7 @@ app.include_router(hc_ventil_router, dependencies=_auth)
 app.include_router(hc_druckverlust_router, dependencies=_auth)
 app.include_router(hc_ravel_router, dependencies=_auth)
 app.include_router(hc_einzel_router, dependencies=_auth)
+app.include_router(hc_plans_router, dependencies=_auth)
 app.include_router(hc_schema_router, dependencies=_auth)
 app.include_router(hc_hydraulik_router, dependencies=_auth)
 app.include_router(hc_bkp_router, dependencies=_auth)
@@ -104,7 +106,6 @@ def _ensure_columns():
             ("ebf_m2", "FLOAT"), ("anzahl_nutzungseinheiten", "INTEGER"),
             ("projektart", "VARCHAR"), ("region", "VARCHAR"), ("zertifizierung", "VARCHAR"),
         ],
-        "hc_projects": [("erstellt_von", "INTEGER"), ("verantwortlicher_id", "INTEGER")],
         "hc_schemas": [("underlay_json", "TEXT")],
         "ref_projekte": [
             ("anlagenkonfiguration", "VARCHAR"),
@@ -114,7 +115,6 @@ def _ensure_columns():
             ("anzahl_schaltgeraetekombinationen", "INTEGER"), ("laufmeter_rohre_heizung", "FLOAT"),
             ("bww_bei_heizung", "BOOLEAN"), ("weiterbetrieb_umbau", "BOOLEAN"), ("etappierung", "BOOLEAN"),
         ],
-        "hc_firmen": [("abo_plan", "VARCHAR"), ("is_active", "BOOLEAN")],
         "hc_users": [
             ("admin_pw_seed_fingerprint", "VARCHAR"),
             ("firma_role", "VARCHAR"),
@@ -148,6 +148,16 @@ def _ensure_columns():
             ("amount_allocation", "VARCHAR"), ("requires_review", "BOOLEAN"),
         ],
         "lv_import_conditions": [("status", "VARCHAR")],
+        "hc_projects": [
+            ("erstellt_von", "INTEGER"), ("verantwortlicher_id", "INTEGER"),
+            ("project_year", "INTEGER"), ("project_sequence", "INTEGER"),
+            ("opened_at", "TIMESTAMP"),
+        ],
+        "hc_firmen": [
+            ("abo_plan", "VARCHAR"), ("is_active", "BOOLEAN"),
+            ("subscription_plan_id", "INTEGER"), ("plan_started_at", "TIMESTAMP"),
+            ("plan_expires_at", "TIMESTAMP"), ("subscription_status", "VARCHAR"),
+        ],
     }
     is_sqlite = engine.url.get_backend_name().startswith("sqlite")
     with engine.connect() as conn:
@@ -174,6 +184,9 @@ def _ensure_columns():
         conn.execute(text("UPDATE lv_import_costs SET requires_review = FALSE WHERE requires_review IS NULL"))
         conn.execute(text("UPDATE lv_import_features SET requires_review = FALSE WHERE requires_review IS NULL"))
         conn.execute(text("UPDATE lv_import_conditions SET status = 'priced' WHERE status IS NULL"))
+        conn.execute(text(
+            "UPDATE hc_firmen SET subscription_status = 'active' "
+            "WHERE subscription_status IS NULL"))
         conn.commit()
 
 

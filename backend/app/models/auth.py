@@ -23,6 +23,13 @@ class Firma(Base):
     # Platzhalter fürs künftige Abomodell (z.B. Tarif nach Anzahl auswertbarer
     # Projekte) — noch keine Durchsetzung/Zahlungslogik, nur die Spalte.
     abo_plan = Column(String, default="kostenlos")
+    # Abomodell: der Plan bestimmt, welche Funktionen die Firma nutzen darf.
+    # `abo_plan` bleibt als Altfeld bestehen und wird nicht mehr ausgewertet.
+    subscription_plan_id = Column(Integer, ForeignKey("subscription_plans.id"),
+                                  nullable=True, index=True)
+    plan_started_at = Column(DateTime, nullable=True)
+    plan_expires_at = Column(DateTime, nullable=True)
+    subscription_status = Column(String, nullable=False, default="active")
     logo_data_url = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 

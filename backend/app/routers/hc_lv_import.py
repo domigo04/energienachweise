@@ -31,6 +31,9 @@ from app.lv_import.project_extract import extract_project_data
 from app.lv_import import commercial, norm_lv
 from app.lv_import.llm import resolver as llm
 from app.lv_import import commercial, conditions_extract, systems
+from app.deps.feature_guard import require_feature
+from app.plan_features import Feature
+from app.services import features as feature_service
 from app import fachwerte
 from app.lv_import.feature_keys import (
     FEATURE_DEFS, LV_IMPORT_FEATURE_KEYS, FEATURE_TO_CONTEXT,
@@ -202,7 +205,7 @@ def _report(imp: LvImport) -> dict:
 async def upload_lv(
     file: UploadFile = File(...),
     project_id: int | None = Form(default=None),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_feature(Feature.LV_IMPORT.value)),
     db: Session = Depends(get_db),
 ):
     """B2 — PDF hochladen: Firma prüfen, Original + SHA-256 speichern, Import
@@ -326,6 +329,13 @@ async def upload_lv(
                if page not in priority_review_pages and page not in technical_review_pages]
         )[:8]
         budget = ImportLlmBudget.from_env()
+        # Trennung der beiden Stufen: `lv_import` deckt Upload, Parser und
+        # Review ab, `lv_ai_review` zusätzlich jede kostenpflichtige
+        # LLM-Auswertung. Fehlt die zweite, bleibt der Import trotzdem nutzbar.
+        ki_erlaubt = feature_service.get_effective_feature(
+            db, user.tenant_id, Feature.LV_AI_REVIEW.value).enabled
+        if not ki_erlaubt:
+            review_pages = []
         visual = (
             visual_review.review(
                 raw, page_numbers=review_pages, budget=budget,
@@ -432,7 +442,18 @@ async def upload_lv(
 
         # Erst nach der autoritativen visuellen Auswertung offene Titel gegen
         # das geschlossene Norm-LV auflösen.
-        llm_stat = llm.apply_to_rows(costs, budget=budget)
+        llm_stat = (
+            llm.apply_to_rows(costs, budget=budget) if ki_erlaubt
+            else {"sent": 0, "mapped": 0}
+        )
+        # Ein Import zählt als EIN Vorgang, auch wenn er intern mehrere
+        # LLM-Aufrufe macht. Gezählt wird erst, wenn tatsächlich einer lief.
+        if ki_erlaubt and budget.calls > 0:
+            feature_service.zaehle_nutzung(
+                db, user.tenant_id, Feature.LV_AI_REVIEW.value,
+                amount=budget.estimated_cost_usd or None,
+            )
+        feature_service.zaehle_nutzung(db, user.tenant_id, Feature.LV_IMPORT.value)
         # ALLE kanonischen Features anlegen (auch nicht erkannte) → der Nutzer
         # sieht die vollständige Checkliste und kann fehlende Werte ergänzen.
         for key in LV_IMPORT_FEATURE_KEYS:
@@ -653,7 +674,7 @@ def debug_lv(import_id: int, user: User = Depends(get_current_user), db: Session
 
 
 @router.post("/{import_id}/map-costs")
-def map_costs(import_id: int, user: User = Depends(get_current_user),
+def map_costs(import_id: int, user: User = Depends(require_feature(Feature.LV_AI_REVIEW.value)),
               db: Session = Depends(get_db)):
     """KI-Zuordnung für noch offene Kostenpositionen erneut ausführen (Punkt 19).
 

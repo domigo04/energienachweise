@@ -61,13 +61,27 @@ class HcModulTyp(str, enum.Enum):
 
 class HcProject(Base):
     __tablename__ = "hc_projects"
+    __table_args__ = (
+        # Innerhalb einer Firma ist die Projektnummer eindeutig; zwei Firmen
+        # dürfen dieselbe Nummer führen.
+        UniqueConstraint("tenant_id", "projektnummer", name="uq_project_number_company"),
+        UniqueConstraint("tenant_id", "project_year", "project_sequence",
+                         name="uq_project_sequence_company_year"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = Column(Integer, default=1, index=True)
     name = Column(String, nullable=False)
     standort = Column(String, nullable=True)
     kunde = Column(String, nullable=True)
-    projektnummer = Column(String, nullable=True)
+    # Projektnummer: wird beim Anlegen serverseitig vergeben (Jahr + laufende
+    # Nummer, z.B. 26003) und danach nie mehr geändert. `projektnummer` ist das
+    # bestehende Feld und bleibt die eine Quelle — kein zweites Nummernfeld.
+    projektnummer = Column(String, nullable=True, index=True)
+    project_year = Column(Integer, nullable=True, index=True)
+    project_sequence = Column(Integer, nullable=True)
+    # Eröffnungsdatum bestimmt das Jahr der Nummer.
+    opened_at = Column(DateTime, nullable=True)
     strasse = Column(String, nullable=True)
     plz = Column(String, nullable=True)
     ort = Column(String, nullable=True)

@@ -206,3 +206,13 @@ export const deleteBauindex = (id) => api.delete(`${BASE}/bauindex/${id}`);
 export const bauindexAutomatischAktualisieren = () => api.post(`${BASE}/bauindex/automatisch-aktualisieren`).then(r => r.data);
 // Norm-LV als geschlossene Auswahlliste für die manuelle Zuordnung.
 export const getNormLv = () => api.get(`${BASE}/lv-imports/norm-lv`).then(r => r.data);
+
+// --- Projektjournal (Notizen, Pendenzen, Stecknadeln im Schema) ---
+export const getProjectNotes = (projectId, params = {}) =>
+  api.get(`${BASE}/projects/${projectId}/notizen`, { params }).then(r => r.data);
+export const createProjectNote = (projectId, data) =>
+  api.post(`${BASE}/projects/${projectId}/notizen`, data).then(r => r.data);
+export const updateProjectNote = (projectId, noteId, data) =>
+  api.patch(`${BASE}/projects/${projectId}/notizen/${noteId}`, data).then(r => r.data);
+export const deleteProjectNote = (projectId, noteId) =>
+  api.delete(`${BASE}/projects/${projectId}/notizen/${noteId}`);

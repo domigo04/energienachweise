@@ -44,9 +44,11 @@ import {
   istWaermepumpe,
 } from '../../components/hc/nodes/generatorTypes';
 import {
+  createProjectNote,
   createSchema,
   createSchemaRevision,
   deleteSchemaUnderlay,
+  getProjectNotes,
   getSchemaEditor,
   getSchemaUnderlay,
   hydraulikBerechnen,
@@ -55,6 +57,7 @@ import {
   restoreSchemaRevision,
   saveSchemaGraph,
   setSchemaUnderlay,
+  updateProjectNote,
 } from '../../api/hcApi';
 import { api } from '../../api';
 import { dateiZuUnderlay } from './schema/underlay';
@@ -1566,7 +1569,7 @@ const closeToolbarMenu = (event) => event.currentTarget.closest('details')?.remo
 function EditorInner() {
   const navigate = useNavigate();
   const { id: projectId } = useParams();
-  const { screenToFlowPosition, getInternalNode, getZoom, fitView } = useReactFlow();
+  const { screenToFlowPosition, getInternalNode, getZoom, fitView, setCenter } = useReactFlow();
   const updateNodeInternals = useUpdateNodeInternals();
   const nodeGeometryVersion = useStore(state => {
     let signature = '';
@@ -1658,6 +1661,16 @@ function EditorInner() {
   const [edgeMenu, setEdgeMenu] = useState(null); // { x, y, edgeId, point }
   const [markierteEdgeIds, setMarkierteEdgeIds] = useState([]);
   const [spiegelAchse, setSpiegelAchse] = useState(null); // { edgeId, start, cursor }
+  // ── Notiz-Stecknadeln (Dominic 2026-07-31) ──────────────────────────────
+  // Ein Journaleintrag kann an einer Stelle im Schema hängen. Der Editor zeigt
+  // die Nadeln seines Schemas, setzt neue und öffnet den Eintrag direkt hier —
+  // geschrieben und gelesen wird derselbe Eintrag wie in der Dokumentation.
+  const [notizen, setNotizen] = useState([]);
+  const [nadelModus, setNadelModus] = useState(false);
+  const [offeneNotiz, setOffeneNotiz] = useState(null);  // { id, titel, text, neu }
+  const nadelModusRef = useRef(false);
+  nadelModusRef.current = nadelModus;
+
   // Beschriftung (DN/m'), die gerade angewählt ist — Entf blendet genau sie aus.
   const [selectedLabelEdgeId, setSelectedLabelEdgeId] = useState(null);
   // Laufender Verschieben-Befehl: { ziele, basis, cursor }. Die Auswahl steht
@@ -3302,6 +3315,74 @@ function EditorInner() {
   // Auswahl treffen, Taste drücken, Basispunkt klicken, Zielpunkt klicken. Die
   // Richtung fängt orthogonal (bzw. 45°), Shift kehrt den Fang um — dieselbe
   // Regel wie beim Zeichnen. Verschoben wird, was beim Start ausgewählt war.
+  // ── Stecknadeln: laden, setzen, verschieben, öffnen ─────────────────────
+  const notizenLaden = useCallback(async () => {
+    if (!projectId || !schemaId) return;
+    try {
+      const daten = await getProjectNotes(projectId, { schema_id:schemaId });
+      setNotizen(daten.notizen || []);
+    } catch { /* Journal ist nicht kritisch fürs Zeichnen */ }
+  }, [projectId, schemaId]);
+
+  useEffect(() => { notizenLaden(); }, [notizenLaden]);
+
+  // Aus der Dokumentation heraus verlinkt: ?notiz=<id> zeigt genau diese Nadel.
+  useEffect(() => {
+    const gesucht = Number(new URLSearchParams(window.location.search).get('notiz'));
+    if (!gesucht || !notizen.length) return;
+    const treffer = notizen.find(item => item.id === gesucht);
+    if (!treffer?.pin) return;
+    setCenter(treffer.pin.x, treffer.pin.y, { zoom:Math.max(getZoom(), 0.8), duration:500 });
+    setOffeneNotiz({ id:treffer.id, titel:treffer.titel, text:treffer.text });
+  }, [notizen, getZoom, setCenter]);
+
+  const nadelSetzen = useCallback(async (weltPunkt, nodeId = null) => {
+    if (!projectId || !schemaId) return;
+    try {
+      const neu = await createProjectNote(projectId, {
+        kind:'notiz', titel:'', text:'',
+        pin:{ schema_id:schemaId, x:weltPunkt.x, y:weltPunkt.y, node_id:nodeId },
+      });
+      setNotizen(liste => [neu, ...liste]);
+      setOffeneNotiz({ id:neu.id, titel:'', text:'', neu:true });
+    } catch { alert('Notiz konnte nicht angelegt werden.'); }
+    setNadelModus(false);
+  }, [projectId, schemaId]);
+
+  const notizSpeichern = useCallback(async (noteId, felder) => {
+    try {
+      const neu = await updateProjectNote(projectId, noteId, felder);
+      setNotizen(liste => liste.map(item => (item.id === noteId ? neu : item)));
+      return neu;
+    } catch { alert('Notiz konnte nicht gespeichert werden.'); return null; }
+  }, [projectId]);
+
+  const nadelEntfernen = useCallback(async (noteId) => {
+    const neu = await notizSpeichern(noteId, { pin_entfernen:true });
+    if (neu) setNotizen(liste => liste.filter(item => item.id !== noteId));
+    setOffeneNotiz(null);
+  }, [notizSpeichern]);
+
+  // Nadel im Bild verschieben — dieselbe Geste wie bei allem anderen im Editor.
+  const nadelDragStart = useCallback((event, noteId) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const bewegen = (ev) => {
+      const punkt = screenToFlowPosition({ x:ev.clientX, y:ev.clientY });
+      setNotizen(liste => liste.map(item => (item.id === noteId
+        ? { ...item, pin:{ ...item.pin, x:punkt.x, y:punkt.y } }
+        : item)));
+    };
+    const beenden = (ev) => {
+      window.removeEventListener('pointermove', bewegen);
+      window.removeEventListener('pointerup', beenden);
+      const punkt = screenToFlowPosition({ x:ev.clientX, y:ev.clientY });
+      notizSpeichern(noteId, { pin:{ schema_id:schemaId, x:punkt.x, y:punkt.y } });
+    };
+    window.addEventListener('pointermove', bewegen);
+    window.addEventListener('pointerup', beenden);
+  }, [notizSpeichern, schemaId, screenToFlowPosition]);
+
   const verschiebeZiele = useCallback((ganzeLeitung = false) => {
     if (selected) return { nodeId:selected.id, beschreibung:'Bauteil' };
     if (markierteEdgeIds.length) {
@@ -4107,6 +4188,13 @@ function EditorInner() {
     // Cursor schon eines liegt. Sonst „verschluckt" das vorhandene Bauteil den
     // Klick und der Planer glaubt, der Befehl sei kaputt.
     if (istBefehl(editorModeRef.current, PLACE)) { platzierenKlick(event); return; }
+    // Nadel am Bauteil: der Eintrag merkt sich zusätzlich, an welchem.
+    if (nadelModusRef.current) {
+      event.preventDefault();
+      event.stopPropagation();
+      nadelSetzen(screenToFlowPosition({ x:event.clientX, y:event.clientY }), node.id);
+      return;
+    }
     // Im Verschieben-Befehl setzt jeder Klick einen Punkt — auch auf einem
     // Bauteil. Sonst liesse sich der Basispunkt nie an ein Bauteil legen.
     if (verschiebenKlick(event)) return;
@@ -4123,7 +4211,7 @@ function EditorInner() {
     setSelectedEdgeSegment(null);
     setSelectedLabelEdgeId(null);
     setInspectorOpen(true);
-  }, [cadKlick, platzierenKlick, verschiebenKlick]);
+  }, [cadKlick, platzierenKlick, verschiebenKlick, nadelSetzen, screenToFlowPosition]);
   const onNodeDoubleClick = useCallback((_, node) => {
     if (node.type === 'label') return; // Textblock: Doppelklick editiert inline
     if (!leitungsEntwurfRef.current) setAuslegung(node);
@@ -4260,6 +4348,12 @@ function EditorInner() {
     // ein Space-Pan die aktuelle Auswahl beim Loslassen abwählen.
     if (spacePanRef.current) return;
     if (istBefehl(editorModeRef.current, PLACE)) { platzierenKlick(event); return; }
+    // Nadel-Modus: der Klick setzt die Stecknadel und öffnet den Eintrag.
+    if (nadelModusRef.current) {
+      event.preventDefault();
+      nadelSetzen(screenToFlowPosition({ x:event.clientX, y:event.clientY }));
+      return;
+    }
     if (verschiebenKlick(event)) return;
     if (spiegelAchse) {
       event.preventDefault();
@@ -4287,7 +4381,7 @@ function EditorInner() {
     setSelectedEdgeSegment(null);
     setSelectedLabelEdgeId(null);
     setMarkierteEdgeIds([]);
-  }, [cadKlick, drawingConfig.grid_size, screenToFlowPosition, selected, selectedEdgeId, spiegelAchse, spiegelKopieErstellen, platzierenKlick, verschiebenKlick]);
+  }, [cadKlick, drawingConfig.grid_size, screenToFlowPosition, selected, selectedEdgeId, spiegelAchse, spiegelKopieErstellen, platzierenKlick, verschiebenKlick, nadelSetzen]);
 
   const canvasMouseMove = useCallback((event) => {
     // Platzierungsvorschau folgt dem Cursor — mit Raster und Ausrichtungslinien.
@@ -4687,6 +4781,13 @@ function EditorInner() {
             title={`Verschieben (Taste ${String(drawingConfig.shortcut_move).toUpperCase()}): Auswahl treffen, Startpunkt und Zielpunkt klicken. Shift beim Start verschiebt die ganze Leitung.`}>
             ✥ Verschieben
           </button>
+          <button
+            onClick={() => setNadelModus(value => !value)}
+            disabled={!schemaId}
+            className={`hc-auto-return${nadelModus ? ' is-active' : ''}`}
+            title="Notiz-Stecknadel setzen: danach auf die Stelle im Schema klicken. Der Eintrag landet in der Dokumentation.">
+            📍 Notiz {nadelModus ? '· Stelle wählen' : notizen.length ? `(${notizen.length})` : ''}
+          </button>
         </div>
 
         <div className="hc-editor-toolbar__spacer" />
@@ -4976,6 +5077,32 @@ function EditorInner() {
                     x2={spiegelAchse.cursor.x} y2={spiegelAchse.cursor.y}
                     stroke="#7c3aed" strokeWidth="2" strokeDasharray="9 6" />
                 )}
+                {/* Notiz-Stecknadeln: sitzen in Weltkoordinaten, zeigen beim
+                    Überfahren den Titel und öffnen den Journaleintrag. */}
+                {notizen.filter(item => item.pin).map(item => (
+                  <g key={`nadel-${item.id}`} style={{ cursor:'pointer', pointerEvents:'all' }}
+                    onPointerDown={(event) => { if (event.button === 0) nadelDragStart(event, item.id); }}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setOffeneNotiz({ id:item.id, titel:item.titel, text:item.text });
+                    }}>
+                    <title>{item.titel || 'Notiz ohne Titel'}</title>
+                    {/* Klassische Nadelform: Kopf oben, Spitze auf dem Punkt. */}
+                    <path
+                      d={`M ${item.pin.x} ${item.pin.y}
+                          l ${-9 / zoomAnzeige} ${-13 / zoomAnzeige}
+                          a ${9 / zoomAnzeige} ${9 / zoomAnzeige} 0 1 1 ${18 / zoomAnzeige} 0 Z`}
+                      fill={item.erledigt ? '#94a3b8' : '#e11d48'}
+                      stroke="#ffffff" strokeWidth={1.6 / zoomAnzeige} strokeLinejoin="round" />
+                    <circle cx={item.pin.x} cy={item.pin.y - 19 / zoomAnzeige}
+                      r={3.4 / zoomAnzeige} fill="#ffffff" />
+                    {offeneNotiz?.id === item.id && (
+                      <circle cx={item.pin.x} cy={item.pin.y - 19 / zoomAnzeige}
+                        r={15 / zoomAnzeige} fill="none" stroke="#e11d48"
+                        strokeWidth={2 / zoomAnzeige} opacity="0.5" />
+                    )}
+                  </g>
+                ))}
                 {/* Verschieben: Basispunkt, gefangener Zielpunkt und die Strecke
                     dazwischen — angezeigt wird genau der Vektor, den der Klick
                     anwendet. */}
@@ -5341,6 +5468,61 @@ function EditorInner() {
           </aside>
         </div>
       )}
+
+      {/* Notizfenster zur Stecknadel. Bewusst schlank: Titel, Text, erledigt.
+          Alles Weitere (Fälligkeit, Art, Verlauf) steht in der Dokumentation. */}
+      {offeneNotiz && (() => {
+        const eintrag = notizen.find(item => item.id === offeneNotiz.id);
+        return (
+          <div onPointerDown={() => setOffeneNotiz(null)} style={{ position:'fixed', inset:0, zIndex:3700 }}>
+            <div onPointerDown={event => event.stopPropagation()}
+              style={{ position:'fixed', right:24, bottom:24, width:330, background:'white',
+                border:'1px solid #cbd5e1', borderRadius:12, padding:14,
+                boxShadow:'0 18px 40px rgba(15,23,42,.26)' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
+                <span style={{ fontSize:14 }}>📍</span>
+                <strong style={{ fontSize:11, color:'#0f172a' }}>Notiz am Schema</strong>
+                <button onClick={() => setOffeneNotiz(null)}
+                  style={{ marginLeft:'auto', border:0, background:'transparent', cursor:'pointer', color:'#94a3b8', fontSize:16 }}>×</button>
+              </div>
+              <input autoFocus value={offeneNotiz.titel}
+                onChange={event => setOffeneNotiz(current => ({ ...current, titel:event.target.value }))}
+                placeholder="Titel, z.B. «Ventil prüfen»"
+                style={{ width:'100%', border:'1px solid #cbd5e1', borderRadius:7, padding:'7px 9px', fontSize:12, marginBottom:6 }} />
+              <textarea value={offeneNotiz.text}
+                onChange={event => setOffeneNotiz(current => ({ ...current, text:event.target.value }))}
+                placeholder="Was ist hier zu tun oder zu beachten?"
+                style={{ width:'100%', minHeight:84, border:'1px solid #cbd5e1', borderRadius:7, padding:'7px 9px', fontSize:12, resize:'vertical' }} />
+              {eintrag && (
+                <div style={{ marginTop:7, fontSize:9.5, color:'#94a3b8', lineHeight:1.5 }}>
+                  <b style={{ color:'#64748b' }}>{eintrag.autor_name || 'Unbekannt'}</b> hat den Eintrag erstellt
+                  {eintrag.bearbeitet_at && (
+                    <> · zuletzt bearbeitet von <b style={{ color:'#64748b' }}>{eintrag.bearbeitet_von_name}</b>
+                    {' '}am {new Intl.DateTimeFormat('de-CH', { dateStyle:'short', timeStyle:'short' }).format(new Date(eintrag.bearbeitet_at))}</>
+                  )}
+                </div>
+              )}
+              <div style={{ display:'flex', gap:6, marginTop:10 }}>
+                <button onClick={async () => {
+                  await notizSpeichern(offeneNotiz.id, { titel:offeneNotiz.titel, text:offeneNotiz.text });
+                  setOffeneNotiz(null);
+                }} style={{ flex:1, padding:'7px 10px', border:0, borderRadius:7, background:'#4f46e5', color:'white', fontSize:11, fontWeight:700, cursor:'pointer' }}>
+                  Speichern
+                </button>
+                <button onClick={() => nadelEntfernen(offeneNotiz.id)}
+                  title="Nur die Nadel entfernen — der Eintrag bleibt in der Dokumentation"
+                  style={{ padding:'7px 10px', border:'1px solid #cbd5e1', borderRadius:7, background:'white', fontSize:11, fontWeight:700, color:'#64748b', cursor:'pointer' }}>
+                  Nadel lösen
+                </button>
+              </div>
+              <Link to={`/projekte/${projectId}/dokumentation`}
+                style={{ display:'block', marginTop:8, fontSize:10, color:'#4f46e5', textDecoration:'none' }}>
+                In der Dokumentation öffnen →
+              </Link>
+            </div>
+          </div>
+        );
+      })()}
 
       {edgeMenu && (
         <div onPointerDown={()=>setEdgeMenu(null)} style={{ position:'fixed', inset:0, zIndex:3600 }}>

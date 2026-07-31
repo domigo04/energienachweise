@@ -99,6 +99,15 @@ def _cost_module(cost_status: Optional[str], version_nr: int, stale: bool) -> di
     return {"status": "in_progress", "version": version_nr, "stale": False}
 
 
+def _documentation_module(note_count: int, open_count: int) -> dict:
+    """Das Journal ist nie «fertig» — es ist begonnen oder nicht. Offene
+    Pendenzen sind eine Information, keine Warnung: ein Projekt ohne offene
+    Punkte gibt es praktisch nie."""
+    if note_count <= 0:
+        return {"status": "not_started", "count": 0, "open": 0}
+    return {"status": "in_progress", "count": note_count, "open": open_count}
+
+
 def compute_status(
     *,
     context: dict,
@@ -110,13 +119,15 @@ def compute_status(
     cost_status: Optional[str],
     cost_version_nr: int,
     cost_stale: bool,
+    note_count: int = 0,
+    open_note_count: int = 0,
 ) -> dict:
     modules = {
         "project_data": _project_data_module(context),
         "schema": _schema_module(schema_present, node_count, edge_count, revision_nr, schema_warnings),
         "quantities": _quantities_module(context),
         "cost_estimate": _cost_module(cost_status, cost_version_nr, cost_stale),
-        "documentation": {"status": "not_started"},
+        "documentation": _documentation_module(note_count, open_note_count),
     }
     scores = [_score(m["status"]) for m in modules.values()]
     completion = round(sum(scores) / len(scores) * 100) if scores else 0
@@ -151,7 +162,7 @@ def _schema_warnungen(graph_json) -> Optional[int]:
 def status_fuer_projekt(db, project, tenant_id: int) -> dict:
     """Projektstatus aus der DB zusammensetzen (§16). Nutzt denselben aktuellen
     Schema-Stand wie der ProjectContext, damit Mengen und Status übereinstimmen."""
-    from app.models.heizungscockpit import HcSchema, HcSchemaRevision
+    from app.models.heizungscockpit import HcProjectNote, HcSchema, HcSchemaRevision
     from app.models.kv import Kostenschaetzung
     from app.data.projektfreigaben import kostenschaetzung_freigabe
     from app.project_context import context_fuer_projekt
@@ -199,6 +210,11 @@ def status_fuer_projekt(db, project, tenant_id: int) -> dict:
         if schema_updated_at is not None and ks.updated_at is not None:
             cost_stale = schema_updated_at > ks.updated_at
 
+    notizen = db.query(HcProjectNote).filter(
+        HcProjectNote.project_id == project.id,
+        HcProjectNote.tenant_id == tenant_id,
+    ).all()
+
     return compute_status(
         context=context,
         schema_present=schema_present,
@@ -209,4 +225,6 @@ def status_fuer_projekt(db, project, tenant_id: int) -> dict:
         cost_status=cost_status,
         cost_version_nr=cost_version_nr,
         cost_stale=cost_stale,
+        note_count=len(notizen),
+        open_note_count=sum(1 for n in notizen if n.erledigt_at is None),
     )

@@ -17,6 +17,9 @@ const AUDIT_LABELS = {
   schema_stand_wiederhergestellt: "Schema-Stand wiederhergestellt",
   kostenschaetzung_gespeichert: "Kostenschätzung gespeichert",
   kostenschaetzung_status_geaendert: "Status der Kostenschätzung geändert",
+  notiz_erstellt: "Journaleintrag erstellt",
+  notiz_bearbeitet: "Journaleintrag bearbeitet",
+  notiz_geloescht: "Journaleintrag gelöscht",
 };
 
 export default function ProjectDashboard() {
@@ -103,7 +106,10 @@ export default function ProjectDashboard() {
     },
     documentation: {
       title: "Dokumentation", icon: FileText, status: m.documentation?.status,
-      metric: "geplant",
+      metric: m.documentation?.count ? `${m.documentation.count} Einträge` : "Journal öffnen",
+      secondaryMetric: m.documentation?.open ? `${m.documentation.open} offen` : null,
+      warnings: 0,
+      to: `/projekte/${id}/dokumentation`,
     },
   };
 
@@ -214,7 +220,7 @@ const ORBIT = [
   { key: "schema", subtitle: "Geometrie + Verbindungen" },
   { key: "quantities", subtitle: "Mengen + Herkunft" },
   { key: "cost_estimate", subtitle: "Referenzen + Bandbreite" },
-  { key: "documentation", subtitle: "Plan + Nachweise" },
+  { key: "documentation", subtitle: "Journal + Pendenzen" },
 ];
 
 function ProjectUniverse({ nodes, hovered, setHovered, completion }) {

@@ -348,3 +348,60 @@ class HcAuditEvent(Base):
     actor_name = Column(String, nullable=True)
     details_json = Column(Text, nullable=False, default="{}")
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+class HcNoteKind(str, enum.Enum):
+    """Arten eines Journaleintrags. Bewusst wenige — ein Eintrag ist ein
+    Eintrag; die Art steuert nur Darstellung und Auswertung."""
+
+    notiz = "notiz"
+    sitzung = "sitzung"           # Sitzungsprotokoll
+    aufgabe = "aufgabe"           # Pendenz mit Fälligkeit
+    entscheid = "entscheid"       # festgehaltener Entscheid
+    abnahme = "abnahme"           # Abnahme- oder Mängelpunkt
+
+
+class HcProjectNote(Base):
+    """Ein Eintrag im Projektjournal.
+
+    Drei Eigenschaften machen ihn aus:
+
+    * **Autor und Bearbeiter stehen immer dran.** Wer geschrieben hat und wer
+      zuletzt geändert hat, sind getrennte Angaben — sonst verschwindet der
+      ursprüngliche Verfasser bei der ersten fremden Korrektur.
+    * **Er kann an einer Stelle im Schema hängen** (Stecknadel): `schema_id`
+      plus Weltkoordinate. Ohne Nadel ist der Eintrag einfach projektweit.
+    * **Er ist erledigbar.** Damit wird aus jedem Eintrag bei Bedarf eine
+      Pendenz, ohne eine zweite Datenstruktur für Aufgaben.
+    """
+
+    __tablename__ = "hc_project_notes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, default=1, nullable=False, index=True)
+    project_id = Column(Integer, nullable=False, index=True)
+    kind = Column(String, nullable=False, default=HcNoteKind.notiz.value)
+    titel = Column(String, nullable=False, default="")
+    text = Column(Text, nullable=False, default="")
+
+    # Stecknadel im Anlagenschema. Alle drei Werte gehören zusammen: entweder
+    # hängt der Eintrag an einer Stelle, oder er hängt nirgends.
+    schema_id = Column(Integer, nullable=True, index=True)
+    pin_x = Column(Float, nullable=True)
+    pin_y = Column(Float, nullable=True)
+    # Optional zusätzlich am Bauteil/an der Leitung, damit die Nadel beim
+    # Verschieben mitwandern kann (Graph-ID, kein Fremdschlüssel).
+    pin_node_id = Column(String, nullable=True)
+
+    faellig_am = Column(Date, nullable=True)
+    erledigt_at = Column(DateTime, nullable=True)
+    erledigt_von_name = Column(String, nullable=True)
+
+    autor_id = Column(Integer, nullable=True, index=True)
+    autor_name = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    # Erst gesetzt, wenn wirklich jemand geändert hat — «nie bearbeitet» und
+    # «vom Autor selbst erstellt» sollen unterscheidbar bleiben.
+    bearbeitet_at = Column(DateTime, nullable=True)
+    bearbeitet_von_id = Column(Integer, nullable=True)
+    bearbeitet_von_name = Column(String, nullable=True)

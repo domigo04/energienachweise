@@ -525,3 +525,48 @@ def test_golden_project_kompletter_context():
     assert eff["anzahl_waermezaehler"] == 13     # 3 Schema + 10 ergänzt
     assert eff["ebf_m2"] == 1420.0
     assert eff["anzahl_nutzungseinheiten"] == 10
+
+
+# ── Heizungssystem aus dem Anlagenschema (Feedback Dominic 2026-07-31) ───────
+#
+# Das Heizungssystem wird nicht mehr von Hand gewählt, sondern aus den
+# Verbrauchergruppen abgeleitet, die im Schema gezeichnet sind.
+
+from app.project_context import heizungssystem_aus_abgabe
+
+
+def test_heizungssystem_ohne_gruppen_ist_unbekannt():
+    """Kein geratenes «gemischt» — das Schema sagt schlicht noch nichts."""
+    assert heizungssystem_aus_abgabe([]) is None
+    assert heizungssystem_aus_abgabe(None) is None
+
+
+def test_heizungssystem_aus_einer_abgabeart():
+    assert heizungssystem_aus_abgabe(["FBH"]) == "FBH"
+    assert heizungssystem_aus_abgabe(["Heizkörper"]) == "HK"
+
+
+def test_heizungssystem_wird_bei_zwei_abgabearten_gemischt():
+    assert heizungssystem_aus_abgabe(["FBH", "Heizkörper"]) == "gemischt"
+
+
+def test_unbekannte_abgabeart_wird_nicht_falsch_einsortiert():
+    """Lufterhitzer ist weder FBH noch HK — allein bleibt das System unbekannt."""
+    assert heizungssystem_aus_abgabe(["Lufterhitzer"]) is None
+    # Neben einer bekannten Art ist die Anlage aber sicher gemischt.
+    assert heizungssystem_aus_abgabe(["FBH", "Lufterhitzer"]) == "gemischt"
+
+
+def test_context_liefert_das_erkannte_heizungssystem_mit():
+    graph = {"nodes": [
+        _n("g1", "gruppe", {"typ": "Fussbodenheizung (FBH)"}),
+        _n("g2", "gruppe", {"typ": "Heizkörper modern (HK)"}),
+    ]}
+    ctx = build_context(None, graph)
+    assert ctx["waermeabgabe"] == ["FBH", "Heizkörper"]
+    assert ctx["heizungssystem"] == "gemischt"
+
+
+def test_context_meldet_unbekannt_wenn_keine_gruppe_gezeichnet_ist():
+    ctx = build_context(None, {"nodes": [_n("wz1", "waermezaehler")]})
+    assert ctx["heizungssystem"] is None

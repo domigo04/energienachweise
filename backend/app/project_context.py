@@ -162,6 +162,34 @@ def _status(pd: ParamDef, source, external_value, manual_override) -> str:
     return STATUS_BEKANNT
 
 
+# Wärmeabgabe der Verbrauchergruppen → Heizungssystem des Projekts.
+# Feedback Dominic 2026-07-31: das Heizungssystem wird nicht mehr von Hand
+# gewählt, sondern aus den Gruppen abgeleitet, die im Anlagenschema gezeichnet
+# sind. Der Planer setzt den Gruppentyp dort ohnehin; ein zweites Auswahlfeld
+# daneben wäre eine zweite Wahrheit und nach der nächsten Schemaänderung falsch.
+_ABGABE_ZU_SYSTEM = {"FBH": "FBH", "Heizkörper": "HK"}
+
+
+def heizungssystem_aus_abgabe(waermeabgabe) -> Optional[str]:
+    """FBH, HK oder gemischt aus den Wärmeabgabesystemen der Gruppen.
+
+    Keine Gruppe mit Typ → None. «Gemischt» wäre hier geraten, und das Schema
+    sagt schlicht noch nichts.
+
+    Ein Abgabesystem ohne Entsprechung im Datenmodell (Lufterhitzer, TABS,
+    Wandheizung …) macht die Anlage gemischt, sobald es neben einem bekannten
+    steht. Allein bleibt es unbekannt, statt falsch einsortiert zu werden.
+    """
+    roh = list(waermeabgabe or [])
+    zugeordnet = {_ABGABE_ZU_SYSTEM.get(a) for a in roh}
+    bekannt = {s for s in zugeordnet if s}
+    if not bekannt:
+        return None
+    if len(zugeordnet) == 1:
+        return next(iter(bekannt))
+    return "gemischt"
+
+
 def build_context(base_data, graph_json, parameter_rows=None) -> dict:
     """Setzt die eine Projektwahrheit zusammen (§24, „Projekt-Compiler").
 
@@ -216,6 +244,9 @@ def build_context(base_data, graph_json, parameter_rows=None) -> dict:
         # Wärmeabgabesysteme aus den Verbrauchergruppen (Liste, kein Skalar) —
         # speist direkt das Wärmeabgabesystem der Kostenschätzung (One Source of Truth).
         "waermeabgabe": schema_mengen.get("waermeabgabe", []),
+        # Daraus abgeleitetes Heizungssystem des Projekts (FBH/HK/gemischt).
+        # None heisst: das Schema hat noch keine Gruppe mit Typ — nicht «gemischt».
+        "heizungssystem": heizungssystem_aus_abgabe(schema_mengen.get("waermeabgabe", [])),
         "zusammenfassung": {
             "anzahl_parameter": len(parameter),
             "bekannt": status_zaehler[STATUS_BEKANNT],

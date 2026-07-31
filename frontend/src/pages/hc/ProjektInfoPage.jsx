@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, Save, ListChecks } from "lucide-react";
-import { getProject, updateProject } from "../../api/hcApi";
-import { GEBAEUDEKATEGORIEN } from "../../data/sia";
+import { getProject, updateProject, getProjectContext, getProjectStatus } from "../../api/hcApi";
+import { GEBAEUDEKATEGORIEN, KLIMASTATIONEN } from "../../data/sia";
 
 // §9 — Projektinformationsseite. Die zentralen Projektgrunddaten (Quelle A)
 // werden hier an EINER Stelle gepflegt und von Kostenschätzung und Mengen
@@ -13,6 +13,8 @@ const HEIZUNGSSYSTEME = [
   { value: "FBH", label: "Fussbodenheizung" },
   { value: "HK", label: "Heizkörper" },
 ];
+const systemLabel = (wert) => HEIZUNGSSYSTEME.find((h) => h.value === wert)?.label || wert;
+const stationVon = (name) => KLIMASTATIONEN.find((s) => s.name === name) || null;
 const SIA_PHASEN = [
   ["31", "31 Vorprojekt"],
   ["32", "32 Bauprojekt"],
@@ -42,7 +44,6 @@ function formFromProject(p) {
     heizungssystem: bd.heizungssystem || "gemischt",
     t_aussen: bd.t_aussen ?? -8.0,
     t_innen: bd.t_innen ?? 20.0,
-    warmwasser_bedarf_kw: bd.warmwasser_bedarf_kw ?? "",
     klimastation: bd.klimastation || "",
   };
 }
@@ -55,15 +56,53 @@ export default function ProjektInfoPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
+  // Aus dem Anlagenschema erkanntes Heizungssystem und der Gesamtfortschritt
+  // aus dem Statusendpunkt — beides wird gelesen, nie hier gerechnet (§16).
+  const [erkannt, setErkannt] = useState({ heizungssystem: null, waermeabgabe: [] });
+  const [fortschritt, setFortschritt] = useState(null);
+  // Automatik ist der Normalfall; der Planer kann sie bewusst übersteuern (§7).
+  // null = noch nicht entschieden (Projekt oder Kontext fehlt noch).
+  const [systemManuell, setSystemManuell] = useState(null);
 
   useEffect(() => {
     getProject(id)
       .then((p) => { setProject(p); setForm(formFromProject(p)); })
       .catch(() => setError("Projekt konnte nicht geladen werden"))
       .finally(() => setLoading(false));
+    getProjectContext(id)
+      .then((ctx) => setErkannt({
+        heizungssystem: ctx?.heizungssystem ?? null,
+        waermeabgabe: ctx?.waermeabgabe || [],
+      }))
+      .catch(() => {});
+    getProjectStatus(id)
+      .then((s) => setFortschritt(s?.completion ?? null))
+      .catch(() => {});
   }, [id]);
 
+  // Einmalig beim Laden entscheiden: weicht der gespeicherte Wert vom erkannten
+  // ab, wurde er bewusst gesetzt — dann bleibt die Handeingabe offen, statt
+  // stillschweigend überfahren zu werden.
+  useEffect(() => {
+    if (systemManuell !== null || !form) return;
+    if (erkannt.heizungssystem == null) return;
+    setSystemManuell(form.heizungssystem !== erkannt.heizungssystem);
+  }, [form, erkannt.heizungssystem, systemManuell]);
+
   const set = (key, value) => { setForm((f) => ({ ...f, [key]: value })); setSaved(false); };
+
+  // Die Auslegungstemperatur gehört zur Klimastation (SIA 2028). Sie wird beim
+  // Wechsel mitgesetzt und bleibt danach überschreibbar (§7).
+  const klimastationWaehlen = (name) => {
+    const station = stationVon(name);
+    setForm((f) => ({ ...f, klimastation: name, ...(station ? { t_aussen: station.theta_e } : {}) }));
+    setSaved(false);
+  };
+
+  // Ohne Handeingabe gilt der erkannte Wert — sonst der eingetragene.
+  const heizungssystemEffektiv = (systemManuell !== true && erkannt.heizungssystem)
+    ? erkannt.heizungssystem
+    : form?.heizungssystem;
 
   const save = async () => {
     setSaving(true);
@@ -73,13 +112,16 @@ export default function ProjektInfoPage() {
         name: form.name, standort: form.standort, kunde: form.kunde, beschreibung: form.beschreibung,
         strasse: form.strasse, plz: form.plz,
         ort: form.ort, bauherr: form.bauherr, sia_phase: form.sia_phase,
-        projektfortschritt_pct: Number(form.projektfortschritt_pct) || 0,
+        // `projektfortschritt_pct` wird nicht mehr gesendet: der Fortschritt
+        // kommt aus dem Statusendpunkt, der ihn aus den Modulen rechnet. Zwei
+        // Fortschritte nebeneinander wären zwei Wahrheiten.
         planbezeichnung: form.planbezeichnung || "Prinzipschema",
         base_data: {
           t_aussen: numOrNull(form.t_aussen) ?? -8.0,
           t_innen: numOrNull(form.t_innen) ?? 20.0,
-          heizungssystem: form.heizungssystem || "gemischt",
-          warmwasser_bedarf_kw: numOrNull(form.warmwasser_bedarf_kw),
+          // Ohne Handeingabe wandert der aus dem Schema erkannte Wert in die
+          // Grunddaten — damit lesen Kostenschätzung und Export dasselbe.
+          heizungssystem: heizungssystemEffektiv || "gemischt",
           klimastation: form.klimastation || null,
           gebaeudekategorie: form.gebaeudekategorie || null,
           ebf_m2: numOrNull(form.ebf_m2),
@@ -93,8 +135,7 @@ export default function ProjektInfoPage() {
       // Read-after-write: die UI bestätigt erst, wenn dieselben Werte über den
       // normalen GET-Pfad wieder aus der Datenbank gelesen wurden.
       const persisted = await getProject(id);
-      if ((persisted.sia_phase || "") !== payload.sia_phase
-        || Number(persisted.projektfortschritt_pct || 0) !== payload.projektfortschritt_pct) {
+      if ((persisted.sia_phase || "") !== payload.sia_phase) {
         throw new Error("Projektphase wurde vom Server nicht bestätigt");
       }
       setProject(persisted);
@@ -164,9 +205,25 @@ export default function ProjektInfoPage() {
                 {SIA_PHASEN.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
             </div>
-            <div><label className="label">Projektfortschritt: {form.projektfortschritt_pct} %</label>
-              <input type="range" min="0" max="100" step="5" className="w-full accent-brand-600"
-                value={form.projektfortschritt_pct} onChange={(e) => set("projektfortschritt_pct", e.target.value)} />
+            {/* Der Fortschritt wird nicht mehr von Hand geschoben: der
+                Statusendpunkt rechnet ihn aus den Modulen (Projektdaten,
+                Schema, Mengen, Kosten, Dokumentation). Hier steht er nur zum
+                Nachlesen — eine zweite, gepflegte Prozentzahl daneben wäre
+                genau die zweite Wahrheit, die das Projekt vermeidet. */}
+            <div>
+              <label className="label">Projektfortschritt</label>
+              <div className="flex items-center gap-3">
+                <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
+                  <div className="h-full rounded-full bg-brand-600 transition-all"
+                    style={{ width: `${fortschritt ?? 0}%` }} />
+                </div>
+                <span className="text-sm font-semibold tabular-nums text-slate-700">
+                  {fortschritt == null ? "—" : `${fortschritt} %`}
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-slate-400">
+                Aus dem Projektstatus berechnet — nicht von Hand gepflegt.
+              </p>
             </div>
           </div>
         </section>
@@ -192,14 +249,62 @@ export default function ProjektInfoPage() {
         <section className="card p-5">
           <h2 className="mb-4 text-sm font-bold text-slate-800">Auslegung</h2>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <div><label className="label">Heizungssystem</label>
-              <select className="input" value={form.heizungssystem} onChange={(e) => set("heizungssystem", e.target.value)}>
-                {HEIZUNGSSYSTEME.map((h) => <option key={h.value} value={h.value}>{h.label}</option>)}
-              </select></div>
-            <div><label className="label">Auslegungstemperatur [°C]</label><input type="number" className="input" value={form.t_aussen} onChange={(e) => set("t_aussen", e.target.value)} /></div>
+            {/* Heizungssystem: erkannt aus den Verbrauchergruppen im
+                Anlagenschema. Erkennbar, erklärbar und kontrolliert
+                überschreibbar (§7) — nicht stillschweigend gesetzt. */}
+            <div className="md:col-span-3">
+              <label className="label">Heizungssystem</label>
+              {erkannt.heizungssystem && systemManuell !== true ? (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <span className="text-sm font-semibold text-slate-800">{systemLabel(erkannt.heizungssystem)}</span>
+                  <span className="badge border-brand-200 bg-brand-50 text-brand-700">aus dem Schema erkannt</span>
+                  <button type="button" onClick={() => setSystemManuell(true)}
+                    className="ml-auto text-xs font-medium text-slate-500 underline-offset-2 hover:text-brand-600 hover:underline">
+                    abweichend festlegen
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <select className="input" value={form.heizungssystem} onChange={(e) => set("heizungssystem", e.target.value)}>
+                    {HEIZUNGSSYSTEME.map((h) => <option key={h.value} value={h.value}>{h.label}</option>)}
+                  </select>
+                  {erkannt.heizungssystem && (
+                    <button type="button"
+                      onClick={() => { setSystemManuell(false); set("heizungssystem", erkannt.heizungssystem); }}
+                      className="shrink-0 text-xs font-medium text-slate-500 underline-offset-2 hover:text-brand-600 hover:underline">
+                      zurück zur Erkennung
+                    </button>
+                  )}
+                </div>
+              )}
+              <p className="mt-1 text-xs text-slate-400">
+                {erkannt.waermeabgabe.length
+                  ? `Verbrauchergruppen im Schema: ${erkannt.waermeabgabe.join(" · ")}`
+                  : "Noch keine Verbrauchergruppe mit Typ im Anlagenschema — bis dahin gilt der hier gewählte Wert."}
+              </p>
+            </div>
+
+            {/* Klimastation nach SIA 2028. Sie bestimmt die
+                Auslegungstemperatur; die bleibt danach überschreibbar. */}
+            <div>
+              <label className="label">Klimastation (SIA 2028)</label>
+              <select className="input" value={form.klimastation} onChange={(e) => klimastationWaehlen(e.target.value)}>
+                <option value="">— wählen —</option>
+                {KLIMASTATIONEN.map((s) => <option key={s.name} value={s.name}>{s.name} ({s.theta_e} °C)</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="label">Auslegungstemperatur [°C]</label>
+              <input type="number" className="input" value={form.t_aussen} onChange={(e) => set("t_aussen", e.target.value)} />
+              <p className="mt-1 text-xs text-slate-400">
+                {stationVon(form.klimastation)
+                  ? (Number(form.t_aussen) === stationVon(form.klimastation).theta_e
+                    ? `Aus ${form.klimastation} (SIA 2028)`
+                    : `Abweichend von ${form.klimastation} (${stationVon(form.klimastation).theta_e} °C)`)
+                  : "Aus der Klimastation, überschreibbar"}
+              </p>
+            </div>
             <div><label className="label">Raumtemperatur [°C]</label><input type="number" className="input" value={form.t_innen} onChange={(e) => set("t_innen", e.target.value)} /></div>
-            <div><label className="label">BWW-Bedarf [kW]</label><input type="number" className="input" value={form.warmwasser_bedarf_kw} onChange={(e) => set("warmwasser_bedarf_kw", e.target.value)} placeholder="optional" /></div>
-            <div><label className="label">Klimastation</label><input className="input" value={form.klimastation} onChange={(e) => set("klimastation", e.target.value)} placeholder="optional" /></div>
           </div>
         </section>
 

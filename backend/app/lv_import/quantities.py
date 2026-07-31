@@ -218,13 +218,15 @@ def _fund(row, rows, index) -> dict:
 
 # ── Punkt 10 — Bauteilmengen nur mit Stück-Einheit ─────────────────────────
 
-def component_counts(rows) -> dict:
+def component_counts(rows, families=None) -> dict:
     """Stückzahlen je Bauteilfamilie aus klaren LV-Zeilen.
 
     Zählt nur Zeilen, die einen Bauteilbegriff UND eine Stück-Menge enthalten.
     `Pumpe / Leistung 570 W` liefert damit nichts."""
-    familien = ("pump", "valve_2way", "valve_3way", "balancing_valve",
-                "radiator", "heat_meter", "floor_heating_manifold")
+    familien = tuple(families or (
+        "pump", "valve_2way", "valve_3way", "balancing_valve",
+        "radiator", "heat_meter", "floor_heating_manifold",
+    ))
     result: dict[str, dict] = {}
     for family in familien:
         terms = FEATURE_TERMS[family]

@@ -36,16 +36,16 @@ Hinweis; wenn Text und Seitenbild widersprechen, gewinnt der sichtbare Wert.
 
 Ermittle nur grobe Kennwerte, bepreiste Kostenpositionen und kommerzielle
 Konditionen. Lies zusätzlich den sichtbaren Projektkopf: Projektname,
-Projektnummer, Ort, Unternehmer und Offertdatum. Fehlende Kopfangaben bleiben
-null.
+Projektnummer, Ort, Unternehmer, Offertdatum, Gebäudenutzung und Projektart.
+Normalisiere Gebäudenutzung und Projektart auf die im Schema erlaubten Codes.
+Fehlende Kopfangaben bleiben null.
 
 Technisch werden NUR diese Kennwerte gebraucht — nach nichts anderem suchen:
-Wärmeerzeugertyp und Heizleistung in kW; Anzahl Bohrungen und Länge je Bohrung
+Heizleistung in kW; Anzahl Bohrungen und Länge je Bohrung
 (die Bohrmeter werden daraus gerechnet, gib sie nur an, wenn ausschliesslich
 die Gesamtzahl sichtbar ist); Frischwasserstation ja/nein; Rohrmeter total ohne
 Fussbodenheizungsrohre, dabei die Rohrmeter aus BKP 241.11 (Primärkreis) und
-BKP 243.1 (Wärmeverteilung) addieren; Anzahl Umwälzpumpen; ob eine Wärmemessung
-vorkommt und wenn erkennbar deren Anzahl.
+BKP 243.1 (Wärmeverteilung) addieren.
 
 Nicht mehr erfassen: Speicher, Pufferspeicher, Verteilsystem, System- und
 Auslegungstemperaturen, Warmwasserbereitung, Montagehöhe, Gerüst, integrale
@@ -53,19 +53,14 @@ Tests, Werkplanung und Gebäudeschutz. Prüfe jeden im Schema erlaubten
 technischen Schlüssel; wenn der sichtbare Nachweis fehlt, gib dafür null zurück
 statt den Schlüssel still auszulassen.
 
-Zähle als Pumpe nur hydraulische Umwälz- oder Zirkulationspumpen mit
-Projektbezug — keine blossen Erwähnungen in Fliesstexten, keine Ersatzpumpen
-und keine Wiederholungen aus Datenblättern. Auf einem Hydraulikschema zählt
-jedes eindeutig beschriftete Pumpensymbol genau einmal, auch wenn keine
-Stückzahl danebensteht; der Verdichter innerhalb einer Wärmepumpe ist keine
-separate Umwälzpumpe. Ohne eindeutige Anzahl null.
-Leite aus einer einzelnen Pauschalposition «Wärmemessung» keine Anzahl 1 ab:
-setze dann heat_metering_present auf true und heat_meter_count auf null.
-Für `generator_type` sind nur diese Codes zulässig: `ews_wp` für
-Sole/Wasser- oder Erdsonden-WP, `lwwp` für Luft/Wasser-WP, `wasser_wp` nur für
-Grundwasser/Wasser-Wasser-WP, ferner `co2_wp`, `fernwaerme`, `holz`, `elektro`
-oder `sonstige`. Eine generische Wärmepumpe ist niemals automatisch
-`wasser_wp`. Addiere Rohrmeter nur, wenn die sichtbaren Mengen eindeutig sind.
+Pumpen und Wärmemessungen werden nicht gesucht und nicht ausgegeben.
+Wärmeerzeugertypen gehören ausschliesslich in `heat_generation_systems`, nie
+in ein technisches Einzelfeld. Erfasse dort nur tatsächlich verbaute und für
+dieses Heizungsangebot kostenrelevante Erzeuger. Jeder Erzeuger braucht auf der
+angegebenen Seite einen wörtlichen, sichtbaren Beleg. Ein Luftheizapparat ist
+keine Luft/Wasser-Wärmepumpe; eine generische Wärmepumpe ist keine Erdsonden-
+oder Wasser/Wasser-Wärmepumpe. Keine Standardwerte oder Annahmen verwenden.
+Addiere Rohrmeter nur, wenn die sichtbaren Mengen eindeutig sind.
 Keine Schrauben, Bögen, Schellen,
 Rohrmeter je Dimension oder anderen unbezahlten Einzelmengen als separate
 Kostenpositionen. Pauschalen nie künstlich aufteilen.
@@ -124,27 +119,18 @@ _TECHNICAL_PAGE_TERMS = {
         "241.11", "primärkreis", "primaerkreis", "243.1 rohrleitungen", "rohrmeter",
         "laufmeter", "rohrleitung", "rohrleitungen", "lfm",
     ),
-    "pumps": (
-        "pumpe", "pumpen", "umwalzpumpe", "heizkreispumpe", "ladepumpe",
-    ),
-    "meters": (
-        "warmemessung", "warmemessungen", "warmezahler",
-        "warmwasserzahler",
-    ),
-    "storage": (
-        "pufferspeicher", "technikspeicher", "technischer speicher",
-        "heizungsspeicher", "energiespeicher",
+    "emission": (
+        "heizkorper", "radiator", "konvektor", "luftheizapparat",
+        "fussbodenheizung", "deckenstrahlplatte", "heizregister",
     ),
 }
 _TECHNICAL_PAGE_FEATURES = {
-    "generator": ("generator_type", "generator_power_kw"),
+    "generator": ("generator_power_kw",),
     "boreholes": (
         "borehole_count", "borehole_length_each_m", "borehole_total_m",
     ),
     "pipe": ("pipe_length_m",),
-    "pumps": ("pump_count",),
-    "meters": ("heat_meter_count",),
-    "storage": ("buffer_count",),
+    "emission": (),
 }
 _COMMERCIAL_PAGE_TERMS = (
     "rabatt", "skonto", "abzug", "abzuge", "zuschlag", "baureinigung",
@@ -170,10 +156,21 @@ RESPONSE_SCHEMA = {
                 "location": _NULLABLE_STRING,
                 "contractor": _NULLABLE_STRING,
                 "offer_date": _NULLABLE_STRING,
+                "building_use": {"anyOf": [
+                    {"type": "string", "enum": [
+                        "mfh", "efh", "buero", "sporthalle", "schule",
+                        "gewerbe", "verkauf", "gesundheit", "sonstige",
+                    ]}, {"type": "null"},
+                ]},
+                "project_type": {"anyOf": [
+                    {"type": "string", "enum": [
+                        "neubau", "sanierung", "erweiterung", "sonstige",
+                    ]}, {"type": "null"},
+                ]},
             },
             "required": [
                 "project_name", "project_number", "location", "contractor",
-                "offer_date",
+                "offer_date", "building_use", "project_type",
             ],
             "additionalProperties": False,
         },
@@ -941,11 +938,6 @@ def apply_result(features: dict, result: dict) -> tuple[list[dict], dict]:
         confidence = _number(item.get("confidence")) or 0
         if key not in LV_IMPORT_FEATURE_KEYS or value is None or confidence < MIN_FEATURE_CONFIDENCE:
             continue
-        if key == "generator_type":
-            from app import fachwerte
-            value = fachwerte.normalize("generator_types", value)
-            if not value:
-                continue
         evidence = str(item.get("evidence") or "")[:300]
         features[key] = {
             "value": value,
@@ -1021,7 +1013,7 @@ def apply_result(features: dict, result: dict) -> tuple[list[dict], dict]:
             for key, value in (result.get("project_data") or {}).items()
             if key in {
                 "project_name", "project_number", "location", "contractor",
-                "offer_date",
+                "offer_date", "building_use", "project_type",
             }
         },
         "visual_review_features_applied": applied,

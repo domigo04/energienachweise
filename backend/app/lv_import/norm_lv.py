@@ -144,6 +144,11 @@ _RULES: list[dict] = [
     {"key": "243.7", "terms": ["waermezaehler"]},
     {"key": "243.8", "terms": ["schaltschrank"]},
     {"key": "243.9", "terms": ["montage"], "kontext": _VERTEILUNG},
+    {"key": "243.10", "terms": ["frischwasserstation"]},
+    {"key": "243.10", "terms": ["frischwassermodul"]},
+    {"key": "243.11", "terms": ["brauchwarmwasser"]},
+    {"key": "243.11", "terms": ["warmwasserbereitung"]},
+    {"key": "243.11", "terms": ["wassererwaermer"]},
     # ── Spezialanlagen (247) ──
     {"key": "247.5", "terms": ["mobile heizzentrale"]},
     {"key": "247.6", "terms": ["kaminanlage"]},

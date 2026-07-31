@@ -46,8 +46,8 @@ def test_keine_gemeinsamen_merkmale_kein_score():
 def test_gruppen_gewichten_unterschiedlich():
     # Dieselben zwei Profile, aber die Gruppen betonen andere Merkmale.
     assert set(BKP_WEIGHTS["erzeugung"]) != set(BKP_WEIGHTS["verteilung"])
-    assert "heat_meter_count" in BKP_WEIGHTS["messung"]
-    assert "pump_count" in BKP_WEIGHTS["verteilung"]
+    assert "heat_meter_count" not in BKP_WEIGHTS["messung"]
+    assert "pump_count" not in BKP_WEIGHTS["verteilung"]
     assert "generator_type" in BKP_WEIGHTS["erzeugung"]
 
 

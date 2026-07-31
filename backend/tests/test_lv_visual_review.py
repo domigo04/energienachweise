@@ -22,6 +22,7 @@ def _valid():
             "project_name": "MFH Test", "project_number": "23033",
             "location": "Rorschacherberg", "contractor": "Unternehmer AG",
             "offer_date": "11.07.2023",
+            "building_use": "mfh", "project_type": "neubau",
         },
         "features": [
             {
@@ -130,7 +131,7 @@ def test_fokussierte_technikpruefung_sendet_pdf_nur_einmal():
     assert len(fake.calls) == 1
 
 
-def test_visuelle_ews_wp_wird_kanonisch_gespeichert():
+def test_erzeugertyp_ist_keine_einzelfeature_mehr():
     result = _valid()
     result["features"].append({
         "key": "generator_type", "value": "Sole/Wasser-Wärmepumpe",
@@ -139,7 +140,7 @@ def test_visuelle_ews_wp_wird_kanonisch_gespeichert():
     })
     features = {}
     visual_review.apply_result(features, result)
-    assert features["generator_type"]["value"] == "ews_wp"
+    assert "generator_type" not in features
 
 
 def test_erdsonden_widerspruch_wird_erkannt():
@@ -213,7 +214,7 @@ def test_fehlende_technikwerte_waehlen_nur_passende_parserseiten():
         {"page": 16, "text": "Rohrleitungen Heizung 325 lfm"},
     ]
     pages_selected = visual_review.select_technical_review_pages(pages, {})
-    assert pages_selected == [8, 11, 16, 14]
+    assert pages_selected == [8, 11, 16]
     assert 3 not in pages_selected
 
 
@@ -246,12 +247,12 @@ def test_hydraulikschema_hat_im_knappen_seitenbudget_vorrang():
     assert selected[0] == 4
 
 
-def test_pumpen_sind_im_strukturierten_visual_review_erlaubt():
+def test_pumpen_sind_im_strukturierten_visual_review_nicht_erlaubt():
     enum = (
         visual_review.RESPONSE_SCHEMA["properties"]["features"]["items"]
         ["properties"]["key"]["enum"]
     )
-    assert "pump_count" in enum
+    assert "pump_count" not in enum
 
 
 def test_konditionsseiten_werden_nach_relevanz_begrenzt():

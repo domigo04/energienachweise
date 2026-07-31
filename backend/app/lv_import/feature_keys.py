@@ -95,9 +95,9 @@ FEATURE_KEYS = list(FEATURE_DEFS.keys())
 # Im LV-Review werden bewusst nur grobe, kostenrelevante Kennwerte gespeichert.
 # Die übrigen Definitionen bleiben für bestehende Referenzprojekte kompatibel.
 LV_IMPORT_FEATURE_KEYS = [
-    # Wärmeerzeuger: Typ und Leistung. `generator_count` und `generator_types`
-    # sind bewusst NICHT dabei — sie waren ein zweites Feld für dieselbe Sache.
-    "generator_type", "generator_power_kw",
+    # Wärmeerzeuger-Typen liegen als bearbeitbare Mehrfachliste in
+    # LvImportSystem. Hier bleibt nur die gemeinsame Erzeugerleistung.
+    "generator_power_kw",
     # Bohrungen: Anzahl und Länge werden erfasst, die Bohrmeter daraus gerechnet.
     # `boreholes_present` entfällt: eine Bohrung ist vorhanden, sobald die Anzahl
     # grösser als null ist — ein eigenes Ja/Nein-Feld wäre eine zweite Wahrheit.
@@ -107,7 +107,6 @@ LV_IMPORT_FEATURE_KEYS = [
     # weil bestehende Importe und Referenzprojekte darunter gespeichert sind;
     # die Beschriftung sagt jetzt ausdrücklich, was gemeint ist.
     "pipe_length_m",
-    "pump_count", "heat_metering_present", "heat_meter_count",
 ]
 
 # Wird gerechnet, nicht eingegeben: Bohrmeter = Anzahl × Länge je Bohrung.
@@ -119,10 +118,11 @@ ABGELEITETE_FEATURE_KEYS = ("borehole_total_m",)
 # Ähnlichkeit verwendet werden. Bewusst keine Spaltenlöschung — bestehende
 # Importe und Referenzprojekte bleiben unangetastet lesbar.
 STILLGELEGTE_FEATURE_KEYS = frozenset({
-    "generator_count", "generator_types", "boreholes_present",
+    "generator_type", "generator_count", "generator_types", "boreholes_present",
     "buffer_count", "storage_count", "storage_volume_each_l", "storage_volume_l",
     "floor_heating_pipe_m", "floor_heating_area_m2", "floor_heating_manifold_count",
-    "domestic_hot_water_included",
+    "domestic_hot_water_included", "pump_count", "heat_metering_present",
+    "heat_meter_count",
     "distribution_system", "design_flow_temperature_c",
     "design_return_temperature_c", "design_outdoor_temperature_c",
     "protected_building", "reversible_installations_required",
@@ -133,6 +133,9 @@ STILLGELEGTE_FEATURE_KEYS = frozenset({
 # LV-Feature-Schlüssel → ProjectContext-Parameterschlüssel (project_context.PARAMETER).
 # Nur hier gepflegt (B12). generator_type ist beidseitig gleich benannt.
 FEATURE_TO_CONTEXT = {
+    # Der ProjectContext liefert für bestehende Hydraulikprojekte weiterhin
+    # einen kanonischen Typ. Nur im LV-Review wurde das Einzel-Feld durch die
+    # bearbeitbare Mehrfachliste ersetzt.
     "generator_type": "generator_type",
     "generator_count": "anzahl_erzeuger",
     "generator_power_kw": "generator_power_kw",
@@ -140,10 +143,8 @@ FEATURE_TO_CONTEXT = {
     "borehole_total_m": "bohrmeter",
     "buffer_count": "anzahl_speicher",
     "storage_volume_l": "speichervolumen_l",
-    "pump_count": "anzahl_pumpen",
     "valve_2way_count": "anzahl_ventile_2weg",
     "valve_3way_count": "anzahl_ventile_3weg",
-    "heat_meter_count": "anzahl_waermezaehler",
     "floor_heating_manifold_count": "anzahl_fbh_verteiler",
     "pipe_length_m": "rohrmeter",
 }
@@ -164,7 +165,6 @@ CONTEXT_TO_FEATURE = {ctx: feat for feat, ctx in FEATURE_TO_CONTEXT.items()}
 REFPROJEKT_COLUMN_TO_FEATURE = {
     "heizleistung_kw": "generator_power_kw",
     "bohrmeter": "borehole_total_m",
-    "anzahl_waermemessungen": "heat_meter_count",
     "laufmeter_rohre_heizung": "pipe_length_m",
 }
 

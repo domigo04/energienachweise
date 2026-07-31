@@ -32,7 +32,7 @@ const LEER = {
   waermeerzeuger: [], waermeabgabe: [], bww_bei_heizung: false, ebf_m2: "", bohrmeter: "", heizleistung_kw: "",
   anzahl_einheiten: "", datum: "", qualitaet: 0.85,
   installierte_leistung_neu_kw: "", flaeche_fbh_m2: "", flaeche_tabs_m2: "", flaeche_deckenstrahlplatten_m2: "",
-  anzahl_heizkoerper: "", anzahl_waermemessungen: "", anzahl_schaltgeraetekombinationen: "", laufmeter_rohre_heizung: "",
+  anzahl_heizkoerper: "", anzahl_schaltgeraetekombinationen: "", laufmeter_rohre_heizung: "",
   rabatt_pct: "", skonto_pct: "",
 };
 const QUALITAET = [
@@ -100,7 +100,7 @@ export default function AuswertungForm() {
             installierte_leistung_neu_kw: r.installierte_leistung_neu_kw ?? "",
             flaeche_fbh_m2: r.flaeche_fbh_m2 ?? "", flaeche_tabs_m2: r.flaeche_tabs_m2 ?? "",
             flaeche_deckenstrahlplatten_m2: r.flaeche_deckenstrahlplatten_m2 ?? "",
-            anzahl_heizkoerper: r.anzahl_heizkoerper ?? "", anzahl_waermemessungen: r.anzahl_waermemessungen ?? "",
+            anzahl_heizkoerper: r.anzahl_heizkoerper ?? "",
             anzahl_schaltgeraetekombinationen: r.anzahl_schaltgeraetekombinationen ?? "",
             laufmeter_rohre_heizung: r.laufmeter_rohre_heizung ?? "",
             rabatt_pct: r.rabatt_pct ?? "", skonto_pct: r.skonto_pct ?? "",
@@ -165,7 +165,7 @@ export default function AuswertungForm() {
       installierte_leistung_neu_kw: num(form.installierte_leistung_neu_kw),
       flaeche_fbh_m2: num(form.flaeche_fbh_m2), flaeche_tabs_m2: num(form.flaeche_tabs_m2),
       flaeche_deckenstrahlplatten_m2: num(form.flaeche_deckenstrahlplatten_m2),
-      anzahl_heizkoerper: num(form.anzahl_heizkoerper), anzahl_waermemessungen: num(form.anzahl_waermemessungen),
+      anzahl_heizkoerper: num(form.anzahl_heizkoerper),
       anzahl_schaltgeraetekombinationen: num(form.anzahl_schaltgeraetekombinationen),
       laufmeter_rohre_heizung: num(form.laufmeter_rohre_heizung),
       rabatt_pct: rabatt, skonto_pct: skonto,
@@ -337,7 +337,6 @@ export default function AuswertungForm() {
                 <div><label className="label">Fläche TABS [m²]</label><input type="number" className="input" value={form.flaeche_tabs_m2} onChange={(e) => set("flaeche_tabs_m2", e.target.value)} /></div>
                 <div><label className="label">Fläche Deckenstrahlplatten [m²]</label><input type="number" className="input" value={form.flaeche_deckenstrahlplatten_m2} onChange={(e) => set("flaeche_deckenstrahlplatten_m2", e.target.value)} /></div>
                 <div><label className="label">Anzahl Heizkörper</label><input type="number" className="input" value={form.anzahl_heizkoerper} onChange={(e) => set("anzahl_heizkoerper", e.target.value)} /></div>
-                <div><label className="label">Anzahl Wärmemessungen</label><input type="number" className="input" value={form.anzahl_waermemessungen} onChange={(e) => set("anzahl_waermemessungen", e.target.value)} /></div>
                 <div><label className="label">Anzahl Schaltgerätekombinationen</label><input type="number" className="input" value={form.anzahl_schaltgeraetekombinationen} onChange={(e) => set("anzahl_schaltgeraetekombinationen", e.target.value)} /></div>
                 <div><label className="label">Laufmeter Rohre Heizung</label><input type="number" className="input" value={form.laufmeter_rohre_heizung} onChange={(e) => set("laufmeter_rohre_heizung", e.target.value)} /></div>
               </div>

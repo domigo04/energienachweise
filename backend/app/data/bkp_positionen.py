@@ -62,6 +62,8 @@ BKP_POSITIONEN = [
     _p("243.7", "Wärmemessung"),
     _p("243.8", "Schaltschrank"),
     _p("243.9", "Montage / Transport Wärmeverteilung"),
+    _p("243.10", "Frischwasserstationen"),
+    _p("243.11", "Brauchwarmwasserbereitung"),
     # 247 — Spezialanlagen
     _p("247.5", "Mobile Heizzentrale"),
     _p("247.6", "Kaminanlage"),

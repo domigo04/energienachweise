@@ -11,7 +11,7 @@ import json
 import os
 from typing import Any
 
-from app.lv_import.feature_keys import FEATURE_DEFS, FEATURE_KEYS
+from app.lv_import.feature_keys import FEATURE_DEFS, LV_IMPORT_FEATURE_KEYS
 from app.lv_import.llm.budget import ImportLlmBudget, enabled as global_enabled
 
 MIN_CONFIDENCE = 0.75
@@ -19,8 +19,8 @@ DEFAULT_OPENAI_MODEL = "gpt-5.6"
 
 SYSTEM_PROMPT = """Du prüfst ein bereits geparstes Schweizer Heizungs-LV.
 Normalisiere nur Werte, die aus den gelieferten Positionen eindeutig belegbar
-sind: Rohrmeter, Pumpen, 2-/3-Weg-Ventile, Abgleichventile, Wärmezähler,
-Fussbodenheizungsverteiler, Speicher, Wärmeerzeuger und Preise. Verwende nur
+sind: Erzeugerleistung, Erdsonden, Frischwasserstation und Rohrmeter total
+ohne Fussbodenheizung. Verwende nur
 erlaubte Feature-Schlüssel und existierende Positions-IDs. Erfinde nichts.
 Positionsbetrag bedeutet Total dieser Position, nicht Einheitspreis. Bei
 Unsicherheit keinen Wert liefern und stattdessen eine kurze Warnung ausgeben."""
@@ -33,7 +33,7 @@ RESPONSE_SCHEMA = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "key": {"type": "string", "enum": FEATURE_KEYS},
+                    "key": {"type": "string", "enum": LV_IMPORT_FEATURE_KEYS},
                     "value": {"anyOf": [{"type": "number"}, {"type": "string"}, {"type": "null"}]},
                     "confidence": {"type": "number", "minimum": 0, "maximum": 1},
                     "source_ids": {"type": "array", "items": {"type": "string"}},
@@ -115,7 +115,7 @@ def _prompt(packet: dict) -> str:
             "type": definition["typ"],
             "unit": definition.get("einheit"),
         }
-        for key, definition in FEATURE_DEFS.items()
+        for key, definition in FEATURE_DEFS.items() if key in LV_IMPORT_FEATURE_KEYS
     }
     return json.dumps(
         {"allowed_features": allowed, "parsed_lv": packet},
@@ -223,7 +223,7 @@ def apply_result(
         source_ids = [str(s) for s in suggestion.get("source_ids") or []]
         sources = [by_id[s] for s in source_ids if s in by_id]
         value = suggestion.get("value")
-        if key not in FEATURE_KEYS or confidence < MIN_CONFIDENCE or value is None or not sources:
+        if key not in LV_IMPORT_FEATURE_KEYS or confidence < MIN_CONFIDENCE or value is None or not sources:
             continue
         if (features.get(key) or {}).get("value") is not None:
             continue

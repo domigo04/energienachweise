@@ -199,9 +199,8 @@ def similarity(inp: dict, ref: dict) -> float:
     score += 0.02 * ratio_similarity(inp.get("flaeche_tabs_m2"), ref.get("flaeche_tabs_m2"))
     score += 0.02 * ratio_similarity(inp.get("flaeche_deckenstrahlplatten_m2"), ref.get("flaeche_deckenstrahlplatten_m2"))
     score += 0.02 * ratio_similarity(inp.get("anzahl_heizkoerper"), ref.get("anzahl_heizkoerper"))
-    score += 0.01 * ratio_similarity(inp.get("anzahl_waermemessungen"), ref.get("anzahl_waermemessungen"))
     score += 0.01 * ratio_similarity(inp.get("anzahl_schaltgeraetekombinationen"), ref.get("anzahl_schaltgeraetekombinationen"))
-    score += 0.02 * ratio_similarity(inp.get("laufmeter_rohre_heizung"), ref.get("laufmeter_rohre_heizung"))
+    score += 0.03 * ratio_similarity(inp.get("laufmeter_rohre_heizung"), ref.get("laufmeter_rohre_heizung"))
     score = min(score, 1.0)
     q = ref.get("qualitaet")
     q = 1.0 if q is None else q

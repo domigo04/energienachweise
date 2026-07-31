@@ -214,13 +214,13 @@ def test_daemmschichtdicke_in_folgezeile_ist_keine_rohrmenge():
     assert res["pipe_length_source_m"]["value"] == 12
 
 
-def test_waermemessung_pauschale_belegt_vorhanden_aber_keine_anzahl():
+def test_waermemessung_pauschale_wird_nicht_mehr_erhoben():
     features = extract_features([{
         "page": 23,
         "text": "243.4 Wärmemessung\nNeo Vac Offerte Wärmemessung pauschal 1 St",
     }])
-    assert features["heat_metering_present"]["value"] is True
-    assert features.get("heat_meter_count", {}).get("value") is None
+    assert "heat_metering_present" not in features
+    assert "heat_meter_count" not in features
 
 
 def test_quadratmeter_sind_keine_rohrmeter():
@@ -272,7 +272,7 @@ def test_bestehende_einfache_lvs_funktionieren_weiter():
     """Alte Formate ohne Einheitenspalte müssen weiter erkannt werden
     (Fallback auf die bisherige Heuristik)."""
     f = extract_features([{"page": 1, "text": "Pos. 241.123\nHocheffizienz-Umwälzpumpe\nMenge 3 Stk."}])
-    assert f["pump_count"]["value"] == 3
+    assert "pump_count" not in f
     f2 = extract_features([{"page": 1, "text": "Pufferspeicher 1'500 Liter"}])
     assert f2["storage_volume_l"]["value"] == 1500
     f3 = extract_features([{"page": 1, "text": "4 Erdsonden à 180 m"}])
@@ -290,7 +290,7 @@ def test_extract_features_nutzt_wortkoordinaten_wenn_vorhanden():
     ]}]
     pages = [{"page": 5, "text": "Umwälzpumpe Heizkreis Stk. 2\nLeistung 570 W"}]
     f = extract_features(pages, word_pages)
-    assert f["pump_count"]["value"] == 2
+    assert "pump_count" not in f
 
 
 # ── Erzeugerleistung im Positionskontext ───────────────────────────────────

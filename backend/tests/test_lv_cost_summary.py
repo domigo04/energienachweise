@@ -213,6 +213,12 @@ def test_exakter_norm_titel_wird_als_exact_erkannt():
     assert res["mapping_confidence"] == 1.0
 
 
+def test_norm_lv_hat_frischwasserstation_und_brauchwarmwasser():
+    assert norm_lv.match_title("Frischwasserstation", "243")["canonical_key"] == "243.10"
+    assert norm_lv.match_title("Brauchwarmwasserbereitung", "243")["canonical_key"] == "243.11"
+    assert norm_lv.covered_keys("Speicher / Frischwasserstation", "243") == ["243.10"]
+
+
 # ── Punkt 18 — keine aggressive Fuzzy-Zuordnung ───────────────────────────
 
 def test_unbekannter_titel_bleibt_ohne_zuordnung():

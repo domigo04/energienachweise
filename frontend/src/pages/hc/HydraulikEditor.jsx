@@ -376,7 +376,6 @@ const PALETTE_GRUPPEN = [
     { paletteId:'erzeuger-co2', type:'erzeuger', label:'CO₂-Wärmepumpe', desc:'Wärmepumpe', preset:{ generator_type:'co2_wp' } },
     { paletteId:'erzeuger-fernwaerme', type:'erzeuger', label:'Fernwärme', desc:'Wärmeübergabe', preset:{ generator_type:'fernwaerme' } },
     { paletteId:'erzeuger-holz', type:'erzeuger', label:'Holz-/Pelletheizung', desc:'SIA-Symbol mit Solid-Quadrat', preset:{ generator_type:'holz' } },
-    { paletteId:'erzeuger-elektro', type:'erzeuger', label:'Elektroheizung', desc:'Elektrischer Wärmeerzeuger', preset:{ generator_type:'elektro' } },
     { type: 'erdsonden',  label: 'Erdsondenfeld',       desc: 'Dynamischer Soleverteiler mit Duplexsonden' },
     { type: 'speicher',   label: 'Speicher',            desc: 'Inhalt wird direkt im Symbol angezeigt' },
     { type: 'bww',        label: 'BWW-Speicher',        desc: 'Warmwasser rot · Kaltwasser grün gestrichelt' },

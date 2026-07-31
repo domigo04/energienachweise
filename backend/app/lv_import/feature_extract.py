@@ -238,12 +238,16 @@ def extract_features(pages, word_pages=None) -> dict:
 
     rows = q.build_rows(pages, word_pages)
     streng: dict[str, dict] = {}
-    bauteile = q.component_counts(rows)
-    for family, key in (("pump", "pump_count"), ("valve_2way", "valve_2way_count"),
+    # Pumpen und Wärmemessung sind bewusst nicht mehr Teil des LV-Fingerprints
+    # und werden deshalb bereits auf Extraktionsebene nicht durchsucht.
+    bauteile = q.component_counts(rows, families=(
+        "valve_2way", "valve_3way", "balancing_valve", "radiator",
+        "floor_heating_manifold",
+    ))
+    for family, key in (("valve_2way", "valve_2way_count"),
                         ("valve_3way", "valve_3way_count"),
                         ("balancing_valve", "balancing_valve_count"),
                         ("radiator", "radiator_count"),
-                        ("heat_meter", "heat_meter_count"),
                         ("floor_heating_manifold", "floor_heating_manifold_count")):
         if family in bauteile:
             streng[key] = bauteile[family]
@@ -254,8 +258,8 @@ def extract_features(pages, word_pages=None) -> dict:
     result.update(streng)
 
     # ── 2) Alte Heuristik nur für noch fehlende Werte ──────────────────────
-    for family, key in (("pump", "pump_count"), ("valve_2way", "valve_2way_count"),
-                        ("valve_3way", "valve_3way_count"), ("heat_meter", "heat_meter_count"),
+    for family, key in (("valve_2way", "valve_2way_count"),
+                        ("valve_3way", "valve_3way_count"),
                         ("floor_heating_manifold", "floor_heating_manifold_count"),
                         ("buffer", "buffer_count"), ("heat_generator", "generator_count")):
         if _fehlt(result, key):
@@ -263,20 +267,11 @@ def extract_features(pages, word_pages=None) -> dict:
             if f is not None:
                 result[key] = f
 
-    for key, fn in (("generator_type", _generator_type),
-                    ("generator_power_kw", _generator_power),
+    for key, fn in (("generator_power_kw", _generator_power),
                     ("storage_volume_l", _storage_volume),
                     ("pipe_length_m", _pipe_length)):
         if _fehlt(result, key):
             f = fn(zeilen)
-            if f is not None:
-                result[key] = f
-
-    # Mehrwertige Merkmale (Punkt 6/7) — immer über die zentrale Registry.
-    for key, registry in (("generator_types", "generator_types"),
-                          ("heat_delivery_types", "heat_delivery_types")):
-        if _fehlt(result, key):
-            f = _mehrfachwerte(zeilen, registry)
             if f is not None:
                 result[key] = f
 
@@ -323,22 +318,6 @@ def extract_features(pages, word_pages=None) -> dict:
                 }
                 break
 
-    # «Wärmemessung» wird in Unternehmerangeboten oft als komplette Fremd-
-    # offerte/Position ausgewiesen. Das belegt die Funktion, aber nicht die
-    # Anzahl einzelner Zähler. Diese beiden Aussagen bleiben deshalb getrennt.
-    if _fehlt(result, "heat_metering_present"):
-        for seite, line in zeilen:
-            low = line.casefold()
-            if any(term in low for term in (
-                "wärmemessung", "waermemessung", "wärmezähler",
-                "waermezaehler", "wärmemengenzähler", "waermemengenzaehler",
-            )):
-                result["heat_metering_present"] = {
-                    "value": True, "confidence": HIGH,
-                    "source_page": seite, "source_text": line,
-                }
-                break
-
     # Für die Kostenlogik ist «nicht erwähnt» bei der Frischwasserstation ein
     # echtes Nein: sie ist ein klar auszuschreibendes Gerät. Ein positiver Wert
     # braucht weiterhin eine ausdrückliche Fundstelle.
@@ -380,8 +359,8 @@ def _bauteilmengen_ergaenzen(pages, result: dict) -> None:
     if not mengen:
         return
     familie_zu_key = {
-        "pump": "pump_count", "valve_2way": "valve_2way_count",
-        "valve_3way": "valve_3way_count", "heat_meter": "heat_meter_count",
+        "valve_2way": "valve_2way_count",
+        "valve_3way": "valve_3way_count",
         "floor_heating_manifold": "floor_heating_manifold_count",
         "buffer": "buffer_count",
     }

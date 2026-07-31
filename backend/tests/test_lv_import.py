@@ -23,25 +23,21 @@ def test_parse_number_schweizer_format():
 
 # ── B6 — konservatives Zählen ───────────────────────────────────────────────
 
-def test_pump_menge_wird_gezaehlt():
+def test_pump_menge_wird_nicht_mehr_erhoben():
     f = extract_features(_pages("Pos. 241.123\nHocheffizienz-Umwälzpumpe\nMenge 3 Stk."))
-    assert f["pump_count"]["value"] == 3
-    assert f["pump_count"]["confidence"] == "high"
-    assert f["pump_count"]["source_page"] == 17
-    assert "Umwälzpumpe" in f["pump_count"]["source_text"]
+    assert "pump_count" not in f
 
 
 def test_pump_ohne_menge_wird_nicht_geraten():
     """Erwähnt, aber keine Menge → value None, confidence low (kein geratenes 1)."""
     f = extract_features(_pages("Umwälzpumpe im Heizkreis"))
-    assert f["pump_count"]["value"] is None
-    assert f["pump_count"]["confidence"] == "low"
+    assert "pump_count" not in f
 
 
 def test_mehrere_positionen_summiert():
     text = "Umwälzpumpe\nMenge 2 Stk\nInlinepumpe\nMenge 3 Stk"
     f = extract_features(_pages(text))
-    assert f["pump_count"]["value"] == 5
+    assert "pump_count" not in f
 
 
 # ── B7 — Leistung / Speicher / Bohrmeter ────────────────────────────────────
@@ -49,12 +45,12 @@ def test_mehrere_positionen_summiert():
 def test_erzeugerleistung_und_typ():
     f = extract_features(_pages("Sole/Wasser-Wärmepumpe 82 kW"))
     assert f["generator_power_kw"]["value"] == 82
-    assert f["generator_type"]["value"] == "ews_wp"
+    assert "generator_type" not in f
 
 
 def test_generische_waermepumpe_wird_nicht_als_wasser_wp_erfunden():
     f = extract_features(_pages("Wärmepumpe 82 kW"))
-    assert f["generator_type"]["value"] == "sonstige"
+    assert "generator_type" not in f
 
 
 def test_spezifischer_erzeugertyp_gewinnt_gegen_fruehe_generische_wp_erwaehnung():
@@ -62,7 +58,7 @@ def test_spezifischer_erzeugertyp_gewinnt_gegen_fruehe_generische_wp_erwaehnung(
         "Expansion Primärkreis WP\n"
         "242.1 Wärmepumpe Sole/Wasser"
     ))
-    assert f["generator_type"]["value"] == "ews_wp"
+    assert "generator_type" not in f
 
 
 def test_speichervolumen():
@@ -177,7 +173,7 @@ def test_bauteilmengen_aus_positionsbloecken_als_fallback():
     text = ("242.1 Umwälzpumpe Heizkreis\nHocheffizienz\nMenge 4 Stk\n"
             "242.2 3-Weg-Mischventil\nDN25\nMenge 2 Stk")
     f = extract_features(_pages(text))
-    assert f["pump_count"]["value"] == 4
+    assert "pump_count" not in f
     assert f["valve_3way_count"]["value"] == 2
 
 
@@ -247,7 +243,7 @@ def test_feature_keys_mappen_auf_projectcontext():
     from app.project_context import PARAMETER_BY_KEY
     for feature_key, ctx_key in FEATURE_TO_CONTEXT.items():
         assert ctx_key in PARAMETER_BY_KEY, f"{feature_key} → {ctx_key} fehlt im ProjectContext"
-    assert context_key("pump_count") == "anzahl_pumpen"
+    assert context_key("pump_count") is None
     assert context_key("borehole_total_m") == "bohrmeter"
 
 
@@ -258,8 +254,11 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
 from app.models.auth import User  # noqa: F401 — registriert hc_users
+from app.models.subscription import SubscriptionPlan  # noqa: F401 — FK-Ziel
 from app.models.heizungscockpit import HcProject  # noqa: F401 — FK-Ziel project_id
-from app.models.lv_import import LvImport, LvImportFeature, LvImportCost, LvImportStatus
+from app.models.lv_import import (
+    LvImport, LvImportFeature, LvImportCost, LvImportStatus, LvImportSystem,
+)
 from app.models.kv import RefProjekt, RefKostenzeile, RefProjektFeature
 
 
@@ -330,7 +329,7 @@ def test_freigabe_uebernimmt_in_refprojekt():
     assert ref is not None
     assert ref.heizleistung_kw == 82.0
     assert ref.bohrmeter == 720.0
-    assert ref.anzahl_waermemessungen == 13          # confirmed_value gewinnt
+    assert ref.anzahl_waermemessungen is None
     assert ref.waermeerzeuger == ["ews_wp"]
     zeile = db.query(RefKostenzeile).first()
     # Referenzkosten tragen die NORM-Nummer und die Norm-Bezeichnung.
@@ -342,6 +341,70 @@ def test_freigabe_uebernimmt_in_refprojekt():
     assert feats["heat_meter_count"] == "13"
     assert feats["borehole_total_m"] == "720"
     assert "generator_type" in feats
+
+
+def test_bearbeitete_systeme_datum_und_bww_fliessen_in_referenz():
+    from datetime import date
+    from types import SimpleNamespace
+    from app.routers.hc_lv_import import approve_lv
+
+    db = _db()
+    imp = LvImport(
+        tenant_id=1, filename="halle.pdf", file_hash="systems",
+        status=LvImportStatus.review.value, offert_datum="14.12.2025",
+        gebaeudetyp="sporthalle", projektart="sanierung",
+    )
+    db.add(imp)
+    db.flush()
+    for key, value in (
+        ("generator_power_kw", "120"),
+        ("fresh_water_station_present", "true"),
+        ("pipe_length_m", "347"),
+    ):
+        db.add(LvImportFeature(lv_import_id=imp.id, key=key, value=value, confirmed=True))
+    db.add_all([
+        LvImportSystem(lv_import_id=imp.id, kind="heat_generation", type_code="fernwaerme",
+                       scope_status="included", confirmed=True),
+        LvImportSystem(lv_import_id=imp.id, kind="heat_emission", type_code="luftheizapparat",
+                       scope_status="installed_by_contractor", confirmed=True),
+        LvImportSystem(lv_import_id=imp.id, kind="heat_generation", type_code="lwwp",
+                       scope_status="by_others", confirmed=True),
+    ])
+    db.commit()
+
+    user = SimpleNamespace(id=1, tenant_id=1, name="D", email="d@x.ch")
+    approve_lv(imp.id, user=user, db=db)
+    ref = db.query(RefProjekt).one()
+    assert ref.waermeerzeuger == ["fernwaerme"]
+    assert ref.waermeabgabe == ["luftheizapparat"]
+    assert ref.anlagenkonfiguration == "monovalent"
+    assert ref.bww_bei_heizung is True
+    assert ref.datum == date(2025, 12, 14)
+    assert ref.gebaeudetyp == "sporthalle"
+    assert ref.projektart == "sanierung"
+
+
+def test_anlagensysteme_koennen_korrigiert_erganzt_und_geloescht_werden():
+    from types import SimpleNamespace
+    from app.routers.hc_lv_import import add_system, update_system, delete_system
+
+    db = _db()
+    imp = LvImport(tenant_id=1, filename="x.pdf", file_hash="crud",
+                   status=LvImportStatus.review.value)
+    db.add(imp)
+    db.commit()
+    user = SimpleNamespace(id=1, tenant_id=1, name="D", email="d@x.ch")
+
+    created = add_system(imp.id, {
+        "kind": "heat_generation", "type_code": "fernwaerme", "confirmed": True,
+    }, user=user, db=db)
+    assert created["type_code"] == "fernwaerme"
+    changed = update_system(imp.id, created["id"], {
+        "type_code": "gas", "capacity_kw": 95, "confirmed": True,
+    }, user=user, db=db)
+    assert changed["type_code"] == "gas" and changed["capacity_kw"] == 95
+    assert delete_system(imp.id, created["id"], user=user, db=db) == {"deleted": True}
+    assert db.query(LvImportSystem).count() == 0
 
 
 def test_freigabe_blockiert_ohne_bestaetigung():

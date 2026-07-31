@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
@@ -248,6 +249,8 @@ async def upload_lv(
         imp.waehrung = "CHF"
         if projekt.get("building_use"):
             imp.gebaeudetyp = projekt["building_use"]["value"]
+        if projekt.get("project_type"):
+            imp.projektart = projekt["project_type"]["value"]
         if projekt.get("units"):
             imp.anzahl_einheiten = projekt["units"]["value"]
 
@@ -399,6 +402,13 @@ async def upload_lv(
             ):
                 if visual_project.get(field):
                     setattr(imp, attr, visual_project[field])
+            for field, attr, registry in (
+                ("building_use", "gebaeudetyp", "building_uses"),
+                ("project_type", "projektart", "project_types"),
+            ):
+                code = fachwerte.normalize(registry, visual_project.get(field))
+                if code:
+                    setattr(imp, attr, code)
             # Ein fehlerfreier Parser bleibt Kostenquelle. KI-Kosten ersetzen ihn
             # nur, wenn Positionen/Summen fehlen oder widersprüchlich sind.
             visual_costs_complete = bool(
@@ -1026,6 +1036,116 @@ def _effective_feature(f: LvImportFeature):
     return f.confirmed_value if f.confirmed_value not in (None, "") else f.value
 
 
+def _system_registry(kind: str) -> str:
+    if kind == systems.HEAT_EMISSION:
+        return "heat_delivery_types"
+    if kind == systems.HEAT_GENERATION:
+        return "generator_types"
+    raise HTTPException(status_code=422, detail="Unbekannte Anlagenart")
+
+
+def _apply_system_body(row: LvImportSystem, body: dict) -> None:
+    if "kind" in body:
+        row.kind = str(body["kind"])
+    registry = _system_registry(row.kind)
+    if "type_code" in body:
+        code = fachwerte.normalize(registry, body["type_code"])
+        if not code:
+            raise HTTPException(status_code=422, detail="Unbekannter Anlagentyp")
+        row.type_code = code
+    for field in ("source_label", "manufacturer", "model", "source_text"):
+        if field in body:
+            value = body[field]
+            setattr(row, field, None if value in (None, "") else str(value)[:300])
+    for field in ("count", "source_page"):
+        if field in body:
+            try:
+                setattr(row, field, None if body[field] in (None, "") else int(float(body[field])))
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=422, detail=f"Ungültiger Wert für {field}")
+    if "capacity_kw" in body:
+        try:
+            row.capacity_kw = None if body["capacity_kw"] in (None, "") else float(body["capacity_kw"])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="Ungültige Leistung")
+    for field, allowed in (
+        ("supplied_by", {"contractor", "others"}),
+        ("installation_by", {"contractor", "others"}),
+        ("existing_or_new", {"existing", "new"}),
+    ):
+        if field in body:
+            value = body[field]
+            if value not in (None, "") and value not in allowed:
+                raise HTTPException(status_code=422, detail=f"Ungültiger Wert für {field}")
+            setattr(row, field, value or None)
+    if "scope_status" in body:
+        value = body["scope_status"]
+        code = fachwerte.normalize("scope_status", value) if value not in (None, "") else None
+        if value not in (None, "") and not code:
+            raise HTTPException(status_code=422, detail="Ungültiger Leistungsumfang")
+        row.scope_status = code
+    if "confirmed" in body:
+        row.confirmed = bool(body["confirmed"])
+
+
+@router.post("/{import_id}/systems")
+def add_system(import_id: int, body: dict, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    imp = _get_import(db, user, import_id)
+    if imp.status == LvImportStatus.approved.value:
+        raise HTTPException(status_code=409, detail="Freigegebener Import ist gesperrt")
+    row = LvImportSystem(lv_import_id=imp.id, kind=str(body.get("kind") or ""),
+                         type_code="", confirmed=True, confidence=1.0)
+    _apply_system_body(row, body)
+    if not row.type_code:
+        raise HTTPException(status_code=422, detail="Anlagentyp fehlt")
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _system_out(row)
+
+
+@router.patch("/{import_id}/systems/{system_id}")
+def update_system(import_id: int, system_id: int, body: dict,
+                  user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    imp = _get_import(db, user, import_id)
+    if imp.status == LvImportStatus.approved.value:
+        raise HTTPException(status_code=409, detail="Freigegebener Import ist gesperrt")
+    row = db.query(LvImportSystem).filter(
+        LvImportSystem.id == system_id, LvImportSystem.lv_import_id == imp.id,
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Anlagensystem nicht gefunden")
+    _apply_system_body(row, body)
+    db.commit()
+    return _system_out(row)
+
+
+@router.delete("/{import_id}/systems/{system_id}")
+def delete_system(import_id: int, system_id: int,
+                  user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    imp = _get_import(db, user, import_id)
+    if imp.status == LvImportStatus.approved.value:
+        raise HTTPException(status_code=409, detail="Freigegebener Import ist gesperrt")
+    row = db.query(LvImportSystem).filter(
+        LvImportSystem.id == system_id, LvImportSystem.lv_import_id == imp.id,
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Anlagensystem nicht gefunden")
+    db.delete(row)
+    db.commit()
+    return {"deleted": True}
+
+
+def _parse_offer_date(value: str | None):
+    raw = str(value or "").strip()
+    for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%d.%m.%y"):
+        try:
+            return datetime.strptime(raw, fmt).date()
+        except ValueError:
+            pass
+    return None
+
+
 @router.post("/{import_id}/approve")
 def approve_lv(import_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """B11 — Freigabe: erst jetzt Übernahme in die Referenzstruktur (RefProjekt).
@@ -1041,6 +1161,12 @@ def approve_lv(import_id: int, user: User = Depends(get_current_user), db: Sessi
         raise HTTPException(status_code=422, detail={
             "message": "Bitte alle Werte prüfen (bestätigen oder als unbekannt markieren).",
             "unconfirmed": unbestaetigt,
+        })
+    systeme_offen = [s.id for s in imp.systems if not s.confirmed]
+    if systeme_offen:
+        raise HTTPException(status_code=422, detail={
+            "message": "Bitte alle Anlagensysteme prüfen, korrigieren oder entfernen.",
+            "unconfirmed_systems": systeme_offen,
         })
 
     # Freigabe blockieren, solange VERWENDETE Kosten (mit effektivem Betrag)
@@ -1077,41 +1203,56 @@ def approve_lv(import_id: int, user: User = Depends(get_current_user), db: Sessi
         except (TypeError, ValueError):
             return None
 
-    # Punkt 6/7 — mehrere Wärmeerzeuger und Wärmeabgaben als kanonische Codes.
-    # `generator_types` ist die vollständige Liste; fehlt sie (Altimport), wird
-    # der Einzelwert `generator_type` verwendet.
-    erzeuger = fachwerte.normalize_list("generator_types", eff.get("generator_types"))
-    if not erzeuger and eff.get("generator_type"):
-        erzeuger = fachwerte.normalize_list("generator_types", eff["generator_type"])
+    system_dicts = [{
+        "kind": s.kind, "type_code": s.type_code, "scope_status": s.scope_status,
+        "capacity_kw": s.capacity_kw,
+    } for s in imp.systems]
+    # Neue Importe verwenden ausschliesslich die geprüfte Anlagenliste. Der
+    # Einzelwert `generator_type` bleibt nur als Altimport-Fallback erhalten.
+    erzeuger = systems.generator_codes(system_dicts)
+    if not imp.systems:
+        erzeuger = fachwerte.normalize_list("generator_types", eff.get("generator_types"))
+        if not erzeuger and eff.get("generator_type"):
+            erzeuger = fachwerte.normalize_list("generator_types", eff["generator_type"])
     # Wärmeabgabe kommt aus der Systemtabelle — dort liegt sie seit der
     # Mehrfacherfassung mit Anzahl und Lieferant. Das frühere Sammelmerkmal
     # `heat_delivery_types` wird nicht mehr gefüllt; ohne diesen Weg bliebe die
     # Abgabe im Referenzprojekt leer und fehlte im Ähnlichkeitsscore.
-    abgabe = systems.delivery_codes(
-        [{"kind": s.kind, "type_code": s.type_code} for s in imp.systems]
-    )
-    if not abgabe:
+    abgabe = systems.delivery_codes(system_dicts)
+    if not imp.systems:
         abgabe = fachwerte.normalize_list("heat_delivery_types", eff.get("heat_delivery_types"))
-    # Erzeuger ebenso: erkannte Systeme ergänzen den Einzelwert.
-    aus_systemen = systems.generator_codes(
-        [{"kind": s.kind, "type_code": s.type_code} for s in imp.systems]
+
+    generator_power = num("generator_power_kw")
+    if generator_power is None:
+        capacities = [
+            float(s["capacity_kw"]) for s in system_dicts
+            if s["kind"] == systems.HEAT_GENERATION
+            and s["type_code"] in erzeuger and s.get("capacity_kw") is not None
+        ]
+        generator_power = sum(capacities) if capacities else None
+    bww_in_heating = (
+        str(eff.get("fresh_water_station_present") or "").lower()
+        in {"true", "1", "ja", "yes"}
+        or any(c.mapping_confirmed and c.canonical_key in {"243.10", "243.11"}
+               for c in imp.costs)
     )
-    for code in aus_systemen:
-        if code not in erzeuger:
-            erzeuger.append(code)
 
     ref = RefProjekt(
         tenant_id=user.tenant_id, erstellt_von=user.id,
         name=imp.projekt_name or f"LV-Import: {imp.filename}",
-        installierte_leistung_neu_kw=num("generator_power_kw"),
+        installierte_leistung_neu_kw=generator_power,
+        heizleistung_kw=generator_power,
         waermeerzeuger=erzeuger,
         waermeabgabe=abgabe,
         # Hybrid ist kein gewählter Erzeuger, sondern abgeleitet (Punkt 7).
-        anlagenkonfiguration="hybrid" if fachwerte.ist_hybrid(erzeuger) else None,
+        anlagenkonfiguration=("hybrid" if fachwerte.ist_hybrid(erzeuger)
+                              else "monovalent" if len(erzeuger) == 1 else None),
         # Projektgrunddaten aus dem Review (Item 6 / Punkt 20) — kanonische Codes.
         ebf_m2=imp.ebf_m2, anzahl_einheiten=imp.anzahl_einheiten,
         gebaeudetyp=imp.gebaeudetyp, projektart=imp.projektart,
         zertifizierung=imp.zertifizierung,
+        datum=_parse_offer_date(imp.offert_datum),
+        bww_bei_heizung=bww_in_heating,
     )
     # Legacy-Spalten aus dem EINEN zentralen Mapping befüllen (Rückwärts-
     # kompatibilität zur bestehenden Ähnlichkeit, die noch Spalten liest).
@@ -1120,7 +1261,7 @@ def approve_lv(import_id: int, user: User = Depends(get_current_user), db: Sessi
         v = num(feature_key)
         if v is None:
             continue
-        setattr(ref, column, int(round(v)) if column == "anzahl_waermemessungen" else v)
+        setattr(ref, column, v)
     db.add(ref)
     db.flush()
 

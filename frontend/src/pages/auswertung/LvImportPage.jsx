@@ -4,9 +4,8 @@ import { Upload, FileText, Check, CheckCircle2, AlertTriangle, Trash2, Plus, Che
 import {
   uploadLvImport, listLvImports, getLvImport, getFachwerte, getNormLv,
   updateLvFeature, updateLvCost, addLvCost, deleteLvCost, updateLvCommercial,
-  updateLvImport, approveLvImport,
+  updateLvImport, approveLvImport, addLvSystem, updateLvSystem, deleteLvSystem,
 } from "../../api/hcApi";
-import { GENERATOR_TYPES } from "../../components/hc/nodes/generatorTypes";
 import PageHeader from "../../components/ui/PageHeader";
 import { LEER, chf, zahl } from "../../lib/format";
 import { PROCESSING, processingSchritt } from "./lvImportProgress";
@@ -33,7 +32,7 @@ const KATEGORIEN = [
   // Bewusst kurz: nur Kennwerte, die für die Kostenauswertung belastbar sind.
   // Speicher, Verteilsystem, Temperaturen und Bauablaufmerkmale sind entfallen —
   // technisch interessant, für den Kostenvergleich aber ohne Nutzen.
-  { titel: "Wärmeerzeuger", keys: ["generator_type", "generator_power_kw"] },
+  { titel: "Erzeugerleistung", keys: ["generator_power_kw"] },
   {
     titel: "Erdsonden",
     keys: ["borehole_count", "borehole_length_each_m", "borehole_total_m"],
@@ -41,12 +40,10 @@ const KATEGORIEN = [
     nurWenn: (byKey) =>
       Number(byKey.borehole_count?.effective_value) > 0
       || Number(byKey.borehole_total_m?.effective_value) > 0
-      || byKey.generator_type?.effective_value === "ews_wp",
+      || Number(byKey.borehole_length_each_m?.effective_value) > 0,
   },
   { titel: "Frischwasserstation", keys: ["fresh_water_station_present"] },
   { titel: "Rohrmeter", keys: ["pipe_length_m"] },
-  { titel: "Pumpen", keys: ["pump_count"] },
-  { titel: "Wärmemessung", keys: ["heat_metering_present", "heat_meter_count"] },
 ];
 
 // Wird gerechnet, nicht eingegeben — im Review nur lesbar.
@@ -57,7 +54,7 @@ const WER = { contractor: "Unternehmer", others: "bauseits/fremd" };
 
 // Merkmale mit Ja/Nein statt Zahleneingabe.
 const BOOL_FEATURES = new Set([
-  "fresh_water_station_present", "heat_metering_present",
+  "fresh_water_station_present",
 ]);
 const SCOPE_LABEL = {
   included: "enthalten",
@@ -208,20 +205,37 @@ function Handschrift({ feature }) {
 
 // Wärmeabgabe und Wärmeerzeugung. Mehrere Systeme gleichzeitig sind der
 // Normalfall, darum eine Liste statt eines einzelnen Feldes.
-function AnlagenSysteme({ systeme }) {
-  if (!systeme?.length) return null;
+function NeuesSystem({ kind, optionen, disabled, onAdd }) {
+  const [typeCode, setTypeCode] = useState("");
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 bg-slate-50/50 px-4 py-3 sm:px-5">
+      <select className="input max-w-sm" disabled={disabled} value={typeCode}
+        onChange={(e) => setTypeCode(e.target.value)}>
+        <option value="">— Anlage auswählen —</option>
+        {optionen.map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}
+      </select>
+      <button type="button" className="btn-secondary min-h-8" disabled={disabled || !typeCode}
+        onClick={async () => { await onAdd({ kind, type_code: typeCode, confirmed: true }); setTypeCode(""); }}>
+        <Plus className="size-4" /> Hinzufügen
+      </button>
+    </div>
+  );
+}
+
+function AnlagenSysteme({ systeme, listen, gesperrt, onUpdate, onDelete, onAdd, gespeichert }) {
   const gruppen = [
-    ["heat_emission", "Wärmeabgabe"],
-    ["heat_generation", "Wärmeerzeugung"],
+    ["heat_generation", "Wärmeerzeuger", "generator_types"],
+    ["heat_emission", "Wärmeabgabe", "heat_delivery_types"],
   ];
   return (
     <section className="card overflow-hidden">
       <div className="border-b border-slate-100 bg-slate-50/60 px-4 py-3 sm:px-5">
         <h2 className="text-sm font-bold text-slate-800">Anlagensysteme</h2>
+        <p className="mt-0.5 text-[11px] text-slate-400">Nur tatsächlich verbaute und kostenrelevante Systeme bestätigen. Falsche Vorschläge löschen.</p>
       </div>
-      {gruppen.map(([kind, titel]) => {
+      {gruppen.map(([kind, titel, registry]) => {
         const rows = systeme.filter((s) => s.kind === kind);
-        if (!rows.length) return null;
+        const optionen = listen?.[registry] || [];
         return (
           <div key={kind}>
             <div className="border-b border-slate-100 bg-white px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500 sm:px-5">
@@ -229,23 +243,28 @@ function AnlagenSysteme({ systeme }) {
             </div>
             <div className="divide-y divide-slate-100">
               {rows.map((s) => (
-                <div key={s.id ?? `${s.kind}-${s.type_code}`} className="px-4 py-3 sm:px-5">
-                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                    <span className="font-medium text-slate-900">{s.label || s.type_code}</span>
-                    {s.count != null && (
-                      <span className="font-mono text-sm tabular-nums text-slate-700">{s.count} Stk.</span>
-                    )}
-                    {s.capacity_kw != null && (
-                      <span className="font-mono text-sm tabular-nums text-slate-700">{s.capacity_kw} kW</span>
-                    )}
-                    {(s.manufacturer || s.model) && (
-                      <span className="text-xs text-slate-500">{[s.manufacturer, s.model].filter(Boolean).join(" ")}</span>
-                    )}
-                    {s.existing_or_new && (
-                      <span className="text-xs text-slate-400">
-                        {s.existing_or_new === "existing" ? "bestehend" : "neu"}
-                      </span>
-                    )}
+                <div key={s.id} className={`px-4 py-3 sm:px-5 ${!s.confirmed ? "border-l-4 border-l-amber-400 bg-amber-50/70" : ""}`}>
+                  <div className="grid gap-2 sm:grid-cols-[minmax(220px,1fr)_100px_110px_auto] sm:items-center">
+                    <select className="input" disabled={gesperrt} value={s.type_code}
+                      onChange={(e) => onUpdate(s, { type_code: e.target.value, confirmed: true })}>
+                      {optionen.map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}
+                    </select>
+                    <input className="input" type="number" min="0" step="1" disabled={gesperrt}
+                      defaultValue={s.count ?? ""} placeholder="Anzahl"
+                      onBlur={(e) => onUpdate(s, { count: e.target.value, confirmed: true })} />
+                    <input className="input" type="number" min="0" step="0.1" disabled={gesperrt || kind !== "heat_generation"}
+                      defaultValue={s.capacity_kw ?? ""} placeholder="kW"
+                      onBlur={(e) => onUpdate(s, { capacity_kw: e.target.value, confirmed: true })} />
+                    <div className="flex items-center justify-end gap-2">
+                      <label className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-600">
+                        <input type="checkbox" disabled={gesperrt} checked={!!s.confirmed}
+                          onChange={(e) => onUpdate(s, { confirmed: e.target.checked })} /> geprüft
+                      </label>
+                      <button type="button" disabled={gesperrt} onClick={() => onDelete(s)}
+                        className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Falsches System entfernen">
+                        <Trash2 className="size-4" />
+                      </button>
+                    </div>
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
                     {s.scope_status && (
@@ -257,10 +276,13 @@ function AnlagenSysteme({ systeme }) {
                     {s.supplied_by && <span>Lieferung: {WER[s.supplied_by] || s.supplied_by}</span>}
                     {s.installation_by && <span>Montage: {WER[s.installation_by] || s.installation_by}</span>}
                     {s.source_page != null && <span>Seite {s.source_page}</span>}
+                    <Gespeichert an={gespeichert === `s${s.id}`} />
                   </div>
                 </div>
               ))}
             </div>
+            {!rows.length && <p className="px-4 py-3 text-xs text-slate-400 sm:px-5">Keine Anlage erkannt.</p>}
+            {!gesperrt && <NeuesSystem kind={kind} optionen={optionen} onAdd={onAdd} />}
           </div>
         );
       })}
@@ -715,6 +737,7 @@ function ReviewAnsicht({ id }) {
   const gesperrt = imp.status === "approved";
   const featTotal = (imp.features || []).length;
   const featGeprueft = (imp.features || []).filter((f) => f.confirmed).length;
+  const systemOffen = (imp.systems || []).filter((s) => !s.confirmed).length;
   // Verwendete Kosten = Positionen mit effektivem Betrag; sie müssen bestätigt sein.
   const kostenVerwendet = (imp.costs || []).filter((c) => c.effective_amount != null);
   const kostenOffen = kostenVerwendet.filter((c) => !c.confirmed).length;
@@ -734,7 +757,7 @@ function ReviewAnsicht({ id }) {
   // Punkt 15 — dritte Summe: was gelesen wurde, aber nicht in die Referenz geht.
   // Als Rest definiert, damit Summe 2 + Summe 3 immer genau Summe 1 ergibt.
   const ausserhalbTotal = Math.max(0, kostenTotal - referenzTotal);
-  const alleGeprueft = featTotal > 0 && featGeprueft === featTotal
+  const alleGeprueft = featTotal > 0 && featGeprueft === featTotal && systemOffen === 0
     && kostenOffen === 0 && zuordnungOffen === 0;
   const grunddatenGesetzt = ["ebf_m2", "anzahl_einheiten", "gebaeudetyp", "projektart",
     "zertifizierung", "region", "projekt_name"]
@@ -742,13 +765,13 @@ function ReviewAnsicht({ id }) {
   // Fortschritt je Schritt für den Stepper (Freigabe selbst ist nie „fertig").
   const schrittFertig = [
     grunddatenGesetzt,
-    featTotal > 0 && featGeprueft === featTotal,
+    featTotal > 0 && featGeprueft === featTotal && systemOffen === 0,
     kostenOffen === 0,
     false,
   ];
   // Wie viel ist in jedem Schritt noch offen — steht am Schritt selbst, nicht
   // erst darin versteckt.
-  const schrittOffen = [0, featTotal - featGeprueft, kostenOffen + zuordnungOffen, 0];
+  const schrittOffen = [0, featTotal - featGeprueft + systemOffen, kostenOffen + zuordnungOffen, 0];
 
   // Alle Felder speichern beim Verlassen. Ohne Rückmeldung weiss niemand, ob
   // der Wert angekommen ist; die Markierung verschwindet nach kurzer Zeit.
@@ -768,6 +791,19 @@ function ReviewAnsicht({ id }) {
     setImp((cur) => ({ ...cur, costs: cur.costs.map((c) => (c.id === cost.id ? updated : c)) }));
     merkeGespeichert(`c${cost.id}`);
   };
+  const setSystem = async (system, patch) => {
+    const updated = await updateLvSystem(id, system.id, patch);
+    setImp((cur) => ({ ...cur, systems: cur.systems.map((s) => (s.id === system.id ? updated : s)) }));
+    merkeGespeichert(`s${system.id}`);
+  };
+  const neuesSystem = async (data) => {
+    const created = await addLvSystem(id, data);
+    setImp((cur) => ({ ...cur, systems: [...(cur.systems || []), created] }));
+  };
+  const entferneSystem = async (system) => {
+    await deleteLvSystem(id, system.id);
+    setImp((cur) => ({ ...cur, systems: cur.systems.filter((s) => s.id !== system.id) }));
+  };
   const entferneKost = async (cost) => {
     await deleteLvCost(id, cost.id);
     setImp((cur) => ({ ...cur, costs: cur.costs.filter((c) => c.id !== cost.id) }));
@@ -784,6 +820,9 @@ function ReviewAnsicht({ id }) {
   const alleBestaetigen = async () => {
     for (const f of (imp.features || []).filter((x) => !x.confirmed)) {
       await setFeature(f, { confirmed: true });
+    }
+    for (const s of (imp.systems || []).filter((x) => !x.confirmed)) {
+      await setSystem(s, { confirmed: true });
     }
     for (const c of kostenVerwendet.filter((x) => !x.confirmed || !x.mapping_confirmed)) {
       await setCost(c, { confirmed: true, mapping_confirmed: true });
@@ -910,7 +949,8 @@ function ReviewAnsicht({ id }) {
       {/* Schritt 2 — Technischer Fingerprint nach Kategorien */}
       {schritt === 1 && (
       <div className="max-w-5xl space-y-6">
-        <AnlagenSysteme systeme={imp.systems} />
+        <AnlagenSysteme systeme={imp.systems || []} listen={listen} gesperrt={gesperrt}
+          onUpdate={setSystem} onDelete={entferneSystem} onAdd={neuesSystem} gespeichert={gespeichert} />
         {KATEGORIEN.filter((kat) => !kat.nurWenn || kat.nurWenn(featureByKey)).map((kat) => {
           const rows = kat.keys.map((k) => featureByKey[k]).filter(Boolean);
           if (!rows.length) return null;
@@ -928,13 +968,6 @@ function ReviewAnsicht({ id }) {
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-medium text-slate-900">{f.label}</span>
-                        {f.key === "heat_meter_count"
-                          && featureByKey.heat_metering_present?.effective_value === "True"
-                          && !f.effective_value && (
-                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
-                            vorhanden, Anzahl nicht erkannt
-                          </span>
-                        )}
                       </div>
                       <Handschrift feature={f} />
                       {multi && listen && (
@@ -955,16 +988,7 @@ function ReviewAnsicht({ id }) {
                     </div>
                     {!multi && (
                     <div className="flex items-center gap-2 sm:justify-end">
-                      {f.key === "generator_type" ? (
-                        <select className="input w-52" disabled={gesperrt}
-                          value={f.confirmed_value ?? (f.value ?? "")}
-                          onChange={(e) => setFeature(f, { confirmed_value: e.target.value, confirmed: true })}>
-                          <option value="">— nicht erkannt —</option>
-                          {GENERATOR_TYPES.filter((type) => type.value !== "hybrid").map((type) => (
-                            <option key={type.value} value={type.value}>{type.label}</option>
-                          ))}
-                        </select>
-                      ) : BOOL_FEATURES.has(f.key) ? (
+                      {BOOL_FEATURES.has(f.key) ? (
                         <select className="input w-36" disabled={gesperrt}
                           value={String(f.confirmed_value ?? f.value ?? "")}
                           onChange={(e) => setFeature(f, { confirmed_value: e.target.value, confirmed: true })}>
@@ -986,7 +1010,7 @@ function ReviewAnsicht({ id }) {
                         <input
                           className="input w-36"
                           type="number"
-                          step={["borehole_count", "pump_count", "heat_meter_count", "buffer_count"].includes(f.key) ? "1" : "0.1"}
+                          step={["borehole_count"].includes(f.key) ? "1" : "0.1"}
                           disabled={gesperrt}
                           defaultValue={f.confirmed_value ?? (f.value ?? "")}
                           placeholder={f.value != null ? String(f.value) : "Wert eingeben"}

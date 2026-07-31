@@ -1,9 +1,9 @@
 """Projektgrunddaten aus Deckblatt/Kopfseiten (Punkt 19).
 
-Nur was zuverlässig im Dokument steht, wird vorgeschlagen. EBF, Zertifizierung,
-Projektart und Nutzungseinheiten werden ausdrücklich NICHT geraten — sie sind
-vergleichsrelevant und müssen aus dem Dokument belegbar sein oder vom Nutzer
-kommen (Punkt 19/20).
+Nur was zuverlässig im Dokument steht, wird vorgeschlagen. EBF und
+Zertifizierung werden ausdrücklich NICHT geraten. Projektart, Gebäudenutzung
+und Nutzungseinheiten werden nur aus einer eindeutigen Projektbezeichnung
+abgeleitet und bleiben im Review bearbeitbar.
 
 Der Gebäudenutzungs-Vorschlag ist eine Ausnahme: „3-MFH" ist ein eindeutiger
 Hinweis. Er wird als Vorschlag mit Confidence geliefert, nie als gesetzte
@@ -105,7 +105,7 @@ def extract_project_data(pages) -> dict:
     # Zweiter Durchgang: Deckblätter ohne Beschriftungen.
     _ohne_labels(pages, result)
 
-    # Gebäudenutzung als Vorschlag (Punkt 19) — AUSSCHLIESSLICH aus der
+    # Gebäudenutzung und Projektart als Vorschlag — AUSSCHLIESSLICH aus der
     # Projektbezeichnung. Früher fiel die Ableitung auf den gesamten Text der
     # ersten Seite zurück; irgendein «Wohnen», «Büro» oder «Lager» im Kleinge-
     # druckten setzte dann eine Nutzung, die nirgends behauptet wurde. Ohne
@@ -130,6 +130,13 @@ def extract_project_data(pages) -> dict:
                     "source_text": quelle.get("source_text"),
                     "derived_from": f"„{m.group(0)}" + "“",
                 }
+    projektart = fachwerte.normalize("project_types", basis)
+    if projektart and projektart != "sonstige":
+        result["project_type"] = {
+            "value": projektart, "confidence": MEDIUM,
+            "source_page": quelle.get("source_page"),
+            "source_text": quelle.get("source_text"),
+        }
     return result
 
 

@@ -212,7 +212,6 @@ _GENERATOR_EVIDENCE = {
     "gas": ("gaskessel", "gasheizung", "gas-brennwert", "erdgas"),
     "oel": ("oelkessel", "ölkessel", "heizoel", "heizöl"),
     "holz": ("pellet", "schnitzel", "stueckholz", "stückholz", "holzkessel"),
-    "elektro": ("elektroheizung", "heizstab", "elektroeinsatz"),
     "solarthermie": ("solarthermie", "sonnenkollektor", "solarkollektor"),
 }
 
@@ -251,13 +250,19 @@ def _fold_text(value: str) -> str:
     return re.sub(r"\s+", " ", low)
 
 
+def _kostenrelevant(system: dict) -> bool:
+    return system.get("scope_status") not in {"by_others", "excluded", "requested_not_priced"}
+
+
 def delivery_codes(systeme: list[dict]) -> list[str]:
     """Codes der Wärmeabgabe — füllt das bestehende Merkmal `heat_delivery_types`."""
-    return sorted({s["type_code"] for s in systeme or [] if s.get("kind") == HEAT_EMISSION})
+    return sorted({s["type_code"] for s in systeme or []
+                   if s.get("kind") == HEAT_EMISSION and _kostenrelevant(s)})
 
 
 def generator_codes(systeme: list[dict]) -> list[str]:
-    return sorted({s["type_code"] for s in systeme or [] if s.get("kind") == HEAT_GENERATION})
+    return sorted({s["type_code"] for s in systeme or []
+                   if s.get("kind") == HEAT_GENERATION and _kostenrelevant(s)})
 
 
 def _zahl(wert):

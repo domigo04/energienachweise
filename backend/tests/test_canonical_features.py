@@ -28,8 +28,8 @@ def test_context_liefert_kanonische_features():
     assert feats["borehole_count"] == 4
     assert feats["borehole_total_m"] == 720.0
     assert feats["storage_volume_l"] == 1500.0
-    assert feats["pump_count"] >= 1
-    assert feats["heat_meter_count"] >= 1
+    assert "pump_count" not in feats
+    assert "heat_meter_count" not in feats
     # Alle Schlüssel gehören zur kanonischen Sprache.
     assert set(feats).issubset(set(FEATURE_KEYS))
 
@@ -45,7 +45,7 @@ def test_refprojekt_generische_features_bevorzugt():
     assert feats["pump_count"] == "5"            # generische Struktur gewinnt
     assert feats["generator_power_kw"] == "90"   # generisch, nicht Legacy 82
     assert feats["borehole_total_m"] == 720.0    # Legacy-Spalte ergänzt
-    assert feats["heat_meter_count"] == 13
+    assert "heat_meter_count" not in feats
     assert feats["pipe_length_m"] == 620.0
 
 

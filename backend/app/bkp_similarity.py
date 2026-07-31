@@ -30,13 +30,11 @@ BKP_WEIGHTS: dict[str, dict[str, float]] = {
     "verteilung": {
         "ebf_m2": 2.0,
         "generator_power_kw": 1.5,
-        "pump_count": 2.0,
         "valve_2way_count": 1.5,
         "valve_3way_count": 1.0,
         "pipe_length_m": 1.5,
     },
     "messung": {
-        "heat_meter_count": 3.0,
         "units": 2.0,
         "building_use": 1.5,
     },

@@ -41,8 +41,6 @@ GENERATOR_TYPES: list[dict] = [
     {"code": "oel", "label": "Öl", "synonyme": ["ölkessel", "oelkessel", "heizöl", "heizoel"]},
     {"code": "holz", "label": "Holz",
      "synonyme": ["pellet", "pellets", "schnitzel", "stückholz", "holzheizung", "holzkessel"]},
-    {"code": "elektro", "label": "Elektro",
-     "synonyme": ["elektroheizung", "heizstab", "elektrisch", "elektroeinsatz"]},
     {"code": "solarthermie", "label": "Solarthermie",
      "synonyme": ["solarthermie", "sonnenkollektor", "solarkollektor"]},
     {"code": "sonstige", "label": "Sonstige", "synonyme": []},

@@ -177,6 +177,12 @@ export const listLvImports = () => api.get(`${BASE}/lv-imports`).then(r => r.dat
 export const getLvImport = (id) => api.get(`${BASE}/lv-imports/${id}`).then(r => r.data);
 export const updateLvFeature = (id, featureId, data) =>
   api.patch(`${BASE}/lv-imports/${id}/features/${featureId}`, data).then(r => r.data);
+export const addLvSystem = (id, data) =>
+  api.post(`${BASE}/lv-imports/${id}/systems`, data).then(r => r.data);
+export const updateLvSystem = (id, systemId, data) =>
+  api.patch(`${BASE}/lv-imports/${id}/systems/${systemId}`, data).then(r => r.data);
+export const deleteLvSystem = (id, systemId) =>
+  api.delete(`${BASE}/lv-imports/${id}/systems/${systemId}`);
 export const updateLvCost = (id, costId, data) =>
   api.patch(`${BASE}/lv-imports/${id}/costs/${costId}`, data).then(r => r.data);
 export const addLvCost = (id, data) => api.post(`${BASE}/lv-imports/${id}/costs`, data).then(r => r.data);

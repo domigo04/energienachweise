@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime
+import re
+from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
@@ -1141,13 +1142,68 @@ def delete_system(import_id: int, system_id: int,
     return {"deleted": True}
 
 
+_MONATE = {
+    "januar": 1, "jan": 1, "februar": 2, "feb": 2, "märz": 3, "maerz": 3, "mrz": 3,
+    "april": 4, "apr": 4, "mai": 5, "juni": 6, "jun": 6, "juli": 7, "jul": 7,
+    "august": 8, "aug": 8, "september": 9, "sep": 9, "sept": 9, "oktober": 10,
+    "okt": 10, "november": 11, "nov": 11, "dezember": 12, "dez": 12,
+}
+
+
 def _parse_offer_date(value: str | None):
+    """Erkanntes Offertdatum → Datum für das Referenzprojekt.
+
+    Bewusst grosszügig: Parser und KI liefern dasselbe Datum in vielen
+    Schreibweisen, und ein nicht gelesenes Datum ist teuer — ohne Datum greift
+    der Baupreisindex nicht mehr, und ein LV von 2025 wird beim Vergleich wie
+    ein heutiges Angebot behandelt (Dominic 2026-07-31). Fehlt der Tag, gilt
+    der Monatserste; fehlt auch der Monat, der 1. Januar — das Jahr ist für die
+    Indexierung das Entscheidende.
+    """
     raw = str(value or "").strip()
-    for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%d.%m.%y"):
+    if not raw:
+        return None
+    # ISO mit Zeitanteil («2025-03-15T00:00:00»).
+    raw = raw.split("T")[0].strip()
+    for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%d.%m.%y", "%d/%m/%Y", "%d/%m/%y",
+                "%d-%m-%Y", "%Y/%m/%d", "%Y.%m.%d"):
         try:
             return datetime.strptime(raw, fmt).date()
         except ValueError:
             pass
+    text = raw.casefold()
+    # Vollständiges Datum irgendwo im Text («Offerte vom 12.06.2025»).
+    m = re.search(r"\b(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2,4})\b", text)
+    if m:
+        jahr = int(m.group(3))
+        try:
+            return date(jahr + 2000 if jahr < 100 else jahr, int(m.group(2)), int(m.group(1)))
+        except ValueError:
+            pass
+    m = re.search(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b", text)
+    if m:
+        try:
+            return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            pass
+    # «15. März 2025» / «März 2025»
+    m = re.search(r"(?:(\d{1,2})\.?\s+)?([a-zäöü]{3,9})\.?\s+(\d{4})", text)
+    if m and m.group(2) in _MONATE:
+        try:
+            return date(int(m.group(3)), _MONATE[m.group(2)], int(m.group(1) or 1))
+        except ValueError:
+            pass
+    # «2025-03» / «03.2025» — Monatsgenau reicht für die Indexierung.
+    m = re.search(r"\b(\d{4})[-./](\d{1,2})\b", text)
+    if m and 1 <= int(m.group(2)) <= 12:
+        return date(int(m.group(1)), int(m.group(2)), 1)
+    m = re.search(r"\b(\d{1,2})[-./](\d{4})\b", text)
+    if m and 1 <= int(m.group(1)) <= 12:
+        return date(int(m.group(2)), int(m.group(1)), 1)
+    # Nacktes Jahr — besser der 1. Januar als gar kein Datum.
+    m = re.search(r"\b(19|20)\d{2}\b", text)
+    if m:
+        return date(int(m.group(0)), 1, 1)
     return None
 
 

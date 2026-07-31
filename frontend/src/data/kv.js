@@ -6,7 +6,13 @@ export const AUSBAUUMFAENGE = ["Vollausbau", "Grundausbau", "Mieterausbau", "nur
 export const ZERTIFIZIERUNGEN = ["Gesetz", "Minergie", "Minergie-P", "Minergie-Eco", "SNBS", "LEED"];
 
 // Mehrfach-Auswahl mit denselben stabilen Codes wie LV-Import und Backend.
-const HISTORISCHE_ERZEUGER = [
+//
+// `GENERATOR_TYPES` beschreibt die SYMBOLE des Schema-Editors und kennt darum
+// weder Fernwärme (dort ein Plattentauscher) noch Gas/Öl. Die Auswertung
+// braucht aber die fachliche Liste aus `backend/app/fachwerte.py` — sonst
+// lässt sich ein Fernwärmeprojekt nicht erfassen und findet keine Referenz.
+const WEITERE_ERZEUGER = [
+  { value: "fernwaerme", label: "Fernwärme", aliases: ["Fernwärme", "Nahwärme"] },
   { value: "gas", label: "Gas", aliases: ["Gas"] },
   { value: "oel", label: "Öl", aliases: ["Öl"] },
   { value: "solarthermie", label: "Solarthermie", aliases: ["Solarthermie"] },
@@ -21,9 +27,9 @@ export const WAERMEERZEUGER = GENERATOR_TYPES
       wasser_wp: ["Wasser/Wasser-WP"], fernwaerme: ["Fernwärme"],
       holz: ["Pellets/Holz"], solarthermie: ["Solarthermie"],
     }[item.value] || [],
-  })).concat(HISTORISCHE_ERZEUGER);
+  })).concat(WEITERE_ERZEUGER);
 export const waermeerzeugerLabel = (code) => GENERATOR_TYPE_LABELS[code]
-  || HISTORISCHE_ERZEUGER.find((item) => item.value === code)?.label
+  || WEITERE_ERZEUGER.find((item) => item.value === code)?.label
   || code;
 export const WAERMEABGABE = ["FBH", "Heizkörper", "TABS", "Deckenstrahlplatten", "Lufterhitzer", "Wandheizung", "Konvektoren"];
 

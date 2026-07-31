@@ -692,3 +692,27 @@ def test_nicht_freigegeben_hat_kein_refprojekt():
     db.commit()
     assert db.query(RefProjekt).count() == 0
     assert imp.ref_projekt_id is None
+
+
+# ── Offertdatum (Dominic 2026-07-31) ──────────────────────────────────────
+# Ein nicht gelesenes Datum ist teuer: ohne Datum greift der Baupreisindex
+# nicht, und ein LV von 2025 wird beim Vergleich wie ein heutiges Angebot
+# behandelt. Darum liest die Übernahme jede übliche Schreibweise.
+def test_offertdatum_wird_aus_allen_ueblichen_schreibweisen_uebernommen():
+    from datetime import date
+    from app.routers.hc_lv_import import _parse_offer_date
+
+    assert _parse_offer_date("2025-03-15") == date(2025, 3, 15)
+    assert _parse_offer_date("15.03.2025") == date(2025, 3, 15)
+    assert _parse_offer_date("15.3.25") == date(2025, 3, 15)
+    assert _parse_offer_date("15/03/2025") == date(2025, 3, 15)
+    assert _parse_offer_date("2025-03-15T00:00:00") == date(2025, 3, 15)
+    assert _parse_offer_date("15. März 2025") == date(2025, 3, 15)
+    assert _parse_offer_date("Offerte vom 12.06.2025") == date(2025, 6, 12)
+    # Unvollständige Angaben: das Jahr ist für die Indexierung entscheidend.
+    assert _parse_offer_date("März 2025") == date(2025, 3, 1)
+    assert _parse_offer_date("2025") == date(2025, 1, 1)
+    # Ohne Angabe wird kein Datum erfunden.
+    assert _parse_offer_date("") is None
+    assert _parse_offer_date(None) is None
+    assert _parse_offer_date("Position 12") is None

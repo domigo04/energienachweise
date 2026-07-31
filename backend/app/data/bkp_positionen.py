@@ -130,11 +130,36 @@ def abgabe_klassen_von(waermeabgabe) -> set:
     return {_ABGABE_KLASSE[a] for a in (waermeabgabe or []) if a in _ABGABE_KLASSE}
 
 
+# Auswahlwert der Oberfläche → Wärmepumpen-Schlüssel des Katalogs.
+#
+# WICHTIG: hier stehen die heutigen CODES *und* die historischen Beschriftungen.
+# Die Auswertung speichert seit der Umstellung Codes ("ews_wp"); der Katalog
+# kannte aber nur die alten Beschriftungen. Dadurch war für jedes NEUE Projekt
+# die Wärmepumpen-Auswahl leer, und alle Positionen mit `wp_typen` — also die
+# gesamte BKP 241 und 242 — fielen aus der Schätzung (Dominic 2026-07-31).
 _WP_ERZEUGER_ZU_KATALOG = {
+    "ews_wp": "sole_wasser",
+    "lwwp": "luft_wasser",
+    "wasser_wp": "wasser_wasser",
     "Erdsonden-WP": "sole_wasser",
     "Luft/Wasser-WP": "luft_wasser",
     "Wasser/Wasser-WP": "wasser_wasser",
 }
+
+# Dieselbe Doppelsprache bei den brennstoffgebundenen Positionen (Tank, Kessel):
+# der Katalog führt sie unter der Beschriftung, die Auswahl liefert den Code.
+_ERZEUGER_CODE_ZU_KATALOG = {
+    "gas": "Gas",
+    "oel": "Öl",
+    "holz": "Holz",
+    "solarthermie": "Solarthermie",
+    "fernwaerme": "Fernwärme",
+}
+
+
+def _katalog_erzeuger(auswahl: set) -> set:
+    """Auswahlwerte auf die Schreibweise des Katalogs bringen (Code ODER Label)."""
+    return {_ERZEUGER_CODE_ZU_KATALOG.get(wert, wert) for wert in auswahl}
 
 
 def filter_positionen(wp_typ: str = None, kategorie: str = None, abgabe_klassen=None,
@@ -142,9 +167,10 @@ def filter_positionen(wp_typ: str = None, kategorie: str = None, abgabe_klassen=
     """Nur die relevanten Positionen für WP-Typ + Gebäudekategorie + Wärmeabgabe.
     abgabe_klassen leer/None = Abgabe unbekannt → nicht danach filtern."""
     out = []
-    erzeuger_auswahl = set(waermeerzeuger or []) if waermeerzeuger is not None else None
+    erzeuger_auswahl = (_katalog_erzeuger(set(waermeerzeuger or []))
+                        if waermeerzeuger is not None else None)
     wp_katalog_auswahl = {
-        _WP_ERZEUGER_ZU_KATALOG[e] for e in (erzeuger_auswahl or set())
+        _WP_ERZEUGER_ZU_KATALOG[e] for e in set(waermeerzeuger or [])
         if e in _WP_ERZEUGER_ZU_KATALOG
     }
     for p in BKP_POSITIONEN:

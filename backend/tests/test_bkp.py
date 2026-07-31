@@ -55,3 +55,27 @@ def test_filter_kategorie():
     assert "243.4b" not in efh   # Torluftschleier nicht im EFH
     gewerbe = {p["bkp_nr"] for p in filter_positionen(kategorie="Gewerbe")}
     assert "243.4b" in gewerbe
+
+
+def test_positionsfilter_versteht_codes_und_alte_beschriftungen():
+    """Regression (Dominic 2026-07-31): die Auswertung speichert Erzeuger als
+    Code ("ews_wp"), der Katalog kannte aber nur die alte Beschriftung. Dadurch
+    fielen bei JEDEM neuen Projekt sämtliche Positionen mit Wärmepumpen-Bindung
+    weg — BKP 241 und 242 blieben ohne Kosten, obwohl passende Referenzen
+    vorhanden waren."""
+    code = {p["bkp_nr"] for p in filter_positionen(waermeerzeuger=["ews_wp"])}
+    label = {p["bkp_nr"] for p in filter_positionen(waermeerzeuger=["Erdsonden-WP"])}
+    assert code == label
+    assert {"241.14", "241.11", "242.3", "242.6", "242.7"} <= code
+    # Die fremden Wärmepumpen-Positionen bleiben trotzdem draussen.
+    assert "242.4" not in code and "242.5" not in code
+
+    luft = {p["bkp_nr"] for p in filter_positionen(waermeerzeuger=["lwwp"])}
+    assert "242.4" in luft and "242.3" not in luft
+    # Ohne Erdsonden gibt es keine Energielagerung Primärkreis.
+    assert not {nr for nr in luft if nr.startswith("241.1") and nr != "241.1a"}
+
+    # Brennstoff-Positionen ebenso: Code wie Beschriftung.
+    assert ({p["bkp_nr"] for p in filter_positionen(waermeerzeuger=["gas"])}
+            == {p["bkp_nr"] for p in filter_positionen(waermeerzeuger=["Gas"])})
+    assert "242.1" in {p["bkp_nr"] for p in filter_positionen(waermeerzeuger=["gas"])}

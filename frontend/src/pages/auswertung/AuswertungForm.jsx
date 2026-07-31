@@ -271,6 +271,15 @@ export default function AuswertungForm() {
               )}
               <p className="mt-3 text-xs text-slate-400">Laufend gegen das Leistungsverzeichnis/Devis des Unternehmers prüfen — passt die Summe?</p>
             </div>
+            {/* Speichern klebt mit der Zusammenstellung mit (Dominic 2026-07-31).
+                Vorher stand es ganz unten — bei einem langen Formular musste man
+                dafür jedes Mal durch alle BKP-Zeilen scrollen. */}
+            <div className="mt-3 flex gap-2">
+              <button type="submit" disabled={saving} className="btn-primary flex-1 justify-center">
+                {saving ? "Speichere…" : "Speichern"}
+              </button>
+              <Link to="/auswertung" className="btn-secondary">Abbrechen</Link>
+            </div>
           </aside>
 
           {/* Haupt-Spalte: Merkmale → Bezugsgrössen → BKP-Kosten → Knöpfe */}
@@ -389,19 +398,14 @@ export default function AuswertungForm() {
               </div>
             </div>
 
-            {/* Knöpfe */}
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex gap-2">
-                <button type="submit" disabled={saving} className="btn-primary">{saving ? "Speichere…" : "Speichern"}</button>
-                <Link to="/auswertung" className="btn-secondary">Abbrechen</Link>
+            {/* Speichern und Abbrechen stehen oben bei der Zusammenstellung.
+                Hier bleiben nur die selten gebrauchten Aktionen. */}
+            {isEdit && (
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <button type="button" onClick={exportCsv} className="btn-secondary"><Download className="size-4" /> CSV</button>
+                <button type="button" onClick={remove} className="btn-ghost text-red-500 hover:bg-red-50"><Trash2 className="size-4" /> Löschen</button>
               </div>
-              {isEdit && (
-                <div className="flex gap-2">
-                  <button type="button" onClick={exportCsv} className="btn-secondary"><Download className="size-4" /> CSV</button>
-                  <button type="button" onClick={remove} className="btn-ghost text-red-500 hover:bg-red-50"><Trash2 className="size-4" /> Löschen</button>
-                </div>
-              )}
-            </div>
+            )}
           </div>
         </div>
       </form>

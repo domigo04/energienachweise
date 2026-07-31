@@ -19,11 +19,13 @@ import { LEER, chf, zahl } from "../../lib/format";
 const MULTI_FEATURES = {};
 
 const KATEGORIEN = [
-  { titel: "Wärmeerzeugung", keys: ["generator_type", "generator_power_kw"] },
+  { titel: "Wärmeerzeugung",
+    keys: ["generator_type", "generator_count", "generator_power_kw", "boreholes_present"] },
   { titel: "Erdsonden", keys: ["borehole_count", "borehole_length_each_m", "borehole_total_m"] },
   { titel: "Speicher / Frischwasserstation",
     keys: ["buffer_count", "storage_count", "storage_volume_each_l", "fresh_water_station_present"] },
-  { titel: "Wärmeverteilung", keys: ["pipe_length_m", "pump_count", "distribution_system"] },
+  { titel: "Wärmeverteilung",
+    keys: ["pipe_length_m", "floor_heating_pipe_m", "pump_count", "distribution_system"] },
   { titel: "Systemtemperaturen",
     keys: ["design_flow_temperature_c", "design_return_temperature_c", "design_outdoor_temperature_c"] },
   { titel: "Wärmemessung", keys: ["heat_meter_count"] },
@@ -40,6 +42,7 @@ const WER = { contractor: "Unternehmer", others: "bauseits/fremd" };
 // Merkmale mit Ja/Nein statt Zahleneingabe.
 const BOOL_FEATURES = new Set([
   "domestic_hot_water_included", "boreholes_present", "fresh_water_station_present",
+  "protected_building",
   "protected_building", "reversible_installations_required", "scaffolding_required",
   "integrated_tests_required", "contractor_workshop_planning_required",
 ]);

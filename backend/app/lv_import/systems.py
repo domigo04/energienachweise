@@ -74,6 +74,19 @@ def _zeilen(pages) -> list[dict]:
     return zeilen
 
 
+def hat_beleg(eintrag: dict) -> bool:
+    """Ein Merkmal ohne Fundstelle ist eine Behauptung, kein Befund.
+
+    Verlangt werden Seitenzahl, ein Textbeleg (oder eine Bounding-Box) und eine
+    Sicherheit. Fehlt eines davon, darf der Wert nicht gespeichert werden.
+    """
+    if eintrag.get("source_page") is None:
+        return False
+    if not (eintrag.get("source_text") or eintrag.get("source_bbox")):
+        return False
+    return eintrag.get("confidence") is not None
+
+
 def detect(pages, kind: str = HEAT_EMISSION) -> list[dict]:
     """Systeme aus born-digital Text erkennen.
 
@@ -85,9 +98,11 @@ def detect(pages, kind: str = HEAT_EMISSION) -> list[dict]:
     for zeile in _zeilen(pages):
         text = zeile["text"]
         code = fachwerte.normalize(registry, text)
-        # `normalize` prüft auch Teiltreffer; ohne echtes Stichwort in der Zeile
-        # wäre das zu grosszügig.
         if not code or code == "sonstige":
+            continue
+        # Ohne Seitenzahl gäbe es keinen nachprüfbaren Beleg — die Zeile wird
+        # dann verworfen statt als Merkmal gespeichert.
+        if zeile.get("page") is None:
             continue
         supplied_by, installation_by, scope = _lieferung(text)
         eintrag = {
@@ -109,7 +124,7 @@ def detect(pages, kind: str = HEAT_EMISSION) -> list[dict]:
         # mehrfach (Beschrieb, Menge, Preis).
         if vorhanden is None or (eintrag["count"] and not vorhanden.get("count")):
             gefunden[code] = eintrag
-    return list(gefunden.values())
+    return [e for e in gefunden.values() if hat_beleg(e)]
 
 
 def from_llm(items, kind: str) -> list[dict]:
@@ -148,7 +163,9 @@ def from_llm(items, kind: str) -> list[dict]:
             "source_page": _ganzzahl(item.get("source_page")),
             "source_text": str(item.get("evidence") or "")[:200] or None,
         })
-    return out
+    # Auch die visuelle Prüfung muss belegen: ohne Seitenzahl, Beleg und
+    # Sicherheit wird der Vorschlag verworfen statt gespeichert.
+    return [e for e in out if hat_beleg(e)]
 
 
 def merge(deterministisch: list[dict], visuell: list[dict]) -> list[dict]:

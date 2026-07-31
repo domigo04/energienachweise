@@ -6,10 +6,13 @@ import time
 from dataclasses import dataclass
 from dataclasses import field
 
-HARD_MAX_CALLS = 3
-HARD_MAX_OUTPUT_TOKENS = 2000
-HARD_MAX_COST_USD = 1.0
-HARD_TIMEOUT_SECONDS = 180.0
+# Harte Obergrenzen. Sie gelten IMMER: eine Umgebungsvariable darf sie senken,
+# nie überschreiten (siehe `from_env`). Qualität geht bei diesem Importer vor
+# minimalen Token — die Grenzen sind die auf Railway freigegebenen Werte.
+HARD_MAX_CALLS = 5
+HARD_MAX_OUTPUT_TOKENS = 12000
+HARD_MAX_COST_USD = 3.0
+HARD_TIMEOUT_SECONDS = 300.0
 
 
 def _bool(name: str, default: str = "true") -> bool:
@@ -37,9 +40,9 @@ def timeout_seconds() -> float:
 
 @dataclass
 class ImportLlmBudget:
-    max_calls: int = 3
-    max_output_tokens: int = 2000
-    max_cost_usd: float = 1.0
+    max_calls: int = HARD_MAX_CALLS
+    max_output_tokens: int = HARD_MAX_OUTPUT_TOKENS
+    max_cost_usd: float = HARD_MAX_COST_USD
     calls: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
@@ -55,15 +58,15 @@ class ImportLlmBudget:
         return cls(
             max_calls=min(
                 HARD_MAX_CALLS,
-                max(0, int(os.getenv("LV_LLM_MAX_CALLS_PER_IMPORT", "3"))),
+                max(0, int(os.getenv("LV_LLM_MAX_CALLS_PER_IMPORT", str(HARD_MAX_CALLS)))),
             ),
             max_output_tokens=min(
                 HARD_MAX_OUTPUT_TOKENS,
-                max(1, int(os.getenv("LV_LLM_MAX_OUTPUT_TOKENS", "2000"))),
+                max(1, int(os.getenv("LV_LLM_MAX_OUTPUT_TOKENS", str(HARD_MAX_OUTPUT_TOKENS)))),
             ),
             max_cost_usd=min(
                 HARD_MAX_COST_USD,
-                max(0.0, float(os.getenv("LV_LLM_MAX_COST_USD", "1.00"))),
+                max(0.0, float(os.getenv("LV_LLM_MAX_COST_USD", str(HARD_MAX_COST_USD)))),
             ),
         )
 

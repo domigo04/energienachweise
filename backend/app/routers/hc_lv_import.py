@@ -30,7 +30,7 @@ from app.lv_import.cost_summary import parse_cost_summary, to_cost_rows, has_cos
 from app.lv_import.project_extract import extract_project_data
 from app.lv_import import commercial, norm_lv
 from app.lv_import.llm import resolver as llm
-from app.lv_import import systems
+from app.lv_import import commercial, conditions_extract, systems
 from app import fachwerte
 from app.lv_import.feature_keys import (
     FEATURE_DEFS, LV_IMPORT_FEATURE_KEYS, FEATURE_TO_CONTEXT,
@@ -350,6 +350,7 @@ async def upload_lv(
                 **visual_review.status(),
             }
         )
+        vorhandene_konditionen = 0
         visual_apply = {
             "visual_review_features_applied": 0,
             "visual_review_costs_applied": 0,
@@ -379,6 +380,7 @@ async def upload_lv(
             if summary_invalid and visual["success"] and visual_costs:
                 costs = visual_costs
             commercial_result = visual_apply.get("commercial") or {}
+            vorhandene_konditionen = len(commercial_result.get("conditions") or [])
             for item in commercial_result.get("conditions") or []:
                 db.add(LvImportCondition(
                     lv_import_id=imp.id,
@@ -392,6 +394,42 @@ async def upload_lv(
                     source_page=item.get("source_page"),
                     status=item.get("status") or "priced",
                 ))
+        # Konditionen: der Text wird IMMER deterministisch gelesen. Bisher gab
+        # es dafür nur die visuelle KI-Prüfung — ohne Schlüssel oder nach einem
+        # Timeout blieb die Konditionsliste leer und die Bruttosumme auf 0,
+        # obwohl Rabatt, Skonto und MWST lesbar im Dokument stehen. Die KI
+        # ergänzt jetzt nur noch, was der Parser nicht gefunden hat.
+        konditionen_seiten = (
+            pipeline.conditions_pages + pipeline.cost_summary_pages
+        ) or pipeline.pages[-3:]
+        geparste_konditionen = conditions_extract.parse_conditions(konditionen_seiten)
+        if not vorhandene_konditionen and conditions_extract.has_conditions(geparste_konditionen):
+            basis = geparste_konditionen["base_amount"]
+            if basis is None:
+                basis = summary.get("trade_total")
+            kette, konditions_hinweise = commercial.validate(
+                basis, geparste_konditionen["conditions"],
+                geparste_konditionen["vat_rate"], None,
+                geparste_konditionen["stated_vat_amount"],
+                geparste_konditionen["stated_total_incl_vat"],
+            )
+            for item in kette.get("conditions") or []:
+                db.add(LvImportCondition(
+                    lv_import_id=imp.id,
+                    original_label=str(item.get("label") or "")[:255],
+                    kind=item["kind"], direction=item["direction"],
+                    rate_percent=item.get("rate_percent"),
+                    amount=item.get("amount"), basis_amount=item.get("basis_amount"),
+                    calculated_amount=item.get("calculated_amount"),
+                    running_total=item.get("running_total"),
+                    order_index=int(item.get("order") or 0),
+                    source_page=item.get("source_page"),
+                    status=item.get("status") or "priced",
+                ))
+            vorhandene_konditionen = len(kette.get("conditions") or [])
+        else:
+            konditions_hinweise = []
+
         # Erst nach der autoritativen visuellen Auswertung offene Titel gegen
         # das geschlossene Norm-LV auflösen.
         llm_stat = llm.apply_to_rows(costs, budget=budget)
@@ -488,6 +526,12 @@ async def upload_lv(
             "systeme_waermeabgabe": len(systems.delivery_codes(systeme)),
             "systeme_waermeerzeugung": len(systems.generator_codes(systeme)),
             "handschrift_offen": len(visual_apply.get("handwritten_open") or []),
+            "konditionen_erkannt": vorhandene_konditionen,
+            "konditionen_quelle": (
+                "visual_ai_pdf" if (visual_apply.get("commercial") or {}).get("conditions")
+                else "parser" if vorhandene_konditionen else "keine"
+            ),
+            "konditionen_hinweise": konditions_hinweise,
             "kosten_pruefen": len([c for c in costs if c.get("requires_review")]),
             **budget.status(),
             **visual_review.status(),

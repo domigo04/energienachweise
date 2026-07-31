@@ -168,6 +168,16 @@ def classify_page(text: str) -> dict:
     return {"type": UNKNOWN, "confidence": LOW, "signals": ["kein Signal"]}
 
 
+def zaehle_kostenzeilen(text: str) -> int:
+    """Wie viele echte BKP-Positionszeilen mit Betrag stehen auf der Seite?
+
+    Wird gebraucht, um eine als «conditions» eingestufte Schlussseite trotzdem
+    für die Kostenauswertung heranzuziehen — dort steht regelmässig die letzte
+    BKP-Gruppe zusammen mit Rabatt und MWST.
+    """
+    return sum(1 for zeile in _zeilen(text) if _BKP_ZEILE_MIT_BETRAG.match(zeile))
+
+
 def classify_pages(pages) -> list[dict]:
     """Alle Seiten klassifizieren → [{"page", "type", "confidence", "signals"}].
 

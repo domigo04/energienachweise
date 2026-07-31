@@ -133,8 +133,25 @@ class LvPipeline:
 
     @property
     def cost_summary_pages(self) -> list[dict]:
-        """Kostenzusammenstellung — die PRIMARY SOURCE für Kosten (Punkt 13)."""
-        return self.pages_for(pc.COST_SUMMARY)
+        """Kostenzusammenstellung — die PRIMARY SOURCE für Kosten (Punkt 13).
+
+        Die letzte Seite einer Zusammenstellung trägt neben den letzten BKP-
+        Gruppen häufig auch Rabatt, Skonto und MWST. Die Seitenklassifikation
+        stuft sie deshalb als «conditions» ein — und die Kosten dieser Seite
+        gingen komplett verloren. Betroffen ist immer die zuletzt aufgeführte
+        BKP-Gruppe, im Regelfall BKP 249 «Diverses».
+
+        Darum: Seiten mit Konditionen oder ohne klare Klasse kommen dazu,
+        sobald sie echte BKP-Positionszeilen mit Betrag enthalten.
+        """
+        seiten = self.pages_for(pc.COST_SUMMARY)
+        bekannt = {p.get("page") for p in seiten}
+        for seite in self.pages_for(pc.CONDITIONS, pc.UNKNOWN):
+            if seite.get("page") in bekannt:
+                continue
+            if pc.zaehle_kostenzeilen(seite.get("text") or "") >= 1:
+                seiten.append(seite)
+        return sorted(seiten, key=lambda p: p.get("page") or 0)
 
     @property
     def cost_summary_word_pages(self) -> list[dict]:

@@ -166,9 +166,25 @@ def test_globale_limits_werden_im_visual_call_verwendet(monkeypatch):
     result = visual_review.review(b"%PDF-test", client=fake, model="test")
     assert result["success"] is True
     assert result["llm_calls"] == 1
-    assert fake.calls[0]["max_output_tokens"] == 2000
+    # Ein Wert unterhalb der harten Obergrenze wird übernommen.
+    assert fake.calls[0]["max_output_tokens"] == 6000
     assert fake.calls[0]["timeout"] == 180
     assert fake.calls[0]["store"] is False
+
+
+def test_umgebungswerte_koennen_die_harten_grenzen_nicht_ueberschreiten(monkeypatch):
+    """Die Obergrenzen gelten immer — eine Variable darf nur senken."""
+    from app.lv_import.llm import budget as b
+
+    monkeypatch.setenv("LV_LLM_MAX_OUTPUT_TOKENS", "999999")
+    monkeypatch.setenv("LV_LLM_MAX_CALLS_PER_IMPORT", "99")
+    monkeypatch.setenv("LV_LLM_MAX_COST_USD", "500")
+    monkeypatch.setenv("LV_VISUAL_REVIEW_TIMEOUT_SECONDS", "9999")
+    gedeckelt = b.ImportLlmBudget.from_env()
+    assert gedeckelt.max_output_tokens == b.HARD_MAX_OUTPUT_TOKENS == 12000
+    assert gedeckelt.max_calls == b.HARD_MAX_CALLS == 5
+    assert gedeckelt.max_cost_usd == b.HARD_MAX_COST_USD == 3.0
+    assert b.timeout_seconds() == b.HARD_TIMEOUT_SECONDS == 300.0
 
 
 def test_call_und_kostenlimit_stoppen_weitere_aufrufe(monkeypatch):

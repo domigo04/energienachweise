@@ -124,8 +124,12 @@ CERTIFICATIONS: list[dict] = [
 
 # ── Gebäudenutzung ────────────────────────────────────────────────────────
 BUILDING_USES: list[dict] = [
+    # «Überbauung» ist bewusst KEIN Synonym: das Wort sagt nur, dass mehrere
+    # Bauten zusammengehören, nicht wozu sie dienen. Es gibt Gewerbe- und
+    # Schulüberbauungen. Als Synonym hat es jede Offerte mit diesem Wort
+    # stillschweigend zu einem Mehrfamilienhaus gemacht.
     {"code": "mfh", "label": "Mehrfamilienhaus",
-     "synonyme": ["mfh", "mehrfamilienhaus", "wohnbau", "wohnen", "überbauung"]},
+     "synonyme": ["mfh", "mehrfamilienhaus", "wohnbau", "wohnen", "wohnsiedlung"]},
     {"code": "efh", "label": "Einfamilienhaus", "synonyme": ["efh", "einfamilienhaus"]},
     {"code": "buero", "label": "Büro / Verwaltung",
      "synonyme": ["büro", "buero", "verwaltung", "dienstleistung"]},
@@ -213,11 +217,19 @@ def normalize(name: str, wert) -> str | None:
         if norm == _falte(e["label"]):
             return e["code"]
     # Dann Synonyme — längste zuerst, damit „minergie-p" vor „minergie" greift.
+    #
+    # Der Treffer muss an einer WORTGRENZE beginnen. Reine Teilstringsuche hat
+    # kurze Synonyme in gewöhnlichen Wörtern gefunden: „lha" steckt in
+    # „Stahlhalterung", „sole" in „Konsole", „hk" in „durchkontaktiert". Das
+    # erzeugte Merkmale ohne jeden Beleg im Dokument. Nach rechts bleibt der
+    # Treffer offen, damit Zusammensetzungen und Mehrzahl weiter greifen
+    # („erdsonde" in „Erdsonden-WP", „fbh" in „FBH-Rohr").
     kandidaten = sorted(
         ((s, e["code"]) for e in eintraege for s in e["synonyme"]),
         key=lambda x: -len(x[0]))
     for syn, code in kandidaten:
-        if _falte(syn) in norm:
+        gefaltet = _falte(syn)
+        if gefaltet and re.search(rf"(?<!\w){re.escape(gefaltet)}", norm):
             return code
     return None
 

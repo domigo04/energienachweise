@@ -486,6 +486,47 @@ def storages(rows) -> dict:
 
 # ── Punkt 11 — Rohrmeter sauber bestimmen ─────────────────────────────────
 
+# ── Semantische Mengenklassifizierung (eine Entscheidungsstelle) ──────────
+# Eine Laufmeterangabe im LV ist nicht automatisch ein Verteilrohrmeter. Ohne
+# diese Unterscheidung summierten sich Fussbodenheizungsrohre, Dämmschalen und
+# beliebige andere Laufmeter zu einer Zahl, die nichts mehr bedeutet.
+PIPE = "pipe"
+UFH_PIPE = "underfloor_heating_pipe"
+INSULATION = "insulation_length"
+OTHER = "other_length"
+
+_DAEMMUNG = (
+    "isolation", "isolierung", "isolier", "daemmung", "dämmung", "daemm",
+    "dämm", "isolationsschale", "isolierschale", "daemmschale", "dämmschale",
+)
+
+
+def classify_length_row(text: str, section_title: str = "", section_nr: str = "") -> str:
+    """Wozu gehört diese Laufmeterangabe?
+
+    Die Reihenfolge ist die fachliche Rangfolge: Dämmung schlägt alles (sie
+    misst fremde Rohre nach), dann Flächenheizung, dann echtes Verteilrohr.
+    Alles andere ist `other_length` und zählt nirgends mit.
+    """
+    low = (text or "").lower()
+    abschnitt = (section_title or "").lower()
+    zusammen = f"{low} {abschnitt}"
+
+    # 1) Dämmung: dieselben Rohre ein zweites Mal, in denselben Metern.
+    if any(begriff in zusammen for begriff in _DAEMMUNG):
+        return INSULATION
+    # 2) Flächen-/Fussbodenheizung — eigene Grösse, nie Verteilrohrmeter.
+    if any(begriff in low for begriff in PIPE_EXCLUDE_TERMS) or \
+       any(begriff in abschnitt for begriff in PIPE_EXCLUDE_SECTION_TERMS):
+        return UFH_PIPE
+    # 3) Echtes Rohr — über Positionstext, Abschnittstitel oder Primärkreis-Nr.
+    if any(begriff in low for begriff in PIPE_INCLUDE_TERMS) or \
+       any(begriff in abschnitt for begriff in PIPE_INCLUDE_TERMS) or \
+       re.fullmatch(r"241\.11\d+", section_nr or ""):
+        return PIPE
+    return OTHER
+
+
 def pipe_lengths(rows) -> dict:
     """Rohrmeter je Seite (Quelle/Verteilung) und total (Punkt 11).
 
@@ -499,6 +540,8 @@ def pipe_lengths(rows) -> dict:
     quelle_fund = verteil_fund = None
     je_abschnitt: dict[str, float] = {}
     ausgeschlossen: list[str] = []
+    fbh_summe = daemmung_summe = 0.0
+    fbh_n = 0
     verbrauchte_mengen_zeilen: set[int] = set()
 
     for i, row in enumerate(rows):
@@ -514,10 +557,8 @@ def pipe_lengths(rows) -> dict:
         # Das ist wichtig, weil fehlerhafte LVs teils auch ein Armaturen-Total
         # erneut als 241.11 nummerieren; dort wären M8/M10 Gewinde sonst
         # fälschlich Laufmeter.
-        ist_primaerkreis_detail = re.fullmatch(r"241\.11\d+", section_nr) is not None
-        if not ist_primaerkreis_detail and \
-           not any(t in low for t in PIPE_INCLUDE_TERMS) and \
-           not any(t in section_low for t in PIPE_INCLUDE_TERMS):
+        klasse = classify_length_row(text, row.get("section_title") or "", section_nr)
+        if klasse == OTHER:
             continue
         if any(t in low for t in _STANDARDLAENGE):
             continue
@@ -538,10 +579,17 @@ def pipe_lengths(rows) -> dict:
             # Position. Die Mengenzelle darf beim nächsten Schleifendurchlauf
             # nicht ein zweites Mal summiert werden.
             verbrauchte_mengen_zeilen.add(mengen_idx)
-        # Ausschluss über Positionstext ODER Abschnittstitel (Punkt 11).
-        if any(t in low for t in PIPE_EXCLUDE_TERMS) or \
-           any(t in section_low for t in PIPE_EXCLUDE_SECTION_TERMS):
-            ausgeschlossen.append(text[:80])
+        # Nur echte Rohrpositionen zählen in die Verteilrohrmeter. Dämmlängen
+        # messen dieselben Rohre nach; Flächenheizungsrohre sind eine eigene
+        # Grösse. Beide werden getrennt gehalten, nicht addiert.
+        if klasse == INSULATION:
+            daemmung_summe += meter
+            ausgeschlossen.append(f"Dämmung: {text[:70]}")
+            continue
+        if klasse == UFH_PIPE:
+            fbh_summe += meter
+            fbh_n += 1
+            ausgeschlossen.append(f"Flächenheizung: {text[:70]}")
             continue
         ist_quelle = any(t in low for t in PIPE_SOURCE_TERMS) or \
             any(t in section_low for t in PIPE_SOURCE_TERMS) or \
@@ -587,6 +635,17 @@ def pipe_lengths(rows) -> dict:
             "source_bbox": basis.get("source_bbox"),
             "per_section": je_abschnitt,
             "excluded": ausgeschlossen[:5],
+            # Nachvollziehbar, was bewusst NICHT mitgezählt wurde.
+            "insulation_length_m": round(daemmung_summe, 1),
+            "underfloor_heating_pipe_m": round(fbh_summe, 1),
+        }
+    if fbh_n:
+        out["floor_heating_pipe_m"] = {
+            "value": round(fbh_summe, 1), "positionen": fbh_n,
+            "confidence": HIGH if fbh_n >= 2 else MEDIUM,
+            "source_page": None,
+            "source_text": f"Summe aus {fbh_n} Flächenheizungspositionen",
+            "derived_from": "Getrennt von den Verteilrohrmetern geführt",
         }
     return out
 

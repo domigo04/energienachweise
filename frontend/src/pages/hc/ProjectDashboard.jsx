@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import {
-  Share2, Calculator, Waves, ListChecks, FileText, ClipboardList, Workflow,
+  Share2, Calculator, ListChecks, FileText, ClipboardList, Workflow,
   ArrowLeft, MapPin, User, UserRoundCheck, Pencil, Archive, History, ChevronDown,
 } from "lucide-react";
 import { getProject, getProjectAudit, getProjectStatus, updateProject } from "../../api/hcApi";
@@ -86,11 +86,6 @@ export default function ProjectDashboard() {
       metric: m.schema?.revision ? `Version ${m.schema.revision}` : "Kein Stand",
       secondaryMetric: m.schema ? `${m.schema.node_count} Bauteile · ${m.schema.edge_count} Leitungen` : null,
       warnings: m.schema?.warnings || 0,
-      to: `/projekte/${id}/schema`,
-    },
-    hydraulics: {
-      title: "Hydraulik", icon: Waves, status: m.hydraulics?.status,
-      metric: m.hydraulics?.status === "complete" ? "berechnet" : m.hydraulics?.status === "warning" ? "prüfen" : "—",
       to: `/projekte/${id}/schema`,
     },
     quantities: {
@@ -217,7 +212,6 @@ const STATUS_DOT = {
 const ORBIT = [
   { key: "project_data", subtitle: "EBF · Nutzung · Einheiten" },
   { key: "schema", subtitle: "Geometrie + Verbindungen" },
-  { key: "hydraulics", subtitle: "Auslegung + Plausibilität" },
   { key: "quantities", subtitle: "Mengen + Herkunft" },
   { key: "cost_estimate", subtitle: "Referenzen + Bandbreite" },
   { key: "documentation", subtitle: "Plan + Nachweise" },

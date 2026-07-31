@@ -44,7 +44,6 @@ def test_leeres_projekt_ist_not_started():
     m = s["modules"]
     assert m["project_data"]["status"] == "not_started"
     assert m["schema"]["status"] == "not_started"
-    assert m["hydraulics"]["status"] == "not_started"
     assert m["quantities"]["status"] == "not_started"
     assert m["cost_estimate"]["status"] == "not_started"
     assert m["documentation"]["status"] == "not_started"
@@ -81,8 +80,10 @@ def test_schema_warnungen_setzen_status():
     assert warn["revision"] == 8
 
 
-def test_hydraulik_complete_bei_leistung():
-    assert _status()["modules"]["hydraulics"]["status"] == "complete"
+def test_hydraulik_ist_kein_eigenes_modul_mehr():
+    """Die Hydraulik führte auf dieselbe Seite wie das Anlagenschema und war
+    damit eine zweite Kachel für dieselbe Sache (Dominic 2026-07-31)."""
+    assert "hydraulics" not in _status()["modules"]
 
 
 def test_mengen_incomplete_bei_offenen_ergaenzungen():

@@ -88,19 +88,6 @@ def _schema_module(schema_present: bool, node_count: int, edge_count: int,
     }
 
 
-def _hydraulics_module(context: dict, schema_present: bool, node_count: int) -> dict:
-    if not schema_present or node_count == 0:
-        return {"status": "not_started"}
-    heizgruppen = next((p for p in context["parameter"] if p["key"] == "anzahl_heizgruppen"), None)
-    leistung = next((p for p in context["parameter"] if p["key"] == "leistung_kw"), None)
-    hat_gruppen = bool(heizgruppen and (heizgruppen["effective_value"] or 0) > 0)
-    if not hat_gruppen:
-        return {"status": "not_started"}
-    if leistung and leistung["effective_value"] is not None:
-        return {"status": "complete"}
-    return {"status": "warning"}
-
-
 def _cost_module(cost_status: Optional[str], version_nr: int, stale: bool) -> dict:
     """cost_status stammt aus dem gespeicherten Workflow (projektfreigaben)."""
     if cost_status in (None, "nicht_begonnen"):
@@ -127,7 +114,6 @@ def compute_status(
     modules = {
         "project_data": _project_data_module(context),
         "schema": _schema_module(schema_present, node_count, edge_count, revision_nr, schema_warnings),
-        "hydraulics": _hydraulics_module(context, schema_present, node_count),
         "quantities": _quantities_module(context),
         "cost_estimate": _cost_module(cost_status, cost_version_nr, cost_stale),
         "documentation": {"status": "not_started"},

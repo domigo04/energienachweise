@@ -1,5 +1,5 @@
 # app/main.py
-import hashlib, os, json
+import os, json
 from fastapi import Depends, FastAPI
 from sqlalchemy import inspect, text
 from fastapi.middleware.cors import CORSMiddleware
@@ -87,7 +87,7 @@ from app.models.auth import Firma, User, Role  # noqa: F401
 from app.models.kv import RefProjekt, RefKostenzeile, RefProjektGewerk, RefProjektFeature, Kostenschaetzung, BauindexEintrag  # noqa: F401
 from app.models.grobkostenschaetzung import Korrekturfaktor  # noqa: F401
 from app.models.lv_import import LvImport, LvImportFeature, LvImportCost  # noqa: F401
-from app.auth import hash_password
+from app.bootstrap_admin import seed_admin as _seed_admin
 from app.runtime import is_production
 
 
@@ -256,51 +256,6 @@ def _seed_korrekturfaktoren(db):
     db.add_all(faktoren)
     db.commit()
     print(f"[INIT] {len(faktoren)} Korrekturfaktoren angelegt")
-
-
-def _seed_admin(db):
-    """Firma (SIREGO) + Erst-Admin sicherstellen. Zugangsdaten aus .env
-    (ADMIN_EMAIL/ADMIN_INITIAL_PASSWORD).
-
-    Passwort wird NUR gesetzt, wenn sich ADMIN_INITIAL_PASSWORD seit dem
-    letzten Start wirklich geändert hat (Fingerprint-Vergleich über
-    `admin_pw_seed_fingerprint`) — nicht mehr bei jedem Neustart. Grund für
-    den Vergleich überhaupt: ändert sich die Umgebungsvariable bewusst (z.B.
-    Rotation eines geleakten Passworts), muss das durchschlagen — genau das
-    Problem, das früher den Produktions-Login blockierte, als ein einmal
-    gesetztes altes Passwort für immer aktiv blieb. Aber ein Passwort, das
-    Dominic übers Konto SELBST geändert hat, darf der nächste Neustart nicht
-    mehr stillschweigend überschreiben (Sicherheits-Review 2026-07-19)."""
-    admin_email = os.getenv("ADMIN_EMAIL", "").lower().strip()
-    admin_pw = os.getenv("ADMIN_INITIAL_PASSWORD", "")
-    if not admin_email or not admin_pw:
-        print("[INFO] Admin-Seed übersprungen — ADMIN_EMAIL und "
-              "ADMIN_INITIAL_PASSWORD müssen beide als Umgebungsvariablen gesetzt sein.")
-        return None
-    firma = db.query(Firma).filter(Firma.id == 1).first()
-    if not firma:
-        db.add(Firma(id=1, name="SIREGO GmbH"))
-        db.commit()
-    pw_fingerprint = hashlib.sha256(admin_pw.encode()).hexdigest()
-
-    admin = db.query(User).filter(User.email == admin_email).first()
-    if not admin:
-        admin = User(tenant_id=1, email=admin_email, name=os.getenv("ADMIN_NAME", "Administrator"))
-        db.add(admin)
-        admin.password_hash = hash_password(admin_pw)
-        admin.admin_pw_seed_fingerprint = pw_fingerprint
-    elif admin.admin_pw_seed_fingerprint != pw_fingerprint:
-        # ADMIN_INITIAL_PASSWORD hat sich seit dem letzten Start geändert (oder
-        # der Admin existierte schon vor diesem Fingerprint-Mechanismus) —
-        # jetzt übernehmen. Ein manuell übers Konto geändertes Passwort bleibt
-        # sonst unangetastet, weil der Fingerprint dann unverändert bleibt.
-        admin.password_hash = hash_password(admin_pw)
-        admin.admin_pw_seed_fingerprint = pw_fingerprint
-    admin.role = Role.admin
-    admin.is_verified = True
-    admin.is_active = True
-    db.commit()
-    return admin_email
 
 
 @app.on_event("startup")

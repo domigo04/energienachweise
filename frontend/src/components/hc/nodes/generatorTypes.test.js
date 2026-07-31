@@ -13,8 +13,9 @@ describe('Erzeugerarten', () => {
     const codes = GENERATOR_TYPES.map(item => item.value);
     expect(new Set(codes).size).toBe(codes.length);
     expect(codes).toContain('lwwp');
-    expect(codes).toContain('fernwaerme');
     expect(codes).toContain('holz');
+    expect(codes).not.toContain('fernwaerme');
+    expect(codes).not.toContain('elektro');
     expect(codes).not.toContain('gas');
     expect(codes).not.toContain('oel');
   });

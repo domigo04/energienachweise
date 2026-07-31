@@ -68,10 +68,21 @@ export function FlowEdge({
   return (
     <>
       <BaseEdge id={id} path={edgePath}
-        style={{ ...style, strokeWidth: 4.5, strokeDasharray: dash, strokeLinecap: 'round', strokeLinejoin: 'round', fill: 'none' }} />
+        style={{ ...style, strokeWidth: 2.5, strokeDasharray: dash, strokeLinecap: 'round', strokeLinejoin: 'round', fill: 'none' }} />
 
-      {selected && <path d={edgePath} fill="none" stroke="#0f172a" strokeWidth={7 / zoom + 4.5} opacity={0.11} pointerEvents="none" />}
-      {data._groupSelected && !selected && <path d={edgePath} fill="none" stroke="#7c3aed" strokeWidth={7 / zoom + 4.5} opacity={0.18} pointerEvents="none" />}
+      {selected && <path d={edgePath} fill="none" stroke="#0f172a" strokeWidth={7 / zoom + 2.5} opacity={0.11} pointerEvents="none" />}
+      {data._groupSelected && !selected && <path d={edgePath} fill="none" stroke="#7c3aed" strokeWidth={7 / zoom + 2.5} opacity={0.18} pointerEvents="none" />}
+
+      {selected && Number.isInteger(data._selectedSegmentIndex) && vertices[data._selectedSegmentIndex + 1] && (
+        <line
+          x1={vertices[data._selectedSegmentIndex].x}
+          y1={vertices[data._selectedSegmentIndex].y}
+          x2={vertices[data._selectedSegmentIndex + 1].x}
+          y2={vertices[data._selectedSegmentIndex + 1].y}
+          stroke="#7c3aed" strokeWidth={4.5 / zoom} strokeLinecap="round"
+          opacity="0.5" pointerEvents="none"
+        />
+      )}
 
       {/* Breiter unsichtbarer Klick-Bereich */}
       <path d={edgePath} fill="none" stroke="transparent" strokeWidth={14 / zoom}

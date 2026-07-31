@@ -2,7 +2,9 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
-import { SymWE } from './symbols';
+import {
+  SymCheckValve, SymPump, SymShutoff, SymSTAD, SymValve2V, SymValve3, SymWE,
+} from './symbols';
 
 describe('Wärmeerzeugersymbole', () => {
   it('zeichnet innen- und aussenaufgestellte Luft/Wasser-WP wie die Standard-WP', () => {
@@ -29,5 +31,23 @@ describe('Wärmeerzeugersymbole', () => {
     expect(renderToStaticMarkup(<SymWE generatorType="gas"/>)).toContain('GAS');
     expect(renderToStaticMarkup(<SymWE generatorType="fernwaerme"/>)).toContain('FERNWÄRME');
     expect(renderToStaticMarkup(<SymWE generatorType="hybrid"/>)).toContain('HYBRID');
+  });
+});
+
+describe('Kompakte Armaturen und Feldgeräte', () => {
+  it('zeichnet Pumpe und Ventile ungefähr halb so gross wie zuvor', () => {
+    expect(renderToStaticMarkup(<SymPump/>)).toContain('width="24"');
+    expect(renderToStaticMarkup(<SymValve2V/>)).toContain('width="34"');
+    expect(renderToStaticMarkup(<SymValve3/>)).toContain('width="38"');
+    expect(renderToStaticMarkup(<SymSTAD/>)).toContain('width="12"');
+  });
+
+  it('zeichnet Kugelhahn und Rückschlagventil mit vollständigen Leitungsstutzen', () => {
+    const kugelhahn = renderToStaticMarkup(<SymShutoff/>);
+    const rueckschlag = renderToStaticMarkup(<SymCheckValve/>);
+    expect(kugelhahn).toContain('y1="6"');
+    expect(kugelhahn).toContain('y2="124"');
+    expect(rueckschlag).toContain('y1="0"');
+    expect(rueckschlag).toContain('y2="80"');
   });
 });

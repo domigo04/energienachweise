@@ -36,7 +36,7 @@ export const COMPONENTS = [
   // Erzeugung
   { type: "erzeuger", label: "Wärmeerzeuger / WP", category: "erzeugung", placement: "free" },
   { type: "erdsonden", label: "Erdsonden", category: "erzeugung", placement: "free" },
-  { type: "pwt", label: "Fernwärme / PWT", category: "erzeugung", placement: "free" },
+  { type: "pwt", label: "Plattentauscher / Fernwärme", category: "erzeugung", placement: "free" },
   // Speicher
   { type: "speicher", label: "Pufferspeicher", category: "speicher", placement: "free" },
   { type: "bww", label: "BWW-Speicher", category: "speicher", placement: "free" },
@@ -61,9 +61,9 @@ export const COMPONENTS = [
   { type: "temperatur", label: "Temperaturfühler", category: "messung", placement: "free" },
   // Sicherheit — beide hängen mit EINEM Anschluss an der Leitung (§15/§18).
   { type: "expansion", label: "Expansionsgefäss", category: "sicherheit",
-    placement: "branch", branch: { port: "bottom", x: 0.488, y: 1, w: 76, h: 125 } },
+    placement: "branch", branch: { port: "bottom", x: 0.488, y: 1, w: 38, h: 53 } },
   { type: "sicherheitsventil", label: "Sicherheitsventil", category: "sicherheit",
-    placement: "branch", branch: { port: "an", x: 0.12, y: 0.61, w: 80, h: 67 } },
+    placement: "branch", branch: { port: "an", x: 0.12, y: 0.61, w: 40, h: 34 } },
   // Verbraucher
   { type: "verbraucher", label: "Verbraucher", category: "verbraucher", placement: "free" },
   // Annotation — ohne hydraulische Bedeutung, nicht im ProjectContext (§9/§10)
@@ -118,5 +118,30 @@ export function componentsByCategory(category) {
 
 // Typen, die per Inline-Drop auf eine Leitung gesetzt werden dürfen (§4).
 export function inlineInsertableTypes() {
-  return COMPONENTS.filter((c) => c.inlineInsertable).map((c) => c.type);
+  return COMPONENTS.filter((c) => isInlineInsertable(c.type)).map((c) => c.type);
+}
+
+// Sichtbare Grundgrössen der kompakten Inline-Symbole. Ihre hydraulische
+// Hauptachse liegt bei allen exakt in der Mitte. Damit kann ein Bauteil beim
+// Einsetzen ohne typabhängigen Schätzwert auf dem getroffenen Leitungspunkt
+// zentriert werden. Bestehende Schemas bleiben kompatibel; die Grösse ist reine
+// Darstellung und wird nicht in den Graph geschrieben.
+export const INLINE_COMPONENT_SIZES = Object.freeze({
+  pump:        { w: 24, h: 24 },
+  valve2:      { w: 34, h: 24 },
+  valve3:      { w: 38, h: 24 },
+  stad:        { w: 12, h: 28 },
+  shutoff:     { w: 14, h: 28 },
+  checkvalve:  { w: 16, h: 28 },
+  waermezaehler:{ w: 26, h: 26 },
+});
+
+export function inlineComponentSize(type) {
+  return INLINE_COMPONENT_SIZES[type] || null;
+}
+
+export function inlineNodePosition(type, point) {
+  const size = inlineComponentSize(type);
+  if (!size || !point) return point;
+  return { x: point.x - size.w / 2, y: point.y - size.h / 2 };
 }

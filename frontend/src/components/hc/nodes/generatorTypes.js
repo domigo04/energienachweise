@@ -5,7 +5,6 @@ export const GENERATOR_TYPES = [
   { value:'lwwp',       label:'Luft/Wasser-WP', family:'wp', source:'air' },
   { value:'wasser_wp',  label:'Wasser/Wasser-WP', family:'wp', source:'water' },
   { value:'co2_wp',     label:'CO₂-Wärmepumpe', family:'wp', source:'co2' },
-  { value:'fernwaerme', label:'Fernwärme', family:'district' },
   { value:'holz',       label:'Holz-/Pelletheizung', family:'boiler', fuel:'Holz' },
   { value:'hybrid',     label:'Hybridanlage', family:'hybrid' },
   { value:'sonstige',   label:'Sonstiger Wärmeerzeuger', family:'other' },

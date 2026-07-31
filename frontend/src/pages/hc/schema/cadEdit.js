@@ -43,17 +43,25 @@ export function segmentOrientierung(a, b, toleranz = 0.5) {
  *
  * Die ganze Leitung wird NICHT verschoben.
  *
- * `orientation` bindet die Bewegung auf die Normale des Segments: ein
- * senkrechtes Segment kann nur seitlich wandern, ein waagrechtes nur hoch/runter.
+ * Standardmässig ist die Bewegung frei. Mit `axisLocked:true` bindet
+ * `orientation` die Bewegung auf die Normale des Segments (Legacy/CAD-Ortho).
  */
-export function segmentVerschieben(points, pointIndexes, orientation, delta, { grid = 10, direction = null } = {}) {
+export function segmentVerschieben(points, pointIndexes, orientation, delta, {
+  grid = 10, direction = null, axisLocked = false,
+} = {}) {
   const idx = new Set(pointIndexes || []);
   if (!Array.isArray(points) || !idx.size) return points || [];
   const raster = (wert) => Math.round(wert / grid) * grid;
 
   let moveX = delta?.x || 0;
   let moveY = delta?.y || 0;
-  if (orientation === 'vertical') {
+  if (!axisLocked) {
+    // Revit-artiges Verschieben: die Maus gibt einen freien Vektor vor. Beide
+    // Segmentenden erhalten exakt denselben Vektor; das Teilstück bleibt also
+    // parallel, ist aber nicht künstlich auf X oder Y beschränkt.
+    moveX = raster(moveX);
+    moveY = raster(moveY);
+  } else if (orientation === 'vertical') {
     moveX = raster(moveX);
     moveY = 0;
   } else if (orientation === 'horizontal') {
@@ -76,6 +84,53 @@ export function segmentVerschieben(points, pointIndexes, orientation, delta, { g
   return points.map((punkt, index) => (idx.has(index)
     ? { x: punkt.x + moveX, y: punkt.y + moveY }
     : punkt));
+}
+
+/**
+ * Bereitet ein sichtbares Teilstück für das Verschieben vor. Liegt es direkt an
+ * einem Bauteilanschluss, wird innen ein Stützpunkt ergänzt. Der hydraulische
+ * Anschluss bleibt dadurch fest und nur das gewählte Teilstück wandert.
+ */
+export function segmentZumVerschieben(route, segmentIndex) {
+  if (!Array.isArray(route) || segmentIndex < 0 || segmentIndex >= route.length - 1) return null;
+  const workingRoute = route.map(point => ({ x:point.x, y:point.y }));
+  let startIndex = segmentIndex;
+  let endIndex = startIndex + 1;
+  if (startIndex === 0) {
+    workingRoute.splice(1, 0, { ...workingRoute[0] });
+    startIndex = 1;
+    endIndex = 2;
+  }
+  if (endIndex === workingRoute.length - 1) {
+    workingRoute.splice(endIndex, 0, { ...workingRoute.at(-1) });
+  }
+  const a = workingRoute[startIndex];
+  const b = workingRoute[endIndex];
+  return {
+    points:workingRoute.slice(1, -1),
+    pointIndexes:[startIndex - 1, endIndex - 1],
+    direction:{ x:b.x - a.x, y:b.y - a.y },
+  };
+}
+
+/** Verschiebestrecke in der üblichen Planer-Einheit cm, ab 1 m in Metern. */
+export function verschiebungLabel(delta = {}) {
+  const mm = Math.hypot(Number(delta.x) || 0, Number(delta.y) || 0);
+  if (mm >= 1000) return `${(mm / 1000).toFixed(2).replace(/\.?0+$/, '')} m`;
+  return `${(mm / 10).toFixed(1).replace(/\.0$/, '')} cm`;
+}
+
+/**
+ * Abschlussdaten für ESC: nur bewusst gesetzte Punkte zählen. Der bewegte
+ * Cursor gehört nie zur gespeicherten Leitung.
+ */
+export function entwurfFuerEscape(draft) {
+  const endPoint = draft?.points?.at(-1);
+  if (!endPoint) return null;
+  return {
+    endPoint:{ x:endPoint.x, y:endPoint.y },
+    draft:{ ...draft, points:draft.points.slice(0, -1) },
+  };
 }
 
 /**

@@ -12,6 +12,8 @@ import {
   placementBehavior,
   branchAnschluss,
   freierPort,
+  inlineComponentSize,
+  inlineNodePosition,
 } from "./componentRegistry";
 
 // §4/§8 — die Registry ist die eine Quelle für Bauteil-Eigenschaften.
@@ -90,5 +92,13 @@ describe("componentRegistry", () => {
 
   it("componentDef gibt null für unbekannte Typen", () => {
     expect(componentDef("gibtsnicht")).toBeNull();
+  });
+
+  it("zentriert kompakte Inline-Bauteile exakt auf dem Leitungspunkt", () => {
+    expect(inlineComponentSize("valve3")).toEqual({ w: 38, h: 24 });
+    expect(inlineNodePosition("valve3", { x: 500, y: 300 }))
+      .toEqual({ x: 481, y: 288 });
+    expect(inlineNodePosition("pump", { x: 500, y: 300 }))
+      .toEqual({ x: 488, y: 288 });
   });
 });

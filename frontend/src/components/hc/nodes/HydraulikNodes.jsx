@@ -15,8 +15,8 @@ const H = (pos, id, style = {}, className = '') => (
     id={id}
     className={className}
     style={{
-      width: 14, height: 14, borderRadius: 3,
-      background: '#475569', border: '2px solid white',
+      width: 8, height: 8, borderRadius: 2,
+      background: '#475569', border: '1px solid white',
       boxShadow: '0 0 0 1px #cbd5e1',
       zIndex: 10,
       ...style,
@@ -77,8 +77,8 @@ export function PumpNode({ data, selected: sel }) {
   // zusammen mit dem Symbol.
   return (
     <div style={wrap(sel)}>
-      {H(Position.Top,    'top',    { top: -4 }, 'hc-pump-handle')}
-      {H(Position.Bottom, 'bottom', { bottom: -4 }, 'hc-pump-handle')}
+      {H(Position.Top,    'top',    { top: -3, left:'50%' }, 'hc-pump-handle')}
+      {H(Position.Bottom, 'bottom', { bottom: -3, left:'50%' }, 'hc-pump-handle')}
       <SymPump />
       <Label text={data.label} />
     </div>
@@ -89,8 +89,8 @@ export function PumpNode({ data, selected: sel }) {
 export function Valve2Node({ data, selected: sel }) {
   return (
     <div style={wrap(sel)}>
-      {H(Position.Top,    'top',    { top: -6,    left: '75%', background: '#1e293b' })}
-      {H(Position.Bottom, 'bottom', { bottom: -6, left: '75%', background: '#1e293b' })}
+      {H(Position.Top,    'top',    { top: -3,    left: '50%', background: '#1e293b' })}
+      {H(Position.Bottom, 'bottom', { bottom: -3, left: '50%', background: '#1e293b' })}
       <SymValve2V />
       <Label text={data.label} color="#1e293b" />
     </div>
@@ -101,9 +101,9 @@ export function Valve2Node({ data, selected: sel }) {
 export function Valve3Node({ data, selected: sel }) {
   return (
     <div style={{ ...wrap(sel), position: 'relative' }}>
-      {H(Position.Top,    'top',    { top: -6,    left: '63%', background: '#1e293b' })}
-      {H(Position.Bottom, 'bottom', { bottom: -6, left: '63%', background: '#1e293b' })}
-      {H(Position.Right,  'right',  { right: -6,   top: '51%',  background: '#1e293b' })}
+      {H(Position.Top,    'top',    { top: -3,    left: '50%', background: '#1e293b' })}
+      {H(Position.Bottom, 'bottom', { bottom: -3, left: '50%', background: '#1e293b' })}
+      {H(Position.Right,  'right',  { right: -3,  top: '50%', background: '#1e293b' })}
       <SymValve3 />
       <Label text={data.label} color="#1e293b" />
     </div>
@@ -114,10 +114,8 @@ export function Valve3Node({ data, selected: sel }) {
 export function CheckValveNode({ data, selected: sel }) {
   return (
     <div style={wrap(sel)}>
-      {H(Position.Top,    'top',    { top: -6 })}
-      {H(Position.Bottom, 'bottom', { bottom: -6 })}
-      {H(Position.Left,   'left',   { left: -6 })}
-      {H(Position.Right,  'right',  { right: -6 })}
+      {H(Position.Top,    'top',    { top: -3, left:'50%' })}
+      {H(Position.Bottom, 'bottom', { bottom: -3, left:'50%' })}
       <SymCheckValve />
       <Label text={data.label} />
     </div>
@@ -128,10 +126,8 @@ export function CheckValveNode({ data, selected: sel }) {
 export function ShutoffNode({ data, selected: sel }) {
   return (
     <div style={wrap(sel)}>
-      {H(Position.Top,    'top',    { top: -6 })}
-      {H(Position.Bottom, 'bottom', { bottom: -6 })}
-      {H(Position.Left,   'left',   { left: -6 })}
-      {H(Position.Right,  'right',  { right: -6 })}
+      {H(Position.Top,    'top',    { top: -3, left:'50%' })}
+      {H(Position.Bottom, 'bottom', { bottom: -3, left:'50%' })}
       <SymShutoff />
       <Label text={data.label} />
     </div>
@@ -142,8 +138,8 @@ export function ShutoffNode({ data, selected: sel }) {
 export function StadNode({ data, selected: sel }) {
   return (
     <div style={wrap(sel)}>
-      {H(Position.Top,    'top',    { top: -6 })}
-      {H(Position.Bottom, 'bottom', { bottom: -6 })}
+      {H(Position.Top,    'top',    { top: -3, left:'50%' })}
+      {H(Position.Bottom, 'bottom', { bottom: -3, left:'50%' })}
       <SymSTAD />
       <Label text={data.label || 'STAD'} />
     </div>
@@ -154,8 +150,8 @@ export function StadNode({ data, selected: sel }) {
 export function TemperaturNode({ data, selected: sel }) {
   return (
     <div style={wrap(sel)}>
-      {H(Position.Left,   'left',   { left: -6, top: '55%' })}
-      {H(Position.Bottom, 'bottom', { bottom: -6, left: '38%' })}
+      {H(Position.Left,   'left',   { left: -3, top: '55%' })}
+      {H(Position.Bottom, 'bottom', { bottom: -3, left: '38%' })}
       <SymTemperatur />
       <Label text={data.label} />
     </div>
@@ -613,11 +609,9 @@ export function WaermezaehlerNode({ data, selected: sel }) {
   const v = data._calc?.v;
   return (
     <div style={wrap(sel)}>
-      {H(Position.Top,    'top',    { top: -6 })}
-      {H(Position.Bottom, 'bottom', { bottom: -6 })}
-      {H(Position.Left,   'left',   { left: -6 })}
-      {H(Position.Right,  'right',  { right: -6 })}
-      <svg viewBox="0 0 48 48" width="48" height="48">
+      {H(Position.Top,    'top',    { top: -3, left:'50%' })}
+      {H(Position.Bottom, 'bottom', { bottom: -3, left:'50%' })}
+      <svg viewBox="0 0 48 48" width="26" height="26">
         <line x1="24" y1="0" x2="24" y2="8" stroke="#1e293b" strokeWidth="3" />
         <line x1="24" y1="40" x2="24" y2="48" stroke="#1e293b" strokeWidth="3" />
         <circle cx="24" cy="24" r="16" fill="white" stroke="#0f766e" strokeWidth="2.5" />
@@ -638,13 +632,13 @@ export function ExpansionNode({ data, selected: sel }) {
   const c = data._calc || {};
   return (
     <div style={wrap(sel)}>
-      {H(Position.Bottom, 'bottom', { bottom: -6, left: '48.8%' })}
+      {H(Position.Bottom, 'bottom', { bottom: -3, left: '48.8%' })}
       {/* Die frühere blaue gestrichelte Leitung unter dem Behälter war reine
           Dekoration und lag ausserdem unter dem echten Anschluss — das sah aus
           wie eine Leitung, war aber keine. Stattdessen endet das Symbol jetzt
           mit einem kurzen, runden Anschlussstutzen genau dort, wo der Handle
           sitzt: Marker == Handle == Snapkoordinate (§14/§15). */}
-      <svg viewBox="0 0 248 344" width="76" height="105">
+      <svg viewBox="0 0 248 344" width="38" height="53">
         <g fill="none" stroke="#1e293b" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
           <path fill="#d9d9d9" d="M54 33 C54 15 84 1 121 1 C158 1 188 15 188 33 L188 297 C188 315 158 329 121 329 C84 329 54 315 54 297 Z" />
           <line x1="54" y1="33" x2="188" y2="33" />
@@ -839,11 +833,16 @@ export function InterfaceLineNode({ id, data, selected: sel }) {
 // Jedes nummerierbare Bauteil bekommt ein rotes Badge (data.nr) oben rechts.
 // eslint-disable-next-line react-refresh/only-export-components
 export const NUMMERIERT = ['gruppe', 'heizkreis', 'pump', 'valve2', 'valve3', 'checkvalve', 'shutoff', 'erzeuger', 'speicher', 'erdsonden', 'verteiler', 'waermezaehler', 'expansion', 'bww', 'stad', 'sicherheitsventil', 'pwt'];
+const KOMPAKTE_BAUTEILE = new Set([
+  'pump', 'valve2', 'valve3', 'checkvalve', 'shutoff', 'stad',
+  'waermezaehler', 'expansion', 'sicherheitsventil', 'pwt',
+]);
 
 // eslint-disable-next-line no-unused-vars
 function mitNr(Comp) {
   function MitNr(props) {
     const nr = props.data?.nr;
+    const kompakt = KOMPAKTE_BAUTEILE.has(props.type);
     const { setNodes, getZoom } = useReactFlow();
     const captionDrag = useRef(null);
     const caption = props.data?.label || {
@@ -887,11 +886,12 @@ function mitNr(Comp) {
         <Comp {...props} />
         {nr != null && (
           <div style={{
-            position: 'absolute', top: -9, right: -9, minWidth: 20, height: 17,
-            borderRadius: 9, background: 'white', border: '1.5px solid #dc2626',
-            color: '#dc2626', fontSize: 9, fontWeight: 700,
+            position: 'absolute', top: kompakt ? -6 : -9, right: kompakt ? -6 : -9,
+            minWidth: kompakt ? 14 : 20, height: kompakt ? 13 : 17,
+            borderRadius: 9, background: 'white', border: `${kompakt ? 1 : 1.5}px solid #dc2626`,
+            color: '#dc2626', fontSize: kompakt ? 7 : 9, fontWeight: 700,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            padding: '0 4px', zIndex: 20, pointerEvents: 'none',
+            padding: kompakt ? '0 3px' : '0 4px', zIndex: 20, pointerEvents: 'none',
           }}>{nr}</div>
         )}
         {nr != null && (

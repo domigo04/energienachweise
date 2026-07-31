@@ -4,9 +4,11 @@
 // unten). Ohne Motor-Kasten (Dominic-Feedback: brauchen wir nicht).
 export function SymPump() {
   return (
-    <svg viewBox="0 0 44 44" width="40" height="40">
-      <circle cx="22" cy="22" r="18" fill="white" stroke="#1e293b" strokeWidth="2.5" />
-      <line x1="4" y1="22" x2="40" y2="22" stroke="#1e293b" strokeWidth="2" />
+    <svg viewBox="0 0 44 44" width="24" height="24">
+      <line x1="22" y1="0" x2="22" y2="4" stroke="#1e293b" strokeWidth="1.6" />
+      <line x1="22" y1="40" x2="22" y2="44" stroke="#1e293b" strokeWidth="1.6" />
+      <circle cx="22" cy="22" r="18" fill="white" stroke="#1e293b" strokeWidth="1.6" />
+      <line x1="4" y1="22" x2="40" y2="22" stroke="#1e293b" strokeWidth="1.4" />
       <polygon points="4,22 40,22 22,38" fill="#1e293b" />
     </svg>
   );
@@ -14,35 +16,38 @@ export function SymPump() {
 
 // ── 2-Wege Regelventil (Vorlage «2-Weg Ventil.svg») ───────────
 // Doppeldreieck (senkrecht) + schwarzer Knoten + oranger Antriebs-
-// kasten (Σ) links. Flussachse senkrecht durch x=104 (Fraction 0.75).
+// kasten (Σ) links. Die hydraulische Flussachse liegt exakt in der Mitte.
 export function SymValve2V() {
   return (
-    <svg viewBox="8 6 128 116" width="44" height="40">
-      <rect x="15" y="40" width="50" height="50" fill="#ffd34d" stroke="#ff9f00" strokeWidth="3" strokeLinejoin="round" />
-      <path d="M29 54 H50 L37 65 L50 76 H29" fill="none" stroke="#ff9f00" strokeWidth="3" strokeLinejoin="round" />
-      <line x1="65" y1="65" x2="90" y2="65" stroke="#ff9f00" strokeWidth="4" strokeLinecap="round" />
-      <polygon points="79,14 130,14 104,65" fill="white" stroke="#000" strokeWidth="3.2" strokeLinejoin="round" />
-      <polygon points="79,116 130,116 104,65" fill="white" stroke="#000" strokeWidth="3.2" strokeLinejoin="round" />
-      <circle cx="104" cy="65" r="12" fill="#000" />
+    <svg viewBox="0 0 100 100" width="34" height="24">
+      <line x1="50" y1="0" x2="50" y2="8" stroke="#1e293b" strokeWidth="2.6" />
+      <line x1="50" y1="92" x2="50" y2="100" stroke="#1e293b" strokeWidth="2.6" />
+      <rect x="4" y="36" width="26" height="28" fill="#ffd34d" stroke="#ff9f00" strokeWidth="2.4" strokeLinejoin="round" />
+      <path d="M10 43 H23 L15 50 L23 57 H10" fill="none" stroke="#ff9f00" strokeWidth="2.4" strokeLinejoin="round" />
+      <line x1="30" y1="50" x2="39" y2="50" stroke="#ff9f00" strokeWidth="2.4" strokeLinecap="round" />
+      <polygon points="36,8 64,8 50,50" fill="white" stroke="#1e293b" strokeWidth="2.4" strokeLinejoin="round" />
+      <polygon points="36,92 64,92 50,50" fill="white" stroke="#1e293b" strokeWidth="2.4" strokeLinejoin="round" />
+      <circle cx="50" cy="50" r="6" fill="#1e293b" />
     </svg>
   );
 }
 
 // ── 3-Wege Mischventil (Vorlage «3-Weg-Ventil.svg») ───────────
 // wie 2-Weg + dritter Anschluss rechts + X im Antriebskasten.
-// Flussachse senkrecht durch x=104 (Fraction ~0.63), 3. Tor rechts.
+// Die Hauptachse liegt mittig, das dritte Tor exakt rechts.
 export function SymValve3() {
   return (
-    <svg viewBox="8 6 152 116" width="52" height="40">
-      <rect x="15" y="40" width="50" height="50" fill="#ffd34d" stroke="#ff9f00" strokeWidth="3" strokeLinejoin="round" />
-      <path d="M15 40 L65 90" stroke="#ff9f00" strokeWidth="3" />
-      <path d="M65 40 L15 90" stroke="#ff9f00" strokeWidth="3" />
-      <path d="M29 54 H50 L37 65 L50 76 H29" fill="none" stroke="#ff9f00" strokeWidth="3" strokeLinejoin="round" />
-      <line x1="65" y1="65" x2="90" y2="65" stroke="#ff9f00" strokeWidth="4" strokeLinecap="round" />
-      <polygon points="79,14 130,14 104,65" fill="white" stroke="#000" strokeWidth="3.2" strokeLinejoin="round" />
-      <polygon points="79,116 130,116 104,65" fill="white" stroke="#000" strokeWidth="3.2" strokeLinejoin="round" />
-      <polygon points="116,65 156,41 156,89" fill="white" stroke="#000" strokeWidth="3.2" strokeLinejoin="round" />
-      <circle cx="104" cy="65" r="12" fill="#000" />
+    <svg viewBox="0 0 100 100" width="38" height="24">
+      <line x1="50" y1="0" x2="50" y2="8" stroke="#1e293b" strokeWidth="2.6" />
+      <line x1="50" y1="92" x2="50" y2="100" stroke="#1e293b" strokeWidth="2.6" />
+      <line x1="92" y1="50" x2="100" y2="50" stroke="#1e293b" strokeWidth="2.6" />
+      <rect x="4" y="36" width="26" height="28" fill="#ffd34d" stroke="#ff9f00" strokeWidth="2.4" strokeLinejoin="round" />
+      <path d="M4 36 L30 64 M30 36 L4 64" stroke="#ff9f00" strokeWidth="2" />
+      <line x1="30" y1="50" x2="39" y2="50" stroke="#ff9f00" strokeWidth="2.4" strokeLinecap="round" />
+      <polygon points="36,8 64,8 50,50" fill="white" stroke="#1e293b" strokeWidth="2.4" strokeLinejoin="round" />
+      <polygon points="36,92 64,92 50,50" fill="white" stroke="#1e293b" strokeWidth="2.4" strokeLinejoin="round" />
+      <polygon points="50,50 92,34 92,66" fill="white" stroke="#1e293b" strokeWidth="2.4" strokeLinejoin="round" />
+      <circle cx="50" cy="50" r="6" fill="#1e293b" />
     </svg>
   );
 }
@@ -51,7 +56,7 @@ export function SymValve3() {
 // Sanduhr zwischen zwei Balken + Messkreis + Pfeil nach oben.
 export function SymSTAD() {
   return (
-    <svg viewBox="0 0 60 135" width="18" height="41">
+    <svg viewBox="0 0 60 135" width="12" height="28">
       <g fill="none" stroke="#1e293b" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
         <line x1="12" y1="11" x2="50" y2="11" />
         <path d="M12 11 L50 105" />
@@ -69,7 +74,7 @@ export function SymSTAD() {
 // Kreis + Diagonalpfeil + T. (Blaue RL-Leitung zeichnet der Strang selbst.)
 export function SymTemperatur() {
   return (
-    <svg viewBox="10 6 90 66" width="52" height="38">
+    <svg viewBox="10 6 90 66" width="26" height="19">
       <g fill="none" stroke="#1e293b" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="38" cy="36" r="12" />
         <line x1="18" y1="56" x2="56" y2="18" />
@@ -85,7 +90,7 @@ export function SymTemperatur() {
 // Anschluss unten (rote Linie x=24).
 export function SymSicherheitsventil() {
   return (
-    <svg viewBox="0 0 199 167" width="80" height="67">
+    <svg viewBox="0 0 199 167" width="40" height="34">
       <g fill="none" stroke="#ff0000" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
         <line x1="24" y1="102" x2="104" y2="102" />
         <line x1="104" y1="102" x2="104" y2="47" />
@@ -114,7 +119,7 @@ export function SymSicherheitsventil() {
 // Raute mit innerer Trennlinie + parallele Kontur, +/− und EIN/AUS.
 export function SymPWT() {
   return (
-    <svg viewBox="0 0 472 342" width="94" height="68">
+    <svg viewBox="0 0 472 342" width="47" height="34">
       <g fill="none" stroke="#000" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
         <path d="M205 48 L356 191 L205 334 L54 191 Z" />
         <line x1="205" y1="48" x2="205" y2="334" />
@@ -135,11 +140,11 @@ export function SymPWT() {
 
 export function SymCheckValve() {
   return (
-    <svg viewBox="0 0 44 44" width="44" height="44">
-      {/* Dreieck: Spitze nach unten (Durchflussrichtung ↓) */}
-      <polygon points="10,6 34,6 22,30" fill="none" stroke="#1e293b" strokeWidth="2.2" strokeLinejoin="round" />
-      {/* Sperrlinie */}
-      <line x1="8" y1="30" x2="36" y2="30" stroke="#1e293b" strokeWidth="2.5" />
+    <svg viewBox="0 0 44 80" width="16" height="28">
+      <line x1="22" y1="0" x2="22" y2="16" stroke="#1e293b" strokeWidth="2.4" />
+      <polygon points="10,16 34,16 22,43" fill="white" stroke="#1e293b" strokeWidth="2.4" strokeLinejoin="round" />
+      <line x1="8" y1="43" x2="36" y2="43" stroke="#1e293b" strokeWidth="2.8" />
+      <line x1="22" y1="43" x2="22" y2="80" stroke="#1e293b" strokeWidth="2.4" />
     </svg>
   );
 }
@@ -149,10 +154,12 @@ export function SymCheckValve() {
 // Antriebskasten. Flussachse senkrecht durch x=104 (mittig).
 export function SymShutoff() {
   return (
-    <svg viewBox="78 10 52 112" width="19" height="41">
+    <svg viewBox="78 6 52 118" width="14" height="28">
+      <line x1="104" y1="6" x2="104" y2="14" stroke="#1e293b" strokeWidth="3" />
       <polygon points="79,14 130,14 104,65" fill="white" stroke="#000" strokeWidth="3.2" strokeLinejoin="round" />
       <polygon points="79,116 130,116 104,65" fill="white" stroke="#000" strokeWidth="3.2" strokeLinejoin="round" />
       <circle cx="104" cy="65" r="13" fill="#000" />
+      <line x1="104" y1="116" x2="104" y2="124" stroke="#1e293b" strokeWidth="3" />
     </svg>
   );
 }

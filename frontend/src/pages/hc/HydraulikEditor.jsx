@@ -27,7 +27,10 @@ import {
   punktAusLaenge,
 } from './schema/cadConstraints';
 import { CORNER, ENDPOINT, GRID, MIDPOINT, NEAREST, PORT, fangStil } from './schema/cadSnap';
-import { abzweigPunkt, routeBereinigen, segmentAusrichten, segmentVerschieben } from './schema/cadEdit';
+import {
+  abzweigPunkt, routeBereinigen, segmentAusrichten, segmentVerschieben,
+  entwurfFuerEscape, segmentZumVerschieben, verschiebungLabel,
+} from './schema/cadEdit';
 import {
   CAD_GRID, DEFAULT_DRAWING_CONFIG, GRID_OPTIONEN,
   graphFuerEditor, normalisiereDrawingConfig,
@@ -54,7 +57,9 @@ import {
 } from '../../api/hcApi';
 import { api } from '../../api';
 import { dateiZuUnderlay } from './schema/underlay';
-import { branchAnschluss, isBranchInsertable, isInlineInsertable } from './schema/componentRegistry';
+import {
+  branchAnschluss, inlineNodePosition, isBranchInsertable, isInlineInsertable,
+} from './schema/componentRegistry';
 
 // ── Konstanten ────────────────────────────────────────────────
 const KVS_REIHE = [0.1, 0.16, 0.25, 0.4, 0.63, 1.0, 1.6, 2.5, 4.0, 6.3, 10, 16, 25, 40, 63];
@@ -367,24 +372,24 @@ const WAERMEABGABE = [
 
 // Palette nach Bauteil-Klassen sortiert (Dominic-Feedback 2026-07-06)
 const PALETTE_GRUPPEN = [
-  { titel: 'Erzeugung & Speicher', items: [
+  { titel: 'Erzeuger', items: [
     { paletteId:'erzeuger-sole-wasser', type:'erzeuger', label:'Sole/Wasser-WP', desc:'Quellen- und Abgabekreis', preset:{ generator_type:'ews_wp' } },
     { paletteId:'erzeuger-luft-wasser-aussen', type:'erzeuger', label:'Luft/Wasser-WP – aussen', desc:'Monoblock, Standard-WP-Symbol', preset:{ generator_type:'lwwp', lwwp_bauart:'aussenaufstellung' } },
     { paletteId:'erzeuger-luft-wasser-innen', type:'erzeuger', label:'Luft/Wasser-WP – innen', desc:'Monoblock, Standard-WP-Symbol', preset:{ generator_type:'lwwp', lwwp_bauart:'innenaufstellung' } },
     { paletteId:'erzeuger-luft-wasser-split', type:'erzeuger', label:'Luft/Wasser-WP – Splitgerät', desc:'Aussen Verflüssiger · innen Verdampfer', preset:{ generator_type:'lwwp', lwwp_bauart:'split' } },
     { paletteId:'erzeuger-wasser-wasser', type:'erzeuger', label:'Wasser/Wasser-WP', desc:'Quellen- und Abgabekreis', preset:{ generator_type:'wasser_wp' } },
     { paletteId:'erzeuger-co2', type:'erzeuger', label:'CO₂-Wärmepumpe', desc:'Wärmepumpe', preset:{ generator_type:'co2_wp' } },
-    { paletteId:'erzeuger-fernwaerme', type:'erzeuger', label:'Fernwärme', desc:'Wärmeübergabe', preset:{ generator_type:'fernwaerme' } },
     { paletteId:'erzeuger-holz', type:'erzeuger', label:'Holz-/Pelletheizung', desc:'SIA-Symbol mit Solid-Quadrat', preset:{ generator_type:'holz' } },
     { type: 'erdsonden',  label: 'Erdsondenfeld',       desc: 'Dynamischer Soleverteiler mit Duplexsonden' },
+    { type: 'pwt',        label: 'Plattentauscher / Fernwärme', desc: 'Wärmeübergabe mit zwei getrennten Kreisen' },
+  ]},
+  { titel: 'Speicher', items: [
     { type: 'speicher',   label: 'Speicher',            desc: 'Inhalt wird direkt im Symbol angezeigt' },
     { type: 'bww',        label: 'BWW-Speicher',        desc: 'Warmwasser rot · Kaltwasser grün gestrichelt' },
-    { type: 'pwt',        label: 'Plattentauscher (PWT)', desc: 'Wärmetauscher, 2 Kreise' },
   ]},
   { titel: 'Verteilung', items: [
     { type: 'verteiler',  label: 'Verteiler',           desc: 'VL/RL-Balken, wählbare Abgänge' },
     { type: 'gruppe',     label: 'Verbrauchergruppe',   desc: 'CAD-Strang: Pumpe, Einspritz, Q/VL/RL' },
-    { type: 'heizkreis',  label: 'Heizkreis',           desc: 'VL / RL / Q → V\' auto' },
   ]},
   { titel: 'Förderung & Armaturen', items: [
     { type: 'pump',       label: 'Pumpe',               desc: 'V\' aus Topologie' },
@@ -445,9 +450,18 @@ const schaltungVon = (d) => (['einspritz', 'beimisch', 'drossel'].includes(d?.sc
 // ── Leitungs-Panel (Klick auf eine Leitung, PHYSIK §10) ───────
 // Zeigt die automatisch gewählte Dimension (DN + Pa/m aus Dominics Tabelle)
 // und lässt die Länge eintragen → Δp = Pa/m · Länge / 1000.
-function LeitungPanel({ edge, leitungResults, onUpdateEdge, onUpdateLayer, onDelete }) {
+function LeitungPanel({
+  edge, leitungResults, onUpdateEdge, onUpdateLayer, onDelete,
+  segmentIndex = null, onMoveSegment,
+}) {
   const lg = leitungResults[edge.id];
   const layer = layerVonEdge(edge);
+  const [dxCm, setDxCm] = useState('');
+  const [dyCm, setDyCm] = useState('');
+  useEffect(() => {
+    setDxCm('');
+    setDyCm('');
+  }, [edge.id, segmentIndex]);
   const ro = (label, value, unit='', ok=false) => (
     <div style={{ marginBottom: 6 }}>
       <label style={lbl}>{label}</label>
@@ -500,8 +514,35 @@ function LeitungPanel({ edge, leitungResults, onUpdateEdge, onUpdateLayer, onDel
         <div style={warnSt}>Kein Durchfluss auf dieser Leitung — Dimensionierung erscheint, sobald sie Wasser führt.</div>
       )}
       <Div />
+      <div style={{ marginBottom:10 }}>
+        <label style={lbl}>Teilstück verschieben</label>
+        {Number.isInteger(segmentIndex) ? (
+          <>
+            <div style={{ fontSize:9, color:'#475569', marginBottom:6 }}>
+              Teilstück {segmentIndex + 1} ist in der Zeichnung violett markiert.
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6 }}>
+              <div><label style={lbl}>ΔX [cm]</label><input type="number" step="1" style={inp} value={dxCm} onChange={e=>setDxCm(e.target.value)} placeholder="0"/></div>
+              <div><label style={lbl}>ΔY [cm]</label><input type="number" step="1" style={inp} value={dyCm} onChange={e=>setDyCm(e.target.value)} placeholder="0"/></div>
+            </div>
+            <button type="button" style={{ ...btnBlue, width:'100%', marginTop:6 }}
+              disabled={!Number(dxCm) && !Number(dyCm)}
+              onClick={() => {
+                onMoveSegment?.(edge.id, segmentIndex, Number(dxCm) || 0, Number(dyCm) || 0);
+                setDxCm(''); setDyCm('');
+              }}>
+              Teilstück exakt verschieben
+            </button>
+          </>
+        ) : (
+          <div style={{ fontSize:9, color:'#64748b', lineHeight:1.45 }}>
+            Zuerst ein Teilstück der Leitung anklicken. Danach frei ziehen oder den Versatz hier in cm eingeben.
+          </div>
+        )}
+      </div>
+      <Div />
       <div style={{ fontSize:9, lineHeight:1.5, color:'#64748b' }}>
-        <b style={{ color:'#334155' }}>Leitungsführung:</b> Die gewählte Leitung direkt am Segment ziehen: senkrechte Stücke bewegen sich links/rechts, waagrechte oben/unten. Doppelklick setzt einen Eckpunkt. Rechtsklick auf einen Endgriff → «Linie weiterziehen». Grüne Hilfslinien zeigen den orthogonalen Fang; Shift rastet auf 0°, 45° oder 90°.
+        <b style={{ color:'#334155' }}>Leitungsführung:</b> Das gewählte Teilstück frei ziehen; der Versatz wird in cm angezeigt. Einzelne Eckpunkte lassen sich ebenfalls frei auf dem Raster verschieben. Doppelklick setzt einen Eckpunkt. Rechtsklick auf einen Endgriff → «Linie weiterziehen».
       </div>
       <Div /><DelBtn onClick={() => onDelete(edge.id)} />
     </div>
@@ -1519,12 +1560,14 @@ function EditorInner() {
   const [selected, setSelected]     = useState(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState(null);
   const [selectedEdgePoint, setSelectedEdgePoint] = useState(null);
+  const [selectedEdgeSegment, setSelectedEdgeSegment] = useState(null); // { edgeId, segmentIndex }
   const [activeLayerId, setActiveLayerId] = useState('heizung_vl');
   const [layerVisibility, setLayerVisibility] = useState(DEFAULT_LAYER_VISIBILITY);
   const [showLayers, setShowLayers] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(true);
   const [paletteGroupsOpen, setPaletteGroupsOpen] = useState(() => ({
-    'Erzeugung & Speicher':true,
+    Erzeuger:true,
+    Speicher:true,
     Verteilung:true,
   }));
   const [showMiniMap, setShowMiniMap] = useState(false);
@@ -1587,6 +1630,7 @@ function EditorInner() {
   const [leitungsCursor, setLeitungsCursor] = useState(null);
   const [leitungsSnap, setLeitungsSnap] = useState(null);
   const [leitungsGuides, setLeitungsGuides] = useState([]);
+  const [segmentVerschiebung, setSegmentVerschiebung] = useState(null);
   const [endpointMenu, setEndpointMenu] = useState(null); // { x, y, edgeId, side }
   const [edgeMenu, setEdgeMenu] = useState(null); // { x, y, edgeId, point }
   const [markierteEdgeIds, setMarkierteEdgeIds] = useState([]);
@@ -2464,7 +2508,7 @@ function EditorInner() {
         paired_edge_id:primaryEdge.id,
         auto_paired:true,
       },
-      style:{ stroke:returnLayer.color, strokeWidth:4.5 },
+      style:{ stroke:returnLayer.color, strokeWidth:2.5 },
     };
     return {
       primaryEdge:{
@@ -2581,7 +2625,7 @@ function EditorInner() {
           corner_radius:drawingConfig.corner_radius,
           points:nextPoints,
         },
-        style:{ ...(existing.style || {}), stroke:layer.color, strokeWidth:4.5 },
+        style:{ ...(existing.style || {}), stroke:layer.color, strokeWidth:2.5 },
       };
 
       if (istLeitungsfang(snapHit)) {
@@ -2682,6 +2726,22 @@ function EditorInner() {
     // Nach Abschluss beenden — ausser der dauerhafte Leitungsmodus ist aktiv.
     setEditorMode(finishCommand(editorModeRef.current));
   }, [activeLayer, bestehendeJunction, cadAnker, drawingConfig, handleAusrichtung, handlePosition, letzterEntwurfsPunkt, leitungTeilen, routePunkte, ruecklaufPaarErstellen, setEdges, setNodes, snap]);
+
+  // ESC beendet eine frei gezeichnete Leitung am LETZTEN bewusst geklickten
+  // Eckpunkt. Die aktuelle Cursorvorschau wird nicht gespeichert. Der letzte
+  // Punkt wird vor dem Abschluss aus den Zwischenpunkten genommen, weil er nun
+  // zum echten Leitungsende wird.
+  const entwurfAmLetztenPunktAbschliessen = useCallback(() => {
+    const draft = leitungsEntwurfRef.current;
+    const abschluss = entwurfFuerEscape(draft);
+    if (!abschluss) return false;
+    leitungsEntwurfRef.current = abschluss.draft;
+    setLeitungsEntwurf(abschluss.draft);
+    leitungsEntwurfAbschliessen(abschluss.endPoint, null, false);
+    // Auch ein Dauerbefehl endet nach ESC immer im Grundzustand.
+    setEditorMode(escapeMode(editorModeRef.current));
+    return true;
+  }, [leitungsEntwurfAbschliessen]);
 
   const cadKlick = useCallback((event, nurBeiAnschluss = false) => {
     // Nur die linke Taste zeichnet. Mittlere Taste = Pan, rechte = abschliessen.
@@ -3043,37 +3103,36 @@ function EditorInner() {
     if (!best) return;
     event.preventDefault();
     snap();
-
-    // Beide Enden des verschobenen Segments müssen Stützpunkte sein. Liegt
-    // ein Segment direkt an einem Bauteil, wird am festen Anschluss unbemerkt
-    // ein zusätzlicher Eckpunkt eingefügt. So bleibt der Fangpunkt verbunden.
-    const workingRoute = route.map(point => ({ ...point }));
-    let startIndex = best.segmentIndex;
-    let endIndex = startIndex + 1;
-    if (startIndex === 0) {
-      workingRoute.splice(1, 0, { ...workingRoute[0] });
-      startIndex = 1;
-      endIndex = 2;
-    }
-    if (endIndex === workingRoute.length - 1) {
-      workingRoute.splice(endIndex, 0, { ...workingRoute.at(-1) });
-    }
-    const a = workingRoute[startIndex];
-    const b = workingRoute[endIndex];
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    const orientation = Math.abs(dy) > Math.abs(dx) * 1.5
-      ? 'vertical'
-      : Math.abs(dx) > Math.abs(dy) * 1.5 ? 'horizontal' : 'diagonal';
+    const vorbereitet = segmentZumVerschieben(route, best.segmentIndex);
+    if (!vorbereitet) return;
+    setSelectedEdgeId(edgeId);
+    setSelectedEdgeSegment({ edgeId, segmentIndex:best.segmentIndex });
+    setSelectedEdgePoint(null);
+    setSegmentVerschiebung({ edgeId, segmentIndex:best.segmentIndex, delta:{ x:0, y:0 }, active:true });
     edgeSegmentDrag.current = {
       edgeId,
       pointer:raw,
-      points:workingRoute.slice(1, -1),
-      pointIndexes:[startIndex - 1, endIndex - 1],
-      orientation,
-      direction:{ x:dx, y:dy },
+      segmentIndex:best.segmentIndex,
+      ...vorbereitet,
     };
   }, [routePunkte, screenToFlowPosition, snap]);
+
+  const segmentNumerischVerschieben = useCallback((edgeId, segmentIndex, dxCm, dyCm) => {
+    const edge = edgesRef.current.find(item => item.id === edgeId);
+    if (!edge || !Number.isInteger(segmentIndex)) return;
+    const vorbereitet = segmentZumVerschieben(routePunkte(edge), segmentIndex);
+    if (!vorbereitet) return;
+    const delta = { x:(Number(dxCm) || 0) * 10, y:(Number(dyCm) || 0) * 10 };
+    if (!delta.x && !delta.y) return;
+    snap();
+    const points = segmentVerschieben(
+      vorbereitet.points, vorbereitet.pointIndexes, null, delta, { grid:1 },
+    );
+    setEdges(items => items.map(item => item.id === edgeId
+      ? { ...item, data:{ ...(item.data || {}), cad_polyline:true, points } }
+      : item));
+    setSegmentVerschiebung({ edgeId, segmentIndex, delta, active:false });
+  }, [routePunkte, setEdges, snap]);
 
   useEffect(() => {
     const move = (event) => {
@@ -3087,16 +3146,22 @@ function EditorInner() {
         { x:raw.x - drag.pointer.x, y:raw.y - drag.pointer.y },
         { grid:drawingConfig.grid_size, direction:drag.direction },
       );
+      const delta = {
+        x:Math.round((raw.x - drag.pointer.x) / drawingConfig.grid_size) * drawingConfig.grid_size,
+        y:Math.round((raw.y - drag.pointer.y) / drawingConfig.grid_size) * drawingConfig.grid_size,
+      };
       if (edgePointFrame.current) cancelAnimationFrame(edgePointFrame.current);
       edgePointFrame.current = requestAnimationFrame(() => {
         setEdges(items => items.map(item => item.id === drag.edgeId
           ? { ...item, data:{ ...(item.data || {}), cad_polyline:true, points:nextPoints } }
           : item));
+        setSegmentVerschiebung({ edgeId:drag.edgeId, segmentIndex:drag.segmentIndex, delta, active:true });
       });
     };
     const up = () => {
       const beendet = edgeSegmentDrag.current;
       edgeSegmentDrag.current = null;
+      setSegmentVerschiebung(current => current ? { ...current, active:false } : current);
       if (beendet?.edgeId) leitungNormalisieren(beendet.edgeId);
     };
     window.addEventListener('pointermove', move, { passive:true });
@@ -3118,9 +3183,9 @@ function EditorInner() {
         ? points[drag.pointIndex - 1]
         : handlePosition(edge.source, edge.sourceHandle);
       const raw = screenToFlowPosition({ x:event.clientX, y:event.clientY });
-      const point = constrainPoint(origin, raw, {
-        ortho:orthoAnRef.current, shift:event.shiftKey, grid:drawingConfig.grid_size,
-      });
+      const point = event.shiftKey
+        ? constrainPoint(origin, raw, { ortho:true, shift:true, grid:drawingConfig.grid_size })
+        : rasterPunkt(raw, drawingConfig.grid_size);
       if (edgePointFrame.current) cancelAnimationFrame(edgePointFrame.current);
       edgePointFrame.current = requestAnimationFrame(() => {
         setEdges(items => items.map(item => {
@@ -3356,6 +3421,12 @@ function EditorInner() {
         if (ev.key === 'Escape') {
           ev.preventDefault();
           ev.stopPropagation();
+          if (entwurfAmLetztenPunktAbschliessen()) {
+            setLaengenPuffer(null);
+            setEndpointMenu(null);
+            setEdgeMenu(null);
+            return;
+          }
           leitungsEntwurfRef.current = null;
           leitungsCursorRef.current = null;
           setLeitungsEntwurf(null);
@@ -3426,7 +3497,7 @@ function EditorInner() {
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [undo, redo, selected, selectedEdgeId, selectedEdgePoint, punktEntfernen, snap, rotateNode, mirrorNode, alignNode, nudgeNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, spiegelAchse, drawingConfig, setNodes, laengeAnwenden]);
+  }, [undo, redo, selected, selectedEdgeId, selectedEdgePoint, punktEntfernen, snap, rotateNode, mirrorNode, alignNode, nudgeNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, spiegelAchse, drawingConfig, setNodes, laengeAnwenden, entwurfAmLetztenPunktAbschliessen]);
 
   // Berechnete Werte (Backend) in die Node-Daten spiegeln — nur für die Anzeige.
   // Verteiler-Rahmen: nur die Balken sind greifbar (dragHandle), die Lücke
@@ -3555,6 +3626,7 @@ function EditorInner() {
         _onRemovePoint:punktEntfernen,
         _onSelectPoint:(edgeId, pointIndex) => setSelectedEdgePoint({ edgeId, pointIndex }),
         _selectedPointIndex:selectedEdgePoint?.edgeId === edge.id ? selectedEdgePoint.pointIndex : null,
+        _selectedSegmentIndex:selectedEdgeSegment?.edgeId === edge.id ? selectedEdgeSegment.segmentIndex : null,
         _onPointPointerDown:punktDragStart,
         _onSegmentPointerDown:segmentDragStart,
         _onEndpointPointerDown:endpointDragStart,
@@ -3570,7 +3642,7 @@ function EditorInner() {
       style: { ...edge.style, stroke:color },
       };
     });
-  }, [edges, edgeContextMenu, edgeFlows, endpointContextMenu, endpointDragStart, junctionDegrees, layerVisibility, leitungResults, markierteEdgeIds, nodeGeometryVersion, punktDragStart, punktEntfernen, punktHinzufuegen, routePunkte, segmentDragStart, selectedEdgeId, selectedEdgePoint]);
+  }, [edges, edgeContextMenu, edgeFlows, endpointContextMenu, endpointDragStart, junctionDegrees, layerVisibility, leitungResults, markierteEdgeIds, nodeGeometryVersion, punktDragStart, punktEntfernen, punktHinzufuegen, routePunkte, segmentDragStart, selectedEdgeId, selectedEdgePoint, selectedEdgeSegment]);
 
   const loadSchema = (key) => {
     const s = SCHALTUNGEN[key];
@@ -3661,7 +3733,7 @@ function EditorInner() {
     const branchJunctionId = branchHit ? newId() : null;
     const nodePosition = branchZiel
       ? { x:branchZiel.x - branchDef.x * branchDef.w, y:branchZiel.y - branchDef.y * branchDef.h }
-      : lineHit ? { x:lineHit.x - 20, y:lineHit.y - 20 } : pos;
+      : lineHit ? inlineNodePosition(nodeType, { x:lineHit.x, y:lineHit.y }) : pos;
 
     // Ausrichtung des Bauteils an der Leitung (§5): die Flussachse (top/bottom)
     // soll mit der Leitung fluchten. Waagrechte Leitung → Bauteil 90° drehen.
@@ -3838,6 +3910,7 @@ function EditorInner() {
     setSelected(node);
     setSelectedEdgeId(null);
     setSelectedEdgePoint(null);
+    setSelectedEdgeSegment(null);
     setInspectorOpen(true);
   }, [cadKlick, platzierenKlick]);
   const onNodeDoubleClick = useCallback((_, node) => {
@@ -3918,9 +3991,17 @@ function EditorInner() {
     setMarkierteEdgeIds([]);
     setSelectedEdgeId(edge.id);
     setSelectedEdgePoint(current => current?.edgeId === edge.id ? current : null);
+    const route = routePunkte(edge);
+    const welt = screenToFlowPosition({ x:event.clientX, y:event.clientY });
+    let segment = null;
+    for (let index = 0; index < route.length - 1; index += 1) {
+      const hit = projektionAufSegment(welt, route[index], route[index + 1]);
+      if (hit && (!segment || hit.distance < segment.distance)) segment = { ...hit, segmentIndex:index };
+    }
+    setSelectedEdgeSegment(segment ? { edgeId:edge.id, segmentIndex:segment.segmentIndex } : null);
     setSelected(null);
     setInspectorOpen(true);
-  }, [ausrichtenKlick, cadKlick, platzierenKlick]);
+  }, [ausrichtenKlick, cadKlick, platzierenKlick, routePunkte, screenToFlowPosition]);
 
   const spiegelKopieErstellen = useCallback((edgeId, axisStart, axisEnd) => {
     const edge = edgesRef.current.find(item => item.id === edgeId);
@@ -3989,6 +4070,7 @@ function EditorInner() {
     setSelected(null);
     setSelectedEdgeId(null);
     setSelectedEdgePoint(null);
+    setSelectedEdgeSegment(null);
     setMarkierteEdgeIds([]);
   }, [cadKlick, drawingConfig.grid_size, screenToFlowPosition, selected, selectedEdgeId, spiegelAchse, spiegelKopieErstellen, platzierenKlick]);
 
@@ -4520,6 +4602,13 @@ function EditorInner() {
                 </div>
               </Panel>
             )}
+            {segmentVerschiebung?.active && (
+              <Panel position="top-center">
+                <div style={{ marginTop:46, padding:'7px 12px', borderRadius:18, background:'#5b21b6', color:'white', fontSize:10, fontWeight:700, boxShadow:'0 6px 16px rgba(91,33,182,.25)' }}>
+                  Teilstück {segmentVerschiebung.segmentIndex + 1} · Δ {verschiebungLabel(segmentVerschiebung.delta)}
+                </div>
+              </Panel>
+            )}
             {leitungsEntwurf && (
               <Panel position="top-center">
                 <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:8, padding:'7px 12px', borderRadius:18,
@@ -4533,11 +4622,12 @@ function EditorInner() {
                     : ['line', 'midpoint'].includes(leitungsSnap?.type)
                       ? 'T-Verbindung erstellen'
                       : leitungsEntwurf.extendEdgeId
-                        ? 'Linie weiterziehen · Klick = neuer Eckpunkt · Enter = fertig'
-                        : 'Leitung zeichnen · Klick = Eckpunkt · Enter = fertig'}
-                  <button onClick={()=>leitungsCursorRef.current && leitungsEntwurfAbschliessen(leitungsCursorRef.current, leitungsSnap, shiftPressed)}
+                        ? 'Linie weiterziehen · Klick = neuer Eckpunkt · Esc = fertig'
+                        : 'Leitung zeichnen · Klick = Eckpunkt · Esc = fertig'}
+                  <button onClick={entwurfAmLetztenPunktAbschliessen}
+                    disabled={!leitungsEntwurf.points?.length}
                     style={{ width:22, height:22, borderRadius:11, border:0, background:'rgba(255,255,255,.2)', color:'white', cursor:'pointer', fontWeight:800 }}
-                    title="Leitung abschliessen">✓</button>
+                    title="Am letzten Eckpunkt abschliessen (Esc)">✓</button>
                 </div>
               </Panel>
             )}
@@ -4546,7 +4636,7 @@ function EditorInner() {
                 {cadEntwurfRoute.length >= 2 && (
                   <path d={roundedPolylinePath(cadEntwurfRoute, drawingConfig.corner_radius)} fill="none"
                     stroke={(LEITUNGS_LAYER.find(layer => layer.id === leitungsEntwurf?.layerId) || activeLayer).color}
-                    strokeWidth="4.5" strokeDasharray="12 7" strokeLinecap="round" strokeLinejoin="round" />
+                    strokeWidth="2.5" strokeDasharray="12 7" strokeLinecap="round" strokeLinejoin="round" />
                 )}
                 {leitungsGuides.map((guide, index) => (
                   <g key={`guide-${index}`}>
@@ -4814,7 +4904,10 @@ function EditorInner() {
               </button>
             </div>
             {selectedEdge ? (
-              <LeitungPanel edge={selectedEdge} leitungResults={leitungResults} onUpdateEdge={updateEdgeData} onUpdateLayer={updateEdgeLayer} onDelete={deleteEdge} />
+              <LeitungPanel edge={selectedEdge} leitungResults={leitungResults}
+                segmentIndex={selectedEdgeSegment?.edgeId === selectedEdge.id ? selectedEdgeSegment.segmentIndex : null}
+                onMoveSegment={segmentNumerischVerschieben}
+                onUpdateEdge={updateEdgeData} onUpdateLayer={updateEdgeLayer} onDelete={deleteEdge} />
             ) : (
               <PropertiesPanel node={selectedNode} nodeFlows={nodeFlows} verteilerResults={verteilerResults} gruppeResults={gruppeResults} ventilResults={ventilResults} pumpenResults={pumpenResults} expansionResults={expansionResults} anschlussWarnungen={anschlussWarnungen} anschlussResults={anschlussResults} pwtResults={pwtResults} heatpumpResults={heatpumpResults} onUpdate={updateNode} onDelete={deleteNode} onSetAbgaenge={setAbgaenge} navigate={navigate}
                 drawingConfig={drawingConfig} onDrawingConfig={drawingConfigAktualisieren}/>

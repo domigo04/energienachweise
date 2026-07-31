@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   abzweigPunkt,
+  entwurfFuerEscape,
   eckpunktEntfernen, eckpunktSetzen, gripsFuerRoute,
   istKollinear, routeBereinigen, routeIstGueltig,
   segmentAusrichten, segmentOrientierung, segmentVerschieben,
+  segmentZumVerschieben, verschiebungLabel,
 } from './cadEdit';
 
 describe('Grips', () => {
@@ -51,7 +53,7 @@ describe('segmentVerschieben — der CAD-Fall aus Punkt 11', () => {
   ];
 
   it('verschiebt das senkrechte Segment parallel und verlängert die Nachbarn', () => {
-    const nachher = segmentVerschieben(route, [1, 2], 'vertical', { x: 300, y: 17 }, { grid: 10 });
+    const nachher = segmentVerschieben(route, [1, 2], 'vertical', { x: 300, y: 17 }, { grid: 10, axisLocked:true });
     // Nur die beiden Segmentpunkte sind gewandert, und nur in x.
     expect(nachher[1]).toEqual({ x: 900, y: 0 });
     expect(nachher[2]).toEqual({ x: 900, y: 400 });
@@ -66,13 +68,13 @@ describe('segmentVerschieben — der CAD-Fall aus Punkt 11', () => {
   });
 
   it('lässt ein senkrechtes Segment nicht nach oben/unten wandern', () => {
-    const nachher = segmentVerschieben(route, [1, 2], 'vertical', { x: 0, y: 250 }, { grid: 10 });
+    const nachher = segmentVerschieben(route, [1, 2], 'vertical', { x: 0, y: 250 }, { grid: 10, axisLocked:true });
     expect(nachher[1].y).toBe(0);
     expect(nachher[2].y).toBe(400);
   });
 
   it('verschiebt ein waagrechtes Segment nur senkrecht', () => {
-    const nachher = segmentVerschieben(route, [0, 1], 'horizontal', { x: 180, y: -120 }, { grid: 10 });
+    const nachher = segmentVerschieben(route, [0, 1], 'horizontal', { x: 180, y: -120 }, { grid: 10, axisLocked:true });
     expect(nachher[0]).toEqual({ x: 0, y: -120 });
     expect(nachher[1]).toEqual({ x: 600, y: -120 });
     expect(segmentOrientierung(nachher[0], nachher[1])).toBe('horizontal');
@@ -86,7 +88,7 @@ describe('segmentVerschieben — der CAD-Fall aus Punkt 11', () => {
   it('hält bei einem diagonalen Segment den Winkel', () => {
     const diag = [{ x: 0, y: 0 }, { x: 100, y: 100 }];
     const nachher = segmentVerschieben(diag, [0, 1], null, { x: 40, y: -40 },
-                                       { grid: 10, direction: { x: 100, y: 100 } });
+                                       { grid: 10, direction: { x: 100, y: 100 }, axisLocked:true });
     // Beide Punkte um denselben Vektor → Richtung unverändert.
     const vorher = { x: diag[1].x - diag[0].x, y: diag[1].y - diag[0].y };
     const jetzt = { x: nachher[1].x - nachher[0].x, y: nachher[1].y - nachher[0].y };
@@ -102,6 +104,42 @@ describe('segmentVerschieben — der CAD-Fall aus Punkt 11', () => {
   it('ist ohne betroffene Punkte ein No-Op', () => {
     expect(segmentVerschieben(route, [], 'vertical', { x: 300, y: 0 })).toEqual(route);
     expect(segmentVerschieben(null, [1], 'vertical', { x: 1, y: 1 })).toEqual([]);
+  });
+
+  it('verschiebt ein Teilstück standardmässig frei in X und Y', () => {
+    const nachher = segmentVerschieben(route, [1, 2], 'vertical', { x: 125, y: -75 }, { grid: 5 });
+    expect(nachher[1]).toEqual({ x: 725, y: -75 });
+    expect(nachher[2]).toEqual({ x: 725, y: 325 });
+  });
+
+  it('schützt bei einem Randsegment den hydraulischen Endpunkt', () => {
+    const vorbereitet = segmentZumVerschieben([{ x:0, y:0 }, { x:500, y:0 }], 0);
+    expect(vorbereitet.points).toEqual([{ x:0, y:0 }, { x:500, y:0 }]);
+    expect(vorbereitet.pointIndexes).toEqual([0, 1]);
+    const bewegt = segmentVerschieben(vorbereitet.points, vorbereitet.pointIndexes, 'horizontal', { x:0, y:200 });
+    expect(bewegt).toEqual([{ x:0, y:200 }, { x:500, y:200 }]);
+  });
+
+  it('beschriftet die Verschiebung in cm und ab einem Meter in m', () => {
+    expect(verschiebungLabel({ x:300, y:400 })).toBe('50 cm');
+    expect(verschiebungLabel({ x:1000, y:0 })).toBe('1 m');
+  });
+});
+
+describe('Leitung mit Escape abschliessen', () => {
+  it('verwendet den letzten gesetzten Eckpunkt und nie die Cursorvorschau', () => {
+    const draft = {
+      startPoint:{ x:0, y:0 },
+      points:[{ x:300, y:0 }, { x:300, y:500 }],
+    };
+    expect(entwurfFuerEscape(draft)).toEqual({
+      endPoint:{ x:300, y:500 },
+      draft:{ startPoint:{ x:0, y:0 }, points:[{ x:300, y:0 }] },
+    });
+  });
+
+  it('erzeugt ohne gesetzten Eckpunkt keine Leitung', () => {
+    expect(entwurfFuerEscape({ startPoint:{ x:0, y:0 }, points:[] })).toBeNull();
   });
 });
 

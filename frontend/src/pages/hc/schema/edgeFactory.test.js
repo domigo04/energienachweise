@@ -16,6 +16,7 @@ describe("createHydraulicEdge", () => {
     expect(e).not.toBeNull();
     expect(e.type).toBe("flow");
     expect(e.data.layer_id).toBe("heizung_vl");
+    expect(e.style.strokeWidth).toBe(2.5);
     expect(e.source).toBe("A");
     expect(e.target).toBe("B");
   });

@@ -47,6 +47,6 @@ export function createHydraulicEdge(params, existingEdges = []) {
     id, source, sourceHandle, target, targetHandle,
     type: "flow", selected: false,
     data: { layer_id: layerId, cad_polyline: true, polyline_version: 1, corner_radius: cornerRadius, points },
-    style: { stroke: layerColor, strokeWidth: 4.5 },
+    style: { stroke: layerColor, strokeWidth: 2.5 },
   };
 }

@@ -16,6 +16,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import './HydraulikEditor.css';
 import { NODE_TYPES, NUMMERIERT, ROTATABLE } from '../../components/hc/nodes/HydraulikNodes';
+import { gedrehteSeite } from '../../components/hc/nodes/anschlussSeite';
 import { EDGE_TYPES } from '../../components/hc/edges/FlowEdge';
 import { pairedHandleId, parallelWaypoints, roundedPolylinePath, splitRouteAtCorner, splitRouteAtPoint, reconnectThroughNode, adaptivePolyline, segmentAchse, mitgezogeneWaypoints } from '../../components/hc/edges/geometry';
 import { createHydraulicEdge, canStartHydraulicLine } from './schema/edgeFactory';
@@ -201,36 +202,17 @@ function objektAusrichtung(point, snapPoints, tolerance = 10, grid = CAD_GRID) {
   return { point:snapped, guides, xMatch:xMatch?.snapPoint, yMatch:yMatch?.snapPoint };
 }
 
-// Seiten im Uhrzeigersinn — eine 90°-Drehung (CSS rotate, im Uhrzeigersinn)
-// verschiebt jede Seite um einen Schritt weiter: rechts→unten→links→oben.
-const SEITEN_UHRZEIGER = ['top', 'right', 'bottom', 'left'];
-
-function rotiereSeite(seite, rotation) {
-  if (!seite || !rotation) return seite;
-  const index = SEITEN_UHRZEIGER.indexOf(seite);
-  if (index < 0) return seite;
-  const schritte = ((Math.round(rotation / 90) % 4) + 4) % 4;
-  return SEITEN_UHRZEIGER[(index + schritte) % 4];
-}
-
-// Horizontale Spiegelung (scaleX(-1)) vertauscht links/rechts; oben/unten bleibt.
-function spiegelSeite(seite) {
-  if (seite === 'left') return 'right';
-  if (seite === 'right') return 'left';
-  return seite;
-}
-
 function anschlussSeite(handle, internal) {
-  const rotation = internal?.data?.rotation || 0;
-  const mirrored = Boolean(internal?.data?.mirrored);
-  // Die deklarierte Position (Handle-Prop) dreht/spiegelt NICHT mit der CSS-
-  // Transformation mit — daher hier um Spiegelung (zuerst) und Drehung (danach)
-  // korrigieren, sonst zeigt die Anfahrt in die falsche Richtung (komischer
-  // Fangpunkt). Reihenfolge entspricht `transform: rotate() scaleX(-1)`.
+  // Die deklarierte Position (Handle-Prop) dreht NICHT mit der CSS-
+  // Transformation mit — sie wird hier korrigiert, sonst zeigt die Anfahrt in
+  // die falsche Richtung. Die Regel dazu liegt rein und getestet in
+  // `nodes/anschlussSeite.js`; sie darf nur an EINER Stelle stehen.
   if (handle?.position) {
-    let seite = String(handle.position).toLowerCase();
-    if (mirrored) seite = spiegelSeite(seite);
-    return rotiereSeite(seite, rotation);
+    return gedrehteSeite(
+      String(handle.position).toLowerCase(),
+      internal?.data?.rotation || 0,
+      Boolean(internal?.data?.mirrored),
+    );
   }
   // Geometrische Herleitung: die gemessenen Bounds spiegeln die Drehung bereits
   // (getBoundingClientRect), daher keine zusätzliche Korrektur.
@@ -4198,6 +4180,15 @@ function EditorInner() {
         ...(edge.data || {}),
         cad_polyline:true,
         _routePoints:effectiveRoute.slice(1, -1),
+        // Auch die ENDEN kommen aus der berechneten Route. React Flow leitet
+        // seine eigenen Endpunkte aus der deklarierten Handle-Seite ab — und
+        // die dreht bei einem gedrehten Bauteil nicht mit. Bei einem quer
+        // liegenden 3-Weg-Ventil landeten die beiden Enden der Flussachse
+        // dadurch ein paar Pixel über- und untereinander statt auf einer Höhe
+        // (Dominic 2026-07-31). Der Editor misst den Anschluss selbst; diese
+        // Messung ist die Wahrheit, nicht die Deklaration.
+        _routeStart:effectiveRoute[0],
+        _routeEnd:effectiveRoute.at(-1),
         _groupSelected:markierteEdgeIds.includes(edge.id),
         _layerRole:layer.role,
         _dashed:layer.dashed,

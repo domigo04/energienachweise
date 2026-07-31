@@ -52,7 +52,13 @@ export function FlowEdge({
     : storedWaypoints.length
       ? storedWaypoints
       : automatischeEckpunkte(sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition);
-  const vertices = [{ x: sourceX, y: sourceY }, ...waypoints, { x: targetX, y: targetY }];
+  // Endpunkte: der Editor misst den Anschluss selbst und liefert ihn mit. Nur
+  // wo diese Messung fehlt (Export, Vorschau ohne Editor), gelten React Flows
+  // eigene Werte — sie leiten den Endpunkt aus der DEKLARIERTEN Handle-Seite
+  // ab, und die dreht bei einem gedrehten Bauteil nicht mit.
+  const start = data._routeStart || { x: sourceX, y: sourceY };
+  const end = data._routeEnd || { x: targetX, y: targetY };
+  const vertices = [{ x: start.x, y: start.y }, ...waypoints, { x: end.x, y: end.y }];
   // Grips sollen auf dem Schirm immer gleich gross sein, egal wie stark gezoomt
   // ist. Darum die Radien durch den Zoom teilen: r_welt = r_screen / zoom.
   const zoom = Math.max(useStore((state) => state.transform[2]) || 1, 0.05);

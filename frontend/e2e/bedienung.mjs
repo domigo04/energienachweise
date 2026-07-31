@@ -377,6 +377,58 @@ kopf('Schemas als Vorlage speichern und wiederverwenden');
     `${await page.locator('.react-flow__node').count()} Nodes`);
 }
 
+// ── 9. Anschlüsse eines gedrehten Bauteils liegen auf einer Achse ─────────
+kopf('Gedrehtes Bauteil: die Flussachse bleibt eine Achse');
+{
+  const leitung = (id, source, sourceHandle, target, targetHandle) => ({
+    id, source, sourceHandle, target, targetHandle, type: 'flow',
+    data: { layer_id: 'heizung_vl', cad_polyline: true, polyline_version: 1, points: [], dn: 40 },
+    style: { stroke: '#ef4444', strokeWidth: 4.5 },
+  });
+
+  // Die Enden der gezeichneten Leitungen in Weltkoordinaten — nicht die
+  // Handles: gemeldet wurde, dass die LEITUNGEN nicht auf einer Höhe ankommen.
+  const leitungsEnden = () => page.evaluate(() => {
+    const vp = document.querySelector('.react-flow__viewport');
+    const m = new DOMMatrix(getComputedStyle(vp).transform);
+    const r = document.querySelector('.react-flow').getBoundingClientRect();
+    return [...document.querySelectorAll('.react-flow__edge')].map((el) => {
+      const pfad = el.querySelector('path');
+      const a = pfad.getPointAtLength(0);
+      const b = pfad.getPointAtLength(pfad.getTotalLength());
+      void m; void r;
+      return { id: el.dataset.id, ax: a.x, ay: a.y, bx: b.x, by: b.y };
+    });
+  });
+
+  for (const [rotation, achse] of [[90, 'y'], [270, 'y'], [0, 'x'], [180, 'x']]) {
+    // Bei 0°/180° liegt die Flussachse senkrecht — dann muss das X übereinstimmen.
+    const quer = achse === 'y';
+    await w.graphSetzen({
+      nodes: [
+        { id: 'a1', type: 'junction', position: quer ? { x: 150, y: 417 } : { x: 517, y: 100 }, data: { cad_anchor: true } },
+        { id: 'a2', type: 'junction', position: quer ? { x: 900, y: 417 } : { x: 517, y: 800 }, data: { cad_anchor: true } },
+        { id: 'v1', type: 'valve3', position: { x: 500, y: 400 }, data: { nr: 13, rotation } },
+      ],
+      edges: [
+        leitung('e1', 'a1', 'center-source', 'v1', 'bottom'),
+        leitung('e2', 'v1', 'top', 'a2', 'center-target'),
+      ],
+      layer_config: {},
+    });
+    await w.laden();
+    await w.mausWeg();
+
+    const enden = await leitungsEnden();
+    const anschluss = enden.map(e => (quer
+      ? (e.id === 'e1' ? e.by : e.ay)      // das Ende, das am Ventil hängt
+      : (e.id === 'e1' ? e.bx : e.ax)));
+    const abweichung = Math.abs(anschluss[0] - anschluss[1]);
+    pruefe(`W${rotation}`, `Bei ${rotation}° kommen beide Leitungen auf derselben ${quer ? 'Höhe' : 'Flucht'} an`,
+      abweichung <= 0.5, `Abweichung ${abweichung.toFixed(2)} px`);
+  }
+}
+
 pruefe('X', 'keine Konsolenfehler', w.fehler.length === 0, w.fehler.slice(0, 3).join(' || '));
 await page.screenshot({ path: `${OUT}/bedienung.png` });
 const offen = bilanz(OUT);

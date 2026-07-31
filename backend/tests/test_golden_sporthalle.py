@@ -201,6 +201,16 @@ def test_alle_drei_abgabesysteme_erkannt():
     assert codes == ["konvektoren", "luftheizapparat", "roehrenradiator"]
 
 
+def test_heizkoerperzubehoer_ist_keine_zusaetzliche_waermeabgabe():
+    pages = [{"page": 26, "text": (
+        "Flachröhrenradiator Typ Excelsior Stk. 3\n"
+        "Heizkörper-Entleerhahn vernickelt Stk. 7\n"
+        "Heizkörper-Thermostatventil Stk. 7\n"
+        "Heizkörperverschraubung Stk. 7"
+    )}]
+    assert systems.delivery_codes(systems.detect(pages)) == ["roehrenradiator"]
+
+
 def test_bauseitige_lieferung_und_eigene_montage_unterschieden():
     _, angewendet = visual_review.apply_result({}, _visual_result())
     lha = next(s for s in angewendet["systems"] if s["type_code"] == "luftheizapparat")

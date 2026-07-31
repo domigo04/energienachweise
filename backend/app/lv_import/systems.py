@@ -28,6 +28,11 @@ _FREMDLIEFERUNG = (
 )
 _MONTAGE_DURCH_UNS = ("montage", "montieren", "versetzen", "anschliessen", "anschließen")
 _BESTAND = ("bestehend", "bestehende", "vorhanden", "vorhandene", "altanlage")
+_HEIZKOERPER_ZUBEHOER = (
+    "entleerhahn", "entlüfter", "entluefter", "thermostatventil",
+    "thermostatkopf", "verschraubung", "aufhängung", "aufhaengung",
+    "halterung", "anschlussarmatur", "ventileinsatz",
+)
 
 # Menge einer Position: «Stk. 4», «4 Stk», «Anzahl 4». Bewusst eng gehalten —
 # eine Typennummer wie «Typ 22» darf nie als Menge durchgehen.
@@ -100,6 +105,12 @@ def detect(pages, kind: str = HEAT_EMISSION) -> list[dict]:
         code = fachwerte.normalize(registry, text)
         if not code or code == "sonstige":
             continue
+        if (
+            kind == HEAT_EMISSION and code == "heizkoerper"
+            and any(term in text.lower() for term in _HEIZKOERPER_ZUBEHOER)
+        ):
+            # Zubehör zu einem Heizkörper ist kein zusätzliches Abgabesystem.
+            continue
         # Ohne Seitenzahl gäbe es keinen nachprüfbaren Beleg — die Zeile wird
         # dann verworfen statt als Merkmal gespeichert.
         if zeile.get("page") is None:
@@ -124,6 +135,12 @@ def detect(pages, kind: str = HEAT_EMISSION) -> list[dict]:
         # mehrfach (Beschrieb, Menge, Preis).
         if vorhanden is None or (eintrag["count"] and not vorhanden.get("count")):
             gefunden[code] = eintrag
+    # Ein konkreter Radiatortyp ist fachlich präziser als der zusätzlich
+    # vorkommende Sammelbegriff «Heizkörper» und darf nicht doppelt erscheinen.
+    if kind == HEAT_EMISSION and "heizkoerper" in gefunden and any(
+        code in gefunden for code in ("roehrenradiator", "plattenradiator")
+    ):
+        gefunden.pop("heizkoerper", None)
     return [e for e in gefunden.values() if hat_beleg(e)]
 
 

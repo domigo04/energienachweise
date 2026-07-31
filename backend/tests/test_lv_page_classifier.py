@@ -117,6 +117,29 @@ def test_tabellenzeile_mit_ep_und_total():
     assert parsed["total"] == 222.0
 
 
+def test_tabellenzeile_menge_vor_einheit_verwechselt_ep_nicht_mit_ausmass():
+    """Dupper-Layout: Beschreibung | Menge | ME | Preis | Total."""
+    row = [_wort("Verbundrohr 16 mm", 60, 100), _wort("5000.00", 250, 100),
+           _wort("m", 310, 100), _wort("1.75", 360, 100), _wort("8'750.00", 430, 100)]
+    parsed = parse_table_row(row)
+    assert parsed["ausmass"] == 5000
+    assert parsed["ep"] == 1.75
+    assert parsed["total"] == 8750
+
+
+def test_metrisches_gewinde_m10_ist_keine_meter_einheit():
+    row = [_wort('1/2“:', 60, 100), _wort("M", 160, 100), _wort("10", 190, 100),
+           _wort("Stk.", 300, 100), _wort("4", 350, 100)]
+    parsed = parse_table_row(row)
+    assert parsed["einheit"] == "stk"
+    assert parsed["ausmass"] == 4
+
+
+def test_code_text_menge_me_preis_total_ist_lv_kopf():
+    text = "Code Text Menge ME Preis Total\n243.1 Rohrleitungen\n12.00 m 26.90 322.80"
+    assert pc.classify_page(text)["type"] == pc.LV
+
+
 def test_wert_rechts_vom_label_gewinnt():
     """Punkt 4 — der Wert rechts vom Label zählt, nicht eine Zahl darüber."""
     word_pages = [{"page": 15, "words": [

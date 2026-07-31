@@ -366,6 +366,7 @@ async def upload_lv(
             }
         )
         vorhandene_konditionen = 0
+        konditionen_quelle = "keine"
         visual_apply = {
             "visual_review_features_applied": 0,
             "visual_review_costs_applied": 0,
@@ -396,6 +397,8 @@ async def upload_lv(
                 costs = visual_costs
             commercial_result = visual_apply.get("commercial") or {}
             vorhandene_konditionen = len(commercial_result.get("conditions") or [])
+            if vorhandene_konditionen:
+                konditionen_quelle = "visual_ai_pdf"
             for item in commercial_result.get("conditions") or []:
                 db.add(LvImportCondition(
                     lv_import_id=imp.id,
@@ -442,6 +445,11 @@ async def upload_lv(
                     status=item.get("status") or "priced",
                 ))
             vorhandene_konditionen = len(kette.get("conditions") or [])
+            # Auch ohne visuellen Review muss die komplette berechnete Kette im
+            # Report landen; sonst zeigt das UI zwar Konditionszeilen, aber
+            # keine Abzüge, MWST und Endsumme an.
+            visual_apply["commercial"] = kette
+            konditionen_quelle = "parser"
         else:
             konditions_hinweise = []
 
@@ -553,10 +561,7 @@ async def upload_lv(
             "systeme_waermeerzeugung": len(systems.generator_codes(systeme)),
             "handschrift_offen": len(visual_apply.get("handwritten_open") or []),
             "konditionen_erkannt": vorhandene_konditionen,
-            "konditionen_quelle": (
-                "visual_ai_pdf" if (visual_apply.get("commercial") or {}).get("conditions")
-                else "parser" if vorhandene_konditionen else "keine"
-            ),
+            "konditionen_quelle": konditionen_quelle,
             "konditionen_hinweise": konditions_hinweise,
             "kosten_pruefen": len([c for c in costs if c.get("requires_review")]),
             **budget.status(),

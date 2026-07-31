@@ -186,6 +186,43 @@ def test_hagmann_rohrmeter_ignorieren_standardlaengen_und_metrische_gewinde():
     assert res["pipe_length_m"]["value"] == 288
 
 
+def test_materialcodes_ueberschreiben_bkp_abschnitt_nicht():
+    """211.xxx sind Katalogcodes innerhalb 241/243, keine neuen Abschnitte."""
+    text = (
+        "241.1 Rohrleitungen Primär\n"
+        "211.313 Debrunner Stahlrohr DN20 12.00 m 26.90 322.80\n"
+        "211.314 Debrunner Stahlrohr DN25 24.00 m 40.00 960.00\n"
+        "243.1 Rohrleitungen Verteilung\n"
+        "211.315 Debrunner Stahlrohr DN15 252.00 m 20.00 5'040.00\n"
+        "243.2 Flächenheizung\n"
+        "213.100 Verbundrohr 16 mm 5000.00 m 1.75 8'750.00"
+    )
+    res = q.pipe_lengths(_rows(text))
+    assert res["pipe_length_source_m"]["value"] == 36
+    assert res["pipe_length_distribution_m"]["value"] == 252
+    assert res["pipe_length_m"]["value"] == 288
+
+
+def test_daemmschichtdicke_in_folgezeile_ist_keine_rohrmenge():
+    text = (
+        "241.11 Rohrleitungen Primärkreis\n"
+        "Inkl. Grundplatte, Nippel, Dübel und Schrauben.\n"
+        "Dämmschichtdicke: M = 19 - 26 mm\n"
+        "Geschweisste Gasrohre DN20 m 12"
+    )
+    res = q.pipe_lengths(_rows(text))
+    assert res["pipe_length_source_m"]["value"] == 12
+
+
+def test_waermemessung_pauschale_belegt_vorhanden_aber_keine_anzahl():
+    features = extract_features([{
+        "page": 23,
+        "text": "243.4 Wärmemessung\nNeo Vac Offerte Wärmemessung pauschal 1 St",
+    }])
+    assert features["heat_metering_present"]["value"] is True
+    assert features.get("heat_meter_count", {}).get("value") is None
+
+
 def test_quadratmeter_sind_keine_rohrmeter():
     """m² darf nicht als Laufmeter gelesen werden."""
     res = q.pipe_lengths(_rows("243.2 Flächenheizung\nBodenheizung Fläche m2 450"))

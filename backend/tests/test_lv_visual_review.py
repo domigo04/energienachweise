@@ -236,6 +236,16 @@ def test_starker_techniktreffer_wird_trotz_parserwert_visuell_geprueft():
     assert visual_review.select_technical_review_pages(pages, features) == [8]
 
 
+def test_hydraulikschema_hat_im_knappen_seitenbudget_vorrang():
+    pages = [
+        {"page": 4, "text": "Prinzipschema Heizung Legende Heizung Wärmepumpe Erdsonden Umwälzpumpe"},
+        {"page": 17, "text": "Wärmepumpe Heizleistung " * 8},
+        {"page": 29, "text": "Umwälzpumpe " * 8},
+    ]
+    selected = visual_review.select_technical_review_pages(pages, {}, max_pages=2)
+    assert selected[0] == 4
+
+
 def test_pumpen_sind_im_strukturierten_visual_review_erlaubt():
     enum = (
         visual_review.RESPONSE_SCHEMA["properties"]["features"]["items"]

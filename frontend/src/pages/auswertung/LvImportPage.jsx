@@ -117,6 +117,24 @@ const MAPPING = {
 const NICHT_ZUGEORDNET = { label: "Nicht zugeordnet", style: "bg-amber-100 text-amber-700",
   hilfe: "Keine passende Norm-LV-Position gefunden." };
 
+// Eine fehlende manuelle Bestätigung ist nicht automatisch ein Fehler. Orange
+// bleibt den tatsächlich unsicheren oder unvollständigen Werten vorbehalten.
+export const featureNeedsAttention = (feature) => (
+  !!feature?.requires_review
+  || feature?.effective_value == null
+  || feature?.effective_value === ""
+  || feature?.confidence === "low"
+  || feature?.confidence === "medium"
+);
+
+export const costNeedsAttention = (cost) => (
+  !!cost?.requires_review
+  || cost?.detected_amount == null
+  || (!cost?.is_group_total && !cost?.canonical_key)
+  || cost?.validation_status === "mismatch"
+  || cost?.confidence === "low"
+);
+
 // Sichtbare Rückmeldung nach dem Speichern eines Feldes.
 function Gespeichert({ an }) {
   if (!an) return null;
@@ -906,7 +924,7 @@ function ReviewAnsicht({ id }) {
                   const multi = MULTI_FEATURES[f.key];
                   const werte = (f.effective_value || "").split(",").map((s) => s.trim()).filter(Boolean);
                   return (
-                  <div key={f.id} className={`grid gap-2 px-4 py-3.5 sm:px-5 ${!f.confirmed ? "border-l-4 border-l-amber-400 bg-amber-50/70" : ""} ${multi ? "" : "sm:grid-cols-[1fr_auto] sm:items-center"}`}>
+                  <div key={f.id} className={`grid gap-2 px-4 py-3.5 sm:px-5 ${featureNeedsAttention(f) ? "border-l-4 border-l-amber-400 bg-amber-50/70" : ""} ${multi ? "" : "sm:grid-cols-[1fr_auto] sm:items-center"}`}>
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-medium text-slate-900">{f.label}</span>
@@ -1020,7 +1038,7 @@ function ReviewAnsicht({ id }) {
             </div>
             <div className="divide-y divide-slate-100">
               {positionen.map((c) => (
-                <div key={c.id} className={`px-4 py-3 sm:px-5 lg:grid lg:grid-cols-2 lg:gap-6 ${(!c.confirmed || !c.mapping_confirmed) ? "border-l-4 border-l-amber-400 bg-amber-50/50" : ""}`}>
+                <div key={c.id} className={`px-4 py-3 sm:px-5 lg:grid lg:grid-cols-2 lg:gap-6 ${costNeedsAttention(c) ? "border-l-4 border-l-amber-400 bg-amber-50/50" : ""}`}>
                   {/* Punkt 16 — Block 1: WAS IM LV STEHT. Nummer, Titel, Betrag,
                       Betrag geprüft. Diese Zeile bleibt immer so wie im PDF. */}
                   <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-start">

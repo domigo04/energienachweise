@@ -74,6 +74,13 @@ def _art(gefaltet: str) -> tuple[str, str] | None:
     return None
 
 
+def _ist_basiszeile(gefaltet: str) -> bool:
+    """Nur ein eigenständiges Gesamt-Total, nie «241 Total» o.ä."""
+    if any(begriff in gefaltet for begriff in _BASIS):
+        return True
+    return bool(re.match(r"^total(?:\s+(?:heizung|gewerk|arbeitsgattung))?$", gefaltet))
+
+
 def parse_conditions(pages) -> dict:
     """Schlussblatt → Basissumme, Konditionen, MWST und ausgewiesene Endsumme.
 
@@ -116,7 +123,10 @@ def parse_conditions(pages) -> dict:
                 continue
 
             # Bemessungsgrundlage — die zuletzt genannte gilt.
-            if any(begriff in gefaltet for begriff in _BASIS) and betrag is not None:
+            # Betrag für die Prüfung ausblenden, damit «Total 256'219.20» als
+            # nackte Bezeichnung «Total» erkannt wird.
+            basis_label = _BETRAG.sub("", gefaltet).strip(" .:-")
+            if _ist_basiszeile(basis_label) and betrag is not None:
                 base_amount = betrag
                 quelle = quelle or nummer
                 continue

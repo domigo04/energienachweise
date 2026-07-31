@@ -178,6 +178,14 @@ def test_erwaehnung_ohne_zahl_ist_keine_kondition():
     assert ergebnis["conditions"] == []
 
 
+def test_nacktes_total_ist_bemessungsgrundlage():
+    ergebnis = conditions_extract.parse_conditions([{
+        "page": 34,
+        "text": "Total 256'219.20\nRabatt 12 % 30'746.30\nMWST 8.1 % 17'703.40",
+    }])
+    assert ergebnis["base_amount"] == pytest.approx(LV_SUMME)
+
+
 # ── 4/5) Technische Merkmale nur mit Beleg ────────────────────────────────
 
 def test_kein_merkmal_ohne_fundstelle():

@@ -130,8 +130,17 @@ def parse_table_row(row) -> dict:
 
     einheit_idx = None
     einheit = None
+    hat_stueck_einheit = any(
+        (w.get("text") or "").strip().lower().rstrip(".")
+        in ("stk", "stück", "stueck", "st")
+        for w in row
+    )
     for i, w in enumerate(row):
-        t = (w["text"] or "").strip().lower().rstrip(".")
+        roh = (w["text"] or "").strip()
+        t = roh.lower().rstrip(".")
+        # «M 10 Stk. 4» ist ein metrisches Gewinde, keine Meter-Einheit.
+        if roh == "M" and hat_stueck_einheit:
+            continue
         if t in [e.rstrip(".") for e in _EINHEITEN]:
             einheit_idx = i
             einheit = t
@@ -143,12 +152,20 @@ def parse_table_row(row) -> dict:
     zahlen = [(i, v, w) for i, v, w in zahlen if v is not None]
 
     ausmass = None
+    links = []
     if einheit_idx is not None:
-        # Ausmass ist die erste Zahl RECHTS von der Einheit (LV-Standard), sonst
-        # die unmittelbar links davor stehende ("150 m").
+        # Beide Schweizer LV-Spaltenfolgen kommen vor:
+        #   Einheit | Ausmass | EP | Total   ("m 12 26.90 322.80")
+        #   Ausmass | Einheit | EP | Total   ("12 m 26.90 322.80")
+        # Stehen mindestens zwei Geldspalten rechts der Einheit, ist die direkt
+        # links stehende Zahl das Ausmass. Andernfalls gilt der übliche Wert
+        # rechts der Einheit. Damit wird nie der Einheitspreis als Rohrmenge
+        # gelesen.
         rechts = [(i, v, w) for i, v, w in zahlen if i > einheit_idx]
         links = [(i, v, w) for i, v, w in zahlen if i < einheit_idx]
-        if rechts:
+        if links and len(rechts) >= 2:
+            ausmass = links[-1][1]
+        elif rechts:
             ausmass = rechts[0][1]
         elif links:
             ausmass = links[-1][1]
@@ -160,12 +177,14 @@ def parse_table_row(row) -> dict:
     # EP/Total: die letzten zwei Zahlen der Zeile, wenn es mehr als das Ausmass
     # gibt. Total ist die rechteste Zahl.
     ep = total = None
-    nach_ausmass = [(i, v, w) for i, v, w in zahlen
+    nach_einheit = [(i, v, w) for i, v, w in zahlen
                     if einheit_idx is None or i > einheit_idx]
-    if len(nach_ausmass) >= 3:
-        ep, total = nach_ausmass[-2][1], nach_ausmass[-1][1]
-    elif len(nach_ausmass) == 2:
-        total = nach_ausmass[-1][1]
+    if links and einheit_idx is not None and len(nach_einheit) >= 2:
+        ep, total = nach_einheit[-2][1], nach_einheit[-1][1]
+    elif len(nach_einheit) >= 3:
+        ep, total = nach_einheit[-2][1], nach_einheit[-1][1]
+    elif len(nach_einheit) == 2:
+        total = nach_einheit[-1][1]
 
     return {"beschreibung": beschreibung, "einheit": einheit, "ausmass": ausmass,
             "ep": ep, "total": total, "zahlen": [v for _, v, _ in zahlen]}

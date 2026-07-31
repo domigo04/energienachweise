@@ -109,25 +109,22 @@ class LvPipeline:
     @property
     def grunddaten_pages(self) -> list[dict]:
         """Grunddaten: Deckblatt + erste Seiten."""
-        seiten = self.pages_for(pc.COVER)
-        if seiten:
-            return seiten
-        return self.pages[:3]
+        # Die eigentliche Offertkopfzeile steht häufig auf Seite 1, obwohl der
+        # Klassifikator weitere Seiten wegen wiederholtem «Offerte»-Text als
+        # Deckblatt erkennt. Darum die ersten drei Seiten immer mitnehmen.
+        seiten = list(self.pages[:3])
+        bekannt = {p.get("page") for p in seiten}
+        seiten.extend(p for p in self.pages_for(pc.COVER) if p.get("page") not in bekannt)
+        return seiten
 
     @property
     def technik_pages(self) -> list[dict]:
         """Technische Mengen: primär LV, sekundär Schema/Beschreibung."""
-        seiten = self.pages_for(pc.LV)
-        if seiten:
-            return seiten
         seiten = self.pages_for(pc.LV, pc.SCHEMA, pc.DESCRIPTION)
         return seiten or self.pages
 
     @property
     def technik_word_pages(self) -> list[dict]:
-        seiten = self.word_pages_for(pc.LV)
-        if seiten:
-            return seiten
         seiten = self.word_pages_for(pc.LV, pc.SCHEMA, pc.DESCRIPTION)
         return seiten or self.word_pages
 
@@ -146,16 +143,26 @@ class LvPipeline:
         """
         seiten = self.pages_for(pc.COST_SUMMARY)
         bekannt = {p.get("page") for p in seiten}
+        zusammenfassungs_nummern = set(bekannt)
         for seite in self.pages_for(pc.CONDITIONS, pc.UNKNOWN):
             if seite.get("page") in bekannt:
                 continue
-            if pc.zaehle_kostenzeilen(seite.get("text") or "") >= 1:
+            nummer = seite.get("page")
+            # Nur die direkt angrenzende Schlussseite ergänzen. Detailseiten
+            # enthalten ebenfalls BKP-Positionen mit Betrag, sind aber keine
+            # Zusammenstellung und würden Kosten doppelt einlesen.
+            ist_fortsetzung = any(
+                nummer is not None and abs(nummer - basis) == 1
+                for basis in zusammenfassungs_nummern if basis is not None
+            )
+            if ist_fortsetzung and pc.zaehle_kostenzeilen(seite.get("text") or "") >= 1:
                 seiten.append(seite)
         return sorted(seiten, key=lambda p: p.get("page") or 0)
 
     @property
     def cost_summary_word_pages(self) -> list[dict]:
-        return self.word_pages_for(pc.COST_SUMMARY)
+        erlaubt = {p.get("page") for p in self.cost_summary_pages}
+        return [sp for sp in self.word_pages if sp.get("page") in erlaubt]
 
     @property
     def conditions_pages(self) -> list[dict]:

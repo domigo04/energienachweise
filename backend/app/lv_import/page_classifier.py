@@ -39,11 +39,15 @@ _COST_TITEL = re.compile(
 )
 # LV-Tabellenkopf: die typischen Spaltentitel einer Ausschreibung.
 _LV_KOPF = (
-    ("pos.", "pos ", "position"),
+    ("pos.", "pos ", "position", "code"),
     ("bezeichnung der arbeit", "bezeichnung", "leistungsbeschrieb"),
     ("ausmass", "ausmaß", "menge", "einheit"),
-    ("einheitspreis", "ep ", "einheits-preis"),
+    ("einheitspreis", "ep ", "einheits-preis", "preis"),
     ("total", "totalpreis", "betrag"),
+)
+_LV_CODE_KOPF = re.compile(
+    r"\bcode\b.*\btext\b.*\bmenge\b.*\bme\b.*\bpreis\b.*\btotal\b",
+    re.IGNORECASE,
 )
 _SCHEMA_BEGRIFFE = (
     "prinzipschema", "strangschema", "legende heizung", "schemaplan",
@@ -93,6 +97,8 @@ def _treffer(low: str, begriffe) -> bool:
 
 def _lv_kopf_score(low: str) -> int:
     """Wie viele der typischen LV-Spaltentitel kommen vor?"""
+    if _LV_CODE_KOPF.search(low):
+        return 5
     return sum(1 for gruppe in _LV_KOPF if any(v in low for v in gruppe))
 
 

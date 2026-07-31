@@ -45,7 +45,18 @@ _POSITION = re.compile(r"^\s*(?:pos\.?\s*|bkp\s*)?(\d{3}(?:\.\d+)+)\s+(\S.*)$", 
 _GRUPPE = re.compile(r"^\s*(?:bkp\s*)?(\d{3})\s+(\S.*)$", re.IGNORECASE)
 # Gruppentotal: "Total BKP 241 ... 103'252.00" — auch "Total 241", "Summe BKP 241".
 _GRUPPE_TOTAL = re.compile(
-    r"^\s*(?:total|summe|zwischentotal)\s*(?:bkp\s*)?(\d{2,3})\b(.*)$", re.IGNORECASE)
+    r"^\s*(?:total|summe|zwischentotal)\s*(?:bkp\s*)?(\d{2,3})(?=\s|$)(.*)$",
+    re.IGNORECASE,
+)
+# Manche Programme drucken die Nummer zuerst: «241 Total ... 120'425.60».
+_GRUPPE_TOTAL_NACH_NUMMER = re.compile(
+    r"^\s*(\d{2,3})\s+(?:total|summe|zwischentotal)\b(.*)$", re.IGNORECASE)
+# Gewerktotal ohne explizite BKP-Nummer: «Total 256'219.20».
+_GEWERK_TOTAL = re.compile(
+    r"^\s*total(?:\s+(?:heizung|gewerk|arbeitsgattung|bkp\s*24))?\s+"
+    r"(?=\d)(.*)$",
+    re.IGNORECASE,
+)
 _HAT_WORT = re.compile(r"[A-Za-zÄÖÜäöüéèà]{3,}")
 
 
@@ -130,7 +141,7 @@ def parse_cost_summary(pages, word_pages=None) -> dict:
             continue
 
         # Gruppentotal bzw. Gewerktotal ("Total BKP 24").
-        m = _GRUPPE_TOTAL.match(line)
+        m = _GRUPPE_TOTAL.match(line) or _GRUPPE_TOTAL_NACH_NUMMER.match(line)
         if m:
             nr, rest = m.group(1), m.group(2)
             betrag = betrag_rechts
@@ -146,6 +157,19 @@ def parse_cost_summary(pages, word_pages=None) -> dict:
                     "bkp_group": nr, "amount": round(betrag, 2),
                     "source_page": seite, "source_text": line[:200],
                 }
+            continue
+
+        # Ein nacktes «Total» auf der Schlussseite ist das Gewerktotal. Diese
+        # Form muss vor Einzelposition/Gruppenkopf ausgewertet werden.
+        m = _GEWERK_TOTAL.match(line)
+        if m:
+            rest = m.group(1)
+            betrag = betrag_rechts
+            if betrag is None:
+                betrag_m = _BETRAG_ENDE.search(rest) or _BETRAG_ENDE.search(line)
+                betrag = parse_number(betrag_m.group(1)) if betrag_m else None
+            if betrag is not None:
+                trade_total = round(betrag, 2)
             continue
 
         # Einzelposition mit Betrag.

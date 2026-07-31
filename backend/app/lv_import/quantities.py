@@ -65,16 +65,29 @@ def _zahl_mit_einheit(text: str, nach_re, vor_re) -> Optional[float]:
     wenn davor kein technischer Bezeichner (DN/Typ/Ø) steht.
     """
     text = text or ""
-    m = nach_re.search(text)
-    if m:
-        return parse_number(m.group(1))
-    for m in vor_re.finditer(text):
-        if _BEZEICHNER_DAVOR.search(text[:m.start(1)]):
+    nach = nach_re.search(text)
+    vor = None
+    for kandidat in vor_re.finditer(text):
+        if _BEZEICHNER_DAVOR.search(text[:kandidat.start(1)]):
             continue
-        return parse_number(m.group(1))
+        vor = kandidat
+        break
+    if nach and vor:
+        # Layout «Menge | Einheit | EP | Total». Zwei Zahlen nach der Einheit
+        # sind Preis und Total; die Menge steht links davon.
+        zahlen_rechts = re.findall(r"-?\d[\d’'.,]*", text[vor.end():])
+        if len(zahlen_rechts) >= 2:
+            return parse_number(vor.group(1))
+    if nach:
+        return parse_number(nach.group(1))
+    if vor:
+        return parse_number(vor.group(1))
     return None
 # Abschnitts-/Positionskopf: "243.1 Rohrleitungen", "241.14 Erdsonden ..."
-_ABSCHNITT = re.compile(r"^\s*(?:pos\.?\s*|bkp\s*)?(2\d{2}(?:\.\d+)*)\s+(\S.*)$", re.IGNORECASE)
+# Nur BKP-Heizungsabschnitte 240–249 steuern den fachlichen Kontext. Dreistellige
+# Material-/Katalogcodes wie 211.313 innerhalb einer Position sind keine neuen
+# Abschnitte; sonst geht z.B. der Kontext «243.2 Flächenheizung» verloren.
+_ABSCHNITT = re.compile(r"^\s*(?:pos\.?\s*|bkp\s*)?(24\d(?:\.\d+)*)\s+(\S.*)$", re.IGNORECASE)
 _HAT_WORT = re.compile(r"[A-Za-zÄÖÜäöüéèà]{3,}")
 
 
@@ -574,6 +587,14 @@ def pipe_lengths(rows) -> dict:
         # Befestiger und ebenfalls kein Laufmeter.
         if any(t in mengen_text for t in _STANDARDLAENGE) or _menge_stk(mengen_row) is not None:
             continue
+        # Die Folgezeile kann selbst eine klar ausgeschlossene Messgrösse sein
+        # (z.B. «Dämmschichtdicke M = 19–26 mm»). Ihr eigener semantischer
+        # Kontext schlägt dann den allgemeinen Rohrabschnitt der Zeile davor.
+        mengen_klasse = classify_length_row(
+            mengen_row.get("text") or "", row.get("section_title") or "", section_nr,
+        )
+        if mengen_klasse in (INSULATION, UFH_PIPE):
+            klasse = mengen_klasse
         if mengen_idx is not None and mengen_idx != i:
             # Beschreibung und darunterliegende Mengenzelle bilden eine
             # Position. Die Mengenzelle darf beim nächsten Schleifendurchlauf

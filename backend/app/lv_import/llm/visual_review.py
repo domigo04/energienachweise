@@ -55,7 +55,10 @@ statt den Schlüssel still auszulassen.
 
 Zähle als Pumpe nur hydraulische Umwälz- oder Zirkulationspumpen mit
 Projektbezug — keine blossen Erwähnungen in Fliesstexten, keine Ersatzpumpen
-und keine Wiederholungen aus Datenblättern. Ohne eindeutige Anzahl null.
+und keine Wiederholungen aus Datenblättern. Auf einem Hydraulikschema zählt
+jedes eindeutig beschriftete Pumpensymbol genau einmal, auch wenn keine
+Stückzahl danebensteht; der Verdichter innerhalb einer Wärmepumpe ist keine
+separate Umwälzpumpe. Ohne eindeutige Anzahl null.
 Leite aus einer einzelnen Pauschalposition «Wärmemessung» keine Anzahl 1 ab:
 setze dann heat_metering_present auf true und heat_meter_count auf null.
 Für `generator_type` sind nur diese Codes zulässig: `ews_wp` für
@@ -426,6 +429,15 @@ def select_technical_review_pages(
                 continue
             text = _fold(page.get("text") or "")
             score = sum(text.count(term) for term in _TECHNICAL_PAGE_TERMS[group])
+            # Ein Hydraulikschema bündelt Erzeuger, Bohrungen und Pumpen auf
+            # einer sichtbaren Seite. Es muss vor beliebigen Detailseiten ins
+            # knappe 8-Seiten-Budget gelangen, insbesondere wenn Kosten- und
+            # Konditionsseiten bereits mehrere Plätze belegen.
+            ist_schema = any(term in text for term in (
+                "prinzipschema", "hydraulikschema", "legende heizung",
+            ))
+            if ist_schema and group in {"generator", "boreholes", "pumps", "storage"}:
+                score += 100
             if score:
                 ranked.append((score, int(page_number)))
         if ranked:

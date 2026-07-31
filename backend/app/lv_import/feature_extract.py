@@ -322,6 +322,44 @@ def extract_features(pages, word_pages=None) -> dict:
                     "source_page": seite, "source_text": line,
                 }
                 break
+
+    # «Wärmemessung» wird in Unternehmerangeboten oft als komplette Fremd-
+    # offerte/Position ausgewiesen. Das belegt die Funktion, aber nicht die
+    # Anzahl einzelner Zähler. Diese beiden Aussagen bleiben deshalb getrennt.
+    if _fehlt(result, "heat_metering_present"):
+        for seite, line in zeilen:
+            low = line.casefold()
+            if any(term in low for term in (
+                "wärmemessung", "waermemessung", "wärmezähler",
+                "waermezaehler", "wärmemengenzähler", "waermemengenzaehler",
+            )):
+                result["heat_metering_present"] = {
+                    "value": True, "confidence": HIGH,
+                    "source_page": seite, "source_text": line,
+                }
+                break
+
+    # Für die Kostenlogik ist «nicht erwähnt» bei der Frischwasserstation ein
+    # echtes Nein: sie ist ein klar auszuschreibendes Gerät. Ein positiver Wert
+    # braucht weiterhin eine ausdrückliche Fundstelle.
+    if _fehlt(result, "fresh_water_station_present"):
+        fws_fund = next((
+            (seite, line) for seite, line in zeilen
+            if any(term in line.casefold() for term in (
+                "frischwasserstation", "frischwassermodul", "friwa",
+            ))
+        ), None)
+        if fws_fund:
+            result["fresh_water_station_present"] = {
+                "value": True, "confidence": HIGH,
+                "source_page": fws_fund[0], "source_text": fws_fund[1],
+            }
+        elif zeilen:
+            result["fresh_water_station_present"] = {
+                "value": False, "confidence": MEDIUM,
+                "source_page": None,
+                "source_text": "Im technischen Angebotsumfang nicht ausgewiesen",
+            }
     return result
 
 

@@ -292,6 +292,33 @@ def test_ausgewiesener_prozentbetrag_bestimmt_fehlende_basis():
     assert result["subtotal_excl_vat"] == 99550
 
 
+def test_nummer_vor_total_und_nacktes_gewerktotal():
+    text = (
+        "241.0 Erdsonden 120'425.60\n"
+        "241 Total 120'425.60\n"
+        "249.1 Wartungsunterlagen 350.00\n"
+        "249.2 Unvorhergesehenes 5'000.00\n"
+        "249.3 Ausführungsplanung 2'000.00\n"
+        "249 Total 7'350.00\n"
+        "Total 256'219.20\n"
+    )
+    result = parse_cost_summary([{"page": 34, "text": text}])
+    assert result["group_totals"]["241"]["amount"] == 120425.60
+    assert result["group_totals"]["249"]["amount"] == 7350
+    assert result["trade_total"] == 256219.20
+
+
+def test_mwst_als_kondition_und_steuersatz_wird_nur_einmal_addiert():
+    result = commercial.calculate_chain(100000, [
+        {"label": "Rabatt", "kind": "percent", "direction": "deduction", "rate_percent": 10},
+        {"label": "MWST 8.1 %", "kind": "percent", "direction": "surcharge", "rate_percent": 8.1},
+    ], vat_rate=8.1)
+    assert [item["label"] for item in result["conditions"]] == ["Rabatt"]
+    assert result["subtotal_excl_vat"] == 90000
+    assert result["vat_amount"] == 7290
+    assert result["total_incl_vat"] == 97290
+
+
 # ── Freigabe: Gruppentotale dürfen die Referenzkosten nicht verdoppeln ─────
 
 def _db():

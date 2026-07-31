@@ -51,6 +51,18 @@ def _label(value: Any) -> str:
     ).casefold()).strip()
 
 
+def _ist_steuer(item: dict) -> bool:
+    """MWST ist immer die separate Schlussstufe, nie eine Kondition.
+
+    Visuelle Modelle liefern sie gelegentlich gleichzeitig als Zuschlag und als
+    `vat_rate`. Ohne diese zentrale Schranke würde sie zweimal addiert.
+    """
+    label = _label(item.get("label"))
+    return any(term in label.split() for term in ("mwst", "vat", "tva")) or (
+        "mehrwertsteuer" in label
+    )
+
+
 def calculate_chain(
     base_amount: float | None, conditions: list[dict], vat_rate: float | None = None,
 ) -> dict:
@@ -61,6 +73,8 @@ def calculate_chain(
     calculated: list[dict] = []
     ancillary_basis: float | None = None
     for index, item in enumerate(conditions or []):
+        if _ist_steuer(item):
+            continue
         kind = item.get("kind")
         direction = item.get("direction")
         if kind not in {"percent", "fixed"} or direction not in {"deduction", "surcharge"}:

@@ -18,7 +18,7 @@ import { EDGE_TYPES } from '../../components/hc/edges/FlowEdge';
 import { pairedHandleId, parallelWaypoints, roundedPolylinePath, splitRouteAtCorner, splitRouteAtPoint, reconnectThroughNode, adaptivePolyline, segmentAchse, mitgezogeneWaypoints } from '../../components/hc/edges/geometry';
 import { createHydraulicEdge, canStartHydraulicLine } from './schema/edgeFactory';
 import {
-  ALIGN, DRAW_PIPE, HOME, PLACE, escape as escapeMode, finishCommand, initialMode,
+  ALIGN, DRAW_PIPE, HOME, MOVE, PLACE, escape as escapeMode, finishCommand, initialMode,
   istBefehl, istModify, modeLabel, startCommand, toggleCommand, zeichnetLeitung,
 } from './schema/editorMode';
 import {
@@ -28,7 +28,8 @@ import {
 } from './schema/cadConstraints';
 import { CORNER, ENDPOINT, GRID, MIDPOINT, NEAREST, PORT, fangStil } from './schema/cadSnap';
 import {
-  abzweigPunkt, routeBereinigen, segmentAusrichten, segmentVerschieben,
+  abzweigPunkt, labelVerschoben, labelVersatz, leitungVerschieben,
+  routeBereinigen, segmentAusrichten, segmentVerschieben,
   entwurfFuerEscape, segmentZumVerschieben, verschiebungLabel,
 } from './schema/cadEdit';
 import {
@@ -452,7 +453,7 @@ const schaltungVon = (d) => (['einspritz', 'beimisch', 'drossel'].includes(d?.sc
 // und lässt die Länge eintragen → Δp = Pa/m · Länge / 1000.
 function LeitungPanel({
   edge, leitungResults, onUpdateEdge, onUpdateLayer, onDelete,
-  segmentIndex = null, onMoveSegment,
+  segmentIndex = null, onMoveSegment, onLabel, onLabelReset,
 }) {
   const lg = leitungResults[edge.id];
   const layer = layerVonEdge(edge);
@@ -539,6 +540,28 @@ function LeitungPanel({
             Zuerst ein Teilstück der Leitung anklicken. Danach frei ziehen oder den Versatz hier in cm eingeben.
           </div>
         )}
+      </div>
+      <Div />
+      {/* Beschriftung (DN/m′) — im Plan steht sie oft im Weg. Sie lässt sich
+          direkt in der Zeichnung ziehen; hier sind Ausblenden und Zurücksetzen
+          erreichbar, damit eine ausgeblendete Beschriftung auffindbar bleibt. */}
+      <div style={{ marginBottom:10 }}>
+        <label style={lbl}>Beschriftung (DN · m′)</label>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6 }}>
+          <button type="button" style={{ ...btnBlue, background:edge.data?.label_hidden ? '#0f766e' : '#475569' }}
+            onClick={() => onLabel?.(edge.id, { label_hidden:!edge.data?.label_hidden })}>
+            {edge.data?.label_hidden ? 'Einblenden' : 'Ausblenden'}
+          </button>
+          <button type="button" style={{ ...btnBlue, background:'#475569' }}
+            disabled={!edge.data?.label_offset?.x && !edge.data?.label_offset?.y}
+            onClick={() => onLabelReset?.(edge.id)}>
+            In die Mitte
+          </button>
+        </div>
+        <div style={{ fontSize:9, color:'#64748b', lineHeight:1.45, marginTop:5 }}>
+          Beschriftung in der Zeichnung greifen und frei versetzen (Shift rastert).
+          Doppelklick stellt sie zurück, Entf blendet sie aus.
+        </div>
       </div>
       <Div />
       <div style={{ fontSize:9, lineHeight:1.5, color:'#64748b' }}>
@@ -1635,6 +1658,13 @@ function EditorInner() {
   const [edgeMenu, setEdgeMenu] = useState(null); // { x, y, edgeId, point }
   const [markierteEdgeIds, setMarkierteEdgeIds] = useState([]);
   const [spiegelAchse, setSpiegelAchse] = useState(null); // { edgeId, start, cursor }
+  // Beschriftung (DN/m'), die gerade angewählt ist — Entf blendet genau sie aus.
+  const [selectedLabelEdgeId, setSelectedLabelEdgeId] = useState(null);
+  // Laufender Verschieben-Befehl: { ziele, basis, cursor }. Die Auswahl steht
+  // beim Start fest, damit ein Klick auf die Fläche sie nicht abwählt.
+  const [verschiebung, setVerschiebung] = useState(null);
+  const verschiebungRef = useRef(null);
+  verschiebungRef.current = verschiebung;
   const [schemaName, setSchemaName] = useState('Schema');
   const [projectName, setProjectName] = useState('');
   const [schemaId, setSchemaId]     = useState(null);
@@ -2043,6 +2073,7 @@ function EditorInner() {
   const edgesRef = useRef([]);
   const edgePointDrag = useRef(null);
   const edgeSegmentDrag = useRef(null);
+  const labelDrag = useRef(null);
   const edgePointFrame = useRef(null);
   const edgeEndpointDrag = useRef(null);
   const deleteEdgeRef = useRef(null);
@@ -3211,6 +3242,160 @@ function EditorInner() {
     };
   }, [drawingConfig.grid_size, handlePosition, leitungNormalisieren, screenToFlowPosition, setEdges]);
 
+  // ── Leitungsbeschriftung (DN / m') ──────────────────────────────────────
+  // Sie gehört zur Leitung, steht im Plan aber oft im Weg. Darum: greifen und
+  // frei versetzen, ausblenden, zurücksetzen. Alles landet in `edge.data` und
+  // damit im Speicherstand UND im PDF-Export.
+  const beschriftungSetzen = useCallback((edgeId, aenderung) => {
+    snap();
+    setEdges(items => items.map(edge => edge.id === edgeId
+      ? { ...edge, data:{ ...(edge.data || {}), ...aenderung } }
+      : edge));
+  }, [setEdges, snap]);
+
+  const labelZuruecksetzen = useCallback((edgeId) => {
+    beschriftungSetzen(edgeId, { label_offset:{ x:0, y:0 }, label_hidden:false });
+  }, [beschriftungSetzen]);
+
+  const labelDragStart = useCallback((event, edgeId) => {
+    event.preventDefault();
+    const edge = edgesRef.current.find(item => item.id === edgeId);
+    if (!edge) return;
+    snap();
+    setSelectedLabelEdgeId(edgeId);
+    setSelectedEdgeId(edgeId);
+    setSelected(null);
+    labelDrag.current = {
+      edgeId,
+      start:screenToFlowPosition({ x:event.clientX, y:event.clientY }),
+      versatz:labelVersatz(edge.data),
+    };
+  }, [screenToFlowPosition, snap]);
+
+  useEffect(() => {
+    const move = (event) => {
+      const drag = labelDrag.current;
+      if (!drag) return;
+      const raw = screenToFlowPosition({ x:event.clientX, y:event.clientY });
+      // Beschriftungen sind Anschriften, keine Geometrie: sie laufen frei mit
+      // dem Cursor. Shift rastert sie fürs saubere Ausrichten mehrerer Labels.
+      const versatz = labelVerschoben(drag.versatz,
+        { x:raw.x - drag.start.x, y:raw.y - drag.start.y },
+        { grid:event.shiftKey ? drawingConfig.grid_size : 0 });
+      if (edgePointFrame.current) cancelAnimationFrame(edgePointFrame.current);
+      edgePointFrame.current = requestAnimationFrame(() => {
+        setEdges(items => items.map(edge => edge.id === drag.edgeId
+          ? { ...edge, data:{ ...(edge.data || {}), label_offset:versatz } }
+          : edge));
+      });
+    };
+    const up = () => { labelDrag.current = null; };
+    window.addEventListener('pointermove', move, { passive:true });
+    window.addEventListener('pointerup', up);
+    return () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+  }, [drawingConfig.grid_size, screenToFlowPosition, setEdges]);
+
+  // ── Verschieben (CAD-MOVE, Dominic 2026-07-31) ───────────────────────────
+  // Auswahl treffen, Taste drücken, Basispunkt klicken, Zielpunkt klicken. Die
+  // Richtung fängt orthogonal (bzw. 45°), Shift kehrt den Fang um — dieselbe
+  // Regel wie beim Zeichnen. Verschoben wird, was beim Start ausgewählt war.
+  const verschiebeZiele = useCallback((ganzeLeitung = false) => {
+    if (selected) return { nodeId:selected.id, beschreibung:'Bauteil' };
+    if (markierteEdgeIds.length) {
+      return { edgeIds:markierteEdgeIds, beschreibung:`${markierteEdgeIds.length} Leitungen` };
+    }
+    if (!ganzeLeitung && selectedEdgeSegment?.edgeId === selectedEdgeId && selectedEdgeId) {
+      return {
+        edgeId:selectedEdgeId,
+        segmentIndex:selectedEdgeSegment.segmentIndex,
+        beschreibung:`Teilstück ${selectedEdgeSegment.segmentIndex + 1}`,
+      };
+    }
+    if (selectedEdgeId) return { edgeIds:[selectedEdgeId], beschreibung:'ganze Leitung' };
+    return null;
+  }, [markierteEdgeIds, selected, selectedEdgeId, selectedEdgeSegment]);
+
+  const leitungenVerschieben = useCallback((edgeIds, delta) => {
+    const ids = new Set(edgeIds);
+    const betroffen = edgesRef.current.filter(edge => ids.has(edge.id));
+    if (!betroffen.length) return;
+    // Ein freies Ende wandert nur mit, wenn ALLE dort hängenden Leitungen
+    // mitverschoben werden — sonst würde eine unbeteiligte Leitung verzerrt.
+    const frei = (nodeId) => {
+      const node = nodesRef.current.find(item => item.id === nodeId);
+      if (node?.type !== 'junction') return false;
+      return edgesRef.current
+        .filter(edge => edge.source === nodeId || edge.target === nodeId)
+        .every(edge => ids.has(edge.id));
+    };
+    const neuePunkte = new Map();
+    const neueAnker = new Map();
+    betroffen.forEach(edge => {
+      const ergebnis = leitungVerschieben(routePunkte(edge), delta, {
+        startFrei:frei(edge.source), endFrei:frei(edge.target),
+      });
+      if (!ergebnis) return;
+      neuePunkte.set(edge.id, ergebnis.points);
+      if (ergebnis.start) neueAnker.set(edge.source, ergebnis.start);
+      if (ergebnis.end) neueAnker.set(edge.target, ergebnis.end);
+    });
+    if (!neuePunkte.size) return;
+    snap();
+    setNodes(items => items.map(node => (neueAnker.has(node.id)
+      ? { ...node, position:neueAnker.get(node.id) }
+      : node)));
+    setEdges(items => items.map(edge => (neuePunkte.has(edge.id)
+      ? { ...edge, data:{ ...(edge.data || {}), cad_polyline:true, points:neuePunkte.get(edge.id) } }
+      : edge)));
+  }, [routePunkte, setEdges, setNodes, snap]);
+
+  const zieleVerschieben = useCallback((ziele, delta) => {
+    if (!ziele || (!delta.x && !delta.y)) return;
+    // Jede Variante ruft die bestehende, getestete Operation — der Befehl selbst
+    // rechnet keine eigene Geometrie.
+    if (ziele.nodeId) { nudgeNode(ziele.nodeId, delta.x, delta.y); return; }
+    if (Number.isInteger(ziele.segmentIndex)) {
+      segmentNumerischVerschieben(ziele.edgeId, ziele.segmentIndex, delta.x / 10, delta.y / 10);
+      return;
+    }
+    leitungenVerschieben(ziele.edgeIds || [], delta);
+  }, [leitungenVerschieben, nudgeNode, segmentNumerischVerschieben]);
+
+  const verschiebenStarten = useCallback((ganzeLeitung = false) => {
+    const ziele = verschiebeZiele(ganzeLeitung);
+    if (!ziele) return false;
+    setEndpointMenu(null);
+    setEdgeMenu(null);
+    setLeitungsGuides([]);
+    setVerschiebung({ ziele, basis:null, cursor:null });
+    setEditorMode(startCommand(MOVE));
+    return true;
+  }, [verschiebeZiele]);
+
+  const verschiebenKlick = useCallback((event) => {
+    const aktuell = verschiebungRef.current;
+    if (!aktuell) return false;
+    if (event.button != null && event.button !== 0) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    const raw = screenToFlowPosition({ x:event.clientX, y:event.clientY });
+    if (!aktuell.basis) {
+      const basis = rasterPunkt(raw, drawingConfig.grid_size);
+      setVerschiebung({ ...aktuell, basis, cursor:basis });
+      return true;
+    }
+    const ziel = constrainPoint(aktuell.basis, raw, {
+      ortho:orthoAnRef.current, shift:event.shiftKey, grid:drawingConfig.grid_size,
+    });
+    zieleVerschieben(aktuell.ziele, { x:ziel.x - aktuell.basis.x, y:ziel.y - aktuell.basis.y });
+    setVerschiebung(null);
+    setEditorMode(finishCommand(editorModeRef.current));
+    return true;
+  }, [drawingConfig.grid_size, screenToFlowPosition, zieleVerschieben]);
+
   const endpointDragStart = useCallback((event, edgeId, side) => {
     event.preventDefault();
     event.stopPropagation();
@@ -3434,6 +3619,7 @@ function EditorInner() {
           setLeitungsSnap(null);
           setLeitungsGuides([]);
           setLaengenPuffer(null);
+          setVerschiebung(null);
           platzierVorschauRef.current = null;
           setPlatzierVorschau(null);
           setInlineTreffer(null);
@@ -3468,6 +3654,15 @@ function EditorInner() {
           setLeitungsEntwurf(next);
           return;
         }
+        // Verschieben (CAD-MOVE): frei belegbare Taste. Mit Shift wandert die
+        // GANZE Leitung statt nur des angeklickten Teilstücks.
+        if (key === drawingConfig.shortcut_move) {
+          ev.preventDefault();
+          verschiebenStarten(ev.shiftKey);
+          return;
+        }
+        // Layer-Schnellwahl. Die frei belegbaren Befehlstasten haben Vorrang —
+        // wer «v» auf Verschieben legt, bekommt Verschieben (Rückgabe oben).
         if (ev.key === 'v' || ev.key === 'V') layerWaehlen('heizung_vl');
         if (ev.key === 'r' || ev.key === 'R') layerWaehlen('heizung_rl');
         if (ev.key === 'b' || ev.key === 'B') layerWaehlen('neutral');
@@ -3486,7 +3681,14 @@ function EditorInner() {
           if (dx || dy) nudgeNode(selected.id, dx, dy);
         }
         if (ev.key === 'Delete' || ev.key === 'Backspace') {
-          if (selectedEdgePoint) {
+          // Eine angewählte Beschriftung wird ausgeblendet, nicht die Leitung
+          // gelöscht. Rückgängig über das Leitungspanel oder Cmd+Z.
+          if (selectedLabelEdgeId) {
+            ev.preventDefault();
+            beschriftungSetzen(selectedLabelEdgeId, { label_hidden:true });
+            setSelectedLabelEdgeId(null);
+          }
+          else if (selectedEdgePoint) {
             ev.preventDefault();
             punktEntfernen(selectedEdgePoint.edgeId, selectedEdgePoint.pointIndex);
           }
@@ -3497,7 +3699,7 @@ function EditorInner() {
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [undo, redo, selected, selectedEdgeId, selectedEdgePoint, punktEntfernen, snap, rotateNode, mirrorNode, alignNode, nudgeNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, spiegelAchse, drawingConfig, setNodes, laengeAnwenden, entwurfAmLetztenPunktAbschliessen]);
+  }, [undo, redo, selected, selectedEdgeId, selectedEdgePoint, selectedLabelEdgeId, beschriftungSetzen, punktEntfernen, snap, rotateNode, mirrorNode, alignNode, nudgeNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, spiegelAchse, drawingConfig, setNodes, laengeAnwenden, entwurfAmLetztenPunktAbschliessen, verschiebenStarten]);
 
   // Berechnete Werte (Backend) in die Node-Daten spiegeln — nur für die Anzeige.
   // Verteiler-Rahmen: nur die Balken sind greifbar (dragHandle), die Lücke
@@ -3632,6 +3834,11 @@ function EditorInner() {
         _onEndpointPointerDown:endpointDragStart,
         _onEndpointContextMenu:endpointContextMenu,
         _onContextMenu:edgeContextMenu,
+        // Beschriftung: ziehen, zurücksetzen, ausblenden (Rechtsklick → Menü).
+        _onLabelPointerDown:labelDragStart,
+        _onLabelContextMenu:edgeContextMenu,
+        _onLabelReset:labelZuruecksetzen,
+        _labelSelected:selectedLabelEdgeId === edge.id,
         _sourceJunctionDegree:nodesRef.current.some(node => node.id === edge.source && node.type === 'junction') ? junctionDegrees.get(edge.source) || 0 : 0,
         _targetJunctionDegree:nodesRef.current.some(node => node.id === edge.target && node.type === 'junction') ? junctionDegrees.get(edge.target) || 0 : 0,
       },
@@ -3642,7 +3849,7 @@ function EditorInner() {
       style: { ...edge.style, stroke:color },
       };
     });
-  }, [edges, edgeContextMenu, edgeFlows, endpointContextMenu, endpointDragStart, junctionDegrees, layerVisibility, leitungResults, markierteEdgeIds, nodeGeometryVersion, punktDragStart, punktEntfernen, punktHinzufuegen, routePunkte, segmentDragStart, selectedEdgeId, selectedEdgePoint, selectedEdgeSegment]);
+  }, [edges, edgeContextMenu, edgeFlows, endpointContextMenu, endpointDragStart, junctionDegrees, labelDragStart, labelZuruecksetzen, layerVisibility, leitungResults, markierteEdgeIds, nodeGeometryVersion, punktDragStart, punktEntfernen, punktHinzufuegen, routePunkte, segmentDragStart, selectedEdgeId, selectedEdgePoint, selectedEdgeSegment, selectedLabelEdgeId]);
 
   const loadSchema = (key) => {
     const s = SCHALTUNGEN[key];
@@ -3900,6 +4107,9 @@ function EditorInner() {
     // Cursor schon eines liegt. Sonst „verschluckt" das vorhandene Bauteil den
     // Klick und der Planer glaubt, der Befehl sei kaputt.
     if (istBefehl(editorModeRef.current, PLACE)) { platzierenKlick(event); return; }
+    // Im Verschieben-Befehl setzt jeder Klick einen Punkt — auch auf einem
+    // Bauteil. Sonst liesse sich der Basispunkt nie an ein Bauteil legen.
+    if (verschiebenKlick(event)) return;
     // Im Zeichenmodus oder bei aktivem Entwurf: Klick auf ein Bauteil startet/
     // führt die Leitung an dessen Anschluss (nur bei Anschluss-Treffer).
     if (leitungsEntwurfRef.current || zeichenModusRef.current) {
@@ -3911,8 +4121,9 @@ function EditorInner() {
     setSelectedEdgeId(null);
     setSelectedEdgePoint(null);
     setSelectedEdgeSegment(null);
+    setSelectedLabelEdgeId(null);
     setInspectorOpen(true);
-  }, [cadKlick, platzierenKlick]);
+  }, [cadKlick, platzierenKlick, verschiebenKlick]);
   const onNodeDoubleClick = useCallback((_, node) => {
     if (node.type === 'label') return; // Textblock: Doppelklick editiert inline
     if (!leitungsEntwurfRef.current) setAuslegung(node);
@@ -3981,6 +4192,7 @@ function EditorInner() {
 
   const onEdgeClick = useCallback((event, edge) => {
     if (istBefehl(editorModeRef.current, ALIGN)) { ausrichtenKlick(event); return; }
+    if (verschiebenKlick(event)) return;
     // Im Platzierungsbefehl setzt ein Klick auf eine Leitung das Bauteil — und
     // teilt sie dabei. Ohne das würde die Leitung den Klick verschlucken,
     // obwohl die Vorschau „in Leitung einsetzen" anzeigt.
@@ -4000,8 +4212,9 @@ function EditorInner() {
     }
     setSelectedEdgeSegment(segment ? { edgeId:edge.id, segmentIndex:segment.segmentIndex } : null);
     setSelected(null);
+    setSelectedLabelEdgeId(null);
     setInspectorOpen(true);
-  }, [ausrichtenKlick, cadKlick, platzierenKlick, routePunkte, screenToFlowPosition]);
+  }, [ausrichtenKlick, cadKlick, platzierenKlick, routePunkte, screenToFlowPosition, verschiebenKlick]);
 
   const spiegelKopieErstellen = useCallback((edgeId, axisStart, axisEnd) => {
     const edge = edgesRef.current.find(item => item.id === edgeId);
@@ -4047,6 +4260,7 @@ function EditorInner() {
     // ein Space-Pan die aktuelle Auswahl beim Loslassen abwählen.
     if (spacePanRef.current) return;
     if (istBefehl(editorModeRef.current, PLACE)) { platzierenKlick(event); return; }
+    if (verschiebenKlick(event)) return;
     if (spiegelAchse) {
       event.preventDefault();
       const point = rasterPunkt(screenToFlowPosition({ x:event.clientX, y:event.clientY }), drawingConfig.grid_size);
@@ -4071,8 +4285,9 @@ function EditorInner() {
     setSelectedEdgeId(null);
     setSelectedEdgePoint(null);
     setSelectedEdgeSegment(null);
+    setSelectedLabelEdgeId(null);
     setMarkierteEdgeIds([]);
-  }, [cadKlick, drawingConfig.grid_size, screenToFlowPosition, selected, selectedEdgeId, spiegelAchse, spiegelKopieErstellen, platzierenKlick]);
+  }, [cadKlick, drawingConfig.grid_size, screenToFlowPosition, selected, selectedEdgeId, spiegelAchse, spiegelKopieErstellen, platzierenKlick, verschiebenKlick]);
 
   const canvasMouseMove = useCallback((event) => {
     // Platzierungsvorschau folgt dem Cursor — mit Raster und Ausrichtungslinien.
@@ -4108,6 +4323,16 @@ function EditorInner() {
       setPlatzierVorschau(alignment.point);
       setInlineTreffer(null);
       setLeitungsGuides(alignment.guides);
+      return;
+    }
+    // Verschieben: der Vorschaupfeil hängt am gefangenen Zielpunkt — angezeigt
+    // wird exakt der Vektor, den der nächste Klick anwendet.
+    if (verschiebungRef.current?.basis) {
+      const raw = screenToFlowPosition({ x:event.clientX, y:event.clientY });
+      const cursor = constrainPoint(verschiebungRef.current.basis, raw, {
+        ortho:orthoAnRef.current, shift:event.shiftKey, grid:drawingConfig.grid_size,
+      });
+      setVerschiebung(current => (current?.basis ? { ...current, cursor } : current));
       return;
     }
     if (spiegelAchse?.start) {
@@ -4394,6 +4619,7 @@ function EditorInner() {
                 ['shortcut_rotate', 'Bauteil drehen'],
                 ['shortcut_mirror', 'Bauteil spiegeln'],
                 ['shortcut_align', 'Ausrichten (Shift: Bauteil aufs Raster)'],
+                ['shortcut_move', 'Verschieben (Shift: ganze Leitung)'],
               ].map(([feld, label]) => (
                 <React.Fragment key={feld}>
                   <label htmlFor={feld}>{label}</label>
@@ -4402,7 +4628,10 @@ function EditorInner() {
                     style={{ textAlign:'center', textTransform:'uppercase', border:'1px solid #cbd5e1', borderRadius:5, padding:4, fontWeight:800 }}/>
                 </React.Fragment>
               ))}
-              <div style={{ gridColumn:'1 / -1', color:'#94a3b8', fontSize:9, marginTop:2 }}>Verschieben: Pfeiltasten (Shift = grosser Schritt)</div>
+              <div style={{ gridColumn:'1 / -1', color:'#94a3b8', fontSize:9, marginTop:2 }}>
+                Verschieben: Auswahl · Taste · Startpunkt · Zielpunkt (orthogonal gefangen).
+                Feinversatz weiterhin mit den Pfeiltasten (Shift = grosser Schritt).
+              </div>
             </div>
             <button onClick={event=>{
               setDrawingConfig(DEFAULT_DRAWING_CONFIG);
@@ -4450,6 +4679,13 @@ function EditorInner() {
             className={`hc-auto-return${dauerLeitung ? ' is-active' : ''}`}
             title="Dauerhafter Leitungsmodus: bleibt nach jeder Leitung aktiv, bis Esc oder Rechtsklick">
             ⤾ Dauer {dauerLeitung ? 'an' : 'aus'}
+          </button>
+          <button
+            onClick={() => (verschiebung ? (setVerschiebung(null), setEditorMode(escapeMode(editorModeRef.current))) : verschiebenStarten(false))}
+            disabled={!verschiebung && !selected && !selectedEdgeId && !markierteEdgeIds.length}
+            className={`hc-auto-return${verschiebung ? ' is-active' : ''}`}
+            title={`Verschieben (Taste ${String(drawingConfig.shortcut_move).toUpperCase()}): Auswahl treffen, Startpunkt und Zielpunkt klicken. Shift beim Start verschiebt die ganze Leitung.`}>
+            ✥ Verschieben
           </button>
         </div>
 
@@ -4602,6 +4838,16 @@ function EditorInner() {
                 </div>
               </Panel>
             )}
+            {verschiebung && (
+              <Panel position="top-center">
+                <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:8, padding:'7px 12px', borderRadius:18,
+                  background:'#5b21b6', color:'white', fontSize:10, fontWeight:700, boxShadow:'0 6px 16px rgba(91,33,182,.28)' }}>
+                  {verschiebung.basis
+                    ? `Verschieben · ${verschiebung.ziele.beschreibung} — Zielpunkt klicken (Shift kehrt den Fang um)`
+                    : `Verschieben · ${verschiebung.ziele.beschreibung} — Startpunkt klicken`}
+                </div>
+              </Panel>
+            )}
             {segmentVerschiebung?.active && (
               <Panel position="top-center">
                 <div style={{ marginTop:46, padding:'7px 12px', borderRadius:18, background:'#5b21b6', color:'white', fontSize:10, fontWeight:700, boxShadow:'0 6px 16px rgba(91,33,182,.25)' }}>
@@ -4729,6 +4975,35 @@ function EditorInner() {
                   <line x1={spiegelAchse.start.x} y1={spiegelAchse.start.y}
                     x2={spiegelAchse.cursor.x} y2={spiegelAchse.cursor.y}
                     stroke="#7c3aed" strokeWidth="2" strokeDasharray="9 6" />
+                )}
+                {/* Verschieben: Basispunkt, gefangener Zielpunkt und die Strecke
+                    dazwischen — angezeigt wird genau der Vektor, den der Klick
+                    anwendet. */}
+                {verschiebung?.basis && (
+                  <g pointerEvents="none">
+                    <circle cx={verschiebung.basis.x} cy={verschiebung.basis.y}
+                      r={5 / zoomAnzeige} fill="white" stroke="#5b21b6" strokeWidth={2 / zoomAnzeige} />
+                    {verschiebung.cursor && (
+                      <>
+                        <line x1={verschiebung.basis.x} y1={verschiebung.basis.y}
+                          x2={verschiebung.cursor.x} y2={verschiebung.cursor.y}
+                          stroke="#5b21b6" strokeWidth={2 / zoomAnzeige}
+                          strokeDasharray={`${9 / zoomAnzeige} ${6 / zoomAnzeige}`} />
+                        <circle cx={verschiebung.cursor.x} cy={verschiebung.cursor.y}
+                          r={4 / zoomAnzeige} fill="#5b21b6" />
+                        <text x={verschiebung.cursor.x + 12 / zoomAnzeige}
+                          y={verschiebung.cursor.y - 12 / zoomAnzeige}
+                          fill="#5b21b6" fontSize={11 / zoomAnzeige} fontWeight="700"
+                          stroke="#ffffff" strokeWidth={3 / zoomAnzeige}
+                          strokeLinejoin="round" paintOrder="stroke">
+                          {verschiebungLabel({
+                            x:verschiebung.cursor.x - verschiebung.basis.x,
+                            y:verschiebung.cursor.y - verschiebung.basis.y,
+                          })}
+                        </text>
+                      </>
+                    )}
+                  </g>
                 )}
               </svg>
             </ViewportPortal>
@@ -4907,6 +5182,7 @@ function EditorInner() {
               <LeitungPanel edge={selectedEdge} leitungResults={leitungResults}
                 segmentIndex={selectedEdgeSegment?.edgeId === selectedEdge.id ? selectedEdgeSegment.segmentIndex : null}
                 onMoveSegment={segmentNumerischVerschieben}
+                onLabel={beschriftungSetzen} onLabelReset={labelZuruecksetzen}
                 onUpdateEdge={updateEdgeData} onUpdateLayer={updateEdgeLayer} onDelete={deleteEdge} />
             ) : (
               <PropertiesPanel node={selectedNode} nodeFlows={nodeFlows} verteilerResults={verteilerResults} gruppeResults={gruppeResults} ventilResults={ventilResults} pumpenResults={pumpenResults} expansionResults={expansionResults} anschlussWarnungen={anschlussWarnungen} anschlussResults={anschlussResults} pwtResults={pwtResults} heatpumpResults={heatpumpResults} onUpdate={updateNode} onDelete={deleteNode} onSetAbgaenge={setAbgaenge} navigate={navigate}
@@ -5103,6 +5379,15 @@ function EditorInner() {
                 }
               }],
               ['◇', 'An Spiegelachse spiegeln', 'Zwei Punkte zeichnen · erzeugt eine Kopie', () => setSpiegelAchse({ edgeId:edgeMenu.edgeId, start:null, cursor:null })],
+              // Beschriftung: dieselben zwei Befehle wie im Leitungspanel, hier
+              // direkt dort, wo der Planer mit der rechten Maustaste hinzeigt.
+              ...(edgesRef.current.find(item=>item.id===edgeMenu.edgeId)?.data?.label_hidden
+                ? [['👁', 'Beschriftung einblenden', 'DN und m′ wieder anzeigen',
+                  () => beschriftungSetzen(edgeMenu.edgeId, { label_hidden:false })]]
+                : [['⃠', 'Beschriftung ausblenden', 'DN und m′ an dieser Leitung verbergen',
+                  () => beschriftungSetzen(edgeMenu.edgeId, { label_hidden:true })]]),
+              ['⌖', 'Beschriftung zurücksetzen', 'Wieder in die Streckenmitte stellen',
+                () => labelZuruecksetzen(edgeMenu.edgeId)],
               ['⌫', 'Löschen', 'Leitung und unbenutzte freie Enden entfernen', () => deleteEdge(edgeMenu.edgeId)],
             ].map(([icon, title, sub, action])=>(
               <button key={title} onClick={()=>{ action(); setEdgeMenu(null); }}

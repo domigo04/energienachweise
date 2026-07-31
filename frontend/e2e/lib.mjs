@@ -9,8 +9,11 @@
 import { chromium } from 'playwright';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
-const HIER = path.dirname(new URL(import.meta.url).pathname);
+// fileURLToPath statt .pathname: sonst bleibt in einem Pfad mit Leerzeichen
+// («Mobile Documents») ein %20 stehen und jeder Kindprozess scheitert.
+const HIER = path.dirname(fileURLToPath(import.meta.url));
 export const LAUFDATEI = path.join(HIER, '.run.json');
 
 /** Zugangsdaten und IDs des laufenden Testaufbaus. */

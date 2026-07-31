@@ -21,6 +21,9 @@ export const DEFAULT_DRAWING_CONFIG = {
   shortcut_rotate: 'd',
   shortcut_mirror: 's',
   shortcut_align: 'a',
+  // Verschieben (CAD-MOVE). Frei belegbar; die Befehlstasten haben Vorrang vor
+  // den festen Layer-Tasten V/R/B, damit auch «v» wählbar ist.
+  shortcut_move: 'm',
   // Auto-Rücklauf ist AUS, solange ein Schema ihn nicht ausdrücklich einschaltet.
   auto_return: false,
   // CAD-Zustände. Fehlen sie (jedes Altschema), gilt der bisherige Default:
@@ -46,6 +49,7 @@ export function normalisiereDrawingConfig(config = {}) {
     shortcut_rotate: shortcutTaste(c.shortcut_rotate, DEFAULT_DRAWING_CONFIG.shortcut_rotate),
     shortcut_mirror: shortcutTaste(c.shortcut_mirror, DEFAULT_DRAWING_CONFIG.shortcut_mirror),
     shortcut_align: shortcutTaste(c.shortcut_align, DEFAULT_DRAWING_CONFIG.shortcut_align),
+    shortcut_move: shortcutTaste(c.shortcut_move, DEFAULT_DRAWING_CONFIG.shortcut_move),
     auto_return: c.auto_return === true,
     ortho: flagge(c.ortho, DEFAULT_DRAWING_CONFIG.ortho),
     object_snap: flagge(c.object_snap, DEFAULT_DRAWING_CONFIG.object_snap),

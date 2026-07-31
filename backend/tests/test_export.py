@@ -182,6 +182,41 @@ def test_svg_uebernimmt_cad_stuetzpunkte_und_medien_layer():
     assert 'viewBox="-350.0' in svg
 
 
+def _beschriftungs_graph(edge_data):
+    """Eine freie Leitung mit Durchfluss — nur für die Beschriftung."""
+    nodes = [
+        {"id": "a", "type": "junction", "position": {"x": 0, "y": 0}, "data": {"cad_anchor": True}},
+        {"id": "b", "type": "junction", "position": {"x": 400, "y": 0}, "data": {"cad_anchor": True}},
+    ]
+    edges = [{
+        "id": "lt", "source": "a", "sourceHandle": "center-source",
+        "target": "b", "targetHandle": "center-target",
+        "style": {"stroke": VL},
+        "data": {"layer_id": "heizung_vl", "cad_polyline": True, "points": [], **edge_data},
+    }]
+    return nodes, edges, {"edge_flows": {"lt": 1.2}, "leitung_results": {"lt": {"dn": "DN32 (33.7x2.6)"}}}
+
+
+def test_svg_uebernimmt_versetzte_leitungsbeschriftung():
+    """Editor und PDF zeigen dieselbe Beschriftung — inklusive Versatz."""
+    nodes, edges, results = _beschriftungs_graph({"label_offset": {"x": 0, "y": -80}})
+    svg = erzeuge_svg(nodes, edges, results)
+    assert "DN32" in svg
+    # Ohne Versatz stünde die Zahl auf y=0; der Versatz muss ankommen.
+    assert 'y="-80.0"' in svg
+    # Und ein Hinweisstrich verbindet sie mit der Leitung.
+    assert 'stroke-dasharray="4,3"' in svg
+
+
+def test_svg_laesst_ausgeblendete_leitungsbeschriftung_weg():
+    nodes, edges, results = _beschriftungs_graph({"label_hidden": True})
+    svg = erzeuge_svg(nodes, edges, results)
+    assert "DN32" not in svg
+    assert "kg/h" not in svg
+    # Die Leitung selbst bleibt selbstverständlich gezeichnet.
+    assert 'd="M 0 0 L 400 0"' in svg
+
+
 def test_svg_cad_anker_sind_unsichtbar_und_polylinie_startet_exakt_am_punkt():
     nodes = [
         {"id": "frei_a", "type": "junction", "position": {"x": 40, "y": 60}, "data": {"cad_anchor": True}},

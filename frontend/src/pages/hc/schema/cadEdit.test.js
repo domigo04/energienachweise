@@ -3,7 +3,8 @@ import {
   abzweigPunkt,
   entwurfFuerEscape,
   eckpunktEntfernen, eckpunktSetzen, gripsFuerRoute,
-  istKollinear, routeBereinigen, routeIstGueltig,
+  istKollinear, labelSichtbar, labelVerschoben, labelVersatz,
+  leitungVerschieben, routeBereinigen, routeIstGueltig,
   segmentAusrichten, segmentOrientierung, segmentVerschieben,
   segmentZumVerschieben, verschiebungLabel,
 } from './cadEdit';
@@ -321,5 +322,57 @@ describe("segmentAusrichten", () => {
     const route = [{ x: 0, y: 0 }, { x: 100, y: 0 }];
     const { route: neu } = segmentAusrichten(route, 0, ref45, { klick: { x: 0, y: 0 } });
     expect(Math.round(neu[1].x)).toBe(Math.round(neu[1].y));
+  });
+});
+
+describe('Leitung verschieben (MOVE)', () => {
+  const route = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }];
+
+  it('nimmt freie Enden mit und verschiebt alle Zwischenpunkte', () => {
+    const ergebnis = leitungVerschieben(route, { x: 50, y: 20 }, { startFrei: true, endFrei: true });
+    expect(ergebnis.start).toEqual({ x: 50, y: 20 });
+    expect(ergebnis.end).toEqual({ x: 150, y: 120 });
+    expect(ergebnis.points).toEqual([{ x: 150, y: 20 }]);
+  });
+
+  it('lässt ein Ende am Bauteil stehen und setzt dort einen Stützpunkt', () => {
+    const ergebnis = leitungVerschieben(route, { x: 0, y: 40 }, { startFrei: false, endFrei: true });
+    expect(ergebnis.start).toBeNull();
+    // Der Anschluss bleibt; die Leitung führt neu zur verschobenen Geometrie.
+    expect(ergebnis.points[0]).toEqual({ x: 0, y: 40 });
+    expect(ergebnis.points.at(-1)).toEqual({ x: 100, y: 40 });
+    expect(ergebnis.end).toEqual({ x: 100, y: 140 });
+  });
+
+  it('hält beide Anschlüsse fest, wenn kein Ende frei ist', () => {
+    const ergebnis = leitungVerschieben(route, { x: 30, y: 0 }, {});
+    expect(ergebnis.start).toBeNull();
+    expect(ergebnis.end).toBeNull();
+    expect(ergebnis.points).toEqual([{ x: 30, y: 0 }, { x: 130, y: 0 }, { x: 130, y: 100 }]);
+  });
+
+  it('macht nichts ohne Vektor oder ohne brauchbare Route', () => {
+    expect(leitungVerschieben(route, { x: 0, y: 0 })).toBeNull();
+    expect(leitungVerschieben([{ x: 0, y: 0 }], { x: 10, y: 0 })).toBeNull();
+  });
+});
+
+describe('Leitungsbeschriftung', () => {
+  it('liefert immer einen brauchbaren Versatz', () => {
+    expect(labelVersatz({})).toEqual({ x: 0, y: 0 });
+    expect(labelVersatz({ label_offset: { x: 'abc', y: 12 } })).toEqual({ x: 0, y: 12 });
+    expect(labelVersatz({ label_offset: { x: -30, y: 5 } })).toEqual({ x: -30, y: 5 });
+  });
+
+  it('ist sichtbar, solange sie nicht ausdrücklich ausgeblendet wurde', () => {
+    expect(labelSichtbar({})).toBe(true);
+    expect(labelSichtbar({ label_hidden: false })).toBe(true);
+    expect(labelSichtbar({ label_hidden: true })).toBe(false);
+  });
+
+  it('addiert den Ziehweg, wahlweise aufs Raster', () => {
+    expect(labelVerschoben({ x: 10, y: 0 }, { x: 5, y: -3 })).toEqual({ x: 15, y: -3 });
+    expect(labelVerschoben({ x: 0, y: 0 }, { x: 12, y: 7 }, { grid: 10 })).toEqual({ x: 10, y: 10 });
+    expect(labelVerschoben(null, null)).toEqual({ x: 0, y: 0 });
   });
 });

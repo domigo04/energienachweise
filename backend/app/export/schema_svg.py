@@ -838,6 +838,24 @@ def zeichne_edge(parts, edge, nodes_by_id, results):
     sw = 4.5
     parts.append(f'<path d="{pfad}" fill="none" stroke="{stroke}" stroke-width="{sw}" stroke-linecap="round" stroke-linejoin="round"{dash}/>')
     fluss = (results.get("edge_flows") or {}).get(edge.get("id"))
+    # Beschriftung wie im Editor: eine ausgeblendete Beschriftung wird auch im
+    # PDF nicht gezeichnet, ein Versatz wird übernommen (Editor und Export
+    # zeigen denselben Plan).
+    if edge_data.get("label_hidden") is True:
+        return
+    versatz = edge_data.get("label_offset") or {}
+    versatz_x = _f(versatz.get("x")) or 0
+    versatz_y = _f(versatz.get("y")) or 0
+    if fluss and (versatz_x or versatz_y):
+        # Hinweisstrich wie im Editor — sonst gehört die versetzte Zahl im Plan
+        # zu keiner erkennbaren Leitung.
+        parts.append(
+            f'<line x1="{_svg_num(lx)}" y1="{_svg_num(ly)}" '
+            f'x2="{_svg_num(lx + versatz_x)}" y2="{_svg_num(ly + versatz_y)}" '
+            f'stroke="{stroke}" stroke-width="1" stroke-dasharray="4,3" opacity="0.55"/>'
+        )
+    lx += versatz_x
+    ly += versatz_y
     if fluss:
         # Neues Label-Format (Dominic 2026-07-06): DN gross oben, Massenstrom m' in
         # kg/h darunter. Pa/m steht weiter im Klick-Panel (LeitungPanel), nicht am Strich.

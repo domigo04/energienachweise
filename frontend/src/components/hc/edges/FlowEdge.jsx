@@ -1,5 +1,6 @@
 import { BaseEdge, EdgeLabelRenderer, useStore } from '@xyflow/react';
 import { roundedPolylinePath } from './geometry';
+import { labelSichtbar, labelVersatz } from '../../../pages/hc/schema/cadEdit';
 
 function halfwayPoint(points) {
   if (points.length < 2) return points[0] || { x: 0, y: 0 };
@@ -62,6 +63,8 @@ export function FlowEdge({
   const cornerRadius = Math.max(0, Number(data.corner_radius ?? data._cornerRadius ?? 8) || 0);
   const edgePath = roundedPolylinePath(vertices, cornerRadius);
   const labelPoint = halfwayPoint(vertices);
+  const labelOffset = labelVersatz(data);
+  const labelAnker = { x: labelPoint.x + labelOffset.x, y: labelPoint.y + labelOffset.y };
   const dash = data._dashed || isRL ? '10 7' : undefined;
   const color = style.stroke || '#334155';
 
@@ -144,21 +147,47 @@ export function FlowEdge({
       {data._sourceJunctionDegree >= 3 && <circle cx={sourceX} cy={sourceY} r={3.5 / zoom} fill={color} pointerEvents="none" />}
       {data._targetJunctionDegree >= 3 && <circle cx={targetX} cy={targetY} r={3.5 / zoom} fill={color} pointerEvents="none" />}
 
-      {/* Leitungs-Label (DN + Massenstrom) — in der Streckenmitte */}
-      {label && (
-        <EdgeLabelRenderer>
-          <div style={{
-            position: 'absolute',
-            transform: `translate(-50%, -130%) translate(${labelPoint.x}px,${labelPoint.y}px)`,
-            fontSize: 9, fontFamily: 'monospace', fontWeight: 700,
-            color: isVL ? '#b91c1c' : isRL ? '#1d4ed8' : '#374151',
-            background: 'rgba(255,255,255,0.92)', padding: '2px 5px', borderRadius: 3,
-            border: `1px solid ${isVL ? '#fca5a5' : isRL ? '#93c5fd' : '#e2e8f0'}`,
-            pointerEvents: 'none', userSelect: 'none', whiteSpace: 'nowrap',
-          }}>
-            {label}
-          </div>
-        </EdgeLabelRenderer>
+      {/* Leitungs-Label (DN + Massenstrom). Sitzt in der Streckenmitte, lässt
+          sich aber mit der Maus an eine freie Stelle ziehen und ausblenden —
+          im Plan steht die Zahl sonst regelmässig im Weg. Der Versatz gehört
+          zur Leitung und wird mitgespeichert und mitexportiert. */}
+      {label && labelSichtbar(data) && (
+        <>
+          {/* Hinweisstrich zur Leitung, sobald die Beschriftung versetzt ist —
+              sonst wüsste im Plan niemand, zu welcher Leitung sie gehört. */}
+          {Boolean(labelOffset.x || labelOffset.y) && (
+            <line x1={labelPoint.x} y1={labelPoint.y} x2={labelAnker.x} y2={labelAnker.y}
+              stroke={color} strokeWidth={1 / zoom} strokeDasharray={`${4 / zoom} ${3 / zoom}`}
+              opacity="0.55" pointerEvents="none" />
+          )}
+          <EdgeLabelRenderer>
+            <div
+              title="Beschriftung ziehen · Doppelklick setzt sie zurück · Entf blendet sie aus"
+              onPointerDown={(event) => {
+                if (event.button !== 0) return;
+                event.stopPropagation();
+                data._onLabelPointerDown?.(event, id);
+              }}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                data._onLabelContextMenu?.(event, id);
+              }}
+              onDoubleClick={(event) => { event.stopPropagation(); data._onLabelReset?.(id); }}
+              style={{
+                position: 'absolute',
+                transform: `translate(-50%, -130%) translate(${labelAnker.x}px,${labelAnker.y}px)`,
+                fontSize: 9, fontFamily: 'monospace', fontWeight: 700,
+                color: isVL ? '#b91c1c' : isRL ? '#1d4ed8' : '#374151',
+                background: 'rgba(255,255,255,0.92)', padding: '2px 5px', borderRadius: 3,
+                border: `1px solid ${data._labelSelected ? '#7c3aed' : isVL ? '#fca5a5' : isRL ? '#93c5fd' : '#e2e8f0'}`,
+                boxShadow: data._labelSelected ? '0 0 0 2px rgba(124,58,237,.25)' : 'none',
+                pointerEvents: 'all', cursor: 'move', userSelect: 'none', whiteSpace: 'nowrap',
+              }}>
+              {label}
+            </div>
+          </EdgeLabelRenderer>
+        </>
       )}
     </>
   );

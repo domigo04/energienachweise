@@ -15,11 +15,15 @@ export const MIRROR = 'mirror';        // Spiegelachse angeben
 // bzw. auf dieselbe Flucht soll. Die Nutzlast trägt die Referenz zwischen den
 // beiden Klicks — der Befehl hat damit KEINEN eigenen Zustand ausserhalb.
 export const ALIGN = 'align';
+// Verschieben: erst den Startpunkt (Basispunkt), dann den Zielpunkt klicken.
+// Die Auswahl steht bereits fest, wenn der Befehl startet — sie liegt in der
+// Nutzlast, damit ein Klick auf die Zeichenfläche sie nicht abwählt.
+export const MOVE = 'move';
 
 // Der Grundzustand. Nach dem Laden und nach jedem ESC gilt genau das.
 export const HOME = Object.freeze({ type: MODIFY, persistent: false, payload: null });
 
-const BEFEHLE = new Set([MODIFY, DRAW_PIPE, PLACE, MIRROR, ALIGN]);
+const BEFEHLE = new Set([MODIFY, DRAW_PIPE, PLACE, MIRROR, ALIGN, MOVE]);
 
 /** Grundzustand. Absichtlich eine Funktion — nie eine gemeinsame Referenz teilen. */
 export function initialMode() {
@@ -79,6 +83,7 @@ export const MODE_LABEL = {
   [PLACE]: 'Bauteil setzen',
   [MIRROR]: 'Spiegeln',
   [ALIGN]: 'Ausrichten',
+  [MOVE]: 'Verschieben',
 };
 
 export function modeLabel(mode) {

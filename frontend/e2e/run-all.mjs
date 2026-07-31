@@ -7,8 +7,11 @@
 import { spawnSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
-const HIER = path.dirname(new URL(import.meta.url).pathname);
+// fileURLToPath statt .pathname: sonst bleibt in einem Pfad mit Leerzeichen
+// («Mobile Documents») ein %20 stehen und jeder Kindprozess scheitert.
+const HIER = path.dirname(fileURLToPath(import.meta.url));
 
 // Reihenfolge bewusst: erst die abgesicherte Basis (Regressionsschutz), dann das
 // Neue. Bricht die Basis, ist alles Weitere ohnehin nicht aussagekräftig.

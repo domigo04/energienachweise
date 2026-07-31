@@ -113,6 +113,71 @@ export function segmentZumVerschieben(route, segmentIndex) {
   };
 }
 
+/**
+ * Eine ganze Leitung um einen Vektor verschieben (CAD-MOVE).
+ *
+ * Ein Ende, das an einem Bauteilanschluss hängt, darf NICHT wandern — sonst
+ * würde die Geometrie die Hydraulik zerreissen (dieselbe Regel wie beim
+ * Ausrichten). Statt das Ende mitzunehmen, entsteht dort ein Stützpunkt an der
+ * verschobenen Stelle: der Anschluss bleibt, die Leitung führt neu dorthin.
+ *
+ * `startFrei`/`endFrei` heisst „dieses Ende hängt an einem freien CAD-Anker und
+ * darf mitwandern". Die neuen Ankerpositionen kommen als `start`/`end` zurück.
+ *
+ * Rückgabe: { points, start, end } — `points` sind die Zwischenpunkte der
+ * Leitung (ohne Enden), `start`/`end` sind null, wenn das Ende fest bleibt.
+ */
+export function leitungVerschieben(route, delta, { startFrei = false, endFrei = false } = {}) {
+  if (!Array.isArray(route) || route.length < 2) return null;
+  const dx = Number(delta?.x) || 0;
+  const dy = Number(delta?.y) || 0;
+  if (!dx && !dy) return null;
+  const versetzt = (p) => ({ x: p.x + dx, y: p.y + dy });
+  const ersterPunkt = route[0];
+  const letzterPunkt = route[route.length - 1];
+  return {
+    points: [
+      ...(startFrei ? [] : [versetzt(ersterPunkt)]),
+      ...route.slice(1, -1).map(versetzt),
+      ...(endFrei ? [] : [versetzt(letzterPunkt)]),
+    ],
+    start: startFrei ? versetzt(ersterPunkt) : null,
+    end: endFrei ? versetzt(letzterPunkt) : null,
+  };
+}
+
+// ── Leitungsbeschriftung (DN / m') ────────────────────────────────────────
+//
+// Die Beschriftung sitzt normalerweise in der Streckenmitte. Im echten Plan
+// steht sie dort aber oft im Weg. Darum trägt jede Leitung einen eigenen
+// Versatz und ein Sichtbarkeitsflag — beides gehört zur Leitung und wird
+// mitgespeichert und mitexportiert.
+
+export const LABEL_VERSATZ_NULL = { x: 0, y: 0 };
+
+/** Gespeicherter Versatz → sicherer Versatz (nie NaN, nie undefined). */
+export function labelVersatz(data = {}) {
+  const roh = data?.label_offset;
+  const x = Number(roh?.x);
+  const y = Number(roh?.y);
+  return {
+    x: Number.isFinite(x) ? x : 0,
+    y: Number.isFinite(y) ? y : 0,
+  };
+}
+
+/** Ist die Beschriftung dieser Leitung eingeblendet? */
+export const labelSichtbar = (data = {}) => data?.label_hidden !== true;
+
+/** Versatz nach einem Ziehen. `grid` 0 lässt die Beschriftung frei stehen. */
+export function labelVerschoben(versatz, delta, { grid = 0 } = {}) {
+  const raster = (wert) => (grid > 0 ? Math.round(wert / grid) * grid : wert);
+  return {
+    x: raster((Number(versatz?.x) || 0) + (Number(delta?.x) || 0)),
+    y: raster((Number(versatz?.y) || 0) + (Number(delta?.y) || 0)),
+  };
+}
+
 /** Verschiebestrecke in der üblichen Planer-Einheit cm, ab 1 m in Metern. */
 export function verschiebungLabel(delta = {}) {
   const mm = Math.hypot(Number(delta.x) || 0, Number(delta.y) || 0);

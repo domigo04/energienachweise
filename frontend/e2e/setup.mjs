@@ -11,8 +11,11 @@ import { spawn, execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
-const HIER = path.dirname(new URL(import.meta.url).pathname);
+// fileURLToPath statt .pathname: sonst bleibt in einem Pfad mit Leerzeichen
+// («Mobile Documents») ein %20 stehen und jeder Kindprozess scheitert.
+const HIER = path.dirname(fileURLToPath(import.meta.url));
 const FRONTEND = path.resolve(HIER, '..');
 const BACKEND = path.resolve(FRONTEND, '..', 'backend');
 const LAUFDATEI = path.join(HIER, '.run.json');
@@ -37,6 +40,9 @@ import json, sys
 from app.database import Base, engine, SessionLocal
 from app.models.auth import User
 from app.models.heizungscockpit import HcProject, HcSchema
+# Alle Modelle laden, bevor create_all läuft — sonst fehlen Zieltabellen von
+# Fremdschlüsseln (z. B. subscription_plans) und der Aufbau bricht ab.
+import app.models.subscription, app.models.grobkostenschaetzung, app.models.kv, app.models.lv_import
 from passlib.context import CryptContext
 
 Base.metadata.create_all(bind=engine)

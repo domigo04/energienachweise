@@ -9,6 +9,7 @@ import {
 import { GENERATOR_TYPES } from "../../components/hc/nodes/generatorTypes";
 import PageHeader from "../../components/ui/PageHeader";
 import { LEER, chf, zahl } from "../../lib/format";
+import { PROCESSING, processingSchritt } from "./lvImportProgress";
 
 // B9 — Review-Seite des LV-Imports. Ohne :id ist es die Upload-Ansicht.
 // Aus einem Unternehmer-LV entsteht ein geprüfter technischer Fingerprint +
@@ -261,15 +262,6 @@ function MultiSelect({ optionen, werte, disabled, onChange }) {
   );
 }
 
-// Punkt 24 — sichtbarer Verarbeitungszustand statt scheinbar eingefrorener Seite.
-const PROCESSING = [
-  { ab: 0, titel: "PDF wird hochgeladen", detail: "Datei wird sicher an den Import übergeben." },
-  { ab: 2, titel: "Seiten werden gelesen und klassifiziert", detail: "Deckblatt, LV, Technik, Kosten und Konditionen werden getrennt." },
-  { ab: 7, titel: "Technische Kennwerte werden erkannt", detail: "Erzeuger, Erdsonden, Rohrmeter, Pumpen und Wärmemessungen." },
-  { ab: 18, titel: "Kosten und Abzüge werden geprüft", detail: "BKP-Positionen, Rabatt, Skonto, Abzüge und MWST werden nachgerechnet." },
-  { ab: 45, titel: "KI-Prüfung und Resultat werden abgeschlossen", detail: "Nur unsichere Seiten werden visuell geprüft und normalisiert." },
-];
-
 function ProcessingAnsicht({ schritt, vergangen }) {
   const aktuell = PROCESSING[schritt];
   const minuten = Math.floor(vergangen / 60);
@@ -345,7 +337,11 @@ function UploadAnsicht() {
   const [imports, setImports] = useState([]);
   const [ueberZone, setUeberZone] = useState(false);
 
-  useEffect(() => { listLvImports().then(setImports).catch(() => {}); }, []);
+  useEffect(() => {
+    listLvImports()
+      .then((data) => setImports(Array.isArray(data) ? data : []))
+      .catch(() => setError("Bisherige LV-Importe konnten nicht geladen werden."));
+  }, []);
 
   // Punkt 24 — der Upload arbeitet synchron; statt Fake-Prozenten laufen die
   // Schritte optisch weiter, damit die Seite nicht eingefroren wirkt.
@@ -357,8 +353,7 @@ function UploadAnsicht() {
     const t = setInterval(() => {
       const seconds = Math.floor((Date.now() - started) / 1000);
       setVergangen(seconds);
-      const index = PROCESSING.findLastIndex((item) => seconds >= item.ab);
-      setSchritt(Math.max(0, index));
+      setSchritt(processingSchritt(seconds));
     }, 1000);
     return () => clearInterval(t);
   }, [busy]);
@@ -761,11 +756,9 @@ function ReviewAnsicht({ id }) {
   };
   const alleBestaetigen = async () => {
     for (const f of (imp.features || []).filter((x) => !x.confirmed)) {
-      // eslint-disable-next-line no-await-in-loop
       await setFeature(f, { confirmed: true });
     }
     for (const c of kostenVerwendet.filter((x) => !x.confirmed || !x.mapping_confirmed)) {
-      // eslint-disable-next-line no-await-in-loop
       await setCost(c, { confirmed: true, mapping_confirmed: true });
     }
   };

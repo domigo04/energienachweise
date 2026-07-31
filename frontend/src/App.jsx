@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { Component, lazy, Suspense } from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import "./index.css";
 
@@ -33,11 +33,48 @@ const Abonnement = lazy(() => import("./pages/admin/Abonnement"));
 const BaupreisindexAdmin = lazy(() => import("./pages/admin/BaupreisindexAdmin"));
 const HydraulikEditor = lazy(() => import("./pages/hc/HydraulikEditor"));
 
+class PageErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  componentDidCatch(error) {
+    // Nur die technische Fehlermeldung, keine Projekt- oder PDF-Inhalte.
+    console.error("Arbeitsseite konnte nicht dargestellt werden", error);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="mx-auto max-w-xl px-5 py-12">
+          <div className="rounded-lg border border-red-200 bg-white p-5">
+            <h1 className="text-base font-bold text-slate-900">Diese Seite konnte nicht geladen werden</h1>
+            <p className="mt-1 text-sm text-slate-600">
+              Bitte lade die Anwendung neu. Deine bereits gespeicherten Daten bleiben erhalten.
+            </p>
+            <button type="button" className="btn-primary mt-4" onClick={() => window.location.reload()}>
+              Seite neu laden
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function PageLoader({ children }) {
   return (
-    <Suspense fallback={<div className="flex min-h-64 items-center justify-center text-sm text-slate-500">Bereich wird geladen…</div>}>
-      {children}
-    </Suspense>
+    <PageErrorBoundary>
+      <Suspense fallback={<div className="flex min-h-64 items-center justify-center text-sm text-slate-500">Bereich wird geladen…</div>}>
+        {children}
+      </Suspense>
+    </PageErrorBoundary>
   );
 }
 

@@ -262,3 +262,44 @@ def test_konditionsseiten_werden_nach_relevanz_begrenzt():
         {"page": 42, "text": "Garantie und Haftung"},
     ]
     assert visual_review.select_commercial_review_pages(pages) == [40, 41]
+
+
+def test_handschriftliche_preiszusammenstellung_wird_fuer_review_gewaehlt():
+    pages = [
+        {"page": 24, "text": "7 Materialspezifikation"},
+        {"page": 25, "text": (
+            "Preisszusammenstellung BKP 243\n"
+            "243.0 Heizflächen\n243.1 Leitungen\n243.2 Apparate\n"
+            "243.3 Regelorgane\n243.4 Speicher\nTotal BKP 243"
+        )},
+        {"page": 26, "text": "243.0 Heizflächen Stk 3"},
+        {"page": 39, "text": "8. Kostenzusammenstellung"},
+        {"page": 40, "text": "Brutto Rabatt Skonto MWST Netto"},
+    ]
+    selected = visual_review.select_cost_review_pages(pages)
+    assert selected[0] == 25
+    assert 40 in selected
+    assert 26 not in selected
+
+
+def test_fokussierte_kostenkorrektur_loescht_andere_befunde_nicht():
+    original = _valid()
+    original["conditions"] = [{
+        "label": "Rabatt", "kind": "percent", "direction": "deduction",
+        "rate_percent": None, "amount": None, "basis_amount": None,
+        "status": "requested_not_priced", "order": 1, "source_page": 2,
+    }]
+    original["heat_emission_systems"] = [{
+        "type": "Konvektor", "source_label": "Konvektor", "count": 4,
+        "supplied_by": "contractor", "installation_by": "contractor",
+        "confidence": 0.95, "source_page": 26, "evidence": "Konvektor Stk 4",
+    }]
+    corrected = _valid()
+    corrected["conditions"] = []
+    corrected["heat_emission_systems"] = []
+    corrected["project_data"] = {key: None for key in original["project_data"]}
+
+    merged = visual_review._merge_focused_correction(original, corrected)
+    assert merged["conditions"] == original["conditions"]
+    assert merged["heat_emission_systems"] == original["heat_emission_systems"]
+    assert merged["project_data"] == original["project_data"]

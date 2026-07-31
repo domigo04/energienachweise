@@ -186,6 +186,54 @@ def merge(deterministisch: list[dict], visuell: list[dict]) -> list[dict]:
     return list(zusammen.values())
 
 
+_GENERATOR_EVIDENCE = {
+    "ews_wp": ("sole/wasser", "sole-wasser", "erdsonde", "erdwaermesonde", "erdwärmesonde"),
+    "lwwp": ("luft/wasser", "luft-wasser", "aussenluft", "außenluft", "lwwp"),
+    "wasser_wp": ("wasser/wasser", "wasser-wasser", "grundwasser"),
+    "co2_wp": ("co2", "co₂"),
+    "fernwaerme": ("fernwaerme", "fernwärme", "nahwaerme", "nahwärme"),
+    "gas": ("gaskessel", "gasheizung", "gas-brennwert", "erdgas"),
+    "oel": ("oelkessel", "ölkessel", "heizoel", "heizöl"),
+    "holz": ("pellet", "schnitzel", "stueckholz", "stückholz", "holzkessel"),
+    "elektro": ("elektroheizung", "heizstab", "elektroeinsatz"),
+    "solarthermie": ("solarthermie", "sonnenkollektor", "solarkollektor"),
+}
+
+
+def filter_visual_generators_by_page_evidence(
+    entries: list[dict], pages: list[dict], *, text_available: bool = True,
+) -> list[dict]:
+    """Verwirft visuell behauptete Erzeuger ohne passenden OCR-Seitenbeleg.
+
+    Luftheizapparate sind keine Luft/Wasser-Wärmepumpe und «bestehend» allein
+    ist kein Fernwärmenachweis. Bei komplett fehlendem Text bleibt die visuelle
+    Quelle erhalten, weil dann keine unabhängige Gegenprüfung möglich ist.
+    """
+    if not text_available:
+        return list(entries or [])
+    page_text = {
+        int(page["page"]): _fold_text(page.get("text") or "")
+        for page in pages or [] if page.get("page")
+    }
+    out: list[dict] = []
+    for entry in entries or []:
+        if entry.get("kind") != HEAT_GENERATION:
+            out.append(entry)
+            continue
+        aliases = _GENERATOR_EVIDENCE.get(entry.get("type_code"), ())
+        text = page_text.get(entry.get("source_page"), "")
+        if aliases and any(_fold_text(alias) in text for alias in aliases):
+            out.append(entry)
+    return out
+
+
+def _fold_text(value: str) -> str:
+    low = str(value or "").lower()
+    for left, right in (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss")):
+        low = low.replace(left, right)
+    return re.sub(r"\s+", " ", low)
+
+
 def delivery_codes(systeme: list[dict]) -> list[str]:
     """Codes der Wärmeabgabe — füllt das bestehende Merkmal `heat_delivery_types`."""
     return sorted({s["type_code"] for s in systeme or [] if s.get("kind") == HEAT_EMISSION})

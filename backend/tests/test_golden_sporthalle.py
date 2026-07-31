@@ -157,6 +157,18 @@ def test_mwst_und_endsumme():
     assert kette["total_incl_vat"] == ENDSUMME
 
 
+def test_ocr_detailzahlen_werden_nicht_als_preise_uebernommen():
+    from app.lv_import.cost_extract import cost_rows_from_positions
+
+    rows = cost_rows_from_positions([{
+        "bkp_nr": "243", "pos_nr": "243.1",
+        "beschreibung": "Leitungen / 21.11.25", "betrag": 21.11,
+        "source_page": 28, "source_text": "243.1 Leitungen / 21.11.25",
+    }], trust_detected_amounts=False)
+    assert rows[0]["detected_amount"] is None
+    assert rows[0]["confidence"] == "medium"
+
+
 # ── Konditionen ────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("label", ["Rabatt", "Skonto", "Sponsoring pauschal"])

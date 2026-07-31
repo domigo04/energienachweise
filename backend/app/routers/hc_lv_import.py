@@ -262,7 +262,10 @@ async def upload_lv(
         else:
             # Einzelpositionen bleiben einzeln sichtbar: Menge, Preis und Titel
             # können so vom Menschen direkt in derselben Zeile geprüft werden.
-            costs = cost_rows_from_positions(positions)
+            costs = cost_rows_from_positions(
+                positions,
+                trust_detected_amounts=pipeline.extraction_method != "ocr",
+            )
         # Visuell werden nur Kostenzusammenstellung, Konditionsseiten und
         # konkrete Parser-Konflikte geprüft — nie nochmals das ganze PDF.
         review = build_review_packet(features, costs, positions)
@@ -282,11 +285,16 @@ async def upload_lv(
             p["page"] for p in pipeline.cost_summary_pages
             if summary_invalid and p.get("page")
         }
-        priority_review_pages.update(
-            visual_review.select_commercial_review_pages(
-                pipeline.pages, max_pages=2,
-            )
+        commercial_review_pages = visual_review.select_commercial_review_pages(
+            pipeline.pages, max_pages=2,
         )
+        priority_review_pages.update(commercial_review_pages)
+        if summary_invalid:
+            priority_review_pages.update(
+                visual_review.select_cost_review_pages(
+                    pipeline.pages, max_pages=3,
+                )
+            )
         # Der Projektkopf wird im selben sparsamen Visual-Review-Aufruf geprüft.
         # Kein zusätzlicher API-Call; höchstens die erste Deckblattseite kommt
         # zum bereits kleinen Seitenpaket hinzu.
@@ -393,7 +401,22 @@ async def upload_lv(
                     setattr(imp, attr, visual_project[field])
             # Ein fehlerfreier Parser bleibt Kostenquelle. KI-Kosten ersetzen ihn
             # nur, wenn Positionen/Summen fehlen oder widersprüchlich sind.
-            if summary_invalid and visual["success"] and visual_costs:
+            visual_costs_complete = bool(
+                visual_costs
+                and (visual.get("result") or {}).get("group_totals")
+                and (visual.get("result") or {}).get("trade_total") is not None
+            )
+            if summary_invalid and visual_costs_complete:
+                # Ein kleiner Summenkonflikt (typisch: schwer lesbare
+                # Handschrift) darf nicht dazu führen, dass wir stattdessen
+                # offensichtlich falsche OCR-Zahlen aus Detailseiten zeigen.
+                # Die visuell gelesenen Werte bleiben sichtbar, aber der ganze
+                # Satz bleibt bis zur Bestätigung ein Prüffall.
+                if not visual["success"]:
+                    for row in visual_costs:
+                        row["requires_review"] = True
+                        row["confidence"] = "medium"
+                        row["validation_status"] = "mismatch"
                 costs = visual_costs
             commercial_result = visual_apply.get("commercial") or {}
             vorhandene_konditionen = len(commercial_result.get("conditions") or [])
@@ -417,9 +440,16 @@ async def upload_lv(
         # Timeout blieb die Konditionsliste leer und die Bruttosumme auf 0,
         # obwohl Rabatt, Skonto und MWST lesbar im Dokument stehen. Die KI
         # ergänzt jetzt nur noch, was der Parser nicht gefunden hat.
-        konditionen_seiten = (
-            pipeline.conditions_pages + pipeline.cost_summary_pages
-        ) or pipeline.pages[-3:]
+        kommerzielle_nummern = set(commercial_review_pages)
+        konditionen_seiten = [
+            page for page in pipeline.pages
+            if page.get("page") in kommerzielle_nummern
+        ]
+        konditionen_seiten += [
+            page for page in pipeline.cost_summary_pages
+            if page.get("page") not in {p.get("page") for p in konditionen_seiten}
+        ]
+        konditionen_seiten = konditionen_seiten or pipeline.pages[-3:]
         geparste_konditionen = conditions_extract.parse_conditions(konditionen_seiten)
         if not vorhandene_konditionen and conditions_extract.has_conditions(geparste_konditionen):
             basis = geparste_konditionen["base_amount"]
@@ -515,10 +545,14 @@ async def upload_lv(
         # Anlagensysteme: Wärmeabgabe und Wärmeerzeugung. Der Parser findet sie
         # in born-digital LVs, die visuelle Prüfung in Scans — beide Wege enden
         # in derselben Struktur.
+        visuelle_systeme = systems.filter_visual_generators_by_page_evidence(
+            visual_apply.get("systems") or [], pipeline.pages,
+            text_available=pipeline.extraction_method != "image",
+        )
         systeme = systems.merge(
             systems.detect(pipeline.technik_pages, systems.HEAT_EMISSION)
             + systems.detect(pipeline.technik_pages, systems.HEAT_GENERATION),
-            visual_apply.get("systems") or [],
+            visuelle_systeme,
         )
         for eintrag in systeme:
             db.add(LvImportSystem(lv_import_id=imp.id, **eintrag))
@@ -534,7 +568,7 @@ async def upload_lv(
             **pipeline.debug_dump(),
             "cost_source": (
                 "cost_summary" if has_cost_summary(summary)
-                else "visual_ai_pdf" if visual["success"]
+                else "visual_ai_pdf" if visual_apply.get("visual_review_costs_applied")
                 else "lv_positions"
             ),
             "features_erkannt": len(erkannte),

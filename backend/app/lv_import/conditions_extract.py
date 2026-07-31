@@ -33,17 +33,19 @@ _PROZENT = re.compile(r"(\d{1,2}(?:[.,]\d{1,2})?)\s*%")
 # Zeilen, die die Bemessungsgrundlage nennen.
 _BASIS = ("total heizung", "totalheizung", "lv-summe", "lv summe", "nettosumme",
           "zwischentotal", "total netto", "summe lv", "total lv", "bruttosumme",
-          "total arbeitsgattung", "total gewerk")
+          "total arbeitsgattung", "total gewerk", "brutto", "eingabesumme")
 # Die Endsumme — danach folgt keine weitere Kondition mehr.
 _ENDE = ("gesamttotal", "endtotal", "total inkl", "rechnungsbetrag",
          "total brutto inkl", "endsumme")
 _MWST = ("mwst", "mehrwertsteuer", "vat", "tva")
+_OFFEN = ("anfrage", "auf anfrage", "nach vereinbarung", "nicht beziffert")
 
 # Konditionsarten. Reihenfolge zählt: «Baureinigung» vor dem allgemeinen
 # «Reinigung», sonst greift der unspezifische Treffer.
 _ARTEN: tuple[tuple[str, tuple[str, ...], str], ...] = (
     ("Rabatt", ("rabatt",), "deduction"),
     ("Skonto", ("skonto",), "deduction"),
+    ("Sponsoring", ("sponsoring",), "deduction"),
     ("Baureinigung/Beschädigungen",
      ("baureinigung", "beschaedigung", "beschädigung", "reinigung"), "deduction"),
     ("Bauwasser und elektrische Energie",
@@ -108,7 +110,8 @@ def parse_conditions(pages) -> dict:
             prozent = parse_number(prozent_treffer.group(1)) if prozent_treffer else None
 
             # Endsumme: danach kommt nichts mehr, aber die Zeile selbst zählt.
-            if any(begriff in gefaltet for begriff in _ENDE):
+            end_label = _BETRAG.sub("", gefaltet).strip(" .:-")
+            if any(begriff in gefaltet for begriff in _ENDE) or end_label == "netto":
                 if betrag is not None:
                     stated_total = betrag
                     quelle = quelle or nummer
@@ -135,9 +138,19 @@ def parse_conditions(pages) -> dict:
             if not art:
                 continue
             label, richtung = art
-            # Ohne Prozentsatz UND ohne Betrag ist es nur eine Erwähnung im
-            # Bedingungstext, keine Kondition.
-            if prozent is None and betrag is None:
+            # «Ein Rabatt wird nach Vereinbarung gewährt» ist Vertragstext.
+            # Offen ist nur eine tabellarische Konditionszeile, die mit der
+            # Konditionsbezeichnung beginnt (z.B. «Rabatt Anfrage»).
+            ist_offen = (
+                any(begriff in gefaltet for begriff in _OFFEN)
+                and any(
+                    gefaltet.startswith(begriff)
+                    for _, begriffe, _ in _ARTEN for begriff in begriffe
+                )
+            )
+            # Ohne Zahl braucht es einen ausdrücklichen Offen-Vermerk. Eine
+            # blosse Erwähnung von «Rabatt» im Vertragstext ist keine Kondition.
+            if prozent is None and betrag is None and not ist_offen:
                 continue
             if label in gesehen:
                 continue
@@ -149,6 +162,7 @@ def parse_conditions(pages) -> dict:
                 "rate_percent": prozent,
                 "amount": betrag,
                 "basis_amount": None,
+                "status": "requested_not_priced" if ist_offen else "priced",
                 "order": len(conditions) + 1,
                 "source_page": nummer,
                 "source_text": zeile[:200],

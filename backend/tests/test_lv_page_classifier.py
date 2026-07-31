@@ -49,6 +49,16 @@ def test_kostenzusammenstellung_braucht_titel_und_bkp_zeilen():
     assert pc.classify_page(nur_titel)["type"] != pc.COST_SUMMARY
 
 
+def test_preisszusammenstellung_wird_wie_kostenzusammenstellung_erkannt():
+    text = (
+        "Preisszusammenstellung BKP 243\n"
+        "243.0 Heizflächen 5'230.00\n"
+        "243.1 Leitungen 3'620.00\n"
+        "243.2 Apparate und Armaturen 4'060.00\n"
+    )
+    assert pc.classify_page(text)["type"] == pc.COST_SUMMARY
+
+
 def test_schemaseite_wird_nie_als_lv_gelesen():
     """Legendenseiten enthalten „Pos." — dürfen aber kein LV sein."""
     text = "Prinzipschema Heizung\nLegende Heizung\nPos. 1 Waermepumpe\nPos. 2 Speicher"

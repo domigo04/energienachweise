@@ -93,7 +93,11 @@ Konditionen ohne Zahl: Steht bei Rabatt, Skonto oder Sponsoring nur «Anfrage»,
 Kostenpositionen: Gib in `scope_summary` in einem Satz an, was die Position alles
 umfasst (z.B. «Transport, Montage, Inbetriebsetzung, Druckproben,
 Revisionsunterlagen»). Dieser Umfang entscheidet später die Zuordnung, nicht die
-laufende Nummer.
+laufende Nummer. Ein sichtbares Gruppentotal ist autoritativ und bleibt separat.
+Wenn handschriftliche Teilbeträge nicht exakt zum Gruppentotal addieren, lies die
+Teilbeträge zeichengetreu, erfinde keine Ausgleichszahl und nenne die Abweichung
+in `warnings`. Auch ein solcher vollständiger Kostensatz ist nützlicher als
+scheinbare Preise aus Mengen-, Datums- oder Seitennummern der Detailseiten.
 
 Wärmeabgabe: Erfasse in `heat_emission_systems` ALLE vorkommenden Abgabesysteme
 einzeln (Flachröhrenradiatoren, Konvektoren, Luftheizapparate, Fussboden-
@@ -147,6 +151,11 @@ _COMMERCIAL_PAGE_TERMS = (
     "bauwasser", "bauwesenversicherung", "baureklame", "mehrwertsteuer",
     "mwst", "nettosumme", "endsumme",
 )
+_COST_PAGE_TERMS = (
+    "preiszusammenstellung", "preisszusammenstellung",
+    "kostenzusammenstellung", "zusammenstellung der kosten",
+)
+_BKP_SUBPOSITION = re.compile(r"(?<!\d)24[0-9][.,]\d+(?!\d)")
 
 _NULLABLE_NUMBER = {"anyOf": [{"type": "number"}, {"type": "null"}]}
 _NULLABLE_STRING = {"anyOf": [{"type": "string"}, {"type": "null"}]}
@@ -488,6 +497,75 @@ def select_commercial_review_pages(
     ]
 
 
+def select_cost_review_pages(
+    pages: list[dict], *, max_pages: int = 3,
+) -> list[int]:
+    """Findet Kostenblätter auch dann, wenn Scan-OCR Spalten auseinanderreisst.
+
+    Handschriftliche Preiszusammenstellungen bestehen oft aus gedruckten
+    BKP-Titeln und handschriftlichen Beträgen. Der normale Klassifikator sieht
+    dann keine vollständige «BKP + Betrag»-Zeile. Für die visuelle Prüfung
+    reicht dagegen der gedruckte Titel plus mehrere Unterpositionen. Eine reine
+    Kapitel-Trennseite wird nicht allein geschickt; stattdessen wird ihre
+    Folgeseite als wahrscheinliches Formular priorisiert.
+    """
+    by_number = {
+        int(page["page"]): page for page in pages or [] if page.get("page")
+    }
+    ranked: list[tuple[int, int]] = []
+    continuation_pages: set[int] = set()
+    for page_number, page in by_number.items():
+        text = _fold(page.get("text") or "")
+        title_hits = sum(text.count(term) for term in _COST_PAGE_TERMS)
+        subpositions = len(_BKP_SUBPOSITION.findall(text))
+        total_hits = text.count("total bkp") + text.count("summe bkp")
+        score = title_hits * 40 + min(subpositions, 12) * 4 + total_hits * 20
+        if title_hits and subpositions < 2 and page_number + 1 in by_number:
+            continuation_pages.add(page_number + 1)
+        if score:
+            # Ein echtes Kostenblatt hat mehrere Unterpositionen bzw. ein Total.
+            # Eine blosse Inhalts-/Kapitelzeile landet hinter der Folgeseite.
+            if subpositions < 2 and not total_hits:
+                score -= 30
+            ranked.append((score, page_number))
+    for page_number in continuation_pages:
+        ranked.append((35, page_number))
+
+    selected: list[int] = []
+    for _, page_number in sorted(ranked, key=lambda item: (-item[0], item[1])):
+        if page_number not in selected:
+            selected.append(page_number)
+        if len(selected) >= max_pages:
+            break
+    return selected
+
+
+def _merge_focused_correction(original: dict, corrected: dict) -> dict:
+    """Nur die erneut geprüften Kosten ersetzen, nicht den restlichen Befund.
+
+    Der Korrektur-PDF enthält häufig nur eine Kostenseite. Wegen des strikten
+    Schemas liefert das Modell trotzdem leere/null Felder für Konditionen,
+    Projekt und Technik. Diese dürfen die belegten Werte des ersten, breiteren
+    Durchgangs nicht löschen.
+    """
+    merged = dict(original or {})
+    corrected = corrected or {}
+    for key in ("costs", "group_totals"):
+        if corrected.get(key):
+            merged[key] = corrected[key]
+    if corrected.get("trade_total") is not None:
+        merged["trade_total"] = corrected["trade_total"]
+
+    # Handschriftliche Kostenkorrekturen können im Fokusdurchgang deutlicher
+    # werden. Andere Fachfelder bleiben dagegen beim ersten Durchgang.
+    if corrected.get("handwritten_corrections"):
+        merged["handwritten_corrections"] = corrected["handwritten_corrections"]
+    warnings = list(original.get("warnings") or [])
+    warnings.extend(corrected.get("warnings") or [])
+    merged["warnings"] = list(dict.fromkeys(warnings))
+    return merged
+
+
 def validate(result: dict, *, require_costs: bool = True) -> list[str]:
     """Prüft Geldsummen, Dubletten und technisch unmögliche Mengen."""
     issues: list[str] = []
@@ -735,9 +813,13 @@ def review(
                     "Positionen. Lies handschriftliche Beträge zeichenweise und "
                     "gib bei Unsicherheit eine tiefe confidence an."
                 )
-            result = _call(
+            corrected = _call(
                 client, korrektur_pdf, model, budget, correction,
                 original_pages=korrektur_seiten, parser_context=parser_context,
+            )
+            result = (
+                _merge_focused_correction(result, corrected)
+                if fokus else corrected
             )
             attempts = budget.calls
             issues = validate(result, require_costs=require_costs)

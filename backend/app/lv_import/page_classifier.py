@@ -34,6 +34,7 @@ HIGH, MEDIUM, LOW = "high", "medium", "low"
 # Kostenzusammenstellung: Titel + mehrere BKP-Zeilen mit Betrag.
 _COST_TITEL = re.compile(
     r"kosten\s*[-–]?\s*zusammenstellung|kostenzusammenstellung"
+    r"|preis\s*[-–]?\s*zusammenstellung|preiss?zusammenstellung"
     r"|zusammenstellung\s+der\s+kosten|^\s*zusammenstellung\s*$",
     re.IGNORECASE | re.MULTILINE,
 )

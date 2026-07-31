@@ -2,6 +2,7 @@ import pytest
 
 from app.runtime import (
     assert_safe_runtime_configuration,
+    is_production,
     production_configuration_errors,
 )
 
@@ -39,3 +40,14 @@ def test_unsichere_produktion_stoppt_start():
             database_url="",
             secret_key="kurz",
         )
+
+
+def test_railway_ist_auch_ohne_environment_variable_produktion(monkeypatch):
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    monkeypatch.setenv("RAILWAY_PROJECT_ID", "project-123")
+    assert is_production() is True
+    errors = production_configuration_errors(
+        database_url="sqlite:///./privcontrol.db",
+        secret_key="x" * 48,
+    )
+    assert any("SQLite" in error for error in errors)

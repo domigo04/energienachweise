@@ -5,11 +5,21 @@ import os
 
 PRODUCTION_ENVIRONMENTS = {"prod", "production"}
 INSECURE_SECRET_KEYS = {"", "dev-secret-change-me"}
+RAILWAY_MARKERS = (
+    "RAILWAY_PROJECT_ID", "RAILWAY_ENVIRONMENT_ID", "RAILWAY_SERVICE_ID",
+)
 
 
 def is_production(environment: str | None = None) -> bool:
-    value = environment if environment is not None else os.getenv("ENVIRONMENT", "development")
-    return value.strip().lower() in PRODUCTION_ENVIRONMENTS
+    if environment is not None:
+        return environment.strip().lower() in PRODUCTION_ENVIRONMENTS
+    value = os.getenv("ENVIRONMENT", "").strip().lower()
+    # Railway setzt diese Marker automatisch. Fehlt dort versehentlich die
+    # eigene Variable ENVIRONMENT, darf die App nie auf den lokalen
+    # SQLite-Fallback und den Entwicklungs-Seed wechseln.
+    return value in PRODUCTION_ENVIRONMENTS or any(
+        os.getenv(marker) for marker in RAILWAY_MARKERS
+    )
 
 
 def production_configuration_errors(

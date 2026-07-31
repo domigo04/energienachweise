@@ -178,6 +178,19 @@ def test_erwaehnung_ohne_zahl_ist_keine_kondition():
     assert ergebnis["conditions"] == []
 
 
+def test_anfrage_bleibt_als_unbezifferte_kondition_erhalten():
+    ergebnis = conditions_extract.parse_conditions([{
+        "page": 2,
+        "text": "Brutto 82'000.-\nRabatt Anfrage\nSkonto Anfrage\n"
+                "MWST 8.1 % 6'642.-\nNetto 88'642.-",
+    }])
+    assert ergebnis["base_amount"] == pytest.approx(82000)
+    assert ergebnis["stated_total_incl_vat"] == pytest.approx(88642)
+    assert [item["status"] for item in ergebnis["conditions"]] == [
+        "requested_not_priced", "requested_not_priced",
+    ]
+
+
 def test_nacktes_total_ist_bemessungsgrundlage():
     ergebnis = conditions_extract.parse_conditions([{
         "page": 34,
@@ -235,6 +248,33 @@ def test_llm_vorschlag_ohne_quellbeleg_wird_verworfen():
         systems.HEAT_EMISSION,
     )
     assert [e["type_code"] for e in mit] == ["luftheizapparat"]
+
+
+def test_visuelle_erzeuger_werden_gegen_die_quellseite_geprueft():
+    visuell = systems.from_llm([
+        {"type": "Luft/Wasser-Wärmepumpe", "source_label": "LWWP",
+         "confidence": 0.95, "source_page": 26,
+         "evidence": "angeblich Luft/Wasser-Wärmepumpe"},
+        {"type": "Fernwärme", "source_label": "Fernwärme Bestand",
+         "confidence": 0.95, "source_page": 27, "evidence": "bestehend"},
+    ], systems.HEAT_GENERATION)
+    pages = [
+        {"page": 26, "text": "Luftheizapparate werden bauseits geliefert."},
+        {"page": 27, "text": "Umbau im schützenswerten Bestand."},
+    ]
+    assert systems.filter_visual_generators_by_page_evidence(visuell, pages) == []
+
+
+def test_echte_luftwasser_wp_besteht_die_quellpruefung():
+    visuell = systems.from_llm([
+        {"type": "Luft/Wasser-Wärmepumpe", "source_label": "LWWP",
+         "confidence": 0.95, "source_page": 8,
+         "evidence": "Luft/Wasser-Wärmepumpe"},
+    ], systems.HEAT_GENERATION)
+    pages = [{"page": 8, "text": "Neue Luft/Wasser-Wärmepumpe 42 kW"}]
+    assert systems.generator_codes(
+        systems.filter_visual_generators_by_page_evidence(visuell, pages)
+    ) == ["lwwp"]
 
 
 # ── 6) Rohrmeter ───────────────────────────────────────────────────────────

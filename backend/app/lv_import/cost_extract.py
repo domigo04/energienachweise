@@ -49,11 +49,19 @@ def extract_costs(pages) -> list[dict]:
     return out
 
 
-def cost_rows_from_positions(positions: list[dict]) -> list[dict]:
+def cost_rows_from_positions(
+    positions: list[dict], *, trust_detected_amounts: bool = True,
+) -> list[dict]:
     """Nicht aggregierte Review-Zeilen: Preis, Menge und Originaltitel bleiben
     pro LV-Position sichtbar. Das ist die Grundlage für «hochladen, kurz
     kontrollieren, freigeben»; Gruppensummen können später weiterhin separat
-    geprüft werden."""
+    geprüft werden.
+
+    Bei OCR-Scans sind Zahlen aus unbepreisten Detailseiten keine belastbaren
+    Preise: Datum, Seitennummer, Menge oder Typnummer können in dieselbe
+    Textzeile rutschen. In diesem Fall bleiben die Beträge bewusst leer und
+    werden visuell bzw. manuell geprüft.
+    """
     rows = []
     for position in positions or []:
         bkp_nr = position.get("bkp_nr")
@@ -61,13 +69,16 @@ def cost_rows_from_positions(positions: list[dict]) -> list[dict]:
             continue
         title = position.get("beschreibung") or ""
         mapping = norm_lv.match_title(title, bkp_nr)
+        detected_amount = (
+            position.get("betrag") if trust_detected_amounts else None
+        )
         rows.append({
             "bkp_nr": bkp_nr,
             "original_position": position.get("pos_nr"),
             "original_title": title,
-            "detected_amount": position.get("betrag"),
+            "detected_amount": detected_amount,
             "positionen": 1,
-            "confidence": HIGH if position.get("betrag") is not None else MEDIUM,
+            "confidence": HIGH if detected_amount is not None else MEDIUM,
             "source_page": position.get("source_page"),
             "source_text": position.get("source_text"),
             "source": "lv_positions",

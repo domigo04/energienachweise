@@ -1,0 +1,17 @@
+# Standardverantwortung für das gesamte Repository.
+* @domigo04
+
+# Governance- und Agentenregeln brauchen eine ausdrückliche Freigabe.
+/AGENTS.md @domigo04
+/CLAUDE.md @domigo04
+/.claude/ @domigo04
+/.github/ @domigo04
+
+# Fachlich und betrieblich besonders sensible Bereiche.
+/PHYSIK.md @domigo04
+/Pflichtenheft.md @domigo04
+/backend/alembic/ @domigo04
+/backend/app/calculations/ @domigo04
+/backend/app/models/ @domigo04
+/docs/ARCHITECTURE.md @domigo04
+/docs/RAILWAY_OPERATIONS.md @domigo04

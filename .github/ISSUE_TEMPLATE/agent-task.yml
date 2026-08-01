@@ -1,0 +1,113 @@
+name: Agenten-Aufgabe
+description: Abgegrenzte Implementierungs-, Review- oder Testaufgabe für einen Agenten
+title: "[Agent] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Formuliere den Auftrag so, dass ein Agent Scope, Akzeptanz und Risiken ohne Raten erkennen kann. Keine echten Projekt- oder Benutzerdaten einfügen.
+
+  - type: textarea
+    id: ziel
+    attributes:
+      label: Ziel
+      description: Welches konkrete Ergebnis soll nach Abschluss vorhanden sein?
+      placeholder: Ein kurzer, überprüfbarer Zielsatz.
+    validations:
+      required: true
+
+  - type: textarea
+    id: kontext
+    attributes:
+      label: Kontext und Problem
+      description: Was ist heute der Zustand, und warum soll er geändert werden?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: bereich
+    attributes:
+      label: Hauptbereich
+      options:
+        - Backend
+        - Frontend
+        - Fullstack
+        - Datenbank oder Migration
+        - Dokumentation
+        - Governance oder CI
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: In Scope
+      description: Welche Änderungen gehören ausdrücklich zu diesem Auftrag?
+      placeholder: |
+        - ...
+        - ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of Scope
+      description: Was soll ausdrücklich nicht geändert werden?
+      placeholder: |
+        - ...
+        - ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: akzeptanzkriterien
+    attributes:
+      label: Akzeptanzkriterien
+      description: Formuliere beobachtbare, einzeln prüfbare Ergebnisse.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: risiken
+    attributes:
+      label: Betroffene Risikobereiche
+      description: Markiere alles, was bei Umsetzung oder Review besonders geprüft werden muss.
+      options:
+        - label: Hydraulik, Formeln oder Kostenschätzung
+        - label: Firmenisolation, Rollen oder Berechtigungen
+        - label: Migration, Persistenz oder bestehende Projekte
+        - label: Revisionen, Audit-Log oder Export
+        - label: Schema-Editor oder Autosave
+        - label: Deployment, Secrets oder externe Dienste
+
+  - type: textarea
+    id: pruefung
+    attributes:
+      label: Erwartete Prüfungen
+      description: Welche automatischen und manuellen Prüfungen belegen die Akzeptanzkriterien?
+      placeholder: |
+        - Backend: ...
+        - Frontend: ...
+        - Manuell: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: referenzen
+    attributes:
+      label: Relevante Referenzen
+      description: Links, Dateien, Screenshots oder Entscheide. Sensible Daten vorher anonymisieren.
+
+  - type: checkboxes
+    id: bereit
+    attributes:
+      label: Bereit zur Bearbeitung
+      options:
+        - label: Scope und Akzeptanzkriterien sind konkret genug für eine Umsetzung ohne zusätzliche Produktentscheidung.
+          required: true
+        - label: Es wurden keine echten Projekt-, Benutzer- oder Zugangsdaten eingefügt.
+          required: true

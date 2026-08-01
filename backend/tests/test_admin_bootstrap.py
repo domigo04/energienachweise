@@ -35,6 +35,7 @@ def test_bootstrap_legt_auf_leerer_datenbank_admin_an(db, monkeypatch):
     assert admin.role == Role.admin
     assert admin.is_verified is True
     assert admin.is_active is True
+    assert admin.admin_pw_seed_version == "1"
     assert verify_password("erstes-sicheres-passwort", admin.password_hash)
 
 
@@ -57,14 +58,66 @@ def test_bootstrap_bewahrt_manuell_geaendertes_passwort(db, monkeypatch):
 def test_geaenderte_variable_rotiert_admin_passwort(db, monkeypatch):
     monkeypatch.setenv("ADMIN_EMAIL", "admin@sirego.ch")
     monkeypatch.setenv("ADMIN_INITIAL_PASSWORD", "altes-passwort")
+    monkeypatch.setenv("ADMIN_INITIAL_PASSWORD_VERSION", "2026-08-01-1")
     seed_admin(db, require_configuration=True)
 
     monkeypatch.setenv("ADMIN_INITIAL_PASSWORD", "neues-passwort")
+    monkeypatch.setenv("ADMIN_INITIAL_PASSWORD_VERSION", "2026-08-01-2")
     seed_admin(db, require_configuration=True)
 
     admin = db.query(User).one()
+    assert admin.admin_pw_seed_version == "2026-08-01-2"
     assert verify_password("neues-passwort", admin.password_hash)
     assert not verify_password("altes-passwort", admin.password_hash)
+
+
+def test_geaendertes_passwort_ohne_neue_version_wird_nicht_uebernommen(db, monkeypatch):
+    monkeypatch.setenv("ADMIN_EMAIL", "admin@sirego.ch")
+    monkeypatch.setenv("ADMIN_INITIAL_PASSWORD", "initial-passwort")
+    monkeypatch.setenv("ADMIN_INITIAL_PASSWORD_VERSION", "1")
+    seed_admin(db, require_configuration=True)
+
+    monkeypatch.setenv("ADMIN_INITIAL_PASSWORD", "unbeabsichtigt-geaendert")
+    seed_admin(db, require_configuration=True)
+
+    admin = db.query(User).one()
+    assert verify_password("initial-passwort", admin.password_hash)
+    assert not verify_password("unbeabsichtigt-geaendert", admin.password_hash)
+
+
+def test_erster_start_nach_migration_bewahrt_manuelles_passwort(db, monkeypatch):
+    monkeypatch.setenv("ADMIN_EMAIL", "admin@sirego.ch")
+    monkeypatch.setenv("ADMIN_INITIAL_PASSWORD", "deployment-passwort")
+    monkeypatch.setenv("ADMIN_INITIAL_PASSWORD_VERSION", "erste-sichere-version")
+    admin = User(
+        tenant_id=1,
+        email="admin@sirego.ch",
+        password_hash=hash_password("manuell-geaendert"),
+        role=Role.admin,
+        is_verified=True,
+        is_active=True,
+        admin_pw_seed_version=None,
+    )
+    db.add_all([Firma(id=1, name="SIREGO GmbH"), admin])
+    db.commit()
+
+    seed_admin(db, require_configuration=True)
+    db.refresh(admin)
+
+    assert admin.admin_pw_seed_version == "erste-sichere-version"
+    assert verify_password("manuell-geaendert", admin.password_hash)
+    assert not verify_password("deployment-passwort", admin.password_hash)
+
+
+def test_passwort_darf_nicht_als_versionskennung_gespeichert_werden(db, monkeypatch):
+    monkeypatch.setenv("ADMIN_EMAIL", "admin@sirego.ch")
+    monkeypatch.setenv("ADMIN_INITIAL_PASSWORD", "nicht-speichern")
+    monkeypatch.setenv("ADMIN_INITIAL_PASSWORD_VERSION", "nicht-speichern")
+
+    with pytest.raises(RuntimeError, match="darf nicht dem Passwort entsprechen"):
+        seed_admin(db, require_configuration=True)
+
+    assert db.query(User).count() == 0
 
 
 def test_verpflichtender_bootstrap_stoppt_ohne_variablen(db, monkeypatch):

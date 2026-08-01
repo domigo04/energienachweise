@@ -51,7 +51,7 @@ LEGACY_COLUMNS = {
         ("is_active", sa.Boolean()),
     ],
     "hc_users": [
-        ("admin_pw_seed_fingerprint", sa.String()),
+        ("admin_pw_seed_version", sa.String()),
         ("firma_role", sa.String()),
         ("firma_admin_beantragt_at", sa.DateTime()),
         ("firma_admin_bestaetigt_at", sa.DateTime()),

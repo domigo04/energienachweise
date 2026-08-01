@@ -8,7 +8,17 @@ Tabellen (`users`) kollidieren.
 from datetime import datetime
 import enum
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, Enum as SAEnum
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    Enum as SAEnum,
+)
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -43,9 +53,15 @@ class Role(str, enum.Enum):
 
 class User(Base):
     __tablename__ = "hc_users"
+    __table_args__ = (
+        CheckConstraint(
+            "role = 'admin' OR tenant_id IS NOT NULL",
+            name="ck_hc_users_tenant_required_for_non_admin",
+        ),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    tenant_id = Column(Integer, ForeignKey("hc_firmen.id"), default=1, index=True)
+    tenant_id = Column(Integer, ForeignKey("hc_firmen.id"), nullable=True, index=True)
     email = Column(String, unique=True, nullable=False, index=True)
     password_hash = Column(String, nullable=False)
     name = Column(String, nullable=True)

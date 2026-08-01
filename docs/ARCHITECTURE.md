@@ -113,6 +113,12 @@ Jeder Projekt-, Schema-, Gruppen-, Kosten- und Exportendpunkt prüft:
 2. Benutzer gehört zur Firma des Projekts.
 3. Benutzerrolle erlaubt die Aktion.
 
+Normale Benutzer benötigen bereits an der zentralen Authentifizierungsgrenze
+eine existierende, aktive Firma. Die Datenbank erlaubt eine leere
+Firmenzuordnung ausschliesslich für globale Plattformadmins; es gibt keinen
+automatischen Rückfall auf Firma 1. Migrationen prüfen unsichere Altbestände
+vor einer Schemaänderung und reparieren Zuordnungen nicht stillschweigend.
+
 Es darf keinen Mischzustand geben, bei dem die Projektliste privat ist, direkte
 Schema-IDs innerhalb der Firma aber zugänglich sind. Projekte sind firmenweit;
 Schreib- und Freigaberechte werden explizit geregelt.

@@ -11,7 +11,7 @@ Mitglieder und Projekte ausschliesslich innerhalb der eigenen Firma.
 from datetime import datetime
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.audit import add_audit_event
 from app.auth import create_access_token, get_current_user, hash_password, require_admin, verify_password
 from app.database import get_db
+from app.login_guard import bremse, passwort_fehler
 from app.models.auth import Firma, Role, User
 from app.models.grobkostenschaetzung import Korrekturfaktor
 from app.models.heizungscockpit import HcProject
@@ -126,6 +127,11 @@ def _firma_fuer_registrierung(body: RegisterIn, db: Session) -> Firma:
 @router.post("/register", status_code=201)
 def register(body: RegisterIn, db: Session = Depends(get_db)):
     email = body.email.lower().strip()
+    # Passwortregeln zuerst — ein zu kurzes Passwort trifft sonst direkt auf die
+    # Login-Bremse und ist trotzdem in Stunden erraten.
+    fehler = passwort_fehler(body.password)
+    if fehler:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, fehler)
     if db.query(User).filter(User.email == email).first():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Diese E-Mail ist bereits registriert.")
     firma = _firma_fuer_registrierung(body, db)
@@ -143,10 +149,29 @@ def register(body: RegisterIn, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenOut)
-def login(body: LoginIn, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == body.email.lower().strip()).first()
+def login(request: Request, body: LoginIn, db: Session = Depends(get_db)):
+    # Bremse gegen Durchprobieren: gezählt wird je Konto UND je Herkunft. Nur
+    # das Konto zu zählen liesse eine Liste vieler Konten durch; nur die IP zu
+    # zählen liesse ein Botnetz durch (Sicherheitsprüfung 2026-08-01).
+    email = body.email.lower().strip()
+    herkunft = request.client.host if request.client else "unbekannt"
+    schluessel = [f"konto:{email}", f"ip:{herkunft}"]
+    for s in schluessel:
+        rest = bremse.gesperrt_fuer(s)
+        if rest:
+            raise HTTPException(
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                f"Zu viele Fehlversuche. Bitte in {max(1, rest // 60)} Minuten erneut versuchen.",
+                headers={"Retry-After": str(rest)},
+            )
+
+    user = db.query(User).filter(User.email == email).first()
     if not user or not verify_password(body.password, user.password_hash):
+        for s in schluessel:
+            bremse.fehlversuch(s)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "E-Mail oder Passwort falsch.")
+    for s in schluessel:
+        bremse.erfolg(s)
     if not user.is_active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Konto ist deaktiviert.")
     if user.role != Role.admin and user.firma and not user.firma.is_active:
@@ -174,6 +199,9 @@ def update_me(body: MePatch, user: User = Depends(get_current_user), db: Session
     if body.neues_passwort:
         if not body.aktuelles_passwort or not verify_password(body.aktuelles_passwort, user.password_hash):
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Aktuelles Passwort ist falsch.")
+        fehler = passwort_fehler(body.neues_passwort)
+        if fehler:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, fehler)
         user.password_hash = hash_password(body.neues_passwort)
         changed["passwort"] = {"geaendert": True}
     if changed:

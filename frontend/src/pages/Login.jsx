@@ -104,7 +104,18 @@ export default function Login() {
             </div>
             <div>
               <label className="label">Passwort</label>
-              <input type="password" required value={pw} onChange={(e) => setPw(e.target.value)} placeholder="••••••••" className="input" />
+              <input type="password" required value={pw} onChange={(e) => setPw(e.target.value)}
+                placeholder="••••••••" className="input"
+                minLength={modus === "register" ? 10 : undefined}
+                autoComplete={modus === "register" ? "new-password" : "current-password"} />
+              {/* Die Regel steht im Backend (login_guard.py) — hier nur der
+                  Hinweis, damit man sie vor dem Abschicken kennt. */}
+              {modus === "register" && (
+                <p className="mt-1 text-xs text-slate-400">
+                  Mindestens 10 Zeichen. Eine Wortfolge ist besser als ein kurzes
+                  Passwort mit Sonderzeichen.
+                </p>
+              )}
             </div>
             {modus === "register" && (
               <div>

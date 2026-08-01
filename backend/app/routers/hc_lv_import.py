@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
+from app.upload_guard import UploadAbgelehnt, lies_begrenzt, pruefe_pdf
 from app.models.auth import Role, User
 from app.models.lv_import import (
     LvImport, LvImportFeature, LvImportCost, LvImportCondition, LvImportStatus,
@@ -213,9 +214,14 @@ async def upload_lv(
 ):
     """B2 — PDF hochladen: Firma prüfen, Original + SHA-256 speichern, Import
     anlegen und Extraktion starten. Original wird nie überschrieben."""
-    raw = await file.read()
-    if not raw:
-        raise HTTPException(status_code=422, detail="Leere Datei")
+    # Grösse und Form prüfen, BEVOR etwas im Speicher oder in der Datenbank
+    # landet (Sicherheitsprüfung 2026-08-01). Die Regeln stehen rein und
+    # getestet in `app/upload_guard.py`.
+    try:
+        raw = await lies_begrenzt(file)
+        pruefe_pdf(raw)
+    except UploadAbgelehnt as abgelehnt:
+        raise HTTPException(status_code=abgelehnt.status_code, detail=abgelehnt.grund)
     file_hash = hashlib.sha256(raw).hexdigest()
 
     imp = LvImport(

@@ -4,7 +4,13 @@ from fastapi import Depends, FastAPI
 from sqlalchemy import inspect, text
 from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(title="Heizungscockpit")
+from app.runtime import is_production as _is_production
+
+# Die interaktive API-Dokumentation ist in Produktion aus: sie zeichnet jedem
+# Besucher die vollständige Schnittstelle auf, ohne dass er ein Konto braucht.
+# Lokal bleibt sie an, dort ist sie beim Entwickeln nützlich.
+_docs = {"docs_url": None, "redoc_url": None, "openapi_url": None} if _is_production() else {}
+app = FastAPI(title="Heizungscockpit", **_docs)
 
 # ---------- CORS ----------
 raw = os.getenv(
@@ -25,6 +31,27 @@ app.add_middleware(
     allow_headers=["*"],
     allow_credentials=False,
 )
+
+
+# ---------- Sicherheitskopfzeilen ----------
+# Die API liefert JSON und PDF, kein HTML — sie ist selbst kein XSS-Ziel. Die
+# Kopfzeilen kosten trotzdem nichts und schliessen die Fälle, die es doch gibt:
+# ein PDF im <iframe> (Clickjacking), ein als HTML fehlinterpretierter Download
+# (MIME-Sniffing) und die Weitergabe interner URLs an fremde Seiten.
+@app.middleware("http")
+async def sicherheitskopfzeilen(request, call_next):
+    antwort = await call_next(request)
+    antwort.headers.setdefault("X-Content-Type-Options", "nosniff")
+    antwort.headers.setdefault("X-Frame-Options", "DENY")
+    antwort.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    # Keine Kamera, kein Mikrofon, kein Standort — nichts davon wird gebraucht.
+    antwort.headers.setdefault(
+        "Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    if _is_production():
+        # Nur in Produktion: lokal würde HSTS die HTTP-Entwicklung blockieren.
+        antwort.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return antwort
 
 # ---------- Health ----------
 @app.get("/healthz")

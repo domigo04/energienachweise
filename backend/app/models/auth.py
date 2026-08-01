@@ -60,6 +60,16 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_login_at = Column(DateTime, nullable=True)
+    # E-Mail-Verifikation (Sicherheitsprüfung 2026-08-01). Ohne bestätigte
+    # Adresse taucht ein Konto gar nicht erst in der Freischaltliste des
+    # Firmenadmins auf — sonst hätte ein Fremder mit geratener Firma und
+    # fremder Adresse nur einen unaufmerksamen Klick gebraucht.
+    # Gespeichert wird nur der HASH des Tokens (siehe app/email_verification.py).
+    email_bestaetigt_at = Column(DateTime, nullable=True)
+    email_token_hash = Column(String, nullable=True)
+    email_token_ablauf = Column(DateTime, nullable=True)
+    email_token_gesendet_at = Column(DateTime, nullable=True)
+
     # Fingerprint des zuletzt via ADMIN_INITIAL_PASSWORD gesetzten Passworts
     # (nur beim Seed-Admin gesetzt) — verhindert, dass main.py::_seed_admin das
     # Passwort bei JEDEM Serverstart zurücksetzt. Sicherheits-Review 2026-07-19.

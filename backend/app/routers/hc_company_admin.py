@@ -40,6 +40,8 @@ def _member_out(user: User) -> dict:
         "role": user.role.value,
         "firma_role": user.firma_role,
         "is_verified": user.is_verified,
+        # Damit die Liste zeigt, WARUM jemand nicht freischaltbar ist.
+        "email_bestaetigt": user.email_bestaetigt_at is not None,
         "is_active": user.is_active,
         "created_at": user.created_at,
         "last_login_at": user.last_login_at,
@@ -178,6 +180,16 @@ def update_member(
     next_role = body.firma_role if body.firma_role is not None else target.firma_role
     next_active = body.is_active if body.is_active is not None else target.is_active
     next_verified = body.is_verified if body.is_verified is not None else target.is_verified
+
+    # Freischalten setzt eine bestätigte Adresse voraus (Sicherheitsprüfung
+    # 2026-08-01). Sonst genügte ein unaufmerksamer Klick, und jemand mit einer
+    # fremden E-Mail und dem geratenen Firmennamen sässe im Mandanten — mit
+    # Zugriff auf alle Projekte und Kosten der Firma.
+    if next_verified and not target.is_verified and target.email_bestaetigt_at is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Diese Person hat ihre E-Mail-Adresse noch nicht bestätigt. "
+            "Freischaltung erst danach möglich.")
 
     verliert_adminrecht = (
         target.firma_role == "admin"

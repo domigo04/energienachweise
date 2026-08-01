@@ -1,6 +1,7 @@
 """Firmen- und Plattformverwaltung inklusive datiertem Audit-Trail."""
 
 import unittest
+from datetime import datetime
 
 from fastapi import HTTPException
 from sqlalchemy import create_engine
@@ -60,6 +61,9 @@ def _setup(db):
         firma_role="mitglied",
         is_verified=False,
         is_active=True,
+        # Seit der Sicherheitsprüfung ist die bestätigte Adresse Voraussetzung
+        # für die Freischaltung — dieser Wartende hat sie bereits bestätigt.
+        email_bestaetigt_at=datetime.utcnow(),
     )
     foreign = User(
         tenant_id=fremde_firma.id,
@@ -202,3 +206,45 @@ class FirmenverwaltungTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EmailBestaetigungTest(unittest.TestCase):
+    """Freischalten setzt eine bestätigte Adresse voraus (Prüfung 2026-08-01).
+
+    Ohne diese Regel genügte ein unaufmerksamer Klick des Firmenadmins, und
+    jemand mit einer fremden E-Mail und dem geratenen Firmennamen sässe im
+    Mandanten — mit Zugriff auf alle Projekte und Kosten.
+    """
+
+    def test_unbestaetigte_adresse_kann_nicht_freigeschaltet_werden(self):
+        db = _db()
+        _, _, admin, _, pending, *_ = _setup(db)
+        pending.email_bestaetigt_at = None
+        db.commit()
+
+        with self.assertRaises(HTTPException) as fehler:
+            update_member(pending.id, FirmenMemberPatch(is_verified=True), admin, db)
+        self.assertEqual(fehler.exception.status_code, 409)
+        db.refresh(pending)
+        self.assertFalse(pending.is_verified)
+
+    def test_nach_der_bestaetigung_geht_es(self):
+        db = _db()
+        _, _, admin, _, pending, *_ = _setup(db)
+        pending.email_bestaetigt_at = datetime.utcnow()
+        db.commit()
+
+        update_member(pending.id, FirmenMemberPatch(is_verified=True), admin, db)
+        db.refresh(pending)
+        self.assertTrue(pending.is_verified)
+
+    def test_die_liste_zeigt_den_bestaetigungsstand(self):
+        """Der Firmenadmin muss sehen, WARUM jemand nicht freischaltbar ist."""
+        db = _db()
+        _, _, admin, _, pending, *_ = _setup(db)
+        pending.email_bestaetigt_at = None
+        db.commit()
+
+        eintrag = next(m for m in firma_overview(admin, db)["mitglieder"]
+                       if m["id"] == pending.id)
+        self.assertFalse(eintrag["email_bestaetigt"])

@@ -19,7 +19,9 @@ from sqlalchemy.orm import Session, joinedload
 from app.audit import add_audit_event
 from app.auth import create_access_token, get_current_user, hash_password, require_admin, verify_password
 from app.database import get_db
+from app.email_verification import ist_abgelaufen, neuer_token, passt, token_hash
 from app.login_guard import bremse, passwort_fehler
+from app.mail import bestaetigungstext, sende
 from app.models.auth import Firma, Role, User
 from app.models.grobkostenschaetzung import Korrekturfaktor
 from app.models.heizungscockpit import HcProject
@@ -143,9 +145,100 @@ def register(body: RegisterIn, db: Session = Depends(get_db)):
         role=Role.user,
         is_verified=False,
     )
+    # Bestätigungstoken erzeugen, BEVOR gespeichert wird — sonst gäbe es kurz
+    # ein Konto ohne Token, und ein Absturz dazwischen liesse es unbestätigbar.
+    klartext, hash_wert, ablauf = neuer_token()
+    user.email_token_hash = hash_wert
+    user.email_token_ablauf = ablauf
+    user.email_token_gesendet_at = datetime.utcnow()
     db.add(user)
     db.commit()
-    return {"ok": True, "message": "Anfrage gesendet. Ein Admin schaltet dein Konto frei."}
+
+    betreff, text = bestaetigungstext(name=user.name, token=klartext)
+    versandt = sende(an=user.email, betreff=betreff, text=text)
+    return {
+        "ok": True,
+        "email_versandt": versandt,
+        "message": (
+            "Fast geschafft — bestätige den Link in der E-Mail. Danach schaltet "
+            "ein Administrator dein Konto frei."
+            if versandt else
+            "Konto angelegt, aber die Bestätigungsmail konnte nicht versandt "
+            "werden. Bitte den Administrator kontaktieren."
+        ),
+    }
+
+
+@router.post("/verify/{token}")
+def verify_email(token: str, db: Session = Depends(get_db)):
+    """Bestätigt eine Adresse. Danach ist die Freischaltung durch den Admin dran.
+
+    Der Token wird nur als Hash gespeichert, also wird über den Hash gesucht —
+    ein Klartextvergleich über alle Benutzer wäre weder nötig noch schneller.
+    """
+    kandidat = (
+        db.query(User)
+        .filter(User.email_token_hash == token_hash(token or ""))
+        .first()
+    )
+    if not kandidat or not passt(token, kandidat.email_token_hash):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Dieser Bestätigungslink ist ungültig.")
+    if ist_abgelaufen(kandidat.email_token_ablauf):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Dieser Bestätigungslink ist abgelaufen. Bitte einen neuen anfordern.")
+
+    kandidat.email_bestaetigt_at = datetime.utcnow()
+    # Einmal gültig: der Token wird mit der Einlösung wertlos.
+    kandidat.email_token_hash = None
+    kandidat.email_token_ablauf = None
+    add_audit_event(
+        db, user=kandidat, action="email_bestaetigt",
+        entity_type="benutzer", entity_id=kandidat.id, details={},
+    )
+    db.commit()
+    return {
+        "ok": True,
+        "message": "E-Mail bestätigt. Ein Administrator schaltet dein Konto frei.",
+    }
+
+
+class VerifyResendIn(BaseModel):
+    email: EmailStr
+
+
+@router.post("/verify/resend/anfordern")
+def resend_verification(request: Request, body: VerifyResendIn, db: Session = Depends(get_db)):
+    """Neuen Bestätigungslink anfordern.
+
+    Die Antwort ist IMMER dieselbe, egal ob die Adresse existiert — sonst wäre
+    dieser Endpunkt eine bequeme Liste aller registrierten Adressen. Und er
+    hängt an derselben Bremse wie der Login, damit er nicht zum Mailversender
+    für Fremde wird.
+    """
+    email = body.email.lower().strip()
+    herkunft = request.client.host if request.client else "unbekannt"
+    schluessel = f"verify:{herkunft}"
+    if bremse.gesperrt_fuer(schluessel):
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS,
+                            "Zu viele Anfragen. Bitte später erneut versuchen.")
+    bremse.fehlversuch(schluessel)
+
+    antwort = {"ok": True, "message":
+               "Falls die Adresse registriert und noch nicht bestätigt ist, "
+               "ist eine neue E-Mail unterwegs."}
+    user = db.query(User).filter(User.email == email).first()
+    if not user or user.email_bestaetigt_at is not None:
+        return antwort
+
+    klartext, hash_wert, ablauf = neuer_token()
+    user.email_token_hash = hash_wert
+    user.email_token_ablauf = ablauf
+    user.email_token_gesendet_at = datetime.utcnow()
+    db.commit()
+    betreff, text = bestaetigungstext(name=user.name, token=klartext)
+    sende(an=user.email, betreff=betreff, text=text)
+    return antwort
 
 
 @router.post("/login", response_model=TokenOut)
@@ -176,6 +269,13 @@ def login(request: Request, body: LoginIn, db: Session = Depends(get_db)):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Konto ist deaktiviert.")
     if user.role != Role.admin and user.firma and not user.firma.is_active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Die Firma ist deaktiviert. Bitte den Support kontaktieren.")
+    # Die Bestätigung kommt VOR der Freischaltung: ohne sie ist nicht belegt,
+    # dass die Adresse überhaupt der Person gehört, die sich hier anmeldet.
+    if user.email_bestaetigt_at is None:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Bitte zuerst die E-Mail-Adresse bestätigen — der Link steht in der "
+            "Registrierungsmail.")
     if not user.is_verified:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Konto noch nicht freigeschaltet — bitte auf die Freischaltung warten.")
     user.last_login_at = datetime.utcnow()

@@ -142,3 +142,81 @@ def test_alte_fehlversuche_fallen_aus_dem_fenster():
     bremse.fehlversuch("ip:203.0.113.5")
     # Der erste Versuch ist verjährt, also erst zwei im Fenster → keine Sperre.
     assert bremse.gesperrt_fuer("ip:203.0.113.5") == 0
+
+
+# ── E-Mail-Verifikation ─────────────────────────────────────────────────────
+#
+# Ohne sie konnte sich jemand mit einer FREMDEN Adresse registrieren und stand
+# danach in der Freischaltliste eines Firmenadmins.
+
+from datetime import datetime, timedelta
+
+from app.email_verification import (
+    GUELTIG_STUNDEN, ist_abgelaufen, neuer_token, passt, token_hash,
+)
+from app.mail import baue_nachricht, bestaetigungstext, versand_bereit
+
+
+def test_token_ist_lang_und_zufaellig():
+    a, _, _ = neuer_token()
+    b, _, _ = neuer_token()
+    assert a != b
+    assert len(a) >= 32
+
+
+def test_nur_der_hash_wird_gespeichert():
+    """Wer die Datenbank liest, darf damit kein Konto bestätigen können."""
+    klartext, hash_wert, _ = neuer_token()
+    assert klartext not in hash_wert
+    assert hash_wert == token_hash(klartext)
+
+
+def test_passender_token_wird_erkannt():
+    klartext, hash_wert, _ = neuer_token()
+    assert passt(klartext, hash_wert) is True
+
+
+def test_falscher_token_wird_abgelehnt():
+    _, hash_wert, _ = neuer_token()
+    assert passt("geraten", hash_wert) is False
+    assert passt("", hash_wert) is False
+    assert passt("egal", None) is False
+
+
+def test_token_laeuft_ab():
+    _, _, ablauf = neuer_token()
+    assert ist_abgelaufen(ablauf) is False
+    assert ist_abgelaufen(ablauf, jetzt=ablauf + timedelta(seconds=1)) is True
+    assert ablauf - datetime.utcnow() <= timedelta(hours=GUELTIG_STUNDEN)
+
+
+def test_fehlender_ablauf_gilt_als_abgelaufen():
+    """Ein Token ohne Ablaufzeitpunkt ist kaputt — nicht ewig gültig."""
+    assert ist_abgelaufen(None) is True
+
+
+def test_ohne_konfiguration_wird_nichts_verschickt(monkeypatch):
+    for schluessel in ("MAIL_HOST", "MAIL_USER", "MAIL_PASSWORD", "MAIL_FROM"):
+        monkeypatch.delenv(schluessel, raising=False)
+    assert versand_bereit() is False
+
+
+def test_mit_konfiguration_ist_der_versand_bereit(monkeypatch):
+    monkeypatch.setenv("MAIL_HOST", "mail.infomaniak.com")
+    monkeypatch.setenv("MAIL_USER", "noreply@example.com")
+    monkeypatch.setenv("MAIL_PASSWORD", "geheim")
+    monkeypatch.delenv("MAIL_FROM", raising=False)
+    assert versand_bereit() is True
+
+
+def test_die_mail_traegt_den_link_und_ist_reiner_text(monkeypatch):
+    monkeypatch.setenv("APP_BASE_URL", "https://example.com/")
+    monkeypatch.setenv("MAIL_USER", "noreply@example.com")
+    monkeypatch.setenv("MAIL_FROM_NAME", "Heizungscockpit")
+    betreff, text = bestaetigungstext(name="Testperson", token="abc123")
+    assert "https://example.com/bestaetigen/abc123" in text
+    assert "24 Stunden" in text
+    nachricht = baue_nachricht(an="wer@example.com", betreff=betreff, text=text)
+    # Reiner Text: nichts, was ein Mailprogramm interpretieren muss.
+    assert nachricht.get_content_type() == "text/plain"
+    assert nachricht["To"] == "wer@example.com"

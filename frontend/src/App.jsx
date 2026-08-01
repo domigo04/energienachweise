@@ -4,6 +4,7 @@ import "./index.css";
 
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
+import EmailBestaetigen from "./pages/EmailBestaetigen";
 import { AuthProvider } from "./auth/AuthContext";
 import ProtectedRoute from "./auth/ProtectedRoute";
 import AppLayout from "./components/AppLayout";
@@ -88,6 +89,8 @@ export default function App() {
           {/* Öffentlich */}
           <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} />
+          {/* Landepunkt aus der Bestätigungsmail — bewusst öffentlich. */}
+          <Route path="/bestaetigen/:token" element={<EmailBestaetigen />} />
 
           {/* Angemeldet: App-Shell mit Seiten-Navigation */}
           <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>

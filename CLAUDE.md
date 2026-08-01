@@ -11,6 +11,8 @@ Je nach Aufgabe:
 - Architektur, Daten und Rechte: `docs/ARCHITECTURE.md`
 - aktuelle Reihenfolge: `docs/ROADMAP.md`
 - Hydraulik und Formeln: `PHYSIK.md`
+- **offene Entscheide von Dominic: `docs/OFFENE_ENTSCHEIDE.md`** — was dort steht,
+  wird nicht im Code beantwortet
 
 Bei Widersprüchen gilt die neueste ausdrückliche Vorgabe von Dominic. Offene
 fachliche Entscheide nicht erraten.

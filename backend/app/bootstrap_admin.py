@@ -8,6 +8,7 @@ Administratorkonto erhält.
 
 import hashlib
 import os
+from datetime import datetime
 
 from sqlalchemy.orm import Session
 
@@ -62,6 +63,11 @@ def seed_admin(db: Session, *, require_configuration: bool = False) -> str | Non
     admin.role = Role.admin
     admin.is_verified = True
     admin.is_active = True
+    # Der Plattformadmin bestätigt seine Adresse nicht per Mail — er wird über
+    # die Umgebung gesetzt. Ohne diesen Eintrag würde ihn die
+    # E-Mail-Verifikation aus dem eigenen System aussperren.
+    if admin.email_bestaetigt_at is None:
+        admin.email_bestaetigt_at = datetime.utcnow()
     db.commit()
     return admin_email
 

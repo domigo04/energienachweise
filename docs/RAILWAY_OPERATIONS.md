@@ -10,6 +10,36 @@
 Der Backend-Start bricht absichtlich ab, wenn Produktion mit SQLite, ohne
 PostgreSQL oder mit einem unsicheren JWT-Schlüssel konfiguriert ist.
 
+## E-Mail-Versand (Infomaniak)
+
+Ohne diese Variablen wird **keine** Bestätigungsmail verschickt: die
+Registrierung legt das Konto an, meldet `email_versandt: false` und protokolliert
+eine Zeile. Niemand kommt dann durch die Verifikation.
+
+- `MAIL_HOST=mail.infomaniak.com`
+- `MAIL_PORT=587` (STARTTLS, offizieller Standard; `465` = SSL als Alternative)
+- `MAIL_USER` — vollständige Absenderadresse
+- `MAIL_PASSWORD` — das für diese Adresse erzeugte Passwort, nicht das
+  Infomaniak-Kontopasswort
+- `MAIL_FROM` — optional, sonst gilt `MAIL_USER`
+- `MAIL_FROM_NAME` — Anzeigename, Standard «Heizungscockpit»
+- `APP_BASE_URL` — Basis für den Bestätigungslink, z. B.
+  `https://www.energienachweise.com`. **Zeigt sie auf die falsche Domain, führen
+  alle Links ins Leere.**
+
+Der Versand ist bewusst SMTP und kein API-Dienst: Infomaniak ist Schweizer
+Hosting, damit verlässt keine Kundenadresse den Rechtsraum, in dem das Produkt
+verkauft wird.
+
+Nach dem ersten Deploy einmal die Registrierung mit einer echten Adresse testen
+— ein falsches Passwort merkt man sonst erst, wenn sich jemand anmelden will.
+
+## Sicherheitsrelevante Variablen
+
+- `LV_UPLOAD_MAX_MB` — Obergrenze für LV-Uploads, Standard 30
+- `LV_LLM_STORE_RESPONSES` — muss `false` bleiben (siehe
+  `docs/OFFENE_ENTSCHEIDE.md`)
+
 ## Deployment
 
 Für den Backend-Service:

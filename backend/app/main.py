@@ -97,6 +97,26 @@ from app.bootstrap_admin import seed_admin as _seed_admin
 from app.runtime import is_production
 
 
+def _drop_legacy_admin_password_fingerprint(conn, *, is_sqlite: bool) -> None:
+    """Entfernt den unsicheren Altwert auch aus historischen lokalen DBs.
+
+    Produktion verwendet dafür ausschliesslich Alembic. Dieser zusätzliche
+    Pfad ist nötig, weil lokale Entwicklungsdatenbanken bisher additiv durch
+    ``_ensure_columns`` aktualisiert werden und sonst den toten SHA-256-Wert
+    behalten würden.
+    """
+    if is_sqlite:
+        existing = {row[1] for row in conn.execute(text("PRAGMA table_info(hc_users)"))}
+        if "admin_pw_seed_fingerprint" in existing:
+            conn.execute(text(
+                "ALTER TABLE hc_users DROP COLUMN admin_pw_seed_fingerprint"
+            ))
+        return
+    conn.execute(text(
+        "ALTER TABLE hc_users DROP COLUMN IF EXISTS admin_pw_seed_fingerprint"
+    ))
+
+
 def _ensure_columns():
     """Fehlende Spalten auf bestehenden Tabellen ergänzen — SQLite-Dev UND
     Postgres-Prod. Bei frisch angelegten Tabellen unnötig (create_all legt die
@@ -178,6 +198,7 @@ def _ensure_columns():
                 # Existenzprüfung überflüssig und ist bei jedem Neustart idempotent.
                 for name, typ in cols:
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {name} {typ}"))
+        _drop_legacy_admin_password_fingerprint(conn, is_sqlite=is_sqlite)
         conn.commit()
         # ALTER TABLE trägt den SQLAlchemy-Python-Default nicht nach — bestehende
         # Zeilen hätten sonst z.B. abo_plan=NULL statt "kostenlos".

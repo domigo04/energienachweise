@@ -6,7 +6,6 @@ Seeds, während eine neue, leere PostgreSQL-Datenbank trotzdem ein nutzbares
 Administratorkonto erhält.
 """
 
-import hashlib
 import os
 
 from sqlalchemy.orm import Session
@@ -20,13 +19,14 @@ from app.models.auth import Firma, Role, User
 def seed_admin(db: Session, *, require_configuration: bool = False) -> str | None:
     """Legt den konfigurierten Admin an oder gleicht ihn sicher ab.
 
-    Das Passwort wird nur übernommen, wenn der Benutzer neu ist oder sich
-    ``ADMIN_INITIAL_PASSWORD`` seit dem letzten Bootstrap geändert hat. Ein im
-    Konto manuell geändertes Passwort bleibt deshalb über Deployments hinweg
-    erhalten.
+    Das Passwort wird nur bei einem neuen Benutzer oder einer bewusst erhöhten
+    ``ADMIN_INITIAL_PASSWORD_VERSION`` übernommen. Ein im Konto manuell
+    geändertes Passwort bleibt deshalb über Deployments hinweg erhalten, ohne
+    einen schnell prüfbaren Passwortfingerabdruck in der Datenbank abzulegen.
     """
     admin_email = os.getenv("ADMIN_EMAIL", "").lower().strip()
     admin_password = os.getenv("ADMIN_INITIAL_PASSWORD", "")
+    admin_password_version = os.getenv("ADMIN_INITIAL_PASSWORD_VERSION", "1").strip()
     if not admin_email or not admin_password:
         message = (
             "ADMIN_EMAIL und ADMIN_INITIAL_PASSWORD müssen beide als "
@@ -36,8 +36,15 @@ def seed_admin(db: Session, *, require_configuration: bool = False) -> str | Non
             raise RuntimeError(message)
         print(f"[INFO] Admin-Bootstrap übersprungen — {message}")
         return None
-
-    password_fingerprint = hashlib.sha256(admin_password.encode()).hexdigest()
+    if not admin_password_version:
+        raise RuntimeError("ADMIN_INITIAL_PASSWORD_VERSION darf nicht leer sein.")
+    if len(admin_password_version) > 100:
+        raise RuntimeError("ADMIN_INITIAL_PASSWORD_VERSION darf höchstens 100 Zeichen lang sein.")
+    if admin_password_version == admin_password:
+        raise RuntimeError(
+            "ADMIN_INITIAL_PASSWORD_VERSION ist eine nicht geheime Versionskennung "
+            "und darf nicht dem Passwort entsprechen."
+        )
 
     company = db.query(Firma).filter(Firma.id == 1).first()
     if not company:
@@ -52,12 +59,17 @@ def seed_admin(db: Session, *, require_configuration: bool = False) -> str | Non
             email=admin_email,
             name=os.getenv("ADMIN_NAME", "Administrator"),
             password_hash=hash_password(admin_password),
-            admin_pw_seed_fingerprint=password_fingerprint,
+            admin_pw_seed_version=admin_password_version,
         )
         db.add(admin)
-    elif admin.admin_pw_seed_fingerprint != password_fingerprint:
+    elif admin.admin_pw_seed_version is None:
+        # Erster Start nach Entfernung des alten SHA-256-Fingerprints: aktuelle
+        # Version übernehmen, aber ein eventuell manuell geändertes Passwort
+        # ausdrücklich nicht zurücksetzen.
+        admin.admin_pw_seed_version = admin_password_version
+    elif admin.admin_pw_seed_version != admin_password_version:
         admin.password_hash = hash_password(admin_password)
-        admin.admin_pw_seed_fingerprint = password_fingerprint
+        admin.admin_pw_seed_version = admin_password_version
 
     admin.role = Role.admin
     admin.is_verified = True

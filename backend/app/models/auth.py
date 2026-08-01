@@ -60,9 +60,9 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_login_at = Column(DateTime, nullable=True)
-    # Fingerprint des zuletzt via ADMIN_INITIAL_PASSWORD gesetzten Passworts
-    # (nur beim Seed-Admin gesetzt) — verhindert, dass main.py::_seed_admin das
-    # Passwort bei JEDEM Serverstart zurücksetzt. Sicherheits-Review 2026-07-19.
-    admin_pw_seed_fingerprint = Column(String, nullable=True)
+    # Nicht geheime Versionskennung des zuletzt bewusst aus der Deployment-
+    # Konfiguration übernommenen Adminpassworts. Sie enthält keinerlei aus dem
+    # Passwort ableitbare Daten und verhindert trotzdem unbeabsichtigte Resets.
+    admin_pw_seed_version = Column(String, nullable=True)
 
     firma = relationship("Firma", back_populates="users")

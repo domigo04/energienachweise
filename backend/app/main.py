@@ -122,7 +122,7 @@ def _ensure_columns():
             ("bww_bei_heizung", "BOOLEAN"), ("weiterbetrieb_umbau", "BOOLEAN"), ("etappierung", "BOOLEAN"),
         ],
         "hc_users": [
-            ("admin_pw_seed_fingerprint", "VARCHAR"),
+            ("admin_pw_seed_version", "VARCHAR"),
             ("firma_role", "VARCHAR"),
             ("firma_admin_beantragt_at", "TIMESTAMP"),
             ("firma_admin_bestaetigt_at", "TIMESTAMP"),

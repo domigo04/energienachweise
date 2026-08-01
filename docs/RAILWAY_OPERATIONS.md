@@ -6,6 +6,8 @@
 - `DATABASE_URL` verweist auf den Railway-PostgreSQL-Service
 - `SECRET_KEY` ist ein zufälliger Wert mit mindestens 32 Zeichen
 - `ALLOWED_ORIGINS` enthält nur die produktiven Frontend-Ursprünge
+- `ADMIN_INITIAL_PASSWORD_VERSION` ist eine nicht geheime Versionskennung wie
+  `2026-08-01-1`; sie darf niemals das Passwort enthalten
 
 Der Backend-Start bricht absichtlich ab, wenn Produktion mit SQLite, ohne
 PostgreSQL oder mit einem unsicheren JWT-Schlüssel konfiguriert ist.
@@ -23,10 +25,12 @@ Für den Backend-Service:
    `python -m app.bootstrap_admin` aus. Damit erhält auch eine neue Datenbank
    idempotent den in `ADMIN_EMAIL` und `ADMIN_INITIAL_PASSWORD` konfigurierten
    Plattformadmin. Schlägt einer der Schritte fehl, geht das neue Deployment
-   nicht live.
+   nicht live. Eine bewusste Rotation setzt ein neues Passwort und erhöht
+   gleichzeitig `ADMIN_INITIAL_PASSWORD_VERSION`. Eine reine Änderung der
+   Passwortvariable löst absichtlich keinen Reset aus.
 5. Der normale App-Start führt in Produktion keinerlei DDL und keinerlei Seeds
    aus. Ein später im Konto manuell geändertes Admin-Passwort wird durch den
-   Pre-Deploy-Bootstrap nicht zurückgesetzt, solange die Passwortvariable
+   Pre-Deploy-Bootstrap nicht zurückgesetzt, solange die Versionskennung
    unverändert bleibt.
 
 Die erste Migration ist additiv: fehlende Tabellen, Spalten und Indizes werden

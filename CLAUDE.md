@@ -3,6 +3,23 @@
 Dieses Dokument enthält nur Regeln, die bei jeder Änderung relevant sind.
 Historie und erledigte Bugs gehören in Git, nicht hierher.
 
+`AGENTS.md` ist die werkzeugneutrale Grundlage für den Agentenworkflow und ist
+auch für Claude verbindlich. Dieses Dokument ergänzt sie um die fachlichen und
+technischen Regeln des Heizungscockpits. Bei einem materiellen Widerspruch nicht
+selbst entscheiden, sondern Dominic die konkrete Frage vorlegen.
+
+## Arbeitsauftrag
+
+- Issue oder Auftrag vollständig lesen und Ziel, In-Scope, Out-of-Scope und
+  Akzeptanzkriterien als Arbeitsvertrag verwenden.
+- Vor Änderungen `git status`, Branch und bestehenden Diff prüfen. Nicht direkt
+  auf `main` arbeiten und fremde Änderungen nicht überschreiben.
+- Nur den freigegebenen Scope umsetzen. Commit, Push und PR-Erstellung erfolgen
+  nur auf ausdrücklichen Auftrag.
+- Übergaben enthalten geänderte Dateien, erreichte Akzeptanzkriterien,
+  Prüfnachweise, nicht ausgeführte Prüfungen mit Grund, Risiken und offene
+  Fragen. Die Vorlagen unter `.github/` sind dafür verbindlich.
+
 ## Vor jeder Änderung lesen
 
 Je nach Aufgabe:
@@ -42,9 +59,13 @@ fachliche Entscheide nicht erraten.
 ## Prüfen
 
 ```bash
-cd backend && python3 -m pytest tests -q
-cd frontend && npm run build
+cd backend && python -m pytest tests -q
+cd frontend && npm test && npm run build
 ```
+
+Bei Migrationen zusätzlich den in `AGENTS.md` dokumentierten Migrationstest auf
+einer leeren SQLite-Datenbank ausführen. Bei React-Hook-Änderungen gilt auch die
+gezielte Hook-Prüfung aus `.github/workflows/ci-deploy.yml`.
 
 Bei Editoränderungen zusätzlich den vollständigen Ablauf prüfen:
 
@@ -63,5 +84,7 @@ Eine Änderung ist erst fertig, wenn:
 - bestehende Projekte weiter laden;
 - Berechtigungen und Mandantentrennung stimmen;
 - Berechnung und Export denselben Stand verwenden;
-- Tests und Frontend-Build erfolgreich sind;
+- relevante Akzeptanzkriterien nachweisbar erfüllt sind;
+- relevante Tests und Frontend-Build erfolgreich sind oder eine nicht
+  ausgeführte Prüfung ausdrücklich begründet ist;
 - keine neue vermeidbare Sonderlogik entstanden ist.

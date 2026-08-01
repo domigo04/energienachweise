@@ -17,7 +17,14 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.audit import add_audit_event
-from app.auth import create_access_token, get_current_user, hash_password, require_admin, verify_password
+from app.auth import (
+    create_access_token,
+    get_current_user,
+    hash_password,
+    require_active_company,
+    require_admin,
+    verify_password,
+)
 from app.database import get_db
 from app.models.auth import Firma, Role, User
 from app.models.grobkostenschaetzung import Korrekturfaktor
@@ -149,8 +156,7 @@ def login(body: LoginIn, db: Session = Depends(get_db)):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "E-Mail oder Passwort falsch.")
     if not user.is_active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Konto ist deaktiviert.")
-    if user.role != Role.admin and user.firma and not user.firma.is_active:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Die Firma ist deaktiviert. Bitte den Support kontaktieren.")
+    require_active_company(user)
     if not user.is_verified:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Konto noch nicht freigeschaltet — bitte auf die Freischaltung warten.")
     user.last_login_at = datetime.utcnow()

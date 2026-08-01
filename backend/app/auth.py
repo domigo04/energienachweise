@@ -49,6 +49,24 @@ def create_access_token(user_id: int) -> str:
     return jwt.encode({"sub": str(user_id), "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
 
 
+def require_active_company(user: User) -> None:
+    """Sperrt normale Konten ohne eine gültige aktive Firmenzuordnung.
+
+    Plattformadmins dürfen ohne Stammfirma arbeiten. Für alle anderen Konten
+    gilt fail-closed: Eine fehlende oder verwaiste Zuordnung darf niemals wie
+    eine aktive Firma behandelt werden.
+    """
+    if user.role == Role.admin:
+        return
+    if not user.tenant_id or user.firma is None:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Konto ist keiner gültigen Firma zugeordnet.",
+        )
+    if not user.firma.is_active:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Die Firma ist deaktiviert")
+
+
 def get_current_user(
     creds: HTTPAuthorizationCredentials = Depends(_bearer),
     db: Session = Depends(get_db),
@@ -64,8 +82,7 @@ def get_current_user(
         raise cred_exc
     if not user.is_verified:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Konto noch nicht freigeschaltet")
-    if user.role != Role.admin and user.firma and not user.firma.is_active:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Die Firma ist deaktiviert")
+    require_active_company(user)
     return user
 
 

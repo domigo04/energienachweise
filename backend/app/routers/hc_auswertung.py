@@ -23,8 +23,9 @@ from app import fachwerte
 from app.calculations.kostenschaetzung import netto_aus_brutto, quantile
 from app.data.bkp_positionen import BKP_GRUPPEN, BKP_POSITIONEN, TREIBER_LABEL, treiber_fuer_bkp
 from app.database import get_db
+from app.lv_import import commercial
 from app.models.auth import User
-from app.models.kv import RefKostenzeile, RefProjekt, RefProjektGewerk
+from app.models.kv import RefKostenzeile, RefProjekt, RefProjektFeature, RefProjektGewerk
 from app.models.lv_import import LvImport
 
 router = APIRouter(prefix="/api/v1/auswertung", tags=["KV – Auswertung (Referenzprojekte)"])
@@ -69,6 +70,13 @@ class RefProjektIn(BaseModel):
     # Rabatt/Skonto Heizung (Gewerk "heizung" — Grundlage für Brutto→Netto)
     rabatt_pct: float = 0.0
     skonto_pct: float = 0.0
+    # Vollständige editierbare Konditionskette inkl. MWST. Optional hält alte
+    # Clients kompatibel, die weiterhin nur Rabatt/Skonto senden.
+    commercial: Optional[dict] = None
+    # Generische, normalisierte LV-Kostentreiber. Das Formular sendet den
+    # geladenen Satz wieder mit, damit auch Merkmale ohne historische
+    # RefProjekt-Spalte einen Bearbeiten-/Speichern-Roundtrip überstehen.
+    features: Optional[dict[str, Optional[str]]] = None
     datum: Optional[date] = None
     qualitaet: float = 1.0
     kostenzeilen: List[KostenzeileIn] = []
@@ -116,9 +124,70 @@ def _import_commercial(imp: LvImport | None) -> dict | None:
     }
 
 
+def _commercial_for_ref(r: RefProjekt, imp: LvImport | None = None) -> dict | None:
+    """Referenzstand gewinnt; der verknüpfte Import ist nur Altbestands-Fallback."""
+    gewerk = _heizung_gewerk(r)
+    if gewerk and isinstance(gewerk.commercial_json, dict):
+        return gewerk.commercial_json
+    return _import_commercial(imp)
+
+
+def _number_or_none(value, label: str) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail=f"Ungültiger Wert: {label}")
+
+
+def _calculate_commercial(raw: dict, default_base: float) -> dict:
+    """Validiert Benutzereingaben und berechnet die Kette im Backend neu."""
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=422, detail="Ungültige Konditionen")
+    conditions = raw.get("conditions") or []
+    if not isinstance(conditions, list) or len(conditions) > 30:
+        raise HTTPException(status_code=422, detail="Ungültige Konditionsliste")
+    normalized: list[dict] = []
+    for index, item in enumerate(conditions):
+        if not isinstance(item, dict):
+            raise HTTPException(status_code=422, detail="Ungültige Kondition")
+        kind = item.get("kind")
+        direction = item.get("direction")
+        status_value = item.get("status") or commercial.PRICED
+        if kind not in {"percent", "fixed"}:
+            raise HTTPException(status_code=422, detail="Typ muss Prozent oder Fixbetrag sein")
+        if direction not in {"deduction", "surcharge"}:
+            raise HTTPException(status_code=422, detail="Richtung muss Abzug oder Zuschlag sein")
+        if status_value not in {commercial.PRICED, commercial.REQUESTED_NOT_PRICED}:
+            raise HTTPException(status_code=422, detail="Ungültiger Konditionsstatus")
+        label = str(item.get("label") or item.get("original_label") or "").strip()
+        label = label or ("Sonstiger Abzug" if direction == "deduction" else "Sonstiger Zuschlag")
+        rate = _number_or_none(item.get("rate_percent"), f"{label} Prozent")
+        amount = _number_or_none(item.get("amount"), f"{label} Betrag")
+        basis = _number_or_none(item.get("basis_amount"), f"{label} Basis")
+        if status_value == commercial.PRICED:
+            if kind == "percent" and rate is None:
+                raise HTTPException(status_code=422, detail=f"Prozentsatz fehlt: {label}")
+            if kind == "fixed" and amount is None:
+                raise HTTPException(status_code=422, detail=f"Fixbetrag fehlt: {label}")
+        normalized.append({
+            "label": label[:255], "kind": kind, "direction": direction,
+            "rate_percent": rate, "amount": amount, "basis_amount": basis,
+            "status": status_value, "order": index + 1,
+            "source_page": item.get("source_page"),
+        })
+    base = _number_or_none(raw.get("base_amount"), "Brutto / LV-Summe")
+    if base is None:
+        base = float(default_base)
+    vat_rate = _number_or_none(raw.get("vat_rate"), "MWST")
+    calculated = commercial.calculate_chain(base, normalized, vat_rate)
+    return {"base_amount": base, **calculated, "valid": True, "issues": []}
+
+
 def _summary(r: RefProjekt, lv_import: LvImport | None = None) -> dict:
     bn = _brutto_netto(r)
-    imported = _import_commercial(lv_import)
+    imported = _commercial_for_ref(r, lv_import)
     if imported:
         if imported.get("base_amount") is not None:
             bn["brutto_chf"] = round(float(imported["base_amount"]))
@@ -152,7 +221,8 @@ def _out(r: RefProjekt, lv_import: LvImport | None = None) -> dict:
             {"id": z.id, "bkp_nr": z.bkp_nr, "bkp_name": z.bkp_name, "betrag_chf": z.betrag_chf}
             for z in r.kostenzeilen if z.gewerk == "heizung"
         ],
-        "lv_commercial": _import_commercial(lv_import),
+        "features": {feature.key: feature.value for feature in r.features},
+        "lv_commercial": _commercial_for_ref(r, lv_import),
     }
 
 
@@ -192,6 +262,30 @@ def _apply(r: RefProjekt, body: RefProjektIn, user: User):
         r.gewerke.append(g)
     g.rabatt_pct = body.rabatt_pct
     g.skonto_pct = body.skonto_pct
+    if body.commercial is not None:
+        brutto = sum(
+            z.betrag_chf or 0 for z in r.kostenzeilen if z.gewerk == "heizung"
+        )
+        calculated = _calculate_commercial(body.commercial, brutto)
+        g.commercial_json = calculated
+        # Legacy-Auswertungen erhalten die beiden bekannten Werte weiterhin.
+        for condition in calculated.get("conditions") or []:
+            label = str(condition.get("label") or "").casefold()
+            if condition.get("kind") != "percent" or condition.get("direction") != "deduction":
+                continue
+            if "rabatt" in label:
+                g.rabatt_pct = float(condition.get("rate_percent") or 0)
+            elif "skonto" in label:
+                g.skonto_pct = float(condition.get("rate_percent") or 0)
+    if body.features is not None:
+        existing = {feature.key: feature for feature in r.features}
+        for key, value in body.features.items():
+            if key in existing:
+                existing[key].value = value
+            else:
+                r.features.append(RefProjektFeature(
+                    tenant_id=user.tenant_id, key=key, value=value,
+                ))
 
 
 # ── CSV Export/Import ───────────────────────────────────────────────────────

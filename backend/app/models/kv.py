@@ -105,6 +105,11 @@ class RefProjektGewerk(Base):
     rabatt_pct = Column(Float, nullable=False, default=0.0)
     skonto_pct = Column(Float, nullable=False, default=0.0)
     korrektur_betrag_chf = Column(Float, nullable=False, default=0.0)
+    # Vollständige Konditionskette des Referenzprojekts. Rabatt/Skonto bleiben
+    # als Legacy-Spalten für bestehende Auswertungen erhalten; hier liegen
+    # zusätzlich Fixabzüge, Zuschläge, Berechnungsbasen und MWST editierbar und
+    # unabhängig vom ursprünglichen LV-Import.
+    commercial_json = Column(JSON, nullable=True)
 
     ref_projekt = relationship("RefProjekt", back_populates="gewerke")
 

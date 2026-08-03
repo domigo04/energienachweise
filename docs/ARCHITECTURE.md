@@ -42,6 +42,13 @@ Erzeugerleistung (getrennt von der Verbraucherleistung), Bohrmeter
 - SQLite nur lokal
 - JWT-Authentifizierung
 
+React Flow ist die 2D-Interaktions- und Darstellungsschicht, nicht der Rechenkern.
+Hydraulische Topologie, Betriebszustände und Berechnungen bleiben im Graph-JSON und
+Backend renderer-unabhängig. Eine spätere Canvas-/WebGL-Darstellung kann deshalb die
+Ansicht ersetzen, ohne den Fachgraphen neu zu bauen. Three.js ist für den aktuellen
+2D-Schemaeditor kein Ziel: 3D-Rendering löst weder Portsemantik noch Topologie,
+orthogonales Routing, Revisionen oder hydraulische Betriebszustände.
+
 ## Aktueller Datenstand
 
 - `HcProject`: Projekt und Grunddaten

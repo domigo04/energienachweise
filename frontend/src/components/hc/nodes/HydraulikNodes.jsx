@@ -265,6 +265,8 @@ export function HeizkreisNode({ data, selected: sel }) {
 
 // ── Speicher ──────────────────────────────────────────────────
 export function SpeicherNode({ data, selected: sel }) {
+  const c = data._calc || {};
+  const liter = data.speicher_liter || c.speichervolumen_l;
   return (
     <div style={wrap(sel)}>
       <ZoneHandles prefix="sz" />
@@ -274,7 +276,7 @@ export function SpeicherNode({ data, selected: sel }) {
       {H(Position.Bottom, 'bot-r',  { bottom: -6, left: '70%', background:'#3b82f6' })}
       {H(Position.Left,   'left',   { left: -6 })}
       {H(Position.Right,  'right',  { right: -6 })}
-      <SymSpeicher liter={data.speicher_liter} />
+      <SymSpeicher liter={liter} obenC={c.speicher_oben_c} untenC={c.speicher_unten_c} />
       <Label text={data.label || 'Speicher'} />
     </div>
   );
@@ -300,6 +302,10 @@ export function ErdsondenNode({ data, selected: sel }) {
   const laengeText = Number.isFinite(laenge) && laenge > 0
     ? ` à ${Math.round(laenge).toLocaleString('de-CH')} m`
     : '';
+  const c = data._calc || {};
+  const statusText = c.erforderlich_gesamt_m != null
+    ? `erf. ${Math.round(c.erforderlich_gesamt_m).toLocaleString('de-CH')} m${c.ausreichend === false ? ' — zu kurz' : ''}`
+    : null;
   const sole = '#eab308';
   const farbe = (dashed) => dashed ? '#16a34a' : sole;
   const rightHandle = (top, id, dashed = false) => (
@@ -356,7 +362,6 @@ export function ErdsondenNode({ data, selected: sel }) {
           fontFamily="Arial, sans-serif" fill="#3730a3">
           {n} Duplex-Erdsonden{laengeText}
         </text>
-
         {/* Verteilerkasten mit zwei klaren Sammelbalken wie in der CAD-Vorlage. */}
         <rect x="8" y="34" width={W - 16} height="78" fill="white"
           stroke="#1f2937" strokeWidth="1.4" />
@@ -364,6 +369,8 @@ export function ErdsondenNode({ data, selected: sel }) {
           stroke={sole} strokeWidth="1.8" />
         <rect x="34" y="78" width={W - 68} height="14" fill="white"
           stroke="#16a34a" strokeWidth="1.7" strokeDasharray="7 4" />
+        {statusText && <text x={W / 2} y="106" textAnchor="middle" fontSize="9" fontWeight="700"
+          fontFamily="Arial, sans-serif" fill={c.ausreichend === false ? '#dc2626' : '#15803d'}>{statusText}</text>}
 
         {xs.map((x, index) => (
           <g key={index}>
@@ -486,14 +493,10 @@ export function GruppeNode({ data, selected: sel }) {
     transform: 'translate(-50%, -50%)',
   });
 
-  // Absperrventil-Symbol (Kugelhahn-Vorlage): weiss gefüllte Dreiecke + kleiner
-  // unausgefüllter Kreis am Treffpunkt (nicht mehr schwarz gefüllt).
+  // Dieselben Symbolkomponenten wie bei einzeln platzierten Bauteilen. Damit
+  // bleiben Proportionen und spätere Symbolkorrekturen an genau einer Stelle.
   const Absperr = ({ cyMid }) => (
-    <>
-      <polygon points={`${cx - 9},${cyMid - 9} ${cx + 9},${cyMid - 9} ${cx},${cyMid}`} fill="white" stroke="#1e293b" strokeWidth="1.6" />
-      <polygon points={`${cx - 9},${cyMid + 9} ${cx + 9},${cyMid + 9} ${cx},${cyMid}`} fill="white" stroke="#1e293b" strokeWidth="1.6" />
-      <circle cx={cx} cy={cyMid} r="3" fill="#1e293b" />
-    </>
+    <g transform={`translate(${cx - 7} ${cyMid - 14})`}><SymShutoff /></g>
   );
 
   return (
@@ -522,14 +525,8 @@ export function GruppeNode({ data, selected: sel }) {
         )}
         {/* Absperrventil oben */}
         <Absperr cyMid={30} />
-        {/* Pumpe — Kreis + Durchmesserlinie + Dreieck nach unten (Flussrichtung) */}
-        {hatPumpe && (
-          <>
-            <circle cx={cx} cy="64" r="15" fill="white" stroke="#1e293b" strokeWidth="2.2" />
-            <line x1={cx - 15} y1="64" x2={cx + 15} y2="64" stroke="#1e293b" strokeWidth="1.8" />
-            <polygon points={`${cx - 15},64 ${cx + 15},64 ${cx},79`} fill="#1e293b" />
-          </>
-        )}
+        {/* Pumpe — identisch zum einzeln platzierbaren Symbol. */}
+        {hatPumpe && <g transform={`translate(${cx - 12} 52)`}><SymPump /></g>}
         {/* Thermometer */}
         <circle cx={cx} cy="98" r="6" fill="white" stroke="#1e293b" strokeWidth="1.4" />
         <text x={cx} y="101" textAnchor="middle" fontSize="7" fontWeight="700" fill="#1e293b">T</text>
@@ -558,24 +555,17 @@ export function GruppeNode({ data, selected: sel }) {
         <text transform="translate(87 202) rotate(-90)" textAnchor="middle" fontSize="8.5" fill="#ef4444" fontFamily="monospace">
           {`m': ${kg(c.m_sek)}`}
         </text>
-        {/* STAD (Strangregulierventil) */}
-        <Absperr cyMid={303} />
-        <line x1={cx + 9} y1="294" x2={cx + 20} y2="288" stroke="#1e293b" strokeWidth="1.6" />
+        {/* STAD — identisch zum einzeln platzierbaren Symbol. */}
+        <g transform={`translate(${cx - 6} 289)`}><SymSTAD /></g>
         {/* Thermometer */}
         <circle cx={cx + 24} cy="320" r="6" fill="white" stroke="#1e293b" strokeWidth="1.4" />
         <text x={cx + 24} y="323" textAnchor="middle" fontSize="7" fontWeight="700" fill="#1e293b">T</text>
-        {/* Ventil unten: 2-Weg (Einspritz/Drossel) oder 3-Weg (Beimisch) —
-            weiss gefüllt + Kreis am Treffpunkt (Vorlage «2-Wege Ventil») */}
+        {/* Ventil unten — identisch zu den einzeln platzierbaren Symbolen. */}
         {hatVentil && (
           <>
-            <polygon points={`${cx - 9},330 ${cx + 9},330 ${cx},338`} fill="white" stroke="#1e293b" strokeWidth="1.6" />
-            <polygon points={`${cx - 9},346 ${cx + 9},346 ${cx},338`} fill="white" stroke="#1e293b" strokeWidth="1.6" />
-            {schaltung === 'beimisch' && (
-              <polygon points={`${cx - 18},330 ${cx - 18},346 ${cx},338`} fill="white" stroke="#1e293b" strokeWidth="1.6" />
-            )}
-            <circle cx={cx} cy="338" r="2.2" fill="white" stroke="#1e293b" strokeWidth="1.2" />
-            <rect x={cx + 12} y="331" width="14" height="14" rx="2" fill={einspritz ? '#f97316' : '#94a3b8'} />
-            <text x={cx + 19} y="341" textAnchor="middle" fontSize="8" fontWeight="700" fill="white">M</text>
+            {schaltung === 'beimisch'
+              ? <g transform={`translate(${cx + 19} 326) scale(-1 1)`}><SymValve3 /></g>
+              : <g transform={`translate(${cx - 17} 326)`}><SymValve2V /></g>}
             {c.ventil && (
               <text x={cx + 30} y="341" fontSize="8" fill="#1e293b" fontFamily="monospace">kvs {c.ventil.kvs_eff}</text>
             )}

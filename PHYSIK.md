@@ -254,3 +254,43 @@ erzeugt eine echte Junction. Beide Teilstücke behalten Layer, Medium, DN, Läng
 (anteilig) und übrige Metadaten. Existiert an der Zielposition bereits eine Junction,
 wird sie wiederverwendet. Eine reine **optische Kreuzung erzeugt weiterhin keine**
 Verbindung.
+
+## 16. Technischer Speicher (2026-08-03)
+Quelle: `Speicher_Auslegung.xlsx`, Blatt `WP`. Der Auslegungsvorschlag wird im
+Backend gerechnet; ein manuell gewählter Speicherinhalt wird nicht still überschrieben.
+
+- Leistung `Q`: manuelle Übersteuerung, sonst Leistung des einen unterstützten
+  Erzeugers; fehlt diese, Summe der Verbraucherleistungen. Mehrere/bivalente
+  Erzeuger werden bis zur Betriebszustandslogik nicht still addiert.
+- Speichertemperatur oben: höchste Verbraucher-VL + Überdeckung (Standard 2 K).
+- Speichertemperatur unten: berechneter Misch-Rücklauf des massgebenden Verteilers;
+  ohne Verteiler tiefste erfasste Verbraucher-RL. Manuell kontrolliert überschreibbar.
+- Überbrückungszeit: Standard 15 min.
+- `V [l] = Q [kW] · t [min] · 60 / (c [kJ/kgK] · ΔT [K] · ρ [kg/m³]) · 1000`
+- Stoffwerte der Vorlage: `c = 4.187 kJ/(kg·K)`, `ρ = 988 kg/m³`.
+- Referenzfall: 29.88 kW, 15 min, ΔT 12 K → rund 650 l.
+
+## 17. Erdsondenfeld – erste Auslegungsstufe (2026-08-03)
+Quelle: `Erdsonden.xlsx`, Blätter `glykol_Erdsonden` und
+`Druckverlustberechnung_erdsonde`.
+
+- Quellenleistung `Q0`: manuelle Übersteuerung, sonst Energiebilanz der Wärmepumpe
+  gemäss §14. Die Heizleistung darf nicht ersatzweise als Quellenleistung gelten.
+- Die spezifische Entzugsleistung `qE [W/m]` ist eine sichtbare, standortbezogene
+  Eingabe. Es gibt keinen versteckten Standardwert.
+- Erforderliche Gesamtbohrmeter:
+  `Lerf [m] = Q0 [kW] · 1000 / qE [W/m] · Sicherheitsfaktor`.
+- Sicherheitsfaktor: Standard 1.10 aus der Vorlage, sichtbar überschreibbar.
+- Duplexsonde: zwei U-Rohre = vier Rohrstränge je Sondenmeter.
+- Rohrinhalte der Vorlage: 25 mm → 0.327 l/m, 32 mm → 0.531 l/m,
+  40 mm → 0.835 l/m.
+- `Vsonde = Anzahl · 4 · Sondenlänge · Rohrinhalt`.
+- `mGlykol = (Vsonde + Zusatzinhalt) · Konzentration / 100 · ρGlykol`,
+  mit `ρGlykol = 1.14 kg/l` aus der Vorlage.
+
+Die EED-Tabellen der Vorlage gelten nur für deren dokumentierte Standorte und
+Randbedingungen (u.a. 1800 Betriebsstunden und ohne BWW). Sie werden deshalb nicht
+als allgemeine Bohrtiefenautomatik übernommen. Die Druckverlust-/Pumpenauslegung
+folgt erst, wenn Einzellänge, Anschlussleitung und Hauptleitung topologisch eindeutig
+definiert sind. Bohrmeter bleiben eine Planungshilfe; geologische und behördliche
+Nachweise sind extern zu prüfen.

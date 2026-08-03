@@ -139,6 +139,8 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
     vr = results.get("verteiler_results") or {}
     nf = results.get("node_flows") or {}
     ergebnisse_erzeuger = results.get("heatpump_results") or {}
+    speicher_results = results.get("speicher_results") or {}
+    erdsonden_results = results.get("erdsonden_results") or {}
     for n in _sortiert(nodes):
         d = n.get("data") or {}
         t = n.get("type")
@@ -283,13 +285,43 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
                     (f"ΔT {quelle}", _fmt(er.get("source_dt"), 2), "K"),
                     (f"V' {quelle}", _fmt(er.get("source_flow_m3h")), "m³/h"),
                 ])
+        elif t == "speicher":
+            c = speicher_results.get(n["id"], {})
+            eingaben = [
+                ("Gewählter Speicherinhalt", d.get("speicher_liter"), "l"),
+                ("Auslegungsleistung", c.get("leistung_kw"), "kW"),
+                ("Leistungsquelle", c.get("leistungsquelle"), ""),
+                ("Maximale Verbraucher-VL", c.get("vorlauf_max_c"), "°C"),
+                ("Überdeckung", c.get("ueberdeckung_k"), "K"),
+                ("Speicher-Rücklauf", c.get("speicher_unten_c"), "°C"),
+                ("Überbrückungszeit", c.get("ueberbrueckung_min"), "min"),
+            ]
+            resultate = [
+                ("Speichertemperatur oben", _fmt(c.get("speicher_oben_c"), 1), "°C"),
+                ("Speichertemperatur unten", _fmt(c.get("speicher_unten_c"), 1), "°C"),
+                ("Auslegungsvorschlag", c.get("speichervolumen_l"), "l"),
+                ("Formel", "V = Q · t · 60 / (c · ΔT · ρ) · 1000", ""),
+            ]
         elif t == "erdsonden":
             anzahl = max(1, min(24, int(_f(d.get("sonden_anzahl")) or 5)))
             laenge = _f(d.get("sonden_laenge_m"))
+            c = erdsonden_results.get(n["id"], {})
             eingaben = [("Ausführung", "Duplex (2 U-Rohre)", ""),
                         ("Anzahl Erdsonden", anzahl, ""),
-                        ("Sondenlänge", laenge, "m")]
-            resultate = [("Gesamtbohrmeter", anzahl * laenge if laenge else None, "m")]
+                        ("Sondenlänge", laenge, "m"),
+                        ("Quellenleistung", c.get("quellenleistung_kw"), "kW"),
+                        ("Leistungsquelle", c.get("leistungsquelle"), ""),
+                        ("Spezifische Entzugsleistung", d.get("entzugsleistung_w_m"), "W/m"),
+                        ("Sicherheitsfaktor", c.get("sicherheitsfaktor"), ""),
+                        ("Sondenrohr", c.get("sonden_aussendurchmesser_mm"), "mm"),
+                        ("Glykolkonzentration", c.get("glykol_konzentration_pct"), "%")]
+            resultate = [("Gewählte Gesamtbohrmeter", c.get("ist_gesamt_m"), "m"),
+                          ("Erforderliche Gesamtbohrmeter", c.get("erforderlich_gesamt_m"), "m"),
+                          ("Erforderliche Länge je Sonde", c.get("erforderlich_pro_sonde_m"), "m"),
+                          ("Sondeninhalt", c.get("sondeninhalt_l"), "l"),
+                          ("Soleinhalt gesamt", c.get("gesamtinhalt_l"), "l"),
+                          ("Glykolbedarf", c.get("glykolbedarf_kg"), "kg"),
+                          ("Bohrmeter-Formel", "Lerf = Q0 · 1000 / qE · SF", "")]
         else:
             continue
         abschnitte.append({"nr": d.get("nr"), "titel": TITEL.get(t, t), "bezeichnung": d.get("label") or "",

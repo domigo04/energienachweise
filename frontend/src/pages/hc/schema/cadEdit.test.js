@@ -118,6 +118,7 @@ describe('segmentVerschieben — der CAD-Fall aus Punkt 11', () => {
     const vorbereitet = segmentZumVerschieben([{ x:0, y:0 }, { x:500, y:0 }], 0);
     expect(vorbereitet.points).toEqual([{ x:0, y:0 }, { x:500, y:0 }]);
     expect(vorbereitet.pointIndexes).toEqual([0, 1]);
+    expect(vorbereitet.orientation).toBe('horizontal');
     const bewegt = segmentVerschieben(vorbereitet.points, vorbereitet.pointIndexes, 'horizontal', { x:0, y:200 });
     expect(bewegt).toEqual([{ x:0, y:200 }, { x:500, y:200 }]);
   });

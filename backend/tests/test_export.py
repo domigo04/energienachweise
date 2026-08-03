@@ -76,7 +76,7 @@ def test_erzeugersymbole_werden_typabhaengig_exportiert():
     assert "VERD." in luft_svg
     assert "L/W-WP SPLIT" in luft_svg
     assert "AUL" not in luft_svg
-    assert handle_pos(lwwp, "wz-l-28") == pytest.approx((40, 70 + 114 * 0.28))
+    assert handle_pos(lwwp, "wz-l-28") == pytest.approx((40, 70 + 137 * 0.28))
     abschnitt = berechnungs_abschnitte(
         [lwwp],
         berechne_schema([{
@@ -175,7 +175,7 @@ def test_svg_uebernimmt_cad_stuetzpunkte_und_medien_layer():
     svg = erzeuge_svg(nodes, edges, {})
     # Nicht-rechtwinklige CAD-Stützpunkte bleiben exakt und werden nicht durch
     # eine Bezier-Rundung vom Editorpfad abweichend nachgezeichnet.
-    assert 'd="M 52 0 L -300 200 L 200 200 L 352 0"' in svg
+    assert 'd="M 62.5 0 L -300 200 L 200 200 L 362.5 0"' in svg
     assert 'stroke="#0e7490"' in svg
     assert 'stroke-dasharray="10,7"' in svg
     # Ein Stützpunkt ausserhalb der Bauteile muss den PDF/SVG-Ausschnitt erweitern.

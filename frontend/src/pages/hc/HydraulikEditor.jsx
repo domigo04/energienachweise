@@ -618,7 +618,7 @@ function ErzeugerTypFelder({ data, onSet }) {
   );
 }
 
-function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ventilResults, pumpenResults, expansionResults, anschlussWarnungen, anschlussResults, pwtResults, heatpumpResults, onUpdate, onDelete, onSetAbgaenge, navigate, drawingConfig, onDrawingConfig }) {
+function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ventilResults, pumpenResults, expansionResults, anschlussWarnungen, anschlussResults, pwtResults, heatpumpResults, speicherResults, erdsondenResults, onUpdate, onDelete, onSetAbgaenge, navigate, drawingConfig, onDrawingConfig }) {
   // Punkt 13 — nichts ausgewählt heisst nicht „nichts zu zeigen": dann gehören
   // hierher die Eigenschaften der ANSICHT, wie in Revit.
   if (!node) return (
@@ -937,14 +937,38 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
   }
 
   // ── SPEICHER ──
-  if (node.type === 'speicher' || node.type === 'bww') {
+  if (node.type === 'speicher') {
+    const sr = speicherResults?.[node.id];
     return (
       <div style={panelSt}>
-        <PT>{node.type === 'bww' ? 'BWW-Speicher' : 'Speicher'}</PT>
-        {fld('Bezeichnung','label',node.type === 'bww' ? 'BWW' : 'Speicher','','text')}
-        {fld('Speicherinhalt','speicher_liter','z.B. 800','L')}
+        <PT>Technischer Speicher</PT>
+        {fld('Bezeichnung','label','Speicher','','text')}
+        {fld('Gewählter Speicherinhalt','speicher_liter','z.B. 800','L')}
+        {sr?.speichervolumen_l != null && <>
+          {ro('Auslegungsvorschlag', sr.speichervolumen_l, 'L', true)}
+          {ro('Temperatur oben', sr.speicher_oben_c, '°C')}
+          {ro('Temperatur unten', sr.speicher_unten_c, '°C')}
+          <div style={{ fontSize:9, color:'#64748b', marginBottom:7 }}>
+            {sr.leistung_kw} kW ({sr.leistungsquelle}) · {sr.ueberbrueckung_min} min · ΔT {Number(sr.speicher_oben_c - sr.speicher_unten_c).toFixed(1)} K
+          </div>
+        </>}
+        {sr?.warnings?.map((w,i)=><div key={i} style={warnSt}>⚠ {w}</div>)}
         <div style={{ fontSize:9, lineHeight:1.5, color:'#64748b', background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:6, padding:'6px 7px' }}>
-          Der Inhalt erscheint direkt im Speicher-Symbol. Die Anzahl und Lage der Anschlüsse bleibt davon unabhängig.
+          Automatik: Erzeugerleistung, sonst Summe der Verbrauchergruppen; oben höchste Gruppen-VL + 2 K, unten gerechneter Misch-Rücklauf. Im Doppelklick lassen sich die Eingaben kontrolliert überschreiben.
+        </div>
+        <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
+      </div>
+    );
+  }
+
+  if (node.type === 'bww') {
+    return (
+      <div style={panelSt}>
+        <PT>BWW-Speicher</PT>
+        {fld('Bezeichnung','label','BWW','','text')}
+        {fld('Speicherinhalt','speicher_liter','z.B. 800','L')}
+        <div style={{ fontSize:9, lineHeight:1.5, color:'#64748b', background:'#fff7ed', border:'1px solid #fed7aa', borderRadius:6, padding:'6px 7px' }}>
+          Die SIA-385-Auslegung wird erst nach Klärung der Bezugsgrösse aus der Excel-Vorlage aktiviert. Der manuelle Inhalt bleibt unverändert nutzbar.
         </div>
         <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
@@ -954,7 +978,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
   // ── ERDSONDENFELD ──
   if (node.type === 'erdsonden') {
     const anzahl = Math.max(1, Math.min(24, parseInt(d.sonden_anzahl) || 5));
-    const laenge = parseFloat(d.sonden_laenge_m);
+    const er = erdsondenResults?.[node.id];
     return (
       <div style={panelSt}>
         <PT>Erdsondenfeld</PT>
@@ -965,9 +989,17 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
           {Array.from({ length:24 }, (_, i) => i + 1).map(k=><option key={k} value={k}>{k}</option>)}
         </select>
         {fld('Sondenlänge','sonden_laenge_m','z.B. 180','m')}
+        {fld('Spezifische Entzugsleistung','entzugsleistung_w_m','standortbezogen','W/m')}
+        {er?.erforderlich_gesamt_m != null && <>
+          {ro('Erforderliche Gesamtbohrmeter', er.erforderlich_gesamt_m, 'm', er.ausreichend)}
+          {ro('Erforderlich je Sonde', er.erforderlich_pro_sonde_m, 'm')}
+          {ro('Gewählte Gesamtbohrmeter', er.ist_gesamt_m, 'm', er.ausreichend)}
+        </>}
+        {er?.gesamtinhalt_l != null && ro('Soleinhalt Feld', er.gesamtinhalt_l, 'L')}
+        {er?.glykolbedarf_kg != null && ro('Glykolbedarf', er.glykolbedarf_kg, 'kg')}
+        {er?.warnings?.map((w,i)=><div key={i} style={warnSt}>⚠ {w}</div>)}
         <div style={{ fontSize:9, lineHeight:1.5, color:'#64748b', background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:6, padding:'6px 7px' }}>
-          Das Symbol zeigt pro Sonde zwei U-Rohre. Der Verteiler wächst automatisch mit.
-          {Number.isFinite(laenge) && laenge > 0 && <> Gesamtbohrmeter: <b>{Math.round(anzahl * laenge).toLocaleString('de-CH')} m</b>.</>}
+          Die Quellenleistung kommt automatisch von der Wärmepumpe. Die spezifische Entzugsleistung ist bewusst eine sichtbare Projektangabe; es wird kein standortunabhängiger Pauschalwert eingesetzt.
         </div>
         <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
@@ -1139,7 +1171,7 @@ function BigVal({ label, value, unit = '', sub = '', color = '#1d4ed8' }) {
   );
 }
 
-function AuslegungModal({ node, v, gr, vr, ver, pr, xr, onUpdate, onClose, navigate }) {
+function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, onUpdate, onClose, navigate }) {
   const d = node.data;
   const set = (k, val) => onUpdate(node.id, k, val);
   const [tab, setTab] = useState('gruppe');
@@ -1428,15 +1460,35 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, onUpdate, onClose, navig
         <button style={btnBlue} onClick={()=>navigate('/rechner/ravel')}>→ RAVEL Wirtschaftlichkeit</button>
       </div>
     );
-  } else if (node.type === 'speicher' || node.type === 'bww') {
+  } else if (node.type === 'speicher') {
     body = (
       <div style={{ display:'grid', gap:10 }}>
-        <div><label style={lbl}>Speicherinhalt [L]</label>
+        <div><label style={lbl}>Gewählter Speicherinhalt [L]</label>
           <input type="number" min="0" style={inp} value={d.speicher_liter??''} onChange={e=>set('speicher_liter',e.target.value)} placeholder="z.B. 800"/></div>
-        <BigVal label="Anzeige im Schema" value={d.speicher_liter || null} unit="L" color="#334155"
-          sub="Der Wert wird direkt im Speicherbehälter dargestellt."/>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+          <div><label style={lbl}>Überbrückungszeit [min]</label><input type="number" min="1" style={inp} value={d.ueberbrueckung_min??15} onChange={e=>set('ueberbrueckung_min',e.target.value)}/></div>
+          <div><label style={lbl}>Überdeckung [K]</label><input type="number" min="0" style={inp} value={d.speicher_ueberdeckung_k??2} onChange={e=>set('speicher_ueberdeckung_k',e.target.value)}/></div>
+          <div><label style={lbl}>Leistung manuell [kW]</label><input type="number" min="0" style={inp} value={d.auslegung_leistung_kw??''} onChange={e=>set('auslegung_leistung_kw',e.target.value)} placeholder="leer = automatisch"/></div>
+          <div><label style={lbl}>Max. VL manuell [°C]</label><input type="number" style={inp} value={d.auslegung_vorlauf_c??''} onChange={e=>set('auslegung_vorlauf_c',e.target.value)} placeholder="leer = automatisch"/></div>
+          <div><label style={lbl}>RL manuell [°C]</label><input type="number" style={inp} value={d.auslegung_ruecklauf_c??''} onChange={e=>set('auslegung_ruecklauf_c',e.target.value)} placeholder="leer = automatisch"/></div>
+        </div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10 }}>
+          <BigVal label="Vorschlag" value={sr?.speichervolumen_l} unit="L" color="#15803d" sub={`${sr?.leistung_kw ?? '—'} kW · ${sr?.leistungsquelle ?? '—'}`}/>
+          <BigVal label="Oben" value={sr?.speicher_oben_c} unit="°C" color="#dc2626" sub="max. VL + Überdeckung"/>
+          <BigVal label="Unten" value={sr?.speicher_unten_c} unit="°C" color="#2563eb" sub="Misch-Rücklauf"/>
+        </div>
+        {sr?.warnings?.map((w,i)=><div key={i} style={warnSt}>⚠ {w}</div>)}
         <div style={{ fontSize:11, color:'#64748b' }}>
-          Die sichtbaren Fangpunkte bleiben unabhängig vom Inhalt. Eine frei konfigurierbare 3-/4-Punkt-Anbindung folgt als eigener Schritt.
+          Der Vorschlag überschreibt den gewählten Speicher nicht automatisch. Berechnet wird im Backend aus Leistung × Zeit / (c × ΔT × ρ).
+        </div>
+      </div>
+    );
+  } else if (node.type === 'bww') {
+    body = (
+      <div style={{ display:'grid', gap:10 }}>
+        <div><label style={lbl}>Speicherinhalt [L]</label><input type="number" min="0" style={inp} value={d.speicher_liter??''} onChange={e=>set('speicher_liter',e.target.value)}/></div>
+        <div style={{ ...warnSt, background:'#fff7ed', border:'1px solid #fed7aa', color:'#9a3412' }}>
+          SIA-385-Automatik noch nicht aktiv: Die Bezugsgrösse der Excel-Eingabe muss fachlich geklärt werden.
         </div>
       </div>
     );
@@ -1454,13 +1506,27 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, onUpdate, onClose, navig
           <input type="number" min="1" style={inp} value={d.sonden_laenge_m??''}
             onChange={e=>set('sonden_laenge_m',e.target.value)} placeholder="z.B. 180"/></div>
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+          <div><label style={lbl}>Quellenleistung manuell [kW]</label><input type="number" min="0" style={inp} value={d.quellenleistung_kw??''} onChange={e=>set('quellenleistung_kw',e.target.value)} placeholder="leer = Wärmepumpe"/></div>
+          <div><label style={lbl}>Spezifische Entzugsleistung [W/m]</label><input type="number" min="1" style={inp} value={d.entzugsleistung_w_m??''} onChange={e=>set('entzugsleistung_w_m',e.target.value)} placeholder="standortbezogen"/></div>
+          <div><label style={lbl}>Sicherheitsfaktor</label><input type="number" min="1" step="0.01" style={inp} value={d.sonden_sicherheitsfaktor??1.1} onChange={e=>set('sonden_sicherheitsfaktor',e.target.value)}/></div>
+          <div><label style={lbl}>Sondenrohr</label><select style={inp} value={d.sonden_rohr_mm??32} onChange={e=>set('sonden_rohr_mm',Number(e.target.value))}>{[25,32,40].map(v=><option key={v} value={v}>{v} mm</option>)}</select></div>
+          <div><label style={lbl}>Glykolkonzentration [%]</label><input type="number" min="0" max="100" style={inp} value={d.glykol_pct??30} onChange={e=>set('glykol_pct',e.target.value)}/></div>
+          <div><label style={lbl}>Zusätzlicher Soleinhalt [L]</label><input type="number" min="0" style={inp} value={d.sole_zusatzinhalt_l??0} onChange={e=>set('sole_zusatzinhalt_l',e.target.value)}/></div>
+        </div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
           <BigVal label="Duplexsonden" value={anzahl} color="#4f46e5" sub="je zwei U-Rohre"/>
           <BigVal label="Gesamtbohrmeter"
             value={Number.isFinite(laenge) && laenge > 0 ? Math.round(anzahl * laenge).toLocaleString('de-CH') : null}
             unit="m" color="#7c3aed" sub="Anzahl × Sondenlänge"/>
         </div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10 }}>
+          <BigVal label="Erforderlich" value={er?.erforderlich_gesamt_m} unit="m" color={er?.ausreichend===false?'#dc2626':'#15803d'} sub={`${er?.quellenleistung_kw ?? '—'} kW · ${er?.leistungsquelle ?? '—'}`}/>
+          <BigVal label="Soleinhalt" value={er?.gesamtinhalt_l} unit="L" color="#0369a1" sub="Duplexrohre + Zusatz"/>
+          <BigVal label="Glykol" value={er?.glykolbedarf_kg} unit="kg" color="#a16207" sub={`${er?.glykol_konzentration_pct ?? '—'} %`}/>
+        </div>
+        {er?.warnings?.map((w,i)=><div key={i} style={warnSt}>⚠ {w}</div>)}
         <div style={{ fontSize:11, color:'#64748b' }}>
-          Rechts liegen die beiden Hauptanschlüsse des Sole-Vor- und -Rücklaufs. Die einzelnen Sondenabgänge werden intern im Verteiler dargestellt.
+          Die Bohrmeterberechnung ist eine transparente Planungshilfe. Standort-/Bewilligungsdaten und EED-Nachweis bleiben extern zu prüfen; die Druckverlustauslegung folgt separat.
         </div>
       </div>
     );
@@ -1810,6 +1876,8 @@ function EditorInner() {
   const anschlussResults = hydraulik.anschluss_results || EMPTY_OBJECT;
   const pwtResults = hydraulik.pwt_results || EMPTY_OBJECT;
   const heatpumpResults = hydraulik.heatpump_results || EMPTY_OBJECT;
+  const speicherResults = hydraulik.speicher_results || EMPTY_OBJECT;
+  const erdsondenResults = hydraulik.erdsonden_results || EMPTY_OBJECT;
   const alleWarnungen = hydraulik.warnungen || EMPTY_ARRAY;
 
   const editorGraphAnwenden = useCallback((graph) => {
@@ -3313,7 +3381,8 @@ function EditorInner() {
     if (!delta.x && !delta.y) return;
     snap();
     const points = segmentVerschieben(
-      vorbereitet.points, vorbereitet.pointIndexes, null, delta, { grid:1 },
+      vorbereitet.points, vorbereitet.pointIndexes, vorbereitet.orientation, delta,
+      { grid:1, direction:vorbereitet.direction, axisLocked:true },
     );
     setEdges(items => items.map(item => item.id === edgeId
       ? { ...item, data:{ ...(item.data || {}), cad_polyline:true, points } }
@@ -3331,12 +3400,15 @@ function EditorInner() {
       const nextPoints = segmentVerschieben(
         drag.points, drag.pointIndexes, drag.orientation,
         { x:raw.x - drag.pointer.x, y:raw.y - drag.pointer.y },
-        { grid:drawingConfig.grid_size, direction:drag.direction },
+        { grid:drawingConfig.grid_size, direction:drag.direction, axisLocked:true },
       );
-      const delta = {
+      const frei = {
         x:Math.round((raw.x - drag.pointer.x) / drawingConfig.grid_size) * drawingConfig.grid_size,
         y:Math.round((raw.y - drag.pointer.y) / drawingConfig.grid_size) * drawingConfig.grid_size,
       };
+      const delta = drag.orientation === 'horizontal' ? { x:0, y:frei.y }
+        : drag.orientation === 'vertical' ? { x:frei.x, y:0 }
+        : frei;
       if (edgePointFrame.current) cancelAnimationFrame(edgePointFrame.current);
       edgePointFrame.current = requestAnimationFrame(() => {
         setEdges(items => items.map(item => item.id === drag.edgeId
@@ -4155,8 +4227,16 @@ function EditorInner() {
       const c = expansionResults[n.id];
       return c ? { ...n, data: { ...n.data, _calc: c } } : n;
     }
+    if (n.type === 'speicher') {
+      const c = speicherResults[n.id];
+      return c ? { ...n, data: { ...n.data, _calc: c } } : n;
+    }
+    if (n.type === 'erdsonden') {
+      const c = erdsondenResults[n.id];
+      return c ? { ...n, data: { ...n.data, _calc: c } } : n;
+    }
     return n;
-  }), [nodes, verteilerResults, gruppeResults, nodeFlows, expansionResults]);
+  }), [nodes, verteilerResults, gruppeResults, nodeFlows, expansionResults, speicherResults, erdsondenResults]);
 
   // Legende: Nr · Bauteil · Bezeichnung · Kennwerte (reine Anzeige der
   // Backend-Resultate — dieselben Zeilen erscheinen im PDF)
@@ -5862,7 +5942,7 @@ function EditorInner() {
                 onLabel={beschriftungSetzen} onLabelReset={labelZuruecksetzen}
                 onUpdateEdge={updateEdgeData} onUpdateLayer={updateEdgeLayer} onDelete={deleteEdge} />
             ) : (
-              <PropertiesPanel node={selectedNode} nodeFlows={nodeFlows} verteilerResults={verteilerResults} gruppeResults={gruppeResults} ventilResults={ventilResults} pumpenResults={pumpenResults} expansionResults={expansionResults} anschlussWarnungen={anschlussWarnungen} anschlussResults={anschlussResults} pwtResults={pwtResults} heatpumpResults={heatpumpResults} onUpdate={updateNode} onDelete={deleteNode} onSetAbgaenge={setAbgaenge} navigate={navigate}
+              <PropertiesPanel node={selectedNode} nodeFlows={nodeFlows} verteilerResults={verteilerResults} gruppeResults={gruppeResults} ventilResults={ventilResults} pumpenResults={pumpenResults} expansionResults={expansionResults} anschlussWarnungen={anschlussWarnungen} anschlussResults={anschlussResults} pwtResults={pwtResults} heatpumpResults={heatpumpResults} speicherResults={speicherResults} erdsondenResults={erdsondenResults} onUpdate={updateNode} onDelete={deleteNode} onSetAbgaenge={setAbgaenge} navigate={navigate}
                 drawingConfig={drawingConfig} onDrawingConfig={drawingConfigAktualisieren}/>
             )}
           </aside>
@@ -6257,6 +6337,8 @@ function EditorInner() {
           ver={ventilResults[auslegungNode.id]}
           pr={pumpenResults[auslegungNode.id]}
           xr={expansionResults[auslegungNode.id]}
+          sr={speicherResults[auslegungNode.id]}
+          er={erdsondenResults[auslegungNode.id]}
           onUpdate={updateNode}
           onClose={() => setAuslegung(null)}
           navigate={navigate}

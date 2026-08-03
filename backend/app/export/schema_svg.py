@@ -36,7 +36,7 @@ EWS_S, EWS_X0, EWS_H = 58, 52, 286
 GROESSEN = {
     "heizkreis": (74, 74), "pump": (48, 48), "valve2": (44, 40),
     "valve3": (52, 40), "checkvalve": (48, 48), "shutoff": (19, 41),
-    "erzeuger": (104, 114), "verbraucher": (68, 50), "speicher": (72, 149),
+    "erzeuger": (125, 137), "verbraucher": (68, 50), "speicher": (72, 149),
     "junction": (46, 46), "label": (120, 16),
     "waermezaehler": (48, 48), "expansion": (76, 105), "bww": (72, 149),
     "anschluss": (60, 40), "stad": (18, 41), "temperatur": (52, 38),
@@ -530,7 +530,7 @@ def zeichne_gruppe(parts, node, results):
     _nr_badge(parts, x + GR_W - 14, y + 64, d.get("nr"))
 
 
-def zeichne_erdsonden(parts, node):
+def zeichne_erdsonden(parts, node, results):
     """Schlichter Soleverteiler mit zwei U-Rohren je Duplexsonde."""
     d = node.get("data") or {}
     x = (node.get("position") or {}).get("x", 0)
@@ -560,6 +560,14 @@ def zeichne_erdsonden(parts, node):
         f'<rect x="{x + 34}" y="{y + 78}" width="{w - 68}" height="14" fill="white" '
         f'stroke="{SOLE_RL_FARBE}" stroke-width="1.7" stroke-dasharray="7,4"/>'
     )
+    c = (results.get("erdsonden_results") or {}).get(node["id"], {})
+    if c.get("erforderlich_gesamt_m") is not None:
+        farbe = "#dc2626" if c.get("ausreichend") is False else "#15803d"
+        suffix = " — zu kurz" if c.get("ausreichend") is False else ""
+        parts.append(
+            f'<text x="{x + w / 2}" y="{y + 106}" text-anchor="middle" font-size="9" '
+            f'font-weight="700" fill="{farbe}">erf. {c["erforderlich_gesamt_m"]:.0f} m{suffix}</text>'
+        )
 
     for index in range(n):
         sx = x + EWS_X0 + index * EWS_S
@@ -596,7 +604,7 @@ def zeichne_standard(parts, node, results):
     sym_start = len(parts)  # Merker für die optionale Drehung (nur das Symbol)
 
     if t == "erdsonden":
-        zeichne_erdsonden(parts, node)
+        zeichne_erdsonden(parts, node, results)
         return
     if t == "heizkreis":
         parts.append(f'<circle cx="{cx}" cy="{cy}" r="{w / 2}" fill="#f0fdf4" stroke="#16a34a" stroke-width="2.5"/>')
@@ -621,9 +629,14 @@ def zeichne_standard(parts, node, results):
         parts.append('<path d="M65 4 L75 14 M75 4 L65 14" fill="none" stroke="#111827" stroke-width="2"/>')
         parts.append('<path d="M20 45 A50 25 0 0 1 120 45 L120 245 A50 25 0 0 1 20 245 Z" fill="#e5e7eb" stroke="#111827" stroke-width="3"/>')
         parts.append('<line x1="20" y1="45" x2="120" y2="45" stroke="#111827" stroke-width="3"/>')
-        liter = _f(d.get("speicher_liter"))
+        c = (results.get("speicher_results") or {}).get(node["id"], {}) if t == "speicher" else {}
+        liter = _f(d.get("speicher_liter")) or _f(c.get("speichervolumen_l"))
         liter_text = f"{liter:.0f} L" if liter and liter > 0 else "… L"
         parts.append(f'<text x="70" y="78" text-anchor="middle" font-size="16" font-weight="700">{liter_text}</text>')
+        if c.get("speicher_oben_c") is not None:
+            parts.append(f'<text x="92" y="119" font-size="12" font-weight="700" fill="#dc2626">{c["speicher_oben_c"]:.1f} °C</text>')
+        if c.get("speicher_unten_c") is not None:
+            parts.append(f'<text x="92" y="199" font-size="12" font-weight="700" fill="#2563eb">{c["speicher_unten_c"]:.1f} °C</text>')
         if t == "bww":
             parts.append('<text x="70" y="151" text-anchor="middle" font-size="15" font-weight="700">BWW</text>')
             parts.append('<path d="M70 45 V2 M65 9 L70 2 L75 9" fill="none" stroke="#ef4444" stroke-width="3"/>')

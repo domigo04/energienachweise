@@ -109,6 +109,7 @@ export function segmentZumVerschieben(route, segmentIndex) {
   return {
     points:workingRoute.slice(1, -1),
     pointIndexes:[startIndex - 1, endIndex - 1],
+    orientation:segmentOrientierung(a, b),
     direction:{ x:b.x - a.x, y:b.y - a.y },
   };
 }

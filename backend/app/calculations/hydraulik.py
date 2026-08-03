@@ -15,6 +15,7 @@ from typing import List, Optional
 
 from app.calculations.expansion import berechne_expansion
 from app.calculations.leitungsdimension import automatische_dimension
+from app.calculations.schema_sizing import erdsondenfeld, technischer_speicher
 from app.calculations.ventil import berechne_kvs
 from app.calculations.waermepumpe import berechne_waermepumpe
 from app.data.generator_types import SOURCE_CIRCUIT_TYPES
@@ -40,6 +41,119 @@ def _zahl(x) -> Optional[float]:
         return float(x)
     except (TypeError, ValueError):
         return None
+
+
+def _bauteil_auslegungen(nodes, verteiler_results, heatpump_results):
+    """Automatische Eingaben aus dem Schema in Speicher/Erdsonden überführen."""
+    speicher_results, erdsonden_results = {}, {}
+    verbraucher = [n for n in nodes if n.get("type") in VERBRAUCHER_TYPEN]
+    erzeuger_werte = [
+        _zahl((n.get("data") or {}).get("leistung_kw"))
+        for n in nodes if n.get("type") == "erzeuger"
+        and _zahl((n.get("data") or {}).get("leistung_kw")) is not None
+    ]
+    # Bivalente/mehrere Erzeuger brauchen Betriebszustände. Bis diese explizit
+    # modelliert sind, werden Leistungen nicht still addiert.
+    erzeuger_leistung = erzeuger_werte[0] if len(erzeuger_werte) == 1 else None
+    verbraucher_leistung = sum(
+        _zahl((n.get("data") or {}).get("q_kw")) or 0 for n in verbraucher
+    )
+    gruppen_vl = [
+        _zahl((n.get("data") or {}).get("vl_temp")) for n in verbraucher
+        if _zahl((n.get("data") or {}).get("vl_temp")) is not None
+    ]
+    gruppen_rl = [
+        _zahl((n.get("data") or {}).get("rl_temp")) for n in verbraucher
+        if _zahl((n.get("data") or {}).get("rl_temp")) is not None
+    ]
+    verteiler_mit_rl = [v for v in verteiler_results.values() if v.get("rl_misch") is not None]
+    auto_rl = (
+        max(verteiler_mit_rl, key=lambda v: v.get("q_total") or 0).get("rl_misch")
+        if verteiler_mit_rl else (min(gruppen_rl) if gruppen_rl else None)
+    )
+
+    for n in nodes:
+        typ = n.get("type")
+        d = n.get("data") or {}
+        if typ == "speicher":
+            leistung = _zahl(d.get("auslegung_leistung_kw"))
+            leistungsquelle = "manuell"
+            if leistung is None:
+                leistung = erzeuger_leistung or verbraucher_leistung or None
+                leistungsquelle = "Erzeuger" if erzeuger_leistung else "Verbrauchergruppen"
+            vl = _zahl(d.get("auslegung_vorlauf_c"))
+            if vl is None and gruppen_vl:
+                vl = max(gruppen_vl)
+            rl = _zahl(d.get("auslegung_ruecklauf_c"))
+            if rl is None:
+                rl = auto_rl
+            if leistung is None or vl is None or rl is None:
+                speicher_results[n["id"]] = {
+                    "warnings": ["Für die automatische Auslegung fehlen Leistung oder Gruppen-Temperaturen."],
+                }
+                continue
+            try:
+                r = technischer_speicher(
+                    leistung, vl, rl,
+                    ueberbrueckung_min=_zahl(d.get("ueberbrueckung_min")) or 15,
+                    ueberdeckung_k=(
+                        _zahl(d.get("speicher_ueberdeckung_k"))
+                        if _zahl(d.get("speicher_ueberdeckung_k")) is not None else 2
+                    ),
+                )
+                r["leistungsquelle"] = leistungsquelle
+                r["gewaehlt_l"] = _zahl(d.get("speicher_liter"))
+                r["warnings"] = []
+                if len(erzeuger_werte) > 1 and _zahl(d.get("auslegung_leistung_kw")) is None:
+                    r["warnings"].append(
+                        "Mehrere Erzeuger erkannt; Auslegung nutzt bis zur Betriebszustandslogik die Verbraucherleistung."
+                    )
+                speicher_results[n["id"]] = r
+            except ValueError as exc:
+                speicher_results[n["id"]] = {"warnings": [str(exc)]}
+
+        elif typ == "erdsonden":
+            q0 = _zahl(d.get("quellenleistung_kw"))
+            leistungsquelle = "manuell"
+            mehrere_wp = False
+            if q0 is None:
+                wp_quellen = [
+                    _zahl(r.get("q_source_kw")) for r in heatpump_results.values()
+                    if _zahl(r.get("q_source_kw")) is not None
+                ]
+                q0 = wp_quellen[0] if len(wp_quellen) == 1 else None
+                mehrere_wp = len(wp_quellen) > 1
+                leistungsquelle = "Wärmepumpe"
+            try:
+                r = erdsondenfeld(
+                    quellenleistung_kw=q0,
+                    sonden_anzahl=int(_zahl(d.get("sonden_anzahl")) or 5),
+                    sonden_laenge_m=_zahl(d.get("sonden_laenge_m")),
+                    spezifische_entzugsleistung_w_m=_zahl(d.get("entzugsleistung_w_m")),
+                    sicherheitsfaktor=_zahl(d.get("sonden_sicherheitsfaktor")) or 1.10,
+                    sonden_aussendurchmesser_mm=int(_zahl(d.get("sonden_rohr_mm")) or 32),
+                    glykol_konzentration_pct=(
+                        _zahl(d.get("glykol_pct"))
+                        if _zahl(d.get("glykol_pct")) is not None else 30
+                    ),
+                    zusaetzlicher_inhalt_l=_zahl(d.get("sole_zusatzinhalt_l")) or 0,
+                )
+                r["leistungsquelle"] = leistungsquelle
+                r["warnings"] = []
+                if r.get("ausreichend") is False:
+                    r["warnings"].append(
+                        f"Gewähltes Feld ist {abs(r['reserve_m']):.0f} m kürzer als der Rechenwert."
+                    )
+                if q0 is None:
+                    r["warnings"].append("Quellenleistung fehlt; Wärmepumpe mit COP oder elektrische Leistung ergänzen.")
+                if mehrere_wp:
+                    r["warnings"].append("Mehrere Wärmepumpen erkannt; Quellenleistung am Erdsondenfeld manuell festlegen.")
+                if _zahl(d.get("entzugsleistung_w_m")) is None:
+                    r["warnings"].append("Spezifische Entzugsleistung fehlt; keine Bohrmeterempfehlung möglich.")
+                erdsonden_results[n["id"]] = r
+            except ValueError as exc:
+                erdsonden_results[n["id"]] = {"warnings": [str(exc)]}
+    return speicher_results, erdsonden_results
 
 
 # ── Druckverlust (Pflichtenheft §5 / PHYSIK §5) ─────────────────────────────
@@ -606,6 +720,7 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
     leer = {"edge_flows": {}, "node_flows": {}, "verteiler_results": {}, "gruppe_results": {},
             "ventil_results": {}, "pumpen_results": {}, "expansion_results": {},
             "leitung_results": {}, "anschluss_results": {}, "pwt_results": {}, "heatpump_results": {},
+            "speicher_results": {}, "erdsonden_results": {},
             "anschluss_warnings": anschluss_warnungen, "warnungen": []}
     if not sek:
         # Ohne Verbraucher gibt es keine Verbraucherkreise — Wärmepumpenkreise
@@ -626,8 +741,12 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
                      if e["source"] == nid or e["target"] == nid]
             leer["node_flows"][nid] = round(max(werte), 4) if werte else 0.0
         leer["leitung_results"] = _leitungsdimensionen(edges, leer["edge_flows"])
+        leer["speicher_results"], leer["erdsonden_results"] = _bauteil_auslegungen(
+            nodes, {}, leer["heatpump_results"])
         leer["warnungen"] = (_sammle_warnungen(nodes, {}, anschluss_warnungen, {}, leer["expansion_results"])
-                             + _wp_warnungen(nodes, leer["heatpump_results"]))
+                             + _wp_warnungen(nodes, leer["heatpump_results"])
+                             + [w for r in leer["speicher_results"].values() for w in r.get("warnings", [])]
+                             + [w for r in leer["erdsonden_results"].values() for w in r.get("warnings", [])])
         return leer
 
     edge_flows, node_flows = {}, {}
@@ -961,6 +1080,8 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
     # Sie liest ausschliesslich edge_flows — die WP-Kreise sind dort bereits
     # eingetragen und werden damit automatisch mitdimensioniert.
     leitung_results = _leitungsdimensionen(edges, edge_flows)
+    speicher_results, erdsonden_results = _bauteil_auslegungen(
+        nodes, verteiler_results, heatpump_results)
 
     return {
         "edge_flows": edge_flows,
@@ -974,8 +1095,12 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
         "anschluss_results": anschluss_results,
         "pwt_results": pwt_results,
         "heatpump_results": heatpump_results,
+        "speicher_results": speicher_results,
+        "erdsonden_results": erdsonden_results,
         "anschluss_warnings": anschluss_warnungen,
         "warnungen": _sammle_warnungen(nodes, verteiler_results, anschluss_warnungen, ventil_results, expansion_results)
                      + _wp_warnungen(nodes, heatpump_results)
-                     + [f"Plattentauscher: {p['warnung']}" for p in pwt_results.values() if p.get("warnung")],
+                     + [f"Plattentauscher: {p['warnung']}" for p in pwt_results.values() if p.get("warnung")]
+                     + [w for r in speicher_results.values() for w in r.get("warnings", [])]
+                     + [w for r in erdsonden_results.values() for w in r.get("warnings", [])],
     }

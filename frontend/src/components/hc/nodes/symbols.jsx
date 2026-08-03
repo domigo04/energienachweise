@@ -184,7 +184,7 @@ const generatorAria = {
 function SymLuftWasserWP({ bauart }) {
   if (bauart !== 'split') return <SymWaermepumpe generatorType="lwwp"/>;
   return (
-    <svg viewBox="0 0 200 220" width="104" height="114" role="img"
+    <svg viewBox="0 0 200 220" width="125" height="137" role="img"
       aria-label={generatorAria.lwwp}>
       <rect x="8" y="30" width="78" height="142" fill="#e5e7eb" stroke="#111827" strokeWidth="3"/>
       <rect x="114" y="30" width="78" height="142" fill="#e5e7eb" stroke="#111827" strokeWidth="3"/>
@@ -208,7 +208,7 @@ function SymWaermepumpe({ generatorType }) {
     co2_wp:'CO₂-WP',
   }[generatorType] || 'WP';
   return (
-    <svg viewBox="0 0 200 220" width="104" height="114" role="img"
+    <svg viewBox="0 0 200 220" width="125" height="137" role="img"
       aria-label={generatorAria[generatorType] || 'Wärmepumpe'}>
       <g fill="none" stroke="#111827" strokeWidth="2.5" strokeLinejoin="round">
         <rect x="8" y="8" width="184" height="204" fill="#e5e7eb" strokeWidth="3" />
@@ -241,7 +241,7 @@ function SymWaermepumpe({ generatorType }) {
 function SymKessel({ generatorType }) {
   if (generatorType === 'holz') {
     return (
-      <svg viewBox="0 0 200 220" width="104" height="114" role="img"
+      <svg viewBox="0 0 200 220" width="125" height="137" role="img"
         aria-label={generatorAria.holz}>
         <rect x="8" y="8" width="184" height="204" fill="white" stroke="#111827" strokeWidth="3"/>
         {/* SIA-Kennzeichen Holz: ausgefülltes Quadrat unten mittig. */}
@@ -251,7 +251,7 @@ function SymKessel({ generatorType }) {
   }
   const fuel = { gas:'GAS', oel:'ÖL', holz:'HOLZ' }[generatorType] || 'KESSEL';
   return (
-    <svg viewBox="0 0 200 220" width="104" height="114" role="img"
+    <svg viewBox="0 0 200 220" width="125" height="137" role="img"
       aria-label={generatorAria[generatorType]}>
       <rect x="22" y="14" width="156" height="192" rx="8" fill="#fff7ed" stroke="#111827" strokeWidth="3"/>
       <rect x="39" y="32" width="122" height="34" rx="3" fill="#f8fafc" stroke="#111827" strokeWidth="2"/>
@@ -264,7 +264,7 @@ function SymKessel({ generatorType }) {
 
 function SymFernwaerme() {
   return (
-    <svg viewBox="0 0 200 220" width="104" height="114" role="img" aria-label={generatorAria.fernwaerme}>
+    <svg viewBox="0 0 200 220" width="125" height="137" role="img" aria-label={generatorAria.fernwaerme}>
       <rect x="12" y="12" width="176" height="196" rx="4" fill="#f8fafc" stroke="#111827" strokeWidth="3"/>
       <path d="M100 42 L155 103 L100 164 L45 103 Z" fill="white" stroke="#111827" strokeWidth="3"/>
       <path d="M100 42 V164" stroke="#111827" strokeWidth="2.5"/>
@@ -277,7 +277,7 @@ function SymFernwaerme() {
 
 function SymElektro() {
   return (
-    <svg viewBox="0 0 200 220" width="104" height="114" role="img" aria-label={generatorAria.elektro}>
+    <svg viewBox="0 0 200 220" width="125" height="137" role="img" aria-label={generatorAria.elektro}>
       <rect x="22" y="14" width="156" height="192" rx="8" fill="#fefce8" stroke="#111827" strokeWidth="3"/>
       <path d="M111 37 L67 118 H99 L87 183 L139 91 H106 Z" fill="#facc15" stroke="#854d0e" strokeWidth="3" strokeLinejoin="round"/>
       <text x="100" y="196" textAnchor="middle" fontFamily="Arial, sans-serif" fontSize="14" fontWeight="700" fill="#111827">ELEKTRO</text>
@@ -287,7 +287,7 @@ function SymElektro() {
 
 function SymHybrid() {
   return (
-    <svg viewBox="0 0 200 220" width="104" height="114" role="img" aria-label={generatorAria.hybrid}>
+    <svg viewBox="0 0 200 220" width="125" height="137" role="img" aria-label={generatorAria.hybrid}>
       <rect x="10" y="12" width="180" height="196" rx="6" fill="#f8fafc" stroke="#111827" strokeWidth="3"/>
       <line x1="100" y1="27" x2="100" y2="180" stroke="#64748b" strokeWidth="2" strokeDasharray="7 5"/>
       <circle cx="57" cy="87" r="30" fill="#e0f2fe" stroke="#111827" strokeWidth="2.5"/>
@@ -302,7 +302,7 @@ function SymHybrid() {
 
 function SymGenerisch() {
   return (
-    <svg viewBox="0 0 200 220" width="104" height="114" role="img" aria-label={generatorAria.sonstige}>
+    <svg viewBox="0 0 200 220" width="125" height="137" role="img" aria-label={generatorAria.sonstige}>
       <rect x="15" y="15" width="170" height="190" rx="7" fill="#f8fafc" stroke="#111827" strokeWidth="3"/>
       <circle cx="100" cy="91" r="41" fill="white" stroke="#64748b" strokeWidth="2.5"/>
       <text x="100" y="101" textAnchor="middle" fontFamily="Arial, sans-serif" fontSize="27" fontWeight="700" fill="#334155">WE</text>
@@ -334,7 +334,7 @@ export function SymVerbraucher() {
   );
 }
 
-export function SymSpeicher({ liter }) {
+export function SymSpeicher({ liter, obenC, untenC }) {
   const wert = Number(liter);
   const literText = Number.isFinite(wert) && wert > 0
     ? `${Math.round(wert).toLocaleString('de-CH')} L`
@@ -349,6 +349,9 @@ export function SymSpeicher({ liter }) {
 
       <text x="70" y="78" textAnchor="middle" fontSize="16" fontWeight="700"
         fontFamily="Arial, sans-serif" fill="#111827">{literText}</text>
+
+      {obenC != null && <text x="92" y="119" fontSize="12" fontWeight="700" fill="#dc2626">{Number(obenC).toFixed(1)} °C</text>}
+      {untenC != null && <text x="92" y="199" fontSize="12" fontWeight="700" fill="#2563eb">{Number(untenC).toFixed(1)} °C</text>}
 
       {/* Temperaturfühler oben und unten. */}
       <g fill="none" stroke="#111827" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

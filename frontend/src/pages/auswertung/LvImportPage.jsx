@@ -362,6 +362,7 @@ function ImportZusammenfassung({ report, imp }) {
   if (!report || !Object.keys(report).length) return null;
   const zeilen = [
     [`${report.page_count ?? imp.page_count} Seiten gelesen`, true],
+    [`${report.visual_review_pages?.length || 0} Seiten von der Qualitätsprüfung vertieft`, true],
     [`${report.kostenpositionen ?? 0} Kostenpositionen erkannt`, (report.kostenpositionen ?? 0) > 0],
     [`${report.commercial?.conditions?.length || 0} Konditionen erkannt`, true],
   ];
@@ -380,6 +381,11 @@ function ImportZusammenfassung({ report, imp }) {
       {(report.visual_review_issues || []).map((warning, index) => (
         <p key={`${warning}-${index}`} className="mt-1 text-[11px] font-semibold text-red-700">
           Auswertung blockiert: {warning}
+        </p>
+      ))}
+      {(report.page_triage_issues || []).map((warning, index) => (
+        <p key={`triage-${warning}-${index}`} className="mt-1 text-[11px] text-slate-500">
+          Dokumentprüfung: {warning}
         </p>
       ))}
     </div>
@@ -517,17 +523,17 @@ function UploadAnsicht() {
 }
 
 // Kleine Zeile zum manuellen Hinzufügen einer BKP-Kostenposition (P0 Item 3).
-function NeueKostZeile({ onAdd }) {
-  const [bkp, setBkp] = useState("");
+function NeueKostZeile({ onAdd, gruppe }) {
+  const [titel, setTitel] = useState("");
   const [betrag, setBetrag] = useState("");
   const [busy, setBusy] = useState(false);
 
   const hinzufuegen = async () => {
-    if (!bkp.trim() || busy) return;
+    if (!titel.trim() || busy) return;
     setBusy(true);
     try {
-      await onAdd(bkp.trim(), betrag === "" ? null : betrag);
-      setBkp(""); setBetrag("");
+      await onAdd(gruppe, betrag === "" ? null : betrag, titel.trim());
+      setTitel(""); setBetrag("");
     } finally {
       setBusy(false);
     }
@@ -535,14 +541,15 @@ function NeueKostZeile({ onAdd }) {
 
   return (
     <div className="flex flex-wrap items-center gap-2 bg-slate-50/40 px-4 py-3 sm:px-5">
-      <input className="input w-24" placeholder="BKP-Nr." value={bkp}
-        onChange={(e) => setBkp(e.target.value)}
+      <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">BKP {gruppe}</span>
+      <input className="input min-w-48 flex-1" placeholder="Bezeichnung, z.B. Montage und Transport" value={titel}
+        onChange={(e) => setTitel(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter") hinzufuegen(); }} />
       <span className="text-xs text-slate-400">CHF</span>
       <input className="input w-28" type="number" placeholder="Betrag" value={betrag}
         onChange={(e) => setBetrag(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter") hinzufuegen(); }} />
-      <button onClick={hinzufuegen} disabled={!bkp.trim() || busy} className="btn-secondary min-h-8">
+      <button onClick={hinzufuegen} disabled={!titel.trim() || busy} className="btn-secondary min-h-8">
         <Plus className="size-4" /> Position hinzufügen
       </button>
     </div>
@@ -692,6 +699,7 @@ function ReviewAnsicht({ id }) {
   const [approving, setApproving] = useState(false);
   const [schritt, setSchritt] = useState(0);
   const [gespeichert, setGespeichert] = useState(null); // zuletzt gespeichertes Feld
+  const [aktiveKostenzeile, setAktiveKostenzeile] = useState(null);
 
   const [listen, setListen] = useState(null);
   const [normLv, setNormLv] = useState(null);
@@ -721,11 +729,14 @@ function ReviewAnsicht({ id }) {
       eintrag.positionen.sort((a, b) =>
         String(a.original_position || a.bkp_nr).localeCompare(String(b.original_position || b.bkp_nr), "de", { numeric: true }));
       const summe = eintrag.positionen.reduce((s, c) => s + (c.effective_amount ?? 0), 0);
+      eintrag.positionSum = summe;
       if (!eintrag.total && eintrag.positionen.length) {
-        eintrag.total = { effective_amount: summe, sum_hint: "(Summe der Positionen)" };
+        eintrag.total = { effective_amount: summe, synthetic: true };
+        eintrag.declaredTotal = null;
+        eintrag.difference = null;
       } else if (eintrag.total && eintrag.positionen.length) {
-        const diff = Math.abs((eintrag.total.effective_amount ?? 0) - summe);
-        eintrag.total = { ...eintrag.total, sum_hint: diff > 1 ? `(Positionen: ${zahl(summe)})` : null };
+        eintrag.declaredTotal = eintrag.total.effective_amount ?? 0;
+        eintrag.difference = eintrag.declaredTotal - summe;
       }
     }
     return [...map.values()].sort((a, b) => a.gruppe.localeCompare(b.gruppe, "de", { numeric: true }));
@@ -816,8 +827,8 @@ function ReviewAnsicht({ id }) {
     await deleteLvCost(id, cost.id);
     setImp((cur) => ({ ...cur, costs: cur.costs.filter((c) => c.id !== cost.id) }));
   };
-  const kostHinzufuegen = async (bkp_nr, betrag) => {
-    const neu = await addLvCost(id, { bkp_nr, confirmed_amount: betrag, confirmed: true });
+  const kostHinzufuegen = async (bkp_nr, betrag, original_title) => {
+    const neu = await addLvCost(id, { bkp_nr, original_title, confirmed_amount: betrag, confirmed: true });
     setImp((cur) => ({ ...cur, costs: [...cur.costs, neu] }));
   };
   const setGrunddaten = async (patch) => {
@@ -1051,26 +1062,33 @@ function ReviewAnsicht({ id }) {
       {/* Schritt 3 — Kosten je BKP-Gruppe mit Total und Summenprüfung (Punkt 23) */}
       {schritt === 2 && (
       <div className="max-w-5xl space-y-5">
-        {kostenGruppen.map(({ gruppe, positionen, total }) => (
+        {kostenGruppen.map(({ gruppe, positionen, total, positionSum, declaredTotal, difference }) => (
           <section key={gruppe} className="card overflow-hidden">
-            <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/60 px-4 py-3 sm:px-5">
-              <h2 className="text-sm font-bold text-slate-800">
-                BKP {gruppe}{total?.original_title ? ` – ${total.original_title}` : ""}
-              </h2>
-              {total?.validation_status === "valid" && (
-                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-green-600">
-                  <CheckCircle2 className="size-3.5" /> Summe geprüft
-                </span>
-              )}
-              {total?.validation_status === "mismatch" && (
-                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-600">
-                  <AlertTriangle className="size-3.5" /> Summe weicht ab
-                </span>
-              )}
+            <div className="border-b border-slate-100 bg-slate-50/60 px-4 py-3 sm:px-5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-sm font-bold text-slate-800">
+                  BKP {gruppe}{total?.original_title ? ` – ${total.original_title}` : ""}
+                </h2>
+                {difference != null && Math.abs(difference) <= 1 && (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-green-600">
+                    <CheckCircle2 className="size-3.5" /> stimmt überein
+                  </span>
+                )}
+                {difference != null && Math.abs(difference) > 1 && (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-red-600">
+                    <AlertTriangle className="size-3.5" /> Differenz {chf(difference)}
+                  </span>
+                )}
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-3">
+                <div><span className="text-slate-400">Total laut LV</span><strong className="ml-2 tabular-nums text-slate-700">{declaredTotal == null ? "—" : chf(declaredTotal)}</strong></div>
+                <div><span className="text-slate-400">Erkannte Positionen</span><strong className="ml-2 tabular-nums text-slate-700">{chf(positionSum)}</strong></div>
+                <div><span className="text-slate-400">Differenz</span><strong className={`ml-2 tabular-nums ${difference != null && Math.abs(difference) > 1 ? "text-red-600" : "text-slate-700"}`}>{difference == null ? "—" : chf(difference)}</strong></div>
+              </div>
             </div>
             <div className="divide-y divide-slate-100">
               {positionen.map((c) => (
-                <div key={c.id} className={`px-4 py-3 sm:px-5 lg:grid lg:grid-cols-2 lg:gap-6 ${costNeedsAttention(c) ? "border-l-4 border-l-amber-400 bg-amber-50/50" : ""}`}>
+                <div key={c.id} className={`px-4 py-3 transition-colors sm:px-5 lg:grid lg:grid-cols-2 lg:gap-6 ${aktiveKostenzeile === c.id ? "bg-sky-50 ring-1 ring-inset ring-sky-200" : costNeedsAttention(c) ? "border-l-4 border-l-amber-400 bg-amber-50/50" : ""}`}>
                   {/* Punkt 16 — Block 1: WAS IM LV STEHT. Nummer, Titel, Betrag,
                       Betrag geprüft. Diese Zeile bleibt immer so wie im PDF. */}
                   <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-start">
@@ -1084,24 +1102,13 @@ function ReviewAnsicht({ id }) {
                       {c.positionen > 1 && !c.original_position && (
                         <p className="text-[11px] text-slate-400">({c.positionen} Positionen aggregiert)</p>
                       )}
-                      {c.source_scope_summary && (
-                        <p className="mt-0.5 text-[11px] leading-snug text-slate-500">
-                          Umfang: {c.source_scope_summary}
-                        </p>
-                      )}
-                      {c.included_norm_labels?.length > 0 && (
-                        // Sammelposition: mehrere Norm-Positionen, aber nur ein
-                        // Betrag. Sichtbar machen, damit niemand doppelt zählt.
-                        <p className="mt-0.5 text-[11px] text-slate-500">
-                          Enthält zusätzlich: {c.included_norm_labels.join(" · ")}
-                          <span className="ml-1 text-slate-400">(Betrag zählt einmal)</span>
-                        </p>
-                      )}
-                      {c.source_text && (
-                        <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">
-                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${M.tagStyle}`}>{M.tag}</span>
-                          <span className="truncate">{c.source_page != null ? `Seite ${c.source_page}` : ""}</span>
-                        </div>
+                      {(c.source_scope_summary || c.source_text || c.included_norm_labels?.length > 0) && (
+                        <details className="mt-1 text-[11px] text-slate-400">
+                          <summary className="cursor-pointer select-none hover:text-slate-600">Details und Quelle</summary>
+                          {c.source_scope_summary && <p className="mt-1">Umfang: {c.source_scope_summary}</p>}
+                          {c.included_norm_labels?.length > 0 && <p>Enthält: {c.included_norm_labels.join(" · ")} (Betrag zählt einmal)</p>}
+                          {c.source_text && <p><span className={`mr-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${M.tagStyle}`}>{M.tag}</span>{c.source_page != null ? `Seite ${c.source_page}` : ""}</p>}
+                        </details>
                       )}
                     </div>
                     <div className="flex items-center gap-2 sm:justify-end">
@@ -1109,7 +1116,9 @@ function ReviewAnsicht({ id }) {
                       <input className="input w-28" disabled={gesperrt}
                         defaultValue={c.confirmed_amount ?? (c.detected_amount ?? "")}
                         placeholder={c.detected_amount != null ? String(c.detected_amount) : "—"}
-                        onBlur={(e) => setCost(c, { confirmed_amount: e.target.value, confirmed: true })} />
+                        onFocus={() => setAktiveKostenzeile(c.id)}
+                        onBlur={(e) => { setAktiveKostenzeile(null); setCost(c, { confirmed_amount: e.target.value, confirmed: true }); }}
+                      />
                       <label className={`inline-flex items-center gap-1 whitespace-nowrap text-[11px] font-semibold ${c.confirmed ? "text-green-600" : "text-amber-600"}`}
                         title="Betrag geprüft — sagt nichts über die Norm-LV-Zuordnung aus.">
                         <input type="checkbox" disabled={gesperrt} checked={!!c.confirmed}
@@ -1182,24 +1191,15 @@ function ReviewAnsicht({ id }) {
                   )}
                 </div>
               ))}
-              {total && (
-                <div className="flex items-center justify-between bg-slate-50/60 px-4 py-2.5 text-sm sm:px-5">
-                  <span className="font-bold text-slate-700">Total {gruppe}</span>
-                  <span className="font-bold text-slate-900">
-                    {chf(total.effective_amount ?? 0)}
-                    {total.sum_hint && <span className="ml-2 text-[11px] font-normal text-slate-400">{total.sum_hint}</span>}
-                  </span>
-                </div>
-              )}
+              {!gesperrt && <NeueKostZeile gruppe={gruppe} onAdd={kostHinzufuegen} />}
             </div>
           </section>
         ))}
         <section className="card overflow-hidden">
           <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/60 px-4 py-3 sm:px-5">
-            <h2 className="text-sm font-bold text-slate-800">Kostenposition ergänzen</h2>
+            <h2 className="text-sm font-bold text-slate-800">Zusammenstellung aller BKP</h2>
             {kostenOffen > 0 && <span className="text-[11px] font-semibold text-amber-600">{kostenOffen} Betrag / {zuordnungOffen} Zuordnung offen</span>}
           </div>
-          {!gesperrt && <NeueKostZeile onAdd={kostHinzufuegen} />}
           {/* Punkt 15 — drei Summen, immer sichtbar. Wer die Zahlen prüft, muss
               sehen, wie viel gelesen wurde, wie viel in die Referenz geht und
               wie viel bewusst draussen bleibt. Summe 2 + 3 = Summe 1. */}

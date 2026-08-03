@@ -66,6 +66,10 @@ npm run build
   `OPENAI_API_KEY`; optional `LV_VISUAL_REVIEW_MODEL` (Standard `gpt-5.6`),
   `LV_VISUAL_REVIEW_REASONING` (Standard `high`) und
   `LV_VISUAL_REVIEW_TIMEOUT_SECONDS` (Standard `180`)
+- Der adaptive LV-Grobscan prüft den kompakten Index aller Seiten und wählt
+  daraus die Detailseiten. Optional: `LV_PAGE_TRIAGE_MODEL` (Standard
+  `gpt-5.6-terra`), `LV_PAGE_TRIAGE_REASONING` (Standard `low`) und
+  `LV_VISUAL_REVIEW_MAX_PAGES` (Standard `24`, harte Obergrenze `60`).
 - Nur als bewusster Notbetrieb kann das Freigabegate mit
   `LV_VISUAL_REVIEW_REQUIRED=false` deaktiviert werden.
 - Alternativ Claude: `ANTHROPIC_API_KEY`,

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
-import { Download, Trash2 } from "lucide-react";
+import { Download, Plus, Trash2 } from "lucide-react";
 import {
   createRef, deleteRef, exportRefCsv, getRef, getRefAnalyse, getRefKatalog, updateRef,
 } from "../../api/hcApi";
@@ -52,6 +52,131 @@ const TREIBER_FELD = {
 // markieren — darunter ist Streuung normal.
 const AUFFAELLIG_PCT = 50;
 
+const leereKonditionen = () => ({ base_amount: null, conditions: [], vat_rate: "" });
+
+const normalisiereKonditionen = (wert, rabatt = 0, skonto = 0) => {
+  if (wert) {
+    return {
+      ...leereKonditionen(), ...wert,
+      vat_rate: wert.vat_rate ?? "",
+      conditions: (wert.conditions || []).map((row) => ({
+        ...row, label: row.label || row.original_label || "Kondition",
+        rate_percent: row.rate_percent ?? "", amount: row.amount ?? "",
+        basis_amount: row.basis_amount ?? "",
+      })),
+    };
+  }
+  const conditions = [];
+  if (Number(rabatt)) conditions.push({ label: "Rabatt", kind: "percent", direction: "deduction", rate_percent: rabatt, amount: "", basis_amount: "" });
+  if (Number(skonto)) conditions.push({ label: "Skonto", kind: "percent", direction: "deduction", rate_percent: skonto, amount: "", basis_amount: "" });
+  return { ...leereKonditionen(), conditions };
+};
+
+// Nur eine Live-Vorschau. Beim Speichern berechnet und validiert das Backend
+// dieselbe Kette nochmals und ist damit die verbindliche Quelle.
+const konditionenVorschau = (fallbackBase, commercial) => {
+  const base = commercial.base_amount == null || commercial.base_amount === ""
+    ? Number(fallbackBase || 0) : Number(commercial.base_amount);
+  let running = base;
+  let nebenkostenBasis = null;
+  const conditions = (commercial.conditions || []).map((row, index) => {
+    if (row.status === "requested_not_priced") {
+      return { ...row, calculated_amount: null, running_total: running, order: index + 1 };
+    }
+    const primary = /rabatt|skonto/i.test(row.label || "");
+    let basis = row.basis_amount === "" || row.basis_amount == null ? null : Number(row.basis_amount);
+    let amount;
+    if (row.kind === "fixed") {
+      amount = Math.abs(Number(row.amount) || 0);
+      basis ??= running;
+    } else {
+      if (basis == null) {
+        if (primary) basis = running;
+        else { nebenkostenBasis ??= running; basis = nebenkostenBasis; }
+      }
+      amount = Math.abs(basis * (Number(row.rate_percent) || 0) / 100);
+    }
+    running += amount * (row.direction === "surcharge" ? 1 : -1);
+    return { ...row, basis_amount: basis, calculated_amount: amount, running_total: running, order: index + 1 };
+  });
+  const vatRate = commercial.vat_rate === "" || commercial.vat_rate == null ? null : Number(commercial.vat_rate);
+  const vatAmount = vatRate == null ? null : running * vatRate / 100;
+  return {
+    base_amount: base, conditions, subtotal_excl_vat: running, vat_rate: vatRate,
+    vat_amount: vatAmount, total_incl_vat: vatAmount == null ? null : running + vatAmount,
+  };
+};
+
+function KonditionenBearbeiten({ commercial, onChange, brutto }) {
+  const preview = konditionenVorschau(brutto, commercial);
+  const patchRow = (index, patch) => onChange({
+    ...commercial,
+    conditions: commercial.conditions.map((row, i) => (i === index ? { ...row, ...patch } : row)),
+  });
+  const add = () => onChange({
+    ...commercial,
+    conditions: [...commercial.conditions, {
+      label: "Sonstiger Abzug", kind: "percent", direction: "deduction",
+      rate_percent: "", amount: "", basis_amount: "",
+    }],
+  });
+  return (
+    <div className="space-y-3 text-sm">
+      <div className="border-b border-slate-200 pb-3">
+        <div className="flex items-center justify-between gap-2">
+          <label className="font-semibold">Brutto / LV-Summe [CHF]</label>
+          <button type="button" className="text-xs font-medium text-brand-600 hover:text-brand-700"
+            onClick={() => onChange({ ...commercial, base_amount: brutto })}>
+            Summe BKP übernehmen
+          </button>
+        </div>
+        <input className="input mt-2 text-right font-semibold" type="number" step="0.01"
+          value={commercial.base_amount ?? ""} placeholder={String(brutto || 0)}
+          onChange={(e) => onChange({ ...commercial, base_amount: e.target.value })} />
+      </div>
+      {commercial.conditions.map((row, index) => (
+        <div key={`${row.label}-${index}`} className="rounded-lg border border-slate-200 p-2">
+          <div className="flex gap-2">
+            <input className="input min-w-0 flex-1" value={row.label || ""}
+              onChange={(e) => patchRow(index, { label: e.target.value })} />
+            <button type="button" className="btn-ghost min-h-9 min-w-9 text-slate-400 hover:text-red-500"
+              onClick={() => onChange({ ...commercial, conditions: commercial.conditions.filter((_, i) => i !== index) })}
+              title="Kondition entfernen"><Trash2 className="size-4" /></button>
+          </div>
+          <div className="mt-2 grid grid-cols-[1fr_1fr_90px] gap-2">
+            <select className="input" value={row.kind || "percent"} onChange={(e) => patchRow(index, { kind: e.target.value })}>
+              <option value="percent">Prozent</option><option value="fixed">Fixbetrag</option>
+            </select>
+            <select className="input" value={row.direction || "deduction"} onChange={(e) => patchRow(index, { direction: e.target.value })}>
+              <option value="deduction">Abzug</option><option value="surcharge">Zuschlag</option>
+            </select>
+            <input className="input text-right" type="number" step="0.01"
+              value={row.kind === "fixed" ? row.amount : row.rate_percent}
+              onChange={(e) => patchRow(index, row.kind === "fixed" ? { amount: e.target.value } : { rate_percent: e.target.value })} />
+          </div>
+          <div className="mt-1 flex justify-between text-xs text-slate-500">
+            <span>{row.kind === "fixed" ? "CHF" : "%"}</span>
+            <span>{row.direction === "deduction" ? "−" : "+"} {chf(Math.abs(preview.conditions[index]?.calculated_amount || 0))}</span>
+          </div>
+        </div>
+      ))}
+      <button type="button" className="btn-secondary min-h-8 w-full justify-center" onClick={add}>
+        <Plus className="size-4" /> Abzug oder Zuschlag ergänzen
+      </button>
+      <div>
+        <label className="label">MWST [%]</label>
+        <input className="input" type="number" step="0.1" value={commercial.vat_rate}
+          onChange={(e) => onChange({ ...commercial, vat_rate: e.target.value })} />
+      </div>
+      <div className="space-y-1 border-t border-slate-200 pt-2">
+        <div className="flex justify-between"><span>Netto exkl. MWST</span><strong>{chf(preview.subtotal_excl_vat)}</strong></div>
+        <div className="flex justify-between"><span>MWST {preview.vat_rate ?? 0} %</span><span>{chf(preview.vat_amount)}</span></div>
+        <div className="flex justify-between border-t-2 border-slate-800 pt-2 text-base"><strong>Endsumme inkl. MWST</strong><strong className="text-brand-600">{chf(preview.total_incl_vat ?? preview.subtotal_excl_vat)}</strong></div>
+      </div>
+    </div>
+  );
+}
+
 export default function AuswertungForm() {
   const { id } = useParams();
   const nav = useNavigate();
@@ -64,7 +189,9 @@ export default function AuswertungForm() {
   const [form, setForm] = useState(LEER);
   const [betraege, setBetraege] = useState({}); // { bkp_nr: "12345" }
   const [katalog, setKatalog] = useState({ positionen: [] });
-  const [lvCommercial, setLvCommercial] = useState(null);
+  const [commercial, setCommercial] = useState(leereKonditionen);
+  const [refFeatures, setRefFeatures] = useState({});
+  const [aktiveBkp, setAktiveBkp] = useState(null);
   const [kennwerte, setKennwerte] = useState({}); // bkp_nr → Streuung im Bestand
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -88,7 +215,8 @@ export default function AuswertungForm() {
     if (isEdit) {
       getRef(id)
         .then((r) => {
-          setLvCommercial(r.lv_commercial || null);
+          setCommercial(normalisiereKonditionen(r.lv_commercial, r.rabatt_pct, r.skonto_pct));
+          setRefFeatures(r.features || {});
           setForm({
             name: r.name || "", projektart: r.projektart || "", gebaeudetyp: r.gebaeudetyp || "",
             ausbauumfang: r.ausbauumfang || "", zertifizierung: r.zertifizierung || "",
@@ -123,9 +251,10 @@ export default function AuswertungForm() {
   const rabatt = Number(form.rabatt_pct) || 0;
   const skonto = Number(form.skonto_pct) || 0;
   const netto = brutto * (1 - rabatt / 100) * (1 - skonto / 100);
+  const commercialPreview = konditionenVorschau(brutto, commercial);
   const erdsonde = hasErdsonde(form.waermeerzeuger);
   // Massgebend ist derselbe Betrag, den auch die Liste als Netto zeigt.
-  const nettoEffektiv = lvCommercial?.total_incl_vat ?? netto;
+  const nettoEffektiv = commercialPreview.total_incl_vat ?? commercialPreview.subtotal_excl_vat ?? netto;
 
   // Vergleich einer Position mit dem Bestand: ohne Betrag der Median als
   // Orientierung, mit Betrag die eigene Abweichung. Fehlt die Bezugsgrösse,
@@ -169,6 +298,13 @@ export default function AuswertungForm() {
       anzahl_schaltgeraetekombinationen: num(form.anzahl_schaltgeraetekombinationen),
       laufmeter_rohre_heizung: num(form.laufmeter_rohre_heizung),
       rabatt_pct: rabatt, skonto_pct: skonto,
+      commercial: {
+        base_amount: commercial.base_amount == null || commercial.base_amount === ""
+          ? brutto : Number(commercial.base_amount),
+        vat_rate: num(commercial.vat_rate),
+        conditions: commercial.conditions,
+      },
+      features: refFeatures,
       datum: form.datum || null, qualitaet: Number(form.qualitaet),
       kostenzeilen,
     };
@@ -216,53 +352,7 @@ export default function AuswertungForm() {
                 <h2 className="font-semibold text-slate-800">Zusammenstellung Heizung</h2>
                 <InfoTip text={ERKL.brutto} />
               </div>
-              {lvCommercial ? (
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between border-b border-slate-200 pb-2">
-                    <strong>Brutto / LV-Summe</strong>
-                    <strong>{chf(lvCommercial.base_amount)}</strong>
-                  </div>
-                  {(lvCommercial.conditions || []).map((condition, index) => (
-                    <div key={`${condition.label}-${index}`}>
-                      <div className="flex justify-between gap-3">
-                        <span className="min-w-0 text-slate-600">
-                          {condition.label}
-                          {condition.kind === "percent" && condition.rate_percent != null
-                            ? ` ${condition.rate_percent} %` : ""}
-                        </span>
-                        <span className="whitespace-nowrap font-medium">
-                          {condition.direction === "deduction" ? "−" : "+"} {chf(Math.abs(condition.calculated_amount || 0))}
-                        </span>
-                      </div>
-                      {condition.running_total != null && (
-                        <div className="mt-1 flex justify-between border-t border-dotted border-slate-300 pt-1 text-xs font-semibold text-slate-500">
-                          <span>Zwischentotal {index + 1}</span>
-                          <span>{chf(condition.running_total)}</span>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                  <div className="flex justify-between border-t border-slate-300 pt-2">
-                    <span>MWST {lvCommercial.vat_rate ?? 0} %</span>
-                    <span>{chf(lvCommercial.vat_amount)}</span>
-                  </div>
-                  <div className="flex justify-between border-t-2 border-slate-800 pt-2 text-base">
-                    <strong>Netto inkl. MWST</strong>
-                    <strong className="text-brand-600">{chf(lvCommercial.total_incl_vat)}</strong>
-                  </div>
-                </div>
-              ) : (
-              <div className="grid grid-cols-2 gap-4">
-                <div><label className="label">Rabatt [%]</label>
-                  <input type="number" step="0.1" className="input" value={form.rabatt_pct} onChange={(e) => set("rabatt_pct", e.target.value)} /></div>
-                <div><label className="label">Skonto [%]</label>
-                  <input type="number" step="0.1" className="input" value={form.skonto_pct} onChange={(e) => set("skonto_pct", e.target.value)} /></div>
-                <div><div className="label">Brutto (Summe LV)</div>
-                  <div className="mt-1 text-lg font-semibold tabular-nums text-slate-900">{chf(brutto)}</div></div>
-                <div><div className="label">Netto (nach Rabatt/Skonto)</div>
-                  <div className="mt-1 text-lg font-semibold tabular-nums text-brand-600">{chf(netto)}</div></div>
-              </div>
-              )}
+              <KonditionenBearbeiten commercial={commercial} onChange={setCommercial} brutto={brutto} />
               {(form.ebf_m2 > 0 || form.heizleistung_kw > 0) && nettoEffektiv > 0 && (
                 <div className="mt-4 grid grid-cols-2 gap-px border-t border-slate-200 bg-slate-200 pt-px">
                   <Kennwert titel="Netto/EBF" wert={form.ebf_m2 > 0 ? `${kw(nettoEffektiv / form.ebf_m2)} CHF/m²` : null} />
@@ -361,13 +451,19 @@ export default function AuswertungForm() {
               <div className="space-y-5">
                 {gruppen.map(([nr, g]) => (
                   <div key={nr}>
-                    <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">{nr} · {g.name}</div>
+                    <div className="mb-2 flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                      <span>{nr} · {g.name}</span>
+                      <span className="tabular-nums text-slate-700">
+                        Total {nr}: {chf(g.items.reduce((summe, item) => summe + (Number(betraege[item.bkp_nr]) || 0), 0))}
+                      </span>
+                    </div>
                     <div className="space-y-1.5">
                       {g.items.map((p) => {
                         const gefuellt = Number(betraege[p.bkp_nr]) > 0;
                         const vergleich = vergleichFuer(p);
                         return (
-                          <div key={p.bkp_nr} className="flex items-center gap-3">
+                          <div key={p.bkp_nr}
+                            className={`flex items-center gap-3 rounded-md px-2 py-1 transition-colors ${aktiveBkp === p.bkp_nr ? "bg-sky-50 ring-1 ring-sky-200" : ""}`}>
                             <div className="min-w-0 flex-1">
                               <span className="text-sm font-medium text-slate-700">{p.bkp_nr}</span>
                               <span className="ml-2 text-sm text-slate-500">{p.bezeichnung}</span>
@@ -385,6 +481,8 @@ export default function AuswertungForm() {
                                 className={"input pr-10 text-right " + (gefuellt ? "border-brand-300 bg-brand-50/40" : "")}
                                 value={betraege[p.bkp_nr] ?? ""}
                                 onChange={(e) => setBetrag(p.bkp_nr, e.target.value)}
+                                onFocus={() => setAktiveBkp(p.bkp_nr)}
+                                onBlur={() => setAktiveBkp(null)}
                                 placeholder="—"
                               />
                               <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400">CHF</span>

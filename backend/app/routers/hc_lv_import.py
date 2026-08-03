@@ -44,7 +44,7 @@ from app.lv_import.feature_keys import (
 from app.lv_import import page_classifier as pc
 from app.lv_import.review_packet import build_review_packet
 from app.lv_import.positions import parse_positions
-from app.lv_import.llm import visual_review
+from app.lv_import.llm import page_triage, visual_review
 from app.lv_import.llm.budget import ImportLlmBudget
 
 router = APIRouter(prefix="/api/v1/lv-imports", tags=["KV – LV-Import"])
@@ -270,8 +270,10 @@ async def upload_lv(
                 positions,
                 trust_detected_amounts=pipeline.extraction_method != "ocr",
             )
-        # Visuell werden nur Kostenzusammenstellung, Konditionsseiten und
-        # konkrete Parser-Konflikte geprüft — nie nochmals das ganze PDF.
+        # Die Detailprüfung erhält nicht mehr eine starre Acht-Seiten-Auswahl.
+        # Zuerst sichtet ein kompakter Grobscan den Index des ganzen Dokuments;
+        # danach werden seine relevanten/unsicheren Seiten zusammen mit den
+        # deterministischen Pflichtseiten hochauflösend geprüft.
         review = build_review_packet(features, costs, positions)
         summary_invalid = (
             not has_cost_summary(summary)
@@ -335,12 +337,12 @@ async def upload_lv(
                 all_pages if len(all_pages) <= 6 else all_pages[:2] + all_pages[-4:]
             )
         prioritized = sorted(priority_review_pages)
-        review_pages = (
+        required_review_pages = (
             prioritized
             + [page for page in technical_review_pages if page not in priority_review_pages]
             + [page for page in sorted(review_pages)
                if page not in priority_review_pages and page not in technical_review_pages]
-        )[:8]
+        )
         budget = ImportLlmBudget.from_env()
         # Trennung der beiden Stufen: `lv_import` deckt Upload, Parser und
         # Review ab, `lv_ai_review` zusätzlich jede kostenpflichtige
@@ -351,8 +353,22 @@ async def upload_lv(
                 db, user.tenant_id, Feature.LV_AI_REVIEW.value
             ).enabled
         )
+        triage = (
+            page_triage.triage(
+                pipeline.pages, pipeline.classification,
+                pipeline.extraction_method, budget=budget,
+            )
+            if ki_erlaubt else {
+                "called": False, "document_quality": None, "issues": [],
+                "pages": [], "selected_pages": [], "page_index": [],
+            }
+        )
+        review_pages, review_page_reasons = page_triage.select_detail_pages(
+            triage, required_review_pages,
+        )
         if not ki_erlaubt:
             review_pages = []
+            review_page_reasons = []
         visual = (
             visual_review.review(
                 raw, page_numbers=review_pages, budget=budget,
@@ -602,6 +618,12 @@ async def upload_lv(
             "visual_review_issues": visual["issues"],
             "visual_review_pages": visual.get("reviewed_pages") or [],
             "visual_review_focused_pages": visual.get("focused_pages") or [],
+            "page_triage_called": triage.get("called", False),
+            "page_triage_document_quality": triage.get("document_quality"),
+            "page_triage_issues": triage.get("issues") or [],
+            "page_triage_selected": review_page_reasons,
+            "page_triage_page_count": len(triage.get("page_index") or []),
+            "page_triage_detail_limit": page_triage.max_detail_pages(),
             "systeme_waermeabgabe": len(systems.delivery_codes(systeme)),
             "systeme_waermeerzeugung": len(systems.generator_codes(systeme)),
             "handschrift_offen": len(visual_apply.get("handwritten_open") or []),
@@ -876,8 +898,13 @@ def add_cost(import_id: int, body: dict, user: User = Depends(get_current_user),
         betrag = None if body.get("confirmed_amount") in (None, "") else float(body["confirmed_amount"])
     except (TypeError, ValueError):
         raise HTTPException(status_code=422, detail="Ungültiger Betrag")
-    c = LvImportCost(lv_import_id=imp.id, bkp_nr=bkp_nr, confirmed_amount=betrag,
-                     manual=True, confirmed=bool(body.get("confirmed", False)), positionen=1)
+    original_title = str(body.get("original_title") or "Manuell ergänzt").strip()[:255]
+    c = LvImportCost(
+        lv_import_id=imp.id, bkp_nr=bkp_nr,
+        source_parent_bkp=bkp_nr.split(".")[0], original_title=original_title,
+        confirmed_amount=betrag, source="manual", confidence="high",
+        manual=True, confirmed=bool(body.get("confirmed", False)), positionen=1,
+    )
     db.add(c)
     db.commit()
     db.refresh(c)
@@ -1333,8 +1360,9 @@ def approve_lv(import_id: int, user: User = Depends(get_current_user), db: Sessi
     db.add(ref)
     db.flush()
 
-    # Rabatt und Skonto auch in die bestehende Referenzstruktur übernehmen.
-    # Die vollständige Konditionskette bleibt am verknüpften LvImport erhalten.
+    # Kommerzielle Konditionen werden als eigenständiger Referenzstand
+    # übernommen. Das Referenzprojekt bleibt dadurch auch nach dem Import
+    # vollständig editierbar; der LvImport ist nur noch die Herkunft.
     rabatt = skonto = 0.0
     for condition in imp.conditions:
         label = (condition.original_label or "").casefold()
@@ -1344,9 +1372,35 @@ def approve_lv(import_id: int, user: User = Depends(get_current_user), db: Sessi
             rabatt = float(condition.rate_percent or 0)
         elif "skonto" in label:
             skonto = float(condition.rate_percent or 0)
+    report = _report(imp)
+    imported_commercial = report.get("commercial") or {}
+    base_amount = imported_commercial.get("base_amount")
+    if base_amount is None:
+        base_amount = report.get("trade_total")
+    condition_rows = [{
+        "label": condition.original_label,
+        "kind": condition.kind,
+        "direction": condition.direction,
+        "rate_percent": condition.rate_percent,
+        "amount": condition.amount,
+        "basis_amount": condition.basis_amount,
+        "status": condition.status,
+        "order": condition.order_index,
+        "source_page": condition.source_page,
+    } for condition in sorted(imp.conditions, key=lambda c: c.order_index)]
+    calculated_commercial = commercial.calculate_chain(
+        base_amount, condition_rows, imported_commercial.get("vat_rate"),
+    )
+    commercial_snapshot = {
+        "base_amount": base_amount,
+        **calculated_commercial,
+        "valid": imported_commercial.get("valid", True),
+        "issues": imported_commercial.get("issues") or [],
+    } if base_amount is not None or condition_rows else None
     ref.gewerke.append(RefProjektGewerk(
         tenant_id=user.tenant_id, gewerk="heizung",
         rabatt_pct=rabatt, skonto_pct=skonto,
+        commercial_json=commercial_snapshot,
     ))
 
     # Kompletter normalisierter Fingerprint (ALLE Merkmale, gemeinsame Sprache).

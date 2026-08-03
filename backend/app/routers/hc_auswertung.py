@@ -86,6 +86,25 @@ def _heizung_gewerk(r: RefProjekt) -> Optional[RefProjektGewerk]:
     return next((g for g in r.gewerke if g.gewerk == "heizung"), None)
 
 
+def _category_code(registry: str, value: str | None) -> str | None:
+    """Altlabel oder neuer Code → ein Wert für API, Filter und Berechnung."""
+    if value in (None, ""):
+        return None
+    return fachwerte.normalize(registry, value) or str(value)
+
+
+def _validated_category(registry: str, value: str | None, field: str) -> str | None:
+    if value in (None, ""):
+        return None
+    code = fachwerte.normalize(registry, value)
+    if not code:
+        raise HTTPException(status_code=422, detail={
+            "message": f"Unbekannter Wert für {field}. Bitte aus der Liste wählen.",
+            "feld": field, "erlaubt": fachwerte.codes(registry),
+        })
+    return code
+
+
 def _brutto_netto(r: RefProjekt) -> dict:
     brutto = sum(z.betrag_chf or 0 for z in r.kostenzeilen if z.gewerk == "heizung")
     g = _heizung_gewerk(r)
@@ -102,34 +121,53 @@ def _import_commercial(imp: LvImport | None) -> dict | None:
         report = json.loads(imp.debug_json or "{}")
     except (TypeError, ValueError):
         report = {}
-    commercial = report.get("commercial") or {}
+    commercial_report = report.get("commercial") or {}
     conditions = sorted(imp.conditions, key=lambda c: c.order_index)
-    if not commercial and not conditions:
+    if not commercial_report and not conditions:
         return None
     return {
-        "base_amount": commercial.get("base_amount") or report.get("trade_total"),
+        "base_amount": (
+            commercial_report.get("base_amount")
+            if commercial_report.get("base_amount") is not None
+            else report.get("trade_total")
+        ),
         "conditions": [{
             "label": c.original_label, "kind": c.kind,
             "direction": c.direction, "rate_percent": c.rate_percent,
             "amount": c.amount, "basis_amount": c.basis_amount,
             "calculated_amount": c.calculated_amount,
             "running_total": c.running_total, "order": c.order_index,
+            "status": c.status or commercial.PRICED,
         } for c in conditions],
-        "subtotal_excl_vat": commercial.get("subtotal_excl_vat"),
-        "vat_rate": commercial.get("vat_rate"),
-        "vat_amount": commercial.get("vat_amount"),
-        "total_incl_vat": commercial.get("total_incl_vat"),
-        "valid": commercial.get("valid"),
-        "issues": commercial.get("issues") or [],
+        "subtotal_excl_vat": commercial_report.get("subtotal_excl_vat"),
+        "vat_rate": commercial_report.get("vat_rate"),
+        "vat_amount": commercial_report.get("vat_amount"),
+        "total_incl_vat": commercial_report.get("total_incl_vat"),
+        "valid": commercial_report.get("valid"),
+        "issues": commercial_report.get("issues") or [],
     }
 
 
 def _commercial_for_ref(r: RefProjekt, imp: LvImport | None = None) -> dict | None:
-    """Referenzstand gewinnt; der verknüpfte Import ist nur Altbestands-Fallback."""
+    """Referenzstand gewinnt; unvollständige frühe Snapshots werden repariert."""
     gewerk = _heizung_gewerk(r)
-    if gewerk and isinstance(gewerk.commercial_json, dict):
-        return gewerk.commercial_json
-    return _import_commercial(imp)
+    snapshot = gewerk.commercial_json if gewerk and isinstance(gewerk.commercial_json, dict) else None
+    source = _import_commercial(imp)
+    if not snapshot:
+        return source
+    if snapshot.get("conditions") or not source or not source.get("conditions"):
+        return snapshot
+    # PR #28 konnte einen Snapshot nur mit Brutto/MWST anlegen, obwohl am
+    # verknüpften Import Konditionen vorhanden waren. Für diese bestehenden
+    # Referenzen ergänzen wir die fehlende Liste verlustfrei aus der Quelle.
+    base = snapshot.get("base_amount")
+    if base is None:
+        base = source.get("base_amount")
+    vat = snapshot.get("vat_rate")
+    if vat is None:
+        vat = source.get("vat_rate")
+    calculated = commercial.calculate_chain(base, source["conditions"], vat)
+    return {"base_amount": base, **calculated, "valid": True, "issues": []}
 
 
 def _number_or_none(value, label: str) -> float | None:
@@ -194,7 +232,9 @@ def _summary(r: RefProjekt, lv_import: LvImport | None = None) -> dict:
         if imported.get("total_incl_vat") is not None:
             bn["netto_chf"] = round(float(imported["total_incl_vat"]))
     return {
-        "id": r.id, "name": r.name, "projektart": r.projektart, "gebaeudetyp": r.gebaeudetyp,
+        "id": r.id, "name": r.name,
+        "projektart": _category_code("project_types", r.projektart),
+        "gebaeudetyp": _category_code("building_uses", r.gebaeudetyp),
         "anlagenkonfiguration": r.anlagenkonfiguration or "monovalent",
         "waermeerzeuger": fachwerte.normalize_list("generator_types", r.waermeerzeuger),
         "waermeabgabe": r.waermeabgabe or [],
@@ -207,7 +247,8 @@ def _summary(r: RefProjekt, lv_import: LvImport | None = None) -> dict:
 def _out(r: RefProjekt, lv_import: LvImport | None = None) -> dict:
     return {
         **_summary(r, lv_import),
-        "ausbauumfang": r.ausbauumfang, "zertifizierung": r.zertifizierung,
+        "ausbauumfang": _category_code("scope_levels", r.ausbauumfang),
+        "zertifizierung": _category_code("certifications", r.zertifizierung),
         "bww_bei_heizung": r.bww_bei_heizung,
         "weiterbetrieb_umbau": r.weiterbetrieb_umbau, "etappierung": r.etappierung,
         "bohrmeter": r.bohrmeter, "anzahl_einheiten": r.anzahl_einheiten, "qualitaet": r.qualitaet,
@@ -228,10 +269,10 @@ def _out(r: RefProjekt, lv_import: LvImport | None = None) -> dict:
 
 def _apply(r: RefProjekt, body: RefProjektIn, user: User):
     r.name = body.name
-    r.projektart = body.projektart
-    r.gebaeudetyp = body.gebaeudetyp
-    r.ausbauumfang = body.ausbauumfang
-    r.zertifizierung = body.zertifizierung
+    r.projektart = _validated_category("project_types", body.projektart, "projektart")
+    r.gebaeudetyp = _validated_category("building_uses", body.gebaeudetyp, "gebaeudetyp")
+    r.ausbauumfang = _validated_category("scope_levels", body.ausbauumfang, "ausbauumfang")
+    r.zertifizierung = _validated_category("certifications", body.zertifizierung, "zertifizierung")
     r.anlagenkonfiguration = body.anlagenkonfiguration
     r.waermeerzeuger = fachwerte.normalize_list("generator_types", body.waermeerzeuger)
     r.waermeabgabe = body.waermeabgabe

@@ -5,17 +5,19 @@ import {
 } from "lucide-react";
 import {
   deleteRefsBulk, exportRefsCsv, getRefProjekte, gkBeispieldatenLaden,
-  gkBeispieldatenLoeschen, importRefsCsv,
+  gkBeispieldatenLoeschen, getFachwerte, importRefsCsv,
 } from "../../api/hcApi";
 import PageHeader from "../../components/ui/PageHeader";
 import GewerkLeiste from "../../components/ui/GewerkLeiste";
-import { GEBAEUDETYPEN, PROJEKTARTEN, WAERMEABGABE, WAERMEERZEUGER, waermeerzeugerLabel } from "../../data/kv";
+import { WAERMEABGABE, WAERMEERZEUGER, waermeerzeugerLabel } from "../../data/kv";
 import { LEER, chf, zahl } from "../../lib/format";
 
 // Kennwert = Netto pro m² EBF. Die Zahl, mit der Referenzen verglichen werden;
 // ohne EBF gibt es keinen Kennwert (und keine erfundene Ersatzgrösse).
 const kennwertVon = (r) => (r.ebf_m2 > 0 && r.summe_kosten > 0 ? r.summe_kosten / r.ebf_m2 : null);
 const jahrVon = (r) => (r.datum ? Number(String(r.datum).slice(0, 4)) : null);
+const fachwertLabel = (listen, name, value) =>
+  (listen?.[name] || []).find((item) => item.code === value)?.label || value || LEER;
 
 const quantil = (werte, p) => {
   if (!werte.length) return null;
@@ -60,6 +62,7 @@ export default function AuswertungList() {
   const nav = useNavigate();
   const fileRef = useRef(null);
   const [refs, setRefs] = useState([]);
+  const [listen, setListen] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [importMsg, setImportMsg] = useState("");
@@ -126,7 +129,10 @@ export default function AuswertungList() {
       .catch(() => setError("Referenzprojekte konnten nicht geladen werden"))
       .finally(() => setLoading(false));
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    getFachwerte().then((result) => setListen(result.listen || {})).catch(() => {});
+  }, []);
 
   const hatBeispiele = useMemo(() => refs.some((r) => r.name.startsWith("Beispiel — ")), [refs]);
 
@@ -250,11 +256,11 @@ export default function AuswertungList() {
             <div className="flex flex-wrap items-center gap-2 pt-1">
               <select className="input h-8 w-auto py-0 text-sm" value={fNutzung} onChange={(e) => setFNutzung(e.target.value)}>
                 <option value="">Nutzung: alle</option>
-                {GEBAEUDETYPEN.map((g) => <option key={g} value={g}>{g}</option>)}
+                {(listen.building_uses || []).map((g) => <option key={g.code} value={g.code}>{g.label}</option>)}
               </select>
               <select className="input h-8 w-auto py-0 text-sm" value={fProjektart} onChange={(e) => setFProjektart(e.target.value)}>
                 <option value="">Projektart: alle</option>
-                {PROJEKTARTEN.map((p) => <option key={p} value={p}>{p}</option>)}
+                {(listen.project_types || []).map((p) => <option key={p.code} value={p.code}>{p.label}</option>)}
               </select>
               <div className="ml-auto flex items-center gap-2">
                 <button onClick={alleAuswaehlen} disabled={gefiltert.length === 0} className="btn-ghost text-sm disabled:opacity-40">
@@ -338,8 +344,8 @@ export default function AuswertungList() {
                         {r.name}
                       </Link>
                     </td>
-                    <td className="whitespace-nowrap py-2 pr-3 text-slate-500">{r.projektart || LEER}</td>
-                    <td className="whitespace-nowrap py-2 pr-3 text-slate-500">{r.gebaeudetyp || LEER}</td>
+                    <td className="whitespace-nowrap py-2 pr-3 text-slate-500">{fachwertLabel(listen, "project_types", r.projektart)}</td>
+                    <td className="whitespace-nowrap py-2 pr-3 text-slate-500">{fachwertLabel(listen, "building_uses", r.gebaeudetyp)}</td>
                     <td className="whitespace-nowrap py-2 pr-3 text-slate-500">
                       {(r.waermeerzeuger || []).map(waermeerzeugerLabel).join(", ") || LEER}
                     </td>

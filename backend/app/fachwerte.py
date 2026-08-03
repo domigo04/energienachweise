@@ -110,7 +110,10 @@ SCOPE_STATUS: list[dict] = [
 
 # ── Zertifizierung (Punkt 20 — nie mehr Freitext) ─────────────────────────
 CERTIFICATIONS: list[dict] = [
-    {"code": "none", "label": "Keine", "synonyme": ["keine", "kein", "-", "ohne"]},
+    {"code": "none", "label": "Keine Zertifizierung",
+     "synonyme": ["keine", "kein", "-", "ohne", "keine zertifizierung"]},
+    {"code": "gesetz", "label": "Gesetzlicher Standard",
+     "synonyme": ["gesetz", "gesetzlich", "gesetzlicher standard"]},
     {"code": "minergie", "label": "Minergie", "synonyme": ["minergie"]},
     {"code": "minergie_p", "label": "Minergie-P", "synonyme": ["minergie-p", "minergie p"]},
     {"code": "minergie_eco", "label": "Minergie-ECO",
@@ -133,7 +136,7 @@ BUILDING_USES: list[dict] = [
      "synonyme": ["büro", "buero", "verwaltung", "dienstleistung"]},
     {"code": "sporthalle", "label": "Sport- / Turnhalle",
      "synonyme": ["sporthalle", "turnhalle", "dreifachhalle", "mehrzweckhalle",
-                  "sportanlage", "hallenbad"]},
+                  "sportanlage", "hallenbad", "schwimmhalle"]},
     {"code": "schule", "label": "Schule / Bildung",
      "synonyme": ["schule", "schulhaus", "kindergarten", "bildung"]},
     {"code": "gewerbe", "label": "Gewerbe / Industrie",
@@ -148,10 +151,15 @@ BUILDING_USES: list[dict] = [
 # ── Projektart ────────────────────────────────────────────────────────────
 PROJECT_TYPES: list[dict] = [
     {"code": "neubau", "label": "Neubau", "synonyme": ["neubau", "neu"]},
+    {"code": "umbau", "label": "Umbau", "synonyme": ["umbau"]},
     {"code": "sanierung", "label": "Sanierung",
-     "synonyme": ["sanierung", "erneuerung", "ersatz", "heizungsersatz", "umbau"]},
+     "synonyme": ["sanierung", "erneuerung"]},
+    {"code": "ersatz_waermeerzeuger", "label": "Ersatz Wärmeerzeuger",
+     "synonyme": ["ersatz wärmeerzeuger", "ersatz waermeerzeuger", "heizungsersatz"]},
+    {"code": "aufstockung", "label": "Aufstockung", "synonyme": ["aufstockung"]},
+    {"code": "mischprojekt", "label": "Mischprojekt", "synonyme": ["mischprojekt"]},
     {"code": "erweiterung", "label": "Erweiterung / Anbau",
-     "synonyme": ["erweiterung", "anbau", "aufstockung"]},
+     "synonyme": ["erweiterung", "anbau"]},
     {"code": "sonstige", "label": "Sonstige", "synonyme": []},
 ]
 
@@ -159,6 +167,11 @@ PROJECT_TYPES: list[dict] = [
 SCOPE_LEVELS: list[dict] = [
     {"code": "vollausbau", "label": "Vollausbau", "synonyme": ["vollausbau", "komplett"]},
     {"code": "grundausbau", "label": "Grundausbau", "synonyme": ["grundausbau", "basis"]},
+    {"code": "mieterausbau", "label": "Mieterausbau", "synonyme": ["mieterausbau"]},
+    {"code": "nur_erzeugung", "label": "Nur Erzeugung",
+     "synonyme": ["nur erzeugung", "nur wärmeerzeugung", "nur waermeerzeugung"]},
+    {"code": "nur_verteilung", "label": "Nur Verteilung",
+     "synonyme": ["nur verteilung", "nur wärmeverteilung", "nur waermeverteilung"]},
     {"code": "teilausbau", "label": "Teilausbau", "synonyme": ["teilausbau", "teilweise"]},
 ]
 

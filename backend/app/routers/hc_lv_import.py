@@ -176,6 +176,7 @@ def _import_out(imp: LvImport, detail: bool = False) -> dict:
         "grunddaten": {
             "ebf_m2": imp.ebf_m2, "anzahl_einheiten": imp.anzahl_einheiten,
             "gebaeudetyp": imp.gebaeudetyp, "projektart": imp.projektart,
+            "ausbauumfang": imp.ausbauumfang,
             "zertifizierung": imp.zertifizierung, "region": imp.region,
             # Punkt 19 — aus dem Deckblatt erkannt.
             "projekt_name": imp.projekt_name, "projekt_nummer": imp.projekt_nummer,
@@ -446,22 +447,6 @@ async def upload_lv(
                         row["validation_status"] = "mismatch"
                 costs = visual_costs
             commercial_result = visual_apply.get("commercial") or {}
-            vorhandene_konditionen = len(commercial_result.get("conditions") or [])
-            if vorhandene_konditionen:
-                konditionen_quelle = "visual_ai_pdf"
-            for item in commercial_result.get("conditions") or []:
-                db.add(LvImportCondition(
-                    lv_import_id=imp.id,
-                    original_label=str(item.get("label") or "")[:255],
-                    kind=item["kind"], direction=item["direction"],
-                    rate_percent=item.get("rate_percent"),
-                    amount=item.get("amount"), basis_amount=item.get("basis_amount"),
-                    calculated_amount=item.get("calculated_amount"),
-                    running_total=item.get("running_total"),
-                    order_index=int(item.get("order") or 0),
-                    source_page=item.get("source_page"),
-                    status=item.get("status") or "priced",
-                ))
         # Konditionen: der Text wird IMMER deterministisch gelesen. Bisher gab
         # es dafür nur die visuelle KI-Prüfung — ohne Schlüssel oder nach einem
         # Timeout blieb die Konditionsliste leer und die Bruttosumme auf 0,
@@ -478,37 +463,45 @@ async def upload_lv(
         ]
         konditionen_seiten = konditionen_seiten or pipeline.pages[-3:]
         geparste_konditionen = conditions_extract.parse_conditions(konditionen_seiten)
-        if not vorhandene_konditionen and conditions_extract.has_conditions(geparste_konditionen):
-            basis = geparste_konditionen["base_amount"]
-            if basis is None:
-                basis = summary.get("trade_total")
-            kette, konditions_hinweise = commercial.validate(
-                basis, geparste_konditionen["conditions"],
-                geparste_konditionen["vat_rate"], None,
-                geparste_konditionen["stated_vat_amount"],
-                geparste_konditionen["stated_total_incl_vat"],
-            )
-            for item in kette.get("conditions") or []:
-                db.add(LvImportCondition(
-                    lv_import_id=imp.id,
-                    original_label=str(item.get("label") or "")[:255],
-                    kind=item["kind"], direction=item["direction"],
-                    rate_percent=item.get("rate_percent"),
-                    amount=item.get("amount"), basis_amount=item.get("basis_amount"),
-                    calculated_amount=item.get("calculated_amount"),
-                    running_total=item.get("running_total"),
-                    order_index=int(item.get("order") or 0),
-                    source_page=item.get("source_page"),
-                    status=item.get("status") or "priced",
-                ))
-            vorhandene_konditionen = len(kette.get("conditions") or [])
-            # Auch ohne visuellen Review muss die komplette berechnete Kette im
-            # Report landen; sonst zeigt das UI zwar Konditionszeilen, aber
-            # keine Abzüge, MWST und Endsumme an.
-            visual_apply["commercial"] = kette
+        visual_commercial = visual_apply.get("commercial") or {}
+        merged_conditions = commercial.merge_conditions(
+            visual_commercial.get("conditions") or [],
+            geparste_konditionen.get("conditions") or [],
+        )
+        basis = visual_commercial.get("base_amount")
+        if basis is None:
+            basis = geparste_konditionen.get("base_amount")
+        if basis is None:
+            basis = summary.get("trade_total")
+        vat_rate = visual_commercial.get("vat_rate")
+        if vat_rate is None:
+            vat_rate = geparste_konditionen.get("vat_rate")
+        kette, konditions_hinweise = commercial.validate(
+            basis, merged_conditions, vat_rate, None,
+            geparste_konditionen.get("stated_vat_amount"),
+            geparste_konditionen.get("stated_total_incl_vat"),
+        )
+        for item in kette.get("conditions") or []:
+            db.add(LvImportCondition(
+                lv_import_id=imp.id,
+                original_label=str(item.get("label") or "")[:255],
+                kind=item["kind"], direction=item["direction"],
+                rate_percent=item.get("rate_percent"),
+                amount=item.get("amount"), basis_amount=item.get("basis_amount"),
+                calculated_amount=item.get("calculated_amount"),
+                running_total=item.get("running_total"),
+                order_index=int(item.get("order") or 0),
+                source_page=item.get("source_page"),
+                status=item.get("status") or "priced",
+            ))
+        vorhandene_konditionen = len(kette.get("conditions") or [])
+        visual_apply["commercial"] = {"base_amount": basis, **kette}
+        if visual_commercial.get("conditions") and geparste_konditionen.get("conditions"):
+            konditionen_quelle = "visual_ai_pdf+parser"
+        elif visual_commercial.get("conditions"):
+            konditionen_quelle = "visual_ai_pdf"
+        elif conditions_extract.has_conditions(geparste_konditionen):
             konditionen_quelle = "parser"
-        else:
-            konditions_hinweise = []
 
         # Erst nach der autoritativen visuellen Auswertung offene Titel gegen
         # das geschlossene Norm-LV auflösen.
@@ -1037,6 +1030,7 @@ def update_import(import_id: int, body: dict, user: User = Depends(get_current_u
     # zuordnen, wird er abgelehnt statt als neue Schreibweise verewigt.
     for feld, registry in (("gebaeudetyp", "building_uses"),
                            ("projektart", "project_types"),
+                           ("ausbauumfang", "scope_levels"),
                            ("zertifizierung", "certifications")):
         if feld not in body:
             continue
@@ -1345,6 +1339,7 @@ def approve_lv(import_id: int, user: User = Depends(get_current_user), db: Sessi
         # Projektgrunddaten aus dem Review (Item 6 / Punkt 20) — kanonische Codes.
         ebf_m2=imp.ebf_m2, anzahl_einheiten=imp.anzahl_einheiten,
         gebaeudetyp=imp.gebaeudetyp, projektart=imp.projektart,
+        ausbauumfang=imp.ausbauumfang,
         zertifizierung=imp.zertifizierung,
         datum=_parse_offer_date(imp.offert_datum),
         bww_bei_heizung=bww_in_heating,

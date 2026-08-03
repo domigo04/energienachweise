@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.audit import add_audit_event
+from app import fachwerte
 from app.auth import get_current_user
 from app.calculations.grobkostenschaetzung import BKP_GRUPPEN_ALLE, berechne_grobkostenschaetzung
 from app.calculations.kostenschaetzung import netto_aus_brutto
@@ -262,8 +263,11 @@ def _ref_to_calc_dict(r: RefProjekt) -> dict:
     return {
         "id": r.id, "name": r.name,
         "ebf_m2": r.ebf_m2, "leistung_kw": r.heizleistung_kw,
-        "nutzung": r.gebaeudetyp, "projektart": r.projektart,
-        "zertifizierung": r.zertifizierung,
+        "nutzung": fachwerte.normalize("building_uses", r.gebaeudetyp) or r.gebaeudetyp,
+        "projektart": fachwerte.normalize("project_types", r.projektart) or r.projektart,
+        "zertifizierung": (
+            fachwerte.normalize("certifications", r.zertifizierung) or r.zertifizierung
+        ),
         "waermeerzeuger": waermeerzeuger,
         "erzeuger_signatur": erzeuger_signatur_von(waermeerzeuger),
         "wp_typ": _wp_typ_von(waermeerzeuger),
@@ -295,6 +299,11 @@ def _berechne(body: SchaetzungIn, user: User, db: Session) -> tuple:
         for e in db.query(BauindexEintrag).filter(BauindexEintrag.tenant_id == user.tenant_id).all()
     ]
     ziel = body.model_dump(mode="json")
+    ziel["nutzung"] = fachwerte.normalize("building_uses", body.nutzung) or body.nutzung
+    ziel["projektart"] = fachwerte.normalize("project_types", body.projektart) or body.projektart
+    ziel["zertifizierung"] = (
+        fachwerte.normalize("certifications", body.zertifizierung) or body.zertifizierung
+    )
     ziel["erzeuger_signatur"] = erzeuger_signatur_von(body.waermeerzeuger)
     ziel["wp_typ"] = _wp_typ_von(body.waermeerzeuger)
     ziel["hat_erdsonden"] = _hat_erdsonden(body.waermeerzeuger)

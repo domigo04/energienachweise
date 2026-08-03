@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Download, Plus, Trash2 } from "lucide-react";
 import {
-  createRef, deleteRef, exportRefCsv, getRef, getRefAnalyse, getRefKatalog, updateRef,
+  createRef, deleteRef, exportRefCsv, getFachwerte, getRef, getRefAnalyse, getRefKatalog, updateRef,
 } from "../../api/hcApi";
 import CheckboxGruppe from "../../components/kv/CheckboxGruppe";
 import AnlagenkonfigurationAuswahl from "../../components/kv/AnlagenkonfigurationAuswahl";
@@ -10,8 +10,7 @@ import PageHeader from "../../components/ui/PageHeader";
 import InfoTip from "../../components/ui/InfoTip";
 import { chf, zahl } from "../../lib/format";
 import {
-  AUSBAUUMFAENGE, GEBAEUDETYPEN, PROJEKTARTEN, WAERMEABGABE, WAERMEERZEUGER, ZERTIFIZIERUNGEN, hasErdsonde,
-  konfigurationVorschlag,
+  WAERMEABGABE, WAERMEERZEUGER, hasErdsonde, konfigurationVorschlag,
 } from "../../data/kv";
 
 // Kurze Erklärungen für die «i»-Tipps — damit klar ist, wozu ein Feld dient
@@ -108,6 +107,7 @@ const konditionenVorschau = (fallbackBase, commercial) => {
 };
 
 function KonditionenBearbeiten({ commercial, onChange, brutto }) {
+  const [editing, setEditing] = useState(false);
   const preview = konditionenVorschau(brutto, commercial);
   const patchRow = (index, patch) => onChange({
     ...commercial,
@@ -120,6 +120,45 @@ function KonditionenBearbeiten({ commercial, onChange, brutto }) {
       rate_percent: "", amount: "", basis_amount: "",
     }],
   });
+  if (!editing) {
+    return (
+      <div className="space-y-2 text-sm">
+        <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+          <strong>Brutto / LV-Summe</strong><strong>{chf(preview.base_amount)}</strong>
+        </div>
+        {preview.conditions.map((row, index) => (
+          <div key={`${row.label}-${index}`} className="border-b border-slate-100 py-2">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <span className="font-medium text-slate-700">{row.label}</span>
+                <span className="ml-2 text-xs text-slate-400">
+                  {row.kind === "percent" ? `${row.rate_percent ?? 0} %` : "Fixbetrag"}
+                </span>
+              </div>
+              <strong className={row.direction === "deduction" ? "text-slate-700" : "text-green-700"}>
+                {row.direction === "deduction" ? "−" : "+"} {chf(Math.abs(row.calculated_amount || 0))}
+              </strong>
+            </div>
+            <div className="mt-1 flex justify-between text-xs text-slate-400">
+              <span>Zwischentotal</span><span>{chf(row.running_total)}</span>
+            </div>
+          </div>
+        ))}
+        {!preview.conditions.length && (
+          <p className="py-2 text-xs text-slate-400">Keine Abzüge oder Zuschläge erfasst.</p>
+        )}
+        <div className="flex justify-between"><span>Netto exkl. MWST</span><strong>{chf(preview.subtotal_excl_vat)}</strong></div>
+        <div className="flex justify-between"><span>MWST {preview.vat_rate ?? "—"} %</span><span>{chf(preview.vat_amount)}</span></div>
+        <div className="flex justify-between border-t-2 border-slate-800 pt-2 text-base">
+          <strong>Endsumme inkl. MWST</strong>
+          <strong className="text-brand-600">{chf(preview.total_incl_vat ?? preview.subtotal_excl_vat)}</strong>
+        </div>
+        <button type="button" className="btn-secondary mt-2 w-full justify-center" onClick={() => setEditing(true)}>
+          Konditionen bearbeiten
+        </button>
+      </div>
+    );
+  }
   return (
     <div className="space-y-3 text-sm">
       <div className="border-b border-slate-200 pb-3">
@@ -173,6 +212,9 @@ function KonditionenBearbeiten({ commercial, onChange, brutto }) {
         <div className="flex justify-between"><span>MWST {preview.vat_rate ?? 0} %</span><span>{chf(preview.vat_amount)}</span></div>
         <div className="flex justify-between border-t-2 border-slate-800 pt-2 text-base"><strong>Endsumme inkl. MWST</strong><strong className="text-brand-600">{chf(preview.total_incl_vat ?? preview.subtotal_excl_vat)}</strong></div>
       </div>
+      <button type="button" className="btn-secondary w-full justify-center" onClick={() => setEditing(false)}>
+        Bearbeitung schliessen
+      </button>
     </div>
   );
 }
@@ -189,6 +231,7 @@ export default function AuswertungForm() {
   const [form, setForm] = useState(LEER);
   const [betraege, setBetraege] = useState({}); // { bkp_nr: "12345" }
   const [katalog, setKatalog] = useState({ positionen: [] });
+  const [listen, setListen] = useState({});
   const [commercial, setCommercial] = useState(leereKonditionen);
   const [refFeatures, setRefFeatures] = useState({});
   const [aktiveBkp, setAktiveBkp] = useState(null);
@@ -208,6 +251,7 @@ export default function AuswertungForm() {
 
   useEffect(() => {
     getRefKatalog().then(setKatalog).catch(() => {});
+    getFachwerte().then((result) => setListen(result.listen || {})).catch(() => {});
     // Kennwerte des Bestands, um jede Position gegen den Median zu stellen.
     getRefAnalyse()
       .then((a) => setKennwerte(Object.fromEntries((a.kennwerte || []).map((k) => [k.bkp_nr, k]))))
@@ -383,19 +427,19 @@ export default function AuswertungForm() {
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div><label className="label flex items-center gap-1">Projektart <InfoTip text={ERKL.projektart} /></label>
                     <select className="input" value={form.projektart} onChange={(e) => set("projektart", e.target.value)}>
-                      <option value="">—</option>{PROJEKTARTEN.map((o) => <option key={o}>{o}</option>)}
+                      <option value="">— keine Angabe —</option>{(listen.project_types || []).map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}
                     </select></div>
                   <div><label className="label">Gebäudetyp</label>
                     <select className="input" value={form.gebaeudetyp} onChange={(e) => set("gebaeudetyp", e.target.value)}>
-                      <option value="">—</option>{GEBAEUDETYPEN.map((o) => <option key={o}>{o}</option>)}
+                      <option value="">— keine Angabe —</option>{(listen.building_uses || []).map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}
                     </select></div>
                   <div><label className="label flex items-center gap-1">Ausbauumfang <InfoTip text={ERKL.ausbauumfang} /></label>
                     <select className="input" value={form.ausbauumfang} onChange={(e) => set("ausbauumfang", e.target.value)}>
-                      <option value="">—</option>{AUSBAUUMFAENGE.map((o) => <option key={o}>{o}</option>)}
+                      <option value="">— keine Angabe —</option>{(listen.scope_levels || []).map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}
                     </select></div>
                   <div><label className="label flex items-center gap-1">Zertifizierung <InfoTip text={ERKL.zertifizierung} /></label>
                     <select className="input" value={form.zertifizierung} onChange={(e) => set("zertifizierung", e.target.value)}>
-                      <option value="">—</option>{ZERTIFIZIERUNGEN.map((o) => <option key={o}>{o}</option>)}
+                      <option value="">— keine Angabe —</option>{(listen.certifications || []).map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}
                     </select></div>
                 </div>
                 <CheckboxGruppe label="Wärmeerzeuger (mehrere möglich)" options={WAERMEERZEUGER} value={form.waermeerzeuger} onChange={setWaermeerzeuger} />

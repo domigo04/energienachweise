@@ -325,6 +325,25 @@ def test_mwst_als_kondition_und_steuersatz_wird_nur_einmal_addiert():
     assert result["total_incl_vat"] == 97290
 
 
+def test_visuelle_konditionen_werden_um_parserfunde_ergaenzt():
+    merged = commercial.merge_conditions(
+        [{"label": "Rabatt", "kind": "percent", "direction": "deduction",
+          "rate_percent": 5, "source_page": 20}],
+        [
+            {"label": "Rabatt 5 %", "kind": "percent", "direction": "deduction",
+             "rate_percent": 5, "amount": 5000, "source_page": 20},
+            {"label": "Baureinigung/Beschädigungen", "kind": "percent",
+             "direction": "deduction", "rate_percent": 0.5, "source_page": 20},
+            {"label": "Baureklame", "kind": "fixed", "direction": "deduction",
+             "amount": 200, "source_page": 20},
+        ],
+    )
+    assert [item["label"] for item in merged] == [
+        "Rabatt", "Baureinigung/Beschädigungen", "Baureklame",
+    ]
+    assert merged[0]["amount"] == 5000
+
+
 # ── Freigabe: Gruppentotale dürfen die Referenzkosten nicht verdoppeln ─────
 
 def _db():

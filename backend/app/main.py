@@ -152,6 +152,7 @@ def _ensure_columns():
         "ref_kostenzeilen": [("gewerk", "VARCHAR")],
         "lv_imports": [
             ("extract_method", "VARCHAR"), ("zertifizierung", "VARCHAR"),
+            ("ausbauumfang", "VARCHAR"),
             ("projekt_name", "VARCHAR"), ("projekt_nummer", "VARCHAR"),
             ("ort", "VARCHAR"), ("unternehmer", "VARCHAR"), ("offert_datum", "VARCHAR"),
             ("debug_json", "TEXT"),

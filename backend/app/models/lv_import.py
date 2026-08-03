@@ -44,6 +44,7 @@ class LvImport(Base):
     # keine Freitexte. Freitext wäre für die Ähnlichkeit unbrauchbar.
     gebaeudetyp = Column(String, nullable=True)      # building_uses-Code
     projektart = Column(String, nullable=True)       # project_types-Code
+    ausbauumfang = Column(String, nullable=True)     # scope_levels-Code
     zertifizierung = Column(String, nullable=True)   # certifications-Code
     region = Column(String, nullable=True)
     # Punkt 19 — aus dem Deckblatt erkannte Projektangaben.

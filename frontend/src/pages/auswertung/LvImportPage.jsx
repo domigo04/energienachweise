@@ -779,7 +779,7 @@ function ReviewAnsicht({ id }) {
   const alleGeprueft = featTotal > 0 && featGeprueft === featTotal && systemOffen === 0
     && kostenOffen === 0 && zuordnungOffen === 0;
   const grunddatenGesetzt = ["ebf_m2", "anzahl_einheiten", "gebaeudetyp", "projektart",
-    "zertifizierung", "region", "projekt_name"]
+    "ausbauumfang", "zertifizierung", "region", "projekt_name"]
     .some((k) => imp.grunddaten?.[k] != null && imp.grunddaten?.[k] !== "");
   // Fortschritt je Schritt für den Stepper (Freigabe selbst ist nie „fertig").
   const schrittFertig = [
@@ -945,6 +945,7 @@ function ReviewAnsicht({ id }) {
           {[
             ["gebaeudetyp", "Gebäudenutzung", "building_uses"],
             ["projektart", "Projektart", "project_types"],
+            ["ausbauumfang", "Ausbauumfang", "scope_levels"],
             ["zertifizierung", "Zertifizierung", "certifications"],
           ].map(([key, label, liste]) => (
             <div key={key}>

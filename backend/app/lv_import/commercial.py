@@ -63,6 +63,56 @@ def _ist_steuer(item: dict) -> bool:
     )
 
 
+def _condition_key(item: dict) -> str:
+    """Gleiche Kondition trotz leicht anderer KI-/Parser-Bezeichnung erkennen."""
+    label = _label(item.get("label") or item.get("original_label"))
+    for key, terms in (
+        ("rabatt", ("rabatt",)),
+        ("skonto", ("skonto",)),
+        ("baureinigung", ("baureinigung", "beschadigung", "reinigung")),
+        ("bauwasser", ("bauwasser", "baustrom", "elektrische energie")),
+        ("versicherung", ("bauwesenversicherung", "bauversicherung", "versicherung")),
+        ("baureklame", ("baureklame", "reklametafel", "bautafel")),
+        ("sponsoring", ("sponsoring",)),
+    ):
+        if any(term in label for term in terms):
+            return key
+    return label
+
+
+def merge_conditions(primary: list[dict], secondary: list[dict]) -> list[dict]:
+    """Visuelle und deterministische Treffer verlustfrei zusammenführen.
+
+    Der visuelle Treffer gewinnt bei widersprüchlichen Werten; der Parser
+    ergänzt fehlende Konditionen und leere Felder. Dadurch kann ein einzelner
+    KI-Treffer nicht mehr Rabatt, Baureinigung oder Baureklame unterdrücken.
+    """
+    merged: list[dict] = []
+    by_key: dict[str, dict] = {}
+    for raw in list(primary or []) + list(secondary or []):
+        if not isinstance(raw, dict) or _ist_steuer(raw):
+            continue
+        item = {**raw}
+        if not item.get("label"):
+            item["label"] = item.get("original_label") or "Kondition"
+        key = _condition_key(item)
+        if not key:
+            continue
+        if key not in by_key:
+            item["order"] = len(merged) + 1
+            by_key[key] = item
+            merged.append(item)
+            continue
+        existing = by_key[key]
+        for field in (
+            "rate_percent", "amount", "basis_amount", "source_page",
+            "source_text", "status",
+        ):
+            if existing.get(field) in (None, "") and item.get(field) not in (None, ""):
+                existing[field] = item[field]
+    return merged
+
+
 def calculate_chain(
     base_amount: float | None, conditions: list[dict], vat_rate: float | None = None,
 ) -> dict:

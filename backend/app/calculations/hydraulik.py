@@ -16,6 +16,13 @@ from typing import List, Optional
 from app.calculations.expansion import berechne_expansion
 from app.calculations.leitungsdimension import automatische_dimension
 from app.calculations.schema_sizing import erdsondenfeld, technischer_speicher
+from app.calculations.sole_druckverlust import (
+    INNENDURCHMESSER_MM,
+    RAUHEIT_MM_STD,
+    ZETA_VERTEILER_STD,
+    sole_druckverlust,
+    waermetraeger_vorgabe,
+)
 from app.calculations.ventil import berechne_kvs
 from app.calculations.waermepumpe import berechne_waermepumpe
 from app.data.generator_types import SOURCE_CIRCUIT_TYPES
@@ -41,6 +48,51 @@ def _zahl(x) -> Optional[float]:
         return float(x)
     except (TypeError, ValueError):
         return None
+
+
+def _sole_druckverlust(d: dict, quellenleistung_kw):
+    """Bauteil-Eingaben auf den Solekreis-Rechenkern legen.
+
+    Fehlen Pflichtangaben aus dem Wärmepumpen-Datenblatt, liefert der Kern eine
+    Warnung statt einer erfundenen Zahl.
+    """
+    def zahl(key, standard=None):
+        wert = _zahl(d.get(key))
+        return wert if wert is not None else standard
+
+    rohr = int(zahl("sonden_rohr_mm", 32) or 32)
+    d_sonde = zahl("sole_id_sonde_mm") or INNENDURCHMESSER_MM.get(rohr)
+    if not d_sonde:
+        return {"warnungen": ["Innendurchmesser der Erdwärmesonde fehlt."]}
+    tiefe = zahl("sonden_laenge_m")
+    if not tiefe:
+        return {"warnungen": ["Sondentiefe fehlt; ohne sie ist der Solekreis nicht berechenbar."]}
+    vorgabe = waermetraeger_vorgabe(zahl("glykol_pct", 30))
+    try:
+        return sole_druckverlust(
+            sonden_anzahl=int(zahl("sonden_anzahl", 5) or 5),
+            sonden_tiefe_m=tiefe,
+            sonden_innen_d_mm=d_sonde,
+            sonden_straenge=2 if d.get("sonden_bauart") == "einfach" else 4,
+            zuleitung_verteiler_m=zahl("sole_zuleitung_verteiler_m", 0),
+            zuleitung_verteiler_innen_d_mm=zahl("sole_id_zuleitung_verteiler_mm"),
+            zuleitung_wp_m=zahl("sole_zuleitung_wp_m", 0),
+            zuleitung_wp_innen_d_mm=zahl("sole_id_zuleitung_wp_mm"),
+            zusatzinhalt_l=zahl("sole_zusatzinhalt_l", 0),
+            volumenstrom_m3_h=zahl("sole_volumenstrom_m3h"),
+            quellenleistung_kw=quellenleistung_kw,
+            sole_dt_k=zahl("sole_dt_k"),
+            konzentration_pct=zahl("glykol_pct", 30),
+            dichte_kg_m3=zahl("sole_dichte_kg_m3", vorgabe["dichte_kg_m3"]),
+            cp_kj_kgk=zahl("sole_cp_kj_kgk", vorgabe["cp_kj_kgk"]),
+            viskositaet_mm2_s=zahl("sole_viskositaet_mm2_s", vorgabe["viskositaet_mm2_s"]),
+            rauheit_mm=zahl("sole_rauheit_mm", RAUHEIT_MM_STD),
+            druckverlust_wp_mws=zahl("sole_dp_wp_mws", 0),
+            verteiler_anzahl=zahl("sole_verteiler_anzahl", 1),
+            zeta_verteiler=zahl("sole_zeta_verteiler", ZETA_VERTEILER_STD),
+        )
+    except ValueError as exc:
+        return {"warnungen": [str(exc)]}
 
 
 def _bauteil_auslegungen(nodes, verteiler_results, heatpump_results):
@@ -123,7 +175,8 @@ def _bauteil_auslegungen(nodes, verteiler_results, heatpump_results):
                 ]
                 q0 = wp_quellen[0] if len(wp_quellen) == 1 else None
                 mehrere_wp = len(wp_quellen) > 1
-                leistungsquelle = "Wärmepumpe"
+                # Nur etikettieren, wenn wirklich ein Wert übernommen wurde.
+                leistungsquelle = "Wärmepumpe" if q0 is not None else None
             try:
                 r = erdsondenfeld(
                     quellenleistung_kw=q0,
@@ -150,6 +203,17 @@ def _bauteil_auslegungen(nodes, verteiler_results, heatpump_results):
                     r["warnings"].append("Mehrere Wärmepumpen erkannt; Quellenleistung am Erdsondenfeld manuell festlegen.")
                 if _zahl(d.get("entzugsleistung_w_m")) is None:
                     r["warnings"].append("Spezifische Entzugsleistung fehlt; keine Bohrmeterempfehlung möglich.")
+                r["druckverlust"] = _sole_druckverlust(d, q0)
+                r["warnings"] += (r["druckverlust"] or {}).get("warnungen", [])
+                # Der Solekreis rechnet den Inhalt aus der echten Geometrie inkl.
+                # Zuleitungen. Sobald er vorliegt, gilt er auch für die
+                # Feldübersicht — sonst stünden zwei Soleinhalte im selben Export.
+                detail = r["druckverlust"] or {}
+                if detail.get("inhalt_total_l") is not None:
+                    r["sondeninhalt_l"] = detail["inhalt_sonden_l"]
+                    r["gesamtinhalt_l"] = detail["inhalt_total_l"]
+                    r["glykolbedarf_kg"] = detail["konzentrat_volumetrisch_kg"]
+                    r["inhalt_quelle"] = "Solekreis-Geometrie"
                 erdsonden_results[n["id"]] = r
             except ValueError as exc:
                 erdsonden_results[n["id"]] = {"warnings": [str(exc)]}

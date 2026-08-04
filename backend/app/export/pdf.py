@@ -144,7 +144,7 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
     for n in _sortiert(nodes):
         d = n.get("data") or {}
         t = n.get("type")
-        eingaben, resultate = [], []
+        eingaben, resultate, rechenweg, hinweise = [], [], [], []
         if t == "gruppe":
             c = gr.get(n["id"], {})
             schaltung = {"einspritz": "Einspritzschaltung (2WV)", "beimisch": "Beimischschaltung (3WV)",
@@ -303,9 +303,11 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
                 ("Formel", "V = Q · t · 60 / (c · ΔT · ρ) · 1000", ""),
             ]
         elif t == "erdsonden":
-            anzahl = max(1, min(24, int(_f(d.get("sonden_anzahl")) or 5)))
-            laenge = _f(d.get("sonden_laenge_m"))
             c = erdsonden_results.get(n["id"], {})
+            # Anzahl aus dem Rechenkern, damit PDF und Berechnung nicht
+            # auseinanderlaufen (die Auswahl im Editor ist auf 24 begrenzt).
+            anzahl = c.get("sonden_anzahl") or max(1, min(24, int(_f(d.get("sonden_anzahl")) or 5)))
+            laenge = _f(d.get("sonden_laenge_m"))
             eingaben = [("Ausführung", "Duplex (2 U-Rohre)", ""),
                         ("Anzahl Erdsonden", anzahl, ""),
                         ("Sondenlänge", laenge, "m"),
@@ -322,10 +324,45 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
                           ("Soleinhalt gesamt", c.get("gesamtinhalt_l"), "l"),
                           ("Glykolbedarf", c.get("glykolbedarf_kg"), "kg"),
                           ("Bohrmeter-Formel", "Lerf = Q0 · 1000 / qE · SF", "")]
+            dv = c.get("druckverlust") or {}
+            if dv:
+                eingaben += [
+                    ("— Solekreis —", "", ""),
+                    ("Solevolumenstrom", dv.get("volumenstrom_m3_h"), "m³/h"),
+                    ("Herkunft Volumenstrom", dv.get("volumenstrom_quelle"), ""),
+                    ("Zuleitung Sonde–Verteiler", d.get("sole_zuleitung_verteiler_m"), "m"),
+                    ("Zuleitung Verteiler–WP", d.get("sole_zuleitung_wp_m"), "m"),
+                    ("Inhalt WP und Expansion", dv.get("zusatzinhalt_l"), "l"),
+                    ("Dichte Wärmeträger", dv.get("dichte_kg_m3"), "kg/m³"),
+                    ("Spez. Wärmekapazität", dv.get("cp_kj_kgk"), "kJ/kgK"),
+                    ("Kinematische Zähigkeit", dv.get("viskositaet_mm2_s"), "mm²/s"),
+                    ("Rohrrauheit", dv.get("rauheit_mm"), "mm"),
+                    ("Druckverlust Wärmepumpe", dv.get("druckverlust_wp_mws"), "mWs"),
+                    ("Zeta-Wert Verteiler", dv.get("zeta_verteiler"), ""),
+                ]
+                resultate += [("— Solekreis —", "", "")]
+                for ts in dv.get("teilstuecke") or []:
+                    resultate += [
+                        (f"{ts['name']}: w", _fmt(ts.get("geschwindigkeit_m_s"), 3), "m/s"),
+                        (f"{ts['name']}: Re", ts.get("reynolds"), f"— {ts.get('stroemungsart')}"),
+                        (f"{ts['name']}: Δp", _fmt(ts.get("druckverlust_mws"), 2), "mWs"),
+                    ]
+                resultate += [
+                    ("Füllinhalt total", dv.get("inhalt_total_l"), "l"),
+                    ("Wärmeträger (Vorlagenformel)", dv.get("waermetraeger_l"), "l"),
+                    ("Konzentrat volumetrisch", dv.get("konzentrat_volumetrisch_l"), "l"),
+                    ("Druckverlust Leitungen", dv.get("druckverlust_leitungen_mws"), "mWs"),
+                    ("Druckverlust Verteiler", dv.get("druckverlust_verteiler_mws"), "mWs"),
+                    ("Förderhöhe Solepumpe", dv.get("foerderhoehe_mws"), "mWs"),
+                    ("Fördervolumen Solepumpe", dv.get("foerdervolumen_m3_h"), "m³/h"),
+                ]
+                rechenweg = dv.get("rechenweg") or []
+                hinweise = dv.get("warnungen") or []
         else:
             continue
         abschnitte.append({"nr": d.get("nr"), "titel": TITEL.get(t, t), "bezeichnung": d.get("label") or "",
-                           "eingaben": eingaben, "resultate": resultate})
+                           "eingaben": eingaben, "resultate": resultate,
+                           "rechenweg": rechenweg, "hinweise": hinweise})
     return abschnitte
 
 
@@ -531,13 +568,67 @@ def _berechnungs_seiten(c, abschnitte, projekt_name):
             c.setFont("Helvetica", 9)
             c.setFillColorRGB(0.1, 0.12, 0.2)
             for name, wert, einheit in rows:
+                if y < 60:
+                    c.showPage()
+                    y = kopf()
+                    c.setFont("Helvetica", 9)
+                    c.setFillColorRGB(0.1, 0.12, 0.2)
                 c.drawString(70, y, str(name))
                 c.drawRightString(430, y, "—" if wert in (None, "") else str(wert))
                 c.drawString(440, y, einheit)
                 y -= 13
             y -= 4
+
+        # Rechenweg: Formel, eingesetzte Werte und Ergebnis je Schritt. Ohne ihn
+        # ist die Zahl im Export nur eine Behauptung.
+        schritte = a.get("rechenweg") or []
+        if schritte:
+            c.setFont("Helvetica-Bold", 9)
+            c.setFillColorRGB(0.45, 0.5, 0.55)
+            c.drawString(60, y, "Rechenweg")
+            y -= 13
+            for s in schritte:
+                if y < 70:
+                    c.showPage()
+                    y = kopf()
+                c.setFont("Helvetica-Bold", 8)
+                c.setFillColorRGB(0.1, 0.12, 0.2)
+                c.drawString(70, y, f"{s.get('groesse')}: {s.get('formel')}")
+                y -= 10
+                c.setFont("Helvetica", 8)
+                c.setFillColorRGB(0.35, 0.4, 0.45)
+                c.drawString(78, y, f"= {s.get('eingesetzt')}  →  {s.get('ergebnis')}")
+                y -= 12
+            y -= 4
+
+        for hinweis in a.get("hinweise") or []:
+            if y < 60:
+                c.showPage()
+                y = kopf()
+            c.setFont("Helvetica-Oblique", 8)
+            c.setFillColorRGB(0.57, 0.25, 0.05)
+            for zeile in _umbruch(hinweis, 105):
+                c.drawString(70, y, zeile)
+                y -= 11
+            y -= 2
+        c.setFillColorRGB(0.1, 0.12, 0.2)
         y -= 10
     c.showPage()
+
+
+def _umbruch(text: str, breite: int) -> list:
+    """Text auf feste Zeichenbreite umbrechen (Helvetica 8 pt, ~105 Zeichen)."""
+    zeilen, aktuell = [], ""
+    for wort in str(text).split():
+        kandidat = f"{aktuell} {wort}".strip()
+        if len(kandidat) > breite and aktuell:
+            zeilen.append(aktuell)
+            aktuell = wort
+        else:
+            aktuell = kandidat
+    if aktuell:
+        zeilen.append(aktuell)
+    return zeilen
 
 
 def erzeuge_pdf(projekt_name: str, schema_name: str, inhalt: str,

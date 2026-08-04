@@ -294,3 +294,80 @@ als allgemeine Bohrtiefenautomatik übernommen. Die Druckverlust-/Pumpenauslegun
 folgt erst, wenn Einzellänge, Anschlussleitung und Hauptleitung topologisch eindeutig
 definiert sind. Bohrmeter bleiben eine Planungshilfe; geologische und behördliche
 Nachweise sind extern zu prüfen.
+
+## 18. Solekreis der Erdsondenanlage – Füllinhalt, Druckverlust, Pumpe (2026-08-04)
+Quelle: `Erdsonden.xlsx`, Blatt `Druckverlustberechnung_erdsonde` (Version 1.0 db),
+Rohrinhalte aus `glykol_Erdsonden`, Innendurchmesser aus `infoblatt3_Normsonden`.
+Umgesetzt in `backend/app/calculations/sole_druckverlust.py`.
+
+Der Kreis wird in drei Teilstücke zerlegt, weil sie unterschiedliche Durchmesser und
+damit unterschiedliche Strömungszustände haben: Erdwärmesonde, Zuleitung Sonde bis
+Verteiler, Zuleitung Verteiler bis Wärmepumpe.
+
+### Füllinhalt
+- `V_Sonde = π/4 · d² · Stränge · Tiefe · Anzahl` — Duplex = 4 Stränge je Sondenmeter,
+  Einfach-U = 2.
+- `V_Zuleitung = π/4 · d² · L · 2` (Vor- und Rücklauf).
+- `V_total = V_Sonde + V_ZulVerteiler + V_ZulWP + V_WP/Expansion`.
+- Innendurchmesser Normsonden SDR 11: 25 mm → 20.4, 32 mm → 26.2, 40 mm → 32.6.
+- Der Innendurchmesser bleibt frei überschreibbar; die Tabelle ist nur Vorgabe.
+
+### Wärmeträger
+- Vorlagenformel (B25): `V_Glykol = V_total · 1000 / 100 · Konzentration / ρ`.
+- Volumetrische Kontrolle: `V_Konz = V_total · Konzentration / 100`.
+- Beide Werte werden ausgewiesen. Weichen sie um mehr als 5 % ab, erscheint eine
+  Warnung: die Bestellmenge ist fachlich festzulegen. Die Vorlage mischt an dieser
+  Stelle Volumen und Masse; der Entscheid gehört zum Fachplaner, nicht ins Tool.
+- Der Zuschlag `+2 l` der Vorlage wurde nicht übernommen, weil er nicht hergeleitet
+  ist. Er lässt sich über «Inhalt WP + Expansion» sichtbar eingeben.
+- Konzentratdichte Antifrogen N: 1.14 kg/l (Blatt `glykol_Erdsonden`).
+
+### Volumenstrom
+- Erste Wahl: Fördermenge Verdampfer aus dem Wärmepumpen-Datenblatt.
+- Ersatzweise `V̇ [m³/h] = Q0 [kW] · 3600 / (c [kJ/kgK] · ΔT [K] · ρ [kg/m³])`.
+- Fehlt beides, wird gewarnt statt geschätzt.
+- Aufteilung: jede Sonde hat `Stränge/2` parallele Kreise; die Sonde und die Zuleitung
+  bis zum Verteiler führen `V̇ / Kreise`, die Leitung zur Wärmepumpe den vollen Strom.
+
+### Strömung und Druckverlust je Teilstück
+- `w = V̇ / (π/4 · d²)`
+- `Re = w · d / ν`
+- `dk = d / Rohrrauheit`, Rauheit PE 0.015 mm
+- Strömungsart: `Re < 2340` laminar; `Re < 65 · dk` turbulent glatt;
+  `Re > 1300 · dk` turbulent rauh; dazwischen Übergangsgebiet.
+- `λ`: laminar `64/Re`; turbulent glatt `0.3164/Re^0.25` (Blasius, `Re < 100 000`),
+  sonst `0.0032 + 0.221/Re^0.237` (Nikuradse); turbulent rauh
+  `1/(2·log₁₀(3.715·dk))²` (Prandtl-Kármán). Im Übergangsgebiet ist `λ` nicht
+  definiert; dann wird kein Druckverlust ausgegeben.
+- `Δp = λ · (ρ · w²/2) / d · L · Stränge`, mit 2 Strängen je Teilstück
+  (Sonde hinunter und hinauf, Zuleitung Vor- und Rücklauf).
+- `Δp [mWs] = Δp [Pa] · 0.000102`
+
+### Pumpenbetriebspunkt
+- `Δp_Verteiler = ζ · (ρ · w²/2) · 0.000102 · Anzahl`, ζ Vorgabe 12.
+- `H = Δp_Leitungen + Δp_Verteiler + Δp_Wärmepumpe`
+- Fördervolumen = Solevolumenstrom.
+- Die Pumpenauswahl selbst bleibt aussen vor: die Kennlinien der Vorlage gelten für
+  bestimmte Fabrikate und würden im Tool veralten. Ausgegeben wird der Betriebspunkt.
+
+### Bewusste Abweichungen von der Vorlage
+- Die Vorlage rechnet Querschnitte teils mit 3.14 statt π. Hier gilt durchgehend π;
+  die Abweichung liegt unter 0.2 %.
+- Die Vorlage prüft in den Zuleitungsspalten die Strömungsart versehentlich über `dk`
+  statt über `Re` und meldet dort immer «Turbulent glatt», obwohl die Lambda-Formel
+  daneben bereits laminar rechnet. Hier wird durchgehend `Re` geprüft.
+- Die Konzentration steckt in der Vorlage fest im Glykol-Term (30), während die
+  Bezeichnung 28 % nennt. Hier ist die Konzentration eine Eingabe.
+
+### Grenzen
+- In der Erdwärmesonde ist mindestens «turbulent glatt» gefordert, sonst stimmt der
+  Wärmeübergang zum Erdreich nicht. Laminare Sonden werden gewarnt; in den Zuleitungen
+  ist Laminarströmung zulässig.
+- Stoffwerte: nur die 28-%-Zeile (ρ 1050 kg/m³, ν 4.15 mm²/s) stammt aus der Vorlage.
+  Die übrigen Zeilen sind Richtwerte für Ethylenglykol bei 0 °C mittlerer Soletemperatur
+  und vom Fachplaner gegen das Produktdatenblatt zu prüfen. Der Temperaturbezug der
+  Vorlage ist nicht dokumentiert; ν = 4.15 mm²/s liegt über dem 0-°C-Literaturwert.
+- Einzelwiderstände ausser dem Verteiler (Bögen, Armaturen, Sondenfuss) sind nicht
+  enthalten und über den Zeta-Wert oder einen Zuschlag zu berücksichtigen.
+- Alle Zahlen sind eine Planungshilfe. Die Verantwortung für die Auslegung bleibt beim
+  Fachplaner; der Rechenweg ist deshalb im Bauteil und im PDF vollständig ausgewiesen.

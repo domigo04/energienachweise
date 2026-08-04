@@ -270,7 +270,7 @@ Backend gerechnet; ein manuell gewählter Speicherinhalt wird nicht still übers
 - Stoffwerte der Vorlage: `c = 4.187 kJ/(kg·K)`, `ρ = 988 kg/m³`.
 - Referenzfall: 29.88 kW, 15 min, ΔT 12 K → rund 650 l.
 
-## 17. Erdsondenfeld und Solepumpe (2026-08-04)
+## 17. Erdsondenfeld – erste Auslegungsstufe (2026-08-03)
 Quelle: `Erdsonden.xlsx`, Blätter `glykol_Erdsonden` und
 `Druckverlustberechnung_erdsonde`.
 
@@ -282,52 +282,187 @@ Quelle: `Erdsonden.xlsx`, Blätter `glykol_Erdsonden` und
   `Lerf [m] = Q0 [kW] · 1000 / qE [W/m] · Sicherheitsfaktor`.
 - Sicherheitsfaktor: Standard 1.10 aus der Vorlage, sichtbar überschreibbar.
 - Duplexsonde: zwei U-Rohre = vier Rohrstränge je Sondenmeter.
-- Standard-Innendurchmesser aus der Vorlage: DA 25 → 20.4 mm, DA 32 →
-  26.2 mm, DA 40 → 32.6 mm; sichtbar überschreibbar.
-- `Vrohr/m = π · dᵢ² / 4 · 1 m · 1000` und
-  `Vsonde = Anzahl · 4 · Sondenlänge · Vrohr/m`.
-- Für den Anlageninhalt werden zusätzlich alle tatsächlich installierten
-  Anschlussrohrmeter als Summe VL+RL und die Hauptleitung berücksichtigt.
-  Die kritische Weglänge darf dafür nicht als Gesamtrohrmenge missverstanden werden.
-- `Vrohr [l] = π · dᵢ² / 4 · L(VL+RL) · 1000`.
-- `mGlykol = Vgesamt · Konzentration / 100 · ρGlykol`,
+- Rohrinhalte der Vorlage: 25 mm → 0.327 l/m, 32 mm → 0.531 l/m,
+  40 mm → 0.835 l/m.
+- `Vsonde = Anzahl · 4 · Sondenlänge · Rohrinhalt`.
+- `mGlykol = (Vsonde + Zusatzinhalt) · Konzentration / 100 · ρGlykol`,
   mit `ρGlykol = 1.14 kg/l` aus der Vorlage.
-
-Pumpenauslegung auf dem hydraulisch ungünstigsten Weg:
-
-- Die Anschlusslänge ist die **einfache Strecke vom Verteiler zur entferntesten
-  Bohrung**. Für den Druckverlust wird `L(VL+RL) = 2 · L(einfach)` gerechnet.
-- Duplexsonde: Gesamtvolumenstrom wird auf `Anzahl Sonden · 2 U-Kreise` verteilt.
-- `V̇U = V̇gesamt / Anzahl Sonden / 2`.
-- `w = V̇ / (π · dᵢ² / 4)`.
-- `Re = w · dᵢ / ν`.
-- Laminar `λ = 64 / Re`; turbulente Bereiche gemäss der Fallunterscheidung der
-  Excel-Vorlage. Das dort nicht definierte Übergangsgebiet wird sichtbar mit
-  der Haaland-Näherung gerechnet.
-- Darcy-Weisbach: `Δp = λ · (ρ · w² / 2) / dᵢ · L(VL+RL)`.
-- Verteiler: `ΔpVerteiler = Σζ · ρ · w² / 2`.
-- `Hrohre = ΣΔp / (ρ · g)` und
-  `Hpumpe = Hrohre + HVerteiler + HWP` mit `g = 9.81 m/s²`.
-- Der komplette Rechenweg zeigt Formel, eingesetzte Werte, Zwischenresultate,
-  Strömungsart und Endresultat im Editor und im Berechnungsexport.
-- Fehlt am EWS-Bauteil der Solevolumenstrom, wird der berechnete Quellenstrom
-  genau einer Wärmepumpe übernommen. Bei mehreren Wärmepumpen ist eine manuelle
-  Festlegung nötig.
-- Der berechnete Gesamtinhalt eines einzelnen Erdsondenfelds kann automatisch
-  als Anlageninhalt des EWS-Expansionsgefässes übernommen werden; eine manuelle
-  Volumenangabe am Gefäss hat Vorrang.
-
-Bewusst korrigierte Abweichungen gegenüber der Excel-Vorlage:
-
-- Die Umrechnung von Druck in Förderhöhe erfolgt stoffwertabhängig mit
-  `H = Δp / (ρ · g)` statt mit dem festen Wasserfaktor `0.000102`.
-- Glykolmenge und -masse verwenden die sichtbare Konzentration und Dichte; die
-  in der Vorlage versteckten Konstanten `30 %` und `+2 l` werden nicht übernommen.
-- Die Strömungsart wird in jedem Abschnitt anhand der Reynolds-Zahl bestimmt.
-  Der Zellbezug der Anschlussleitung in der Excel-Anzeige ist inkonsistent;
-  Reibungsbeiwert und Backend verwenden konsistent `Re`.
 
 Die EED-Tabellen der Vorlage gelten nur für deren dokumentierte Standorte und
 Randbedingungen (u.a. 1800 Betriebsstunden und ohne BWW). Sie werden deshalb nicht
-als allgemeine Bohrtiefenautomatik übernommen. Bohrmeter bleiben eine Planungshilfe; geologische und behördliche
+als allgemeine Bohrtiefenautomatik übernommen. Die Druckverlust-/Pumpenauslegung
+folgt erst, wenn Einzellänge, Anschlussleitung und Hauptleitung topologisch eindeutig
+definiert sind. Bohrmeter bleiben eine Planungshilfe; geologische und behördliche
 Nachweise sind extern zu prüfen.
+
+## 18. Solekreis der Erdsondenanlage – Füllinhalt, Druckverlust, Pumpe (2026-08-04)
+Quelle: `Erdsonden.xlsx`, Blatt `Druckverlustberechnung_erdsonde` (Version 1.0 db),
+Rohrinhalte aus `glykol_Erdsonden`, Innendurchmesser aus `infoblatt3_Normsonden`.
+Umgesetzt in `backend/app/calculations/sole_druckverlust.py`.
+
+Der Kreis wird in drei Teilstücke zerlegt, weil sie unterschiedliche Durchmesser und
+damit unterschiedliche Strömungszustände haben: Erdwärmesonde, Zuleitung Sonde bis
+Verteiler, Zuleitung Verteiler bis Wärmepumpe.
+
+### Füllinhalt
+- `V_Sonde = π/4 · d² · Stränge · Tiefe · Anzahl` — Duplex = 4 Stränge je Sondenmeter,
+  Einfach-U = 2.
+- Der kritische Weg Sonde–Verteiler ist die einfache Strecke zur entferntesten
+  Bohrung; für den Druckverlust gilt `L(VL+RL) = 2 · L(kritisch)`.
+- Der Füllinhalt verwendet separat die gesamten tatsächlich installierten
+  Anschlussrohrmeter als Summe VL+RL. Fehlen sie, wird die vorläufige Annahme
+  `2 · L(kritisch)` sichtbar gewarnt.
+- `V_Zuleitung = π/4 · d² · L_gesamt(VL+RL)`.
+- `V_total = V_Sonde + V_ZulVerteiler + V_ZulWP + V_WP/Expansion`.
+- Der Innendurchmesser ist **keine freie Eingabe**, sondern folgt aus der Rohrauswahl.
+  Ein Durchmesser ohne zugehöriges Rohr wäre nicht bestellbar und hätte keine
+  Nenndruckstufe. Tabelle in `backend/app/calculations/sole_rohre.py`.
+
+### Wärmeträger
+- Vorlagenformel (B25): `V_Glykol = V_total · 1000 / 100 · Konzentration / ρ`.
+- Volumetrische Kontrolle: `V_Konz = V_total · Konzentration / 100`.
+- Beide Werte werden ausgewiesen. Weichen sie um mehr als 5 % ab, erscheint eine
+  Warnung: die Bestellmenge ist fachlich festzulegen. Die Vorlage mischt an dieser
+  Stelle Volumen und Masse; der Entscheid gehört zum Fachplaner, nicht ins Tool.
+- Der Zuschlag `+2 l` der Vorlage wurde nicht übernommen, weil er nicht hergeleitet
+  ist. Er lässt sich über «Inhalt WP + Expansion» sichtbar eingeben.
+- Konzentratdichte Antifrogen N: 1.14 kg/l (Blatt `glykol_Erdsonden`).
+
+### Volumenstrom
+- Erste Wahl: Fördermenge Verdampfer aus dem Wärmepumpen-Datenblatt; fehlt sie
+  am Erdsondenbauteil, wird der berechnete Quellenstrom genau einer verbundenen
+  Wärmepumpe übernommen.
+- Ersatzweise `V̇ [m³/h] = Q0 [kW] · 3600 / (c [kJ/kgK] · ΔT [K] · ρ [kg/m³])`.
+- Fehlt beides, wird gewarnt statt geschätzt.
+- Aufteilung: jede Sonde hat `Stränge/2` parallele Kreise; die Sonde und die Zuleitung
+  bis zum Verteiler führen `V̇ / Kreise`, die Leitung zur Wärmepumpe den vollen Strom.
+
+### Strömung und Druckverlust je Teilstück
+- `w = V̇ / (π/4 · d²)`
+- `Re = w · d / ν`
+- `dk = d / Rohrrauheit`, Rauheit PE 0.015 mm
+- Strömungsart: `Re < 2340` laminar; `Re < 65 · dk` turbulent glatt;
+  `Re > 1300 · dk` turbulent rauh; dazwischen Übergangsgebiet.
+- `λ`: laminar `64/Re`; turbulent glatt `0.3164/Re^0.25` (Blasius, `Re < 100 000`),
+  sonst `0.0032 + 0.221/Re^0.237` (Nikuradse); turbulent rauh
+  `1/(2·log₁₀(3.715·dk))²` (Prandtl-Kármán). Im Übergangsgebiet ist `λ` nicht
+  definiert; dann wird kein Druckverlust ausgegeben.
+- `Δp = λ · (ρ · w²/2) / d · L · Stränge`, mit 2 Strängen je Teilstück
+  (Sonde hinunter und hinauf, Zuleitung Vor- und Rücklauf).
+- `H [mWs] = Δp [Pa] / (ρ · g)` mit `g = 9.81 m/s²`.
+
+### Pumpenbetriebspunkt
+- `H_Verteiler = ζ · (ρ · w²/2) / (ρ · g) · Anzahl`, ζ Vorgabe 12.
+- `H = Δp_Leitungen + Δp_Verteiler + Δp_Wärmepumpe`
+- Fördervolumen = Solevolumenstrom.
+- Die Pumpenauswahl selbst bleibt aussen vor: die Kennlinien der Vorlage gelten für
+  bestimmte Fabrikate und würden im Tool veralten. Ausgegeben wird der Betriebspunkt.
+
+### Bewusste Abweichungen von der Vorlage
+- Die Vorlage rechnet Querschnitte teils mit 3.14 statt π. Hier gilt durchgehend π;
+  die Abweichung liegt unter 0.2 %.
+- Die Vorlage wandelt Pascal mit dem festen Wasserfaktor `0.000102` in mWs um.
+  Das Backend verwendet die tatsächliche Soledichte über `H = Δp/(ρ·g)`.
+- Die Vorlage prüft in den Zuleitungsspalten die Strömungsart versehentlich über `dk`
+  statt über `Re` und meldet dort immer «Turbulent glatt», obwohl die Lambda-Formel
+  daneben bereits laminar rechnet. Hier wird durchgehend `Re` geprüft.
+- Die Konzentration steckt in der Vorlage fest im Glykol-Term (30), während die
+  Bezeichnung 28 % nennt. Hier ist die Konzentration eine Eingabe.
+
+### Grenzen
+- In der Erdwärmesonde ist mindestens «turbulent glatt» gefordert, sonst stimmt der
+  Wärmeübergang zum Erdreich nicht. Laminare Sonden werden gewarnt; in den Zuleitungen
+  ist Laminarströmung zulässig.
+- Stoffwerte stammen vollständig aus den Zellkommentaren der Vorlage (siehe §19).
+  Die spezifische Wärmekapazität steht dort nicht und bleibt ein Richtwert.
+- Einzelwiderstände ausser dem Verteiler (Bögen, Armaturen, Sondenfuss) sind nicht
+  enthalten und über den Zeta-Wert oder einen Zuschlag zu berücksichtigen.
+- Alle Zahlen sind eine Planungshilfe. Die Verantwortung für die Auslegung bleibt beim
+  Fachplaner; der Rechenweg ist deshalb im Bauteil und im PDF vollständig ausgewiesen.
+
+## 19. Rohre, Druckstufen und Wärmeträger der Erdsonden (2026-08-04)
+Quellen: SIA 384/6:2021 «Erdwärmesonden», wiedergegeben in der FWS-Präsentation
+«WP-/EWS-Technik Update 2021» (Dr. Walter J. Eugster), sowie die Zellkommentare
+in `Erdsonden.xlsx`. Tabelle in `backend/app/calculations/sole_rohre.py`,
+Auswahlliste gespiegelt in `frontend/src/pages/hc/schema/soleTabellen.js`
+(Abgleich durch `test_frontend_auswahllisten_bleiben_deckungsgleich`).
+
+### Rohrmasse (SIA 384/6:2021 Tabelle 10)
+
+| Aussen | Innen | Wand | Nenndruck | SDR |
+| --- | --- | --- | --- | --- |
+| 32 mm | 26.0 mm | 3.0 mm | PN 16 | SDR 11 |
+| 32 mm | 24.8 mm | 3.6 mm | PN 20 | SDR 9 |
+| 40 mm | 32.6 mm | 3.7 mm | PN 16 | SDR 11 |
+| 40 mm | 31.0 mm | 4.5 mm | PN 20 | SDR 9 |
+| 40 mm | 29.2 mm | 5.4 mm | PN 25 | SDR 7.4 |
+| 50 mm | 40.8 mm | 4.6 mm | PN 16 | SDR 11 |
+| 50 mm | 38.8 mm | 5.6 mm | PN 20 | SDR 9 |
+| 50 mm | 36.4 mm | 6.9 mm | PN 25 | SDR 7.4 |
+| 50 mm | 32.0 mm | 8.9 mm | PN 32 | SDR 5.6 |
+
+Die 32-mm-Zeile für PN 20 steht nicht in Tabelle 10; sie folgt der Rohrreihe
+SDR 9 (Wanddicke 32/9 = 3.56 mm, aufgerundet auf 3.6 mm) und damit derselben
+Systematik wie die dort aufgeführten Zeilen 40 × 4.5 und 50 × 5.6. Tiefere Sonden
+brauchen die höhere Druckstufe auch im 32er-Durchmesser.
+
+Zusätzlich wählbar bleiben die beiden Masse der Excel-Vorlage, damit bestehende
+Berechnungen nachvollziehbar bleiben: `PE 32 × 2.9` mit innen 26.2 mm und
+`PE 50 × 4.7` mit innen 40.6 mm. **Offener Punkt:** Die Norm nennt für das
+32er-Sondenrohr 26.0 mm, die Vorlage rechnet mit 26.2 mm. Die Zellkommentare der
+Vorlage widersprechen sich hier selbst (26.20 beim Sondenrohr, 26.00 bei den
+Zuleitungen). Fachlicher Entscheid offen; der Unterschied bewegt Re um rund 1 %.
+
+Die Tabelle 10 nennt für das 50er-PN-32-Rohr eine Wanddicke von 7.2 mm, was zum
+angegebenen Innendurchmesser von 32 mm nicht passt. Übernommen wird der
+Innendurchmesser (massgebend für die Strömung); die Wanddicke folgt SDR 5.6.
+
+### Nenndruckstufe nach Sondentiefe (SIA 384/6:2021, informativ)
+
+| Tiefenbereich | Max. Überdruck am Sondenfuss | Nenndruckstufe |
+| --- | --- | --- |
+| 0–170 m | 20 bar | PN 16 |
+| 171–200 m | 24 bar | PN 20 |
+| 201–260 m | 30 bar | PN 25 |
+| 261–360 m | 41 bar | PN 32 |
+
+Der Überdruck enthält 3 bar Betriebsdruck. Das gewählte Sondenrohr bringt seine
+Nenndruckstufe mit; liegt sie unter der für die Tiefe geforderten, wird gewarnt.
+Über 360 m endet die Tabelle — dort ist die Druckstufe fachlich festzulegen.
+
+Zulässige Differenzdrücke je Druckstufe (Tabelle 8) sind in `DRUCKSTUFEN`
+hinterlegt: PN 16/SDR 11 bis PN 40/SDR 5, je mit Prüf- und Betriebsgrenzen.
+
+### Wärmeträger (Zellkommentare `Erdsonden.xlsx`)
+
+| Produkt | Anteil | ρ [kg/m³] | ν [mm²/s] | Frostschutz |
+| --- | --- | --- | --- | --- |
+| Antifrogen L (Propylenglykol) | 21.4 % | 1028 | 5.03 | −8.0 °C |
+| Antifrogen L | 25 % | 1033 | 5.98 | −10.1 °C |
+| Antifrogen L | 30 % | 1039 | 7.65 | −13.5 °C |
+| Antifrogen N (Ethylenglykol) | 20 % | 1040 | 3.49 | −10.4 °C |
+| Antifrogen N | 25 % | 1050 | 4.15 | −13.6 °C |
+| Ethanol | 10 % | 982 | 2.82 | −4.5 °C |
+| Ethanol | 20 % | 969 | 4.29 | −10.5 °C |
+| Ethanol | 30 % | 654 | 5.96 | −20.5 °C |
+
+Damit ist geklärt, woher ρ = 1050 kg/m³ und ν = 4.15 mm²/s im Druckverlustblatt
+stammen: aus **Antifrogen N 25 %**. Die Zelle `Wärmeträger` beschriftet denselben
+Fall als «Et. glykol 28%» — die Beschriftung passt nicht zu den verwendeten
+Stoffwerten. Massgebend sind die Stoffwerte.
+
+Die Dichte 654 kg/m³ für Ethanol 30 % steht so in der Vorlage, ist aber für ein
+Ethanol-Wasser-Gemisch nicht plausibel (erwartet rund 950 kg/m³). Der Wert bleibt
+unverändert hinterlegt, erzeugt bei Auswahl aber eine Warnung.
+
+Die spezifische Wärmekapazität kommt in der Vorlage nicht vor. Sie ist ein
+Richtwert, sichtbar überschreibbar und wird nur gebraucht, wenn der Volumenstrom
+aus Quellenleistung und Sole-ΔT bestimmt wird statt aus dem WP-Datenblatt.
+
+### Bohrdurchmesser (SIA 384/6:2021, informativ)
+
+| Sondentyp | Hammerbohrung | Spülbohrung |
+| --- | --- | --- |
+| 32 mm Duplex | 115 mm | 4 ¾ ʺ (121 mm) |
+| 40 mm Duplex | 130 mm | 5 ⅜ ʺ (136 mm) |
+| 50 mm Duplex | 160 mm | 6 ½ ʺ (165 mm) |

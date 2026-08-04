@@ -110,7 +110,7 @@ def legende_zeilen(nodes: list, results: dict) -> list:
             if ex and "fehler" not in ex:
                 werte = f"VN {ex['vn_l']} l → {ex['vorschlag_l']} l · p0 {ex['p0_bar']} / pfin {ex['pfin_bar']} bar"
             elif ex:
-                werte = f"⚠ {ex['fehler']}"
+                werte = f"! {ex['fehler']}"
         elif t == "erzeuger":
             er = ergebnisse_erzeuger.get(n["id"], {})
             werte = " · ".join(x for x in [
@@ -144,7 +144,7 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
     for n in _sortiert(nodes):
         d = n.get("data") or {}
         t = n.get("type")
-        eingaben, resultate = [], []
+        eingaben, resultate, rechenweg, hinweise = [], [], [], []
         if t == "gruppe":
             c = gr.get(n["id"], {})
             schaltung = {"einspritz": "Einspritzschaltung (2WV)", "beimisch": "Beimischschaltung (3WV)",
@@ -303,9 +303,11 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
                 ("Formel", "V = Q · t · 60 / (c · ΔT · ρ) · 1000", ""),
             ]
         elif t == "erdsonden":
-            anzahl = max(1, min(24, int(_f(d.get("sonden_anzahl")) or 5)))
-            laenge = _f(d.get("sonden_laenge_m"))
             c = erdsonden_results.get(n["id"], {})
+            # Anzahl aus dem Rechenkern, damit PDF und Berechnung nicht
+            # auseinanderlaufen (die Auswahl im Editor ist auf 24 begrenzt).
+            anzahl = c.get("sonden_anzahl") or max(1, min(24, int(_f(d.get("sonden_anzahl")) or 5)))
+            laenge = _f(d.get("sonden_laenge_m"))
             eingaben = [("Ausführung", "Duplex (2 U-Rohre)", ""),
                         ("Anzahl Erdsonden", anzahl, ""),
                         ("Sondenlänge", laenge, "m"),
@@ -314,41 +316,75 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
                         ("Spezifische Entzugsleistung", d.get("entzugsleistung_w_m"), "W/m"),
                         ("Sicherheitsfaktor", c.get("sicherheitsfaktor"), ""),
                         ("Sondenrohr", c.get("sonden_aussendurchmesser_mm"), "mm"),
-                        ("Sonden-Innendurchmesser", c.get("sonden_innendurchmesser_mm"), "mm"),
-                        ("Glykolkonzentration", c.get("glykol_konzentration_pct"), "%"),
-                        ("Solevolumenstrom", c.get("sole_volumenstrom_m3h"), "m³/h"),
-                        ("Volumenstromquelle", c.get("volumenstromquelle"), ""),
-                        ("Kritischer Anschlussweg (einfach)", c.get("anschlussleitung_kritisch_m"), "m"),
-                        ("Alle Anschlussrohre (VL+RL)", c.get("anschlussleitung_gesamt_vl_rl_m"), "m"),
-                        ("Hauptleitung (einfach)", c.get("hauptleitung_m"), "m"),
-                        ("Sole-Dichte", c.get("sole_dichte_kg_m3"), "kg/m³"),
-                        ("Kinematische Viskosität", c.get("sole_viskositaet_mm2_s"), "mm²/s"),
-                        ("Rohrrauheit", c.get("rohrrauheit_mm"), "mm"),
-                        ("WP-Druckverlust", c.get("wp_druckverlust_mws"), "mWS"),
-                        ("Verteiler Σζ", c.get("verteiler_zeta"), "")]
+                        ("Glykolkonzentration", c.get("glykol_konzentration_pct"), "%")]
             resultate = [("Gewählte Gesamtbohrmeter", c.get("ist_gesamt_m"), "m"),
                           ("Erforderliche Gesamtbohrmeter", c.get("erforderlich_gesamt_m"), "m"),
                           ("Erforderliche Länge je Sonde", c.get("erforderlich_pro_sonde_m"), "m"),
                           ("Sondeninhalt", c.get("sondeninhalt_l"), "l"),
-                          ("Anschlussinhalt", c.get("anschlussinhalt_l"), "l"),
-                          ("Hauptleitungsinhalt", c.get("hauptleitungsinhalt_l"), "l"),
                           ("Soleinhalt gesamt", c.get("gesamtinhalt_l"), "l"),
                           ("Glykolbedarf", c.get("glykolbedarf_kg"), "kg"),
-                          ("Druckverlust Rohre", c.get("druckverlust_rohre_pa"), "Pa"),
-                          ("Förderhöhe Rohre", c.get("foerderhoehe_rohre_mws"), "mWS"),
-                          ("Förderhöhe Verteiler", c.get("foerderhoehe_verteiler_mws"), "mWS"),
-                          ("Pumpenförderhöhe gesamt", c.get("foerderhoehe_gesamt_mws"), "mWS"),
-                          ("Pumpendruck gesamt", c.get("foerderhoehe_gesamt_kpa"), "kPa"),
                           ("Bohrmeter-Formel", "Lerf = Q0 · 1000 / qE · SF", "")]
-            resultate.extend([
-                (f"{s.get('groesse')}: {s.get('formel')}",
-                 f"{s.get('eingesetzt')} = {s.get('ergebnis')}", "")
-                for s in c.get("rechenweg", [])
-            ])
+            dv = c.get("druckverlust") or {}
+            if dv:
+                rohre = dv.get("rohre") or {}
+                traeger = dv.get("waermetraeger") or {}
+                stufe = dv.get("druckstufe") or {}
+                def _rohr(schluessel):
+                    r = rohre.get(schluessel) or {}
+                    return (f"{r.get('bezeichnung')} (innen {r.get('innen_mm')} mm, {r.get('pn')})"
+                            if r else None)
+                eingaben += [
+                    ("— Solekreis —", "", ""),
+                    ("Rohr Erdwärmesonde", _rohr("sonde"), ""),
+                    ("Rohr Zuleitung Sonde–Verteiler", _rohr("zuleitung_verteiler"), ""),
+                    ("Kritischer Weg Sonde–Verteiler (einfach)", d.get("sole_zuleitung_verteiler_m"), "m"),
+                    ("Alle Anschlussrohre Sonde–Verteiler (VL+RL)",
+                     dv.get("zuleitung_verteiler_gesamt_vl_rl_m"), "m"),
+                    ("Rohr Zuleitung Verteiler–WP", _rohr("zuleitung_wp"), ""),
+                    ("Länge Zuleitung Verteiler–WP", d.get("sole_zuleitung_wp_m"), "m"),
+                    ("Inhalt WP und Expansion", dv.get("zusatzinhalt_l"), "l"),
+                    ("Solevolumenstrom", dv.get("volumenstrom_m3_h"), "m³/h"),
+                    ("Herkunft Volumenstrom", dv.get("volumenstrom_quelle"), ""),
+                    ("Wärmeträger", (f"{traeger.get('produkt')} {traeger.get('konzentration_pct')} %"
+                                     if traeger else None), ""),
+                    ("Frostschutz bis", traeger.get("frostschutz_c"), "°C"),
+                    ("Dichte Wärmeträger", dv.get("dichte_kg_m3"), "kg/m³"),
+                    ("Spez. Wärmekapazität", dv.get("cp_kj_kgk"), "kJ/kgK"),
+                    ("Kinematische Zähigkeit", dv.get("viskositaet_mm2_s"), "mm²/s"),
+                    ("Rohrrauheit", dv.get("rauheit_mm"), "mm"),
+                    ("Druckverlust Wärmepumpe", dv.get("druckverlust_wp_mws"), "mWs"),
+                    ("Zeta-Wert Verteiler", dv.get("zeta_verteiler"), ""),
+                ]
+                if stufe:
+                    eingaben += [
+                        ("Nenndruckstufe gewählt", stufe.get("gewaehlt_pn"), ""),
+                        ("Nenndruckstufe erforderlich",
+                         f"{stufe.get('pn')} ({stufe.get('bereich')})" if stufe.get("pn") else None,
+                         "SIA 384/6:2021"),
+                    ]
+                resultate += [("— Solekreis —", "", "")]
+                for ts in dv.get("teilstuecke") or []:
+                    resultate += [
+                        (f"{ts['name']}: w", _fmt(ts.get("geschwindigkeit_m_s"), 3), "m/s"),
+                        (f"{ts['name']}: Re", ts.get("reynolds"), f"— {ts.get('stroemungsart')}"),
+                        (f"{ts['name']}: Δp", _fmt(ts.get("druckverlust_mws"), 2), "mWs"),
+                    ]
+                resultate += [
+                    ("Füllinhalt total", dv.get("inhalt_total_l"), "l"),
+                    ("Wärmeträger (Vorlagenformel)", dv.get("waermetraeger_l"), "l"),
+                    ("Konzentrat volumetrisch", dv.get("konzentrat_volumetrisch_l"), "l"),
+                    ("Druckverlust Leitungen", dv.get("druckverlust_leitungen_mws"), "mWs"),
+                    ("Druckverlust Verteiler", dv.get("druckverlust_verteiler_mws"), "mWs"),
+                    ("Förderhöhe Solepumpe", dv.get("foerderhoehe_mws"), "mWs"),
+                    ("Fördervolumen Solepumpe", dv.get("foerdervolumen_m3_h"), "m³/h"),
+                ]
+                rechenweg = dv.get("rechenweg") or []
+                hinweise = dv.get("warnungen") or []
         else:
             continue
         abschnitte.append({"nr": d.get("nr"), "titel": TITEL.get(t, t), "bezeichnung": d.get("label") or "",
-                           "eingaben": eingaben, "resultate": resultate})
+                           "eingaben": eingaben, "resultate": resultate,
+                           "rechenweg": rechenweg, "hinweise": hinweise})
     return abschnitte
 
 
@@ -518,7 +554,7 @@ def _legende_seiten(c, zeilen, projekt_name, warnungen=None):
                 y = kopf(seite[1] - 80)
                 c.setFillColorRGB(0.73, 0.11, 0.11)
                 c.setFont("Helvetica-Bold", 9)
-            c.drawString(40, y, f"⚠ {w}")
+            c.drawString(40, y, f"! {w}")
             y -= 15
     c.showPage()
 
@@ -554,33 +590,75 @@ def _berechnungs_seiten(c, abschnitte, projekt_name):
             c.setFont("Helvetica", 9)
             c.setFillColorRGB(0.1, 0.12, 0.2)
             for name, wert, einheit in rows:
-                if y < 55:
+                if y < 60:
                     c.showPage()
                     y = kopf()
-                    c.setFont("Helvetica-Oblique", 8)
-                    c.drawString(60, y, f"{a['titel']} — Fortsetzung")
-                    y -= 14
                     c.setFont("Helvetica", 9)
-                name_text = str(name)
-                wert_text = "—" if wert in (None, "") else str(wert)
-                # Rechenwege enthalten bewusst vollständige Formeln und
-                # eingesetzte Werte. Lange Zeilen werden untereinander
-                # ausgegeben, damit nichts überdruckt oder abgeschnitten wird.
-                if len(name_text) + len(wert_text) + len(str(einheit)) > 76:
-                    c.drawString(70, y, name_text)
-                    y -= 11
-                    c.setFont("Helvetica", 8)
-                    c.drawString(85, y, f"{wert_text}{(' ' + str(einheit)) if einheit else ''}")
-                    c.setFont("Helvetica", 9)
-                    y -= 14
-                else:
-                    c.drawString(70, y, name_text)
-                    c.drawRightString(430, y, wert_text)
-                    c.drawString(440, y, einheit)
-                    y -= 13
+                    c.setFillColorRGB(0.1, 0.12, 0.2)
+                c.drawString(70, y, str(name))
+                c.drawRightString(430, y, "—" if wert in (None, "") else str(wert))
+                c.drawString(440, y, einheit)
+                y -= 13
             y -= 4
+
+        # Rechenweg: Formel, eingesetzte Werte und Ergebnis je Schritt. Ohne ihn
+        # ist die Zahl im Export nur eine Behauptung.
+        schritte = a.get("rechenweg") or []
+        if schritte:
+            c.setFont("Helvetica-Bold", 9)
+            c.setFillColorRGB(0.45, 0.5, 0.55)
+            c.drawString(60, y, "Rechenweg")
+            y -= 13
+            gruppe_aktiv = None
+            for s in schritte:
+                if y < 70:
+                    c.showPage()
+                    y = kopf()
+                    gruppe_aktiv = None
+                if s.get("gruppe") and s["gruppe"] != gruppe_aktiv:
+                    gruppe_aktiv = s["gruppe"]
+                    c.setFont("Helvetica-Bold", 8.5)
+                    c.setFillColorRGB(0.86, 0.15, 0.15)
+                    c.drawString(64, y, gruppe_aktiv)
+                    y -= 12
+                c.setFont("Helvetica-Bold", 8)
+                c.setFillColorRGB(0.1, 0.12, 0.2)
+                c.drawString(70, y, f"{s.get('groesse')}: {s.get('formel')}")
+                y -= 10
+                c.setFont("Helvetica", 8)
+                c.setFillColorRGB(0.35, 0.4, 0.45)
+                c.drawString(78, y, f"= {s.get('eingesetzt')}  →  {s.get('ergebnis')}")
+                y -= 12
+            y -= 4
+
+        for hinweis in a.get("hinweise") or []:
+            if y < 60:
+                c.showPage()
+                y = kopf()
+            c.setFont("Helvetica-Oblique", 8)
+            c.setFillColorRGB(0.57, 0.25, 0.05)
+            for zeile in _umbruch(hinweis, 105):
+                c.drawString(70, y, zeile)
+                y -= 11
+            y -= 2
+        c.setFillColorRGB(0.1, 0.12, 0.2)
         y -= 10
     c.showPage()
+
+
+def _umbruch(text: str, breite: int) -> list:
+    """Text auf feste Zeichenbreite umbrechen (Helvetica 8 pt, ~105 Zeichen)."""
+    zeilen, aktuell = [], ""
+    for wort in str(text).split():
+        kandidat = f"{aktuell} {wort}".strip()
+        if len(kandidat) > breite and aktuell:
+            zeilen.append(aktuell)
+            aktuell = wort
+        else:
+            aktuell = kandidat
+    if aktuell:
+        zeilen.append(aktuell)
+    return zeilen
 
 
 def erzeuge_pdf(projekt_name: str, schema_name: str, inhalt: str,

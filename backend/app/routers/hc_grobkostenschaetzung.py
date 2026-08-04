@@ -223,8 +223,16 @@ def _hat_erdsonden(waermeerzeuger: list) -> bool:
     return any(e == "ews_wp" or "erdsonde" in (e or "").lower() for e in (waermeerzeuger or []))
 
 
-_FLAECHIG = {"FBH", "TABS", "Wandheizung", "Deckenstrahlplatten"}
-_KOERPER = {"Heizkörper", "Konvektoren"}
+_FLAECHIG = {
+    "FBH", "TABS", "Wandheizung", "Deckenstrahlplatten",
+    "fbh", "tabs", "wandheizung", "deckenheizung", "deckenstrahlplatten",
+}
+_KOERPER = {
+    "Heizkörper", "Konvektoren",
+    "heizkoerper", "roehrenradiator", "plattenradiator", "konvektoren",
+    "geblaesekonvektor",
+}
+_LUFT = {"Lufterhitzer", "lufterhitzer", "luftheizapparat", "heizregister"}
 
 
 def _abgabe_dominant_von(waermeabgabe: list) -> Optional[str]:
@@ -237,7 +245,7 @@ def _abgabe_dominant_von(waermeabgabe: list) -> Optional[str]:
         return "FBH"
     if koerper:
         return "HK"
-    if "Lufterhitzer" in abgabe:
+    if abgabe & _LUFT:
         return "Luft"
     return None
 
@@ -259,7 +267,8 @@ def _positionen(r: RefProjekt, netto: bool) -> dict:
 
 
 def _ref_to_calc_dict(r: RefProjekt) -> dict:
-    waermeerzeuger = list(r.waermeerzeuger or [])
+    waermeerzeuger = fachwerte.normalize_list("generator_types", r.waermeerzeuger)
+    waermeabgabe = fachwerte.normalize_list("heat_delivery_types", r.waermeabgabe)
     return {
         "id": r.id, "name": r.name,
         "ebf_m2": r.ebf_m2, "leistung_kw": r.heizleistung_kw,
@@ -271,9 +280,9 @@ def _ref_to_calc_dict(r: RefProjekt) -> dict:
         "waermeerzeuger": waermeerzeuger,
         "erzeuger_signatur": erzeuger_signatur_von(waermeerzeuger),
         "wp_typ": _wp_typ_von(waermeerzeuger),
-        "abgabe_dominant": _abgabe_dominant_von(r.waermeabgabe),
-        "abgabe_klassen": abgabe_klassen_von(r.waermeabgabe),  # welche Abgabe-Kosten die Referenz liefern darf
-        "hat_erdsonden": _hat_erdsonden(r.waermeerzeuger),
+        "abgabe_dominant": _abgabe_dominant_von(waermeabgabe),
+        "abgabe_klassen": abgabe_klassen_von(waermeabgabe),  # welche Abgabe-Kosten die Referenz liefern darf
+        "hat_erdsonden": _hat_erdsonden(waermeerzeuger),
         "anzahl_ne": r.anzahl_einheiten,
         "bww_bei_heizung": r.bww_bei_heizung,
         "datum_abrechnung": r.datum,
@@ -304,10 +313,12 @@ def _berechne(body: SchaetzungIn, user: User, db: Session) -> tuple:
     ziel["zertifizierung"] = (
         fachwerte.normalize("certifications", body.zertifizierung) or body.zertifizierung
     )
-    ziel["erzeuger_signatur"] = erzeuger_signatur_von(body.waermeerzeuger)
-    ziel["wp_typ"] = _wp_typ_von(body.waermeerzeuger)
-    ziel["hat_erdsonden"] = _hat_erdsonden(body.waermeerzeuger)
-    ziel["abgabe_dominant"] = _abgabe_dominant_von(body.waermeabgabe)
+    ziel["waermeerzeuger"] = fachwerte.normalize_list("generator_types", body.waermeerzeuger)
+    ziel["waermeabgabe"] = fachwerte.normalize_list("heat_delivery_types", body.waermeabgabe)
+    ziel["erzeuger_signatur"] = erzeuger_signatur_von(ziel["waermeerzeuger"])
+    ziel["wp_typ"] = _wp_typ_von(ziel["waermeerzeuger"])
+    ziel["hat_erdsonden"] = _hat_erdsonden(ziel["waermeerzeuger"])
+    ziel["abgabe_dominant"] = _abgabe_dominant_von(ziel["waermeabgabe"])
 
     def rechne(variante_feld: str) -> dict:
         referenzen = [{**m, "positionen": m[variante_feld]} for m in refs]

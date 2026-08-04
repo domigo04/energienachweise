@@ -1,13 +1,6 @@
 // Grobkostenschätzung (BKP) — Labels, Farben, Formatierung.
 // Enum-Werte müssen exakt zum Backend passen (models/grobkostenschaetzung.py).
 
-// Nutzungen und Projektarten — dieselben Listen wie in der Auswertung
-// (kv.js), denn die Grobkostenschätzung rechnet direkt auf deren Daten:
-// der Hard-Filter vergleicht die Projektart wortwörtlich.
-import { GEBAEUDETYPEN, PROJEKTARTEN as KV_PROJEKTARTEN } from "./kv";
-export const NUTZUNGEN = GEBAEUDETYPEN.map((n) => ({ value: n, label: n }));
-export const PROJEKTARTEN = KV_PROJEKTARTEN.map((p) => ({ value: p, label: p }));
-
 export const WP_TYPEN = [
   { value: "sole", label: "Sole/Wasser-WP" },
   { value: "luft", label: "Luft/Wasser-WP" },

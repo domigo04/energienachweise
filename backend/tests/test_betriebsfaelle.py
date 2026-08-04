@@ -98,13 +98,27 @@ def test_mischventil_erzeugt_keine_betriebsfaelle():
     assert r["ventil_results"]["uv"].get("funktion") is None
 
 
-def test_umschaltventil_bekommt_kein_kvs():
-    """Es wird nichts gedrosselt — ein kvs wäre hier eine erfundene Zahl."""
-    r = berechne_schema(*_schema())
-    ventil = r["ventil_results"]["uv"]
+def test_umschaltventil_erzeugt_gar_kein_ventilergebnis():
+    """Es wird nichts gedrosselt — ein kvs wäre hier eine erfundene Zahl.
 
-    assert ventil["funktion"] == "umschaltend"
-    assert "kvs_eff" not in ventil and "pv" not in ventil
+    Entscheidend ist, dass **kein** Eintrag entsteht: Ein halb gefülltes
+    Ergebnis wird von jeder Anzeige als Ventilauslegung gelesen und läuft dort
+    in fehlende Felder. Genau daran ist der Editor mit weisser Seite
+    abgestürzt, sobald ein Ventil auf «umschaltend» gestellt wurde.
+    """
+    r = berechne_schema(*_schema())
+
+    assert "uv" not in r["ventil_results"]
+
+
+def test_jedes_ventilergebnis_ist_vollstaendig():
+    """Anzeigen dürfen sich auf die Felder eines Ventilergebnisses verlassen."""
+    nodes, edges = _schema(funktion="mischend")
+    r = berechne_schema(nodes, edges)
+
+    for knoten_id, ventil in r["ventil_results"].items():
+        for feld in ("v", "kvs_theor", "kvs_vorschlag", "kvs_eff", "pv"):
+            assert ventil.get(feld) is not None, f"{knoten_id}: {feld} fehlt"
 
 
 def test_fehlende_bww_angaben_werden_benannt_statt_geraten():

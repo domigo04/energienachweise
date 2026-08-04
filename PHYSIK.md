@@ -517,6 +517,13 @@ eine Temperatur und wird über kvs und Ventilautorität ausgelegt (§3). Das
 **umschaltende** Ventil kennt nur zwei Stellungen; es wird nicht gedrosselt und
 bekommt deshalb kein kvs.
 
+Ein Umschaltventil erzeugt deshalb **gar kein** Ventilergebnis — nicht etwa ein
+teilweise gefülltes. Jede Anzeige darf sich darauf verlassen, dass ein
+vorhandenes Ventilergebnis vollständig ist (kvs und Ventilautorität). Ein halb
+gefüllter Eintrag wurde von der Legende als Ventilauslegung gelesen und riss den
+Editor mit einer weissen Seite ab, sobald ein Ventil auf «umschaltend» gestellt
+wurde. Zwei Tests halten das fest.
+
 Sitzt ein Umschaltventil im Kreis zwischen Wärmepumpe und technischem Speicher,
 läuft die Anlage entweder im Brauchwarmwasser- oder im Heizbetrieb — nie in
 beiden zugleich. Daraus folgt die zentrale Regel:

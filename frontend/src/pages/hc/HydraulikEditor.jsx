@@ -752,7 +752,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
               <div style={{ fontSize:9, color:'#94a3b8', marginTop:4 }}>Keine Einspritzung — primär = sekundär.</div>
             )}
             {gr.pumpe?.dp_kpa != null && ro('Pumpe Förderhöhe', `${gr.pumpe.dp_kpa.toFixed(1)} kPa = ${gr.pumpe.mws.toFixed(2)} mWS`, '')}
-            {gr.ventil && ro('Ventil kvs / Autorität', `${gr.ventil.kvs_eff} / ${gr.ventil.pv.toFixed(1)} %`, '')}
+            {gr.ventil?.pv != null && ro('Ventil kvs / Autorität', `${gr.ventil.kvs_eff} / ${gr.ventil.pv.toFixed(1)} %`, '')}
             <div style={{ fontSize:9, color:'#94a3b8', marginTop:4 }}>Pumpe + Ventil auslegen: <b>Doppelklick</b> auf den Strang.</div>
           </>
         ) : (
@@ -1408,13 +1408,36 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, onUpdate, onClos
       </div>
     );
   } else if (node.type === 'valve2' || node.type === 'valve3') {
-    body = (
+    const umschaltend = node.type === 'valve3' && (d.funktion || 'mischend') === 'umschaltend';
+    body = umschaltend ? (
       <div style={{ display:'grid', gap:12 }}>
+        <div><label style={lbl}>Funktion</label>
+          <select style={{...inp,cursor:'pointer'}} value={d.funktion||'mischend'} onChange={e=>set('funktion',e.target.value)}>
+            <option value="mischend">Mischend — regelt eine Temperatur</option>
+            <option value="umschaltend">Umschaltend — zwei Stellungen (BWW-Vorrang)</option>
+          </select></div>
+        <BigVal label="Durchfluss V' (aus der Leitung)" value={v?v.toFixed(4):null} unit="m³/h" color="#15803d"/>
+        <div style={{ fontSize:11, lineHeight:1.6, color:'#334155' }}>
+          Ein Umschaltventil kennt zwei Stellungen und drosselt nicht. Es bekommt deshalb
+          weder Δpvar noch kvs noch eine Ventilautorität. Zwischen Wärmepumpe und technischem
+          Speicher heisst das: <b>entweder Brauchwarmwasser oder Verbrauchergruppen</b>.
+          Die beiden Betriebsfälle stehen bei der Wärmepumpe.
+        </div>
+      </div>
+    ) : (
+      <div style={{ display:'grid', gap:12 }}>
+        {node.type === 'valve3' && (
+          <div><label style={lbl}>Funktion</label>
+            <select style={{...inp,cursor:'pointer'}} value={d.funktion||'mischend'} onChange={e=>set('funktion',e.target.value)}>
+              <option value="mischend">Mischend — regelt eine Temperatur</option>
+              <option value="umschaltend">Umschaltend — zwei Stellungen (BWW-Vorrang)</option>
+            </select></div>
+        )}
         <BigVal label="Durchfluss V' (aus der Leitung)" value={v?v.toFixed(4):null} unit="m³/h" color="#15803d"
           sub={v?'kommt automatisch aus dem Schema':'Bauteil in eine Leitung mit Durchfluss setzen'}/>
         <div><label style={lbl}>Δpvar — Druckabfall variabler Anlagenteil [kPa]</label>
           <input type="number" style={inp} value={d.dp_var??''} onChange={e=>set('dp_var',e.target.value)} placeholder="26"/></div>
-        {ver ? <>
+        {ver?.kvs_theor != null ? <>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
             <BigVal label="kvs theoretisch" value={Number(ver.kvs_theor).toFixed(3)} color="#1e293b"/>
             <BigVal label="kvs Vorschlag" value={ver.kvs_vorschlag} color="#1d4ed8" sub="nächstgrösser, Norm-Reihe"/>
@@ -1892,6 +1915,9 @@ function ResultBox({ v, label, unit }) {
   );
 }
 function PvBox({ pv, v, kvs_eff }) {
+  // Ohne Autorität gibt es nichts anzuzeigen. Früher lief die Komponente hier
+  // in pv.toFixed() und riss den ganzen Editor mit (weisse Seite).
+  if (typeof pv !== 'number' || !Number.isFinite(pv)) return null;
   const col = pv<30?'#dc2626':pv>80?'#ca8a04':'#15803d';
   const bg  = pv<30?'#fef2f2':pv>80?'#fefce8':'#f0fdf4';
   const bd  = pv<30?'#fca5a5':pv>80?'#fde047':'#86efac';
@@ -4558,7 +4584,7 @@ function EditorInner() {
           const c = gruppeResults[n.id] || {};
           const sn = { einspritz: 'Einspritz', beimisch: 'Beimisch', drossel: 'Drossel' }[schaltungVon(d)];
           const bez = d.label || 'Gruppe';
-          werte = `${sn} · ${d.q_kw ?? '—'} kW · ${d.vl_temp ?? '—'}/${d.rl_temp ?? '—'} °C · sek ${fx(c.m_sek)} / prim ${fx(c.m_prim)} m³/h${d.dp_kpa ? ` · Δp ${d.dp_kpa} kPa` : ''}${d.hat_wz ? ' · WZ' : ''}${c.pumpe?.dp_kpa != null ? ` · ${bez} Pumpe ${c.pumpe.dp_kpa.toFixed(1)} kPa` : ''}${c.ventil ? ` · ${bez} Ventil kvs ${c.ventil.kvs_eff} (Pv ${c.ventil.pv.toFixed(1)}%)` : ''}`;
+          werte = `${sn} · ${d.q_kw ?? '—'} kW · ${d.vl_temp ?? '—'}/${d.rl_temp ?? '—'} °C · sek ${fx(c.m_sek)} / prim ${fx(c.m_prim)} m³/h${d.dp_kpa ? ` · Δp ${d.dp_kpa} kPa` : ''}${d.hat_wz ? ' · WZ' : ''}${c.pumpe?.dp_kpa != null ? ` · ${bez} Pumpe ${c.pumpe.dp_kpa.toFixed(1)} kPa` : ''}${c.ventil?.pv != null ? ` · ${bez} Ventil kvs ${c.ventil.kvs_eff} (Pv ${c.ventil.pv.toFixed(1)}%)` : ''}`;
         } else if (n.type === 'heizkreis') {
           werte = `${d.q_kw ?? '—'} kW · ${d.vl_temp ?? '—'}/${d.rl_temp ?? '—'} °C · V' ${fx(nodeFlows[n.id])} m³/h`;
         } else if (n.type === 'verteiler') {
@@ -4569,7 +4595,9 @@ function EditorInner() {
           werte = `V' ${fx(p.v ?? nodeFlows[n.id])} m³/h${p.foerderhoehe_kpa != null ? ` · Förderhöhe ${p.foerderhoehe_kpa.toFixed(1)} kPa${p.dp_ast_kpa ? ` (gemeinsam ${p.dp_gemeinsam_kpa ?? 0} + Ast ${p.dp_ast_kpa})` : ''}` : ''}`;
         } else if (n.type === 'valve2' || n.type === 'valve3') {
           const ve = ventilResults[n.id];
-          werte = `V' ${fx(nodeFlows[n.id])} m³/h${ve ? ` · kvs ${ve.kvs_eff} · Pv ${ve.pv.toFixed(1)} %` : ''}`;
+          const umschalt = n.type === 'valve3' && (n.data?.funktion || 'mischend') === 'umschaltend';
+          werte = `V' ${fx(nodeFlows[n.id])} m³/h${umschalt ? ' · Umschaltventil (BWW-Vorrang)' : ''}`
+            + (ve?.pv != null ? ` · kvs ${ve.kvs_eff} · Pv ${ve.pv.toFixed(1)} %` : '');
         } else if (n.type === 'waermezaehler') {
           werte = [d.typ, `V' ${fx(nodeFlows[n.id])} m³/h (aus Leitung)`].filter(Boolean).join(' · ');
         } else if (n.type === 'expansion') {

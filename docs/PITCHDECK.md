@@ -8,15 +8,25 @@ Das Deck ist ein Verkaufsdokument. Es darf nur behaupten, was in
 `docs/PILOT_SCOPE_V1.md`, `docs/PILOT_PLAN.md`, `docs/PITCH_READINESS.md` und
 `PHYSIK.md` belegt ist.
 
-## Publikum
+## Zwei Varianten
 
-Das Deck wird einem bereits geeigneten Heizungsplanungsbüro gezeigt: heute
-Pilotkunde, nach dem Marktstart Lizenznehmer. Es qualifiziert das Büro nicht
-mehr vor — diese Auswahl ist vor dem Termin passiert.
+Eine Komponente, zwei Foliensätze aus `PITCH_DECKS`:
 
-## Aufbau
+| Variante | Route | Publikum |
+| --- | --- | --- |
+| Kunde (Standard) | `/admin/pitchdeck/:slideId?` | ein bereits ausgewähltes Heizungsplanungsbüro: heute Pilotkunde, nach dem Marktstart Lizenznehmer |
+| Investor | `/admin/pitchdeck/investor/:slideId?` | Kapitalgeber, die Anteile kaufen |
 
-Hauptteil (12 Folien):
+Die Investorenvariante trägt oben rechts einen amberfarbenen Hinweis
+«Investoren», damit im Termin nie der falsche Satz läuft.
+
+**Die Trennlinie ist inhaltlich, nicht kosmetisch.** Marktgrösse in Lizenzen,
+wiederkehrender Jahresumsatz, Entwicklungskosten und Unternehmensbewertung
+stehen ausschliesslich in der Investorenvariante. Ein Büro, das eine Lizenz
+kauft, will wissen, was es ihm bringt und was es kostet — nicht, wie viele
+Lizenzen sich theoretisch verkaufen liessen.
+
+### Kundenvariante (12 Folien)
 
 1. SIREGO – wer dahinter steht, mit Porträt
 2. Eine Änderung. Fünf Excel neu. – das Problem
@@ -25,25 +35,48 @@ Hauptteil (12 Folien):
 5. Das Heizungscockpit erklärt
 6. Der Weg zum Marktstart – MVP-Timeline
 7. Was Sie bekommen – Leistungen im Piloten
-8. Marktpotenzial
-9. Die Finanzierung
-10. Bis zum Marktstart – Funding
-11. Lizenzen bei erfolgreichem Marktstart
+8. Der Bedarf verschwindet nicht
+9. Was es Ihnen bringt – Nutzen pro Planer
+10. Was als Nächstes kommt – Ausbaustufen
+11. Pilot und Lizenz – Preise
 12. Heizungscockpit näher kennenlernen – Kontakt und QR-Code
 
-Anhang (6 Folien): Funktionsstatus heute, Nutzenhypothese, LV und
-Kostenintelligenz, technische Gates, Daten und Datenschutz,
-Berechnungsannahmen. Der Funktionsstatus liegt bewusst im Anhang: im Hauptteil
-wird das Zielbild gezeigt, für Rückfragen steht die ehrliche Abgrenzung bereit.
+Anhang: Funktionsstatus heute, LV und Kostenintelligenz, technische Gates,
+Daten und Datenschutz, Berechnungsannahmen. Der Funktionsstatus liegt bewusst
+im Anhang: im Hauptteil wird das Zielbild gezeigt, für Rückfragen steht die
+ehrliche Abgrenzung bereit.
+
+### Investorenvariante (12 Folien)
+
+SIREGO · Problem · Lösung · Heizungscockpit erklärt · **Marktgrösse** ·
+Nutzen beim Kunden · Preismodell · Ausbaustufen · **Entwicklungskosten** ·
+**Bewertung** · MVP-Timeline · Kontakt. Anhang zusätzlich mit «Der Bedarf» als
+Grundlage der Marktzahlen.
 
 ## Kaufmännische Angaben
 
-Marktgrössen, Finanzierungsbedarf und Lizenzkonditionen stehen in
-`PITCH_ZAHLEN` in `pitchDeckContent.js`. Leere Felder erscheinen im Deck
-sichtbar als amber gestricheltes «einzutragen» — sie werden bewusst nicht
-geschätzt. Belegt sind nur die Werte aus `docs/PILOT_PLAN.md`: Pilotbeitrag
-CHF 5'000 für drei begleitete Monate und die Core-Lizenz von CHF 4'000–6'000
-pro Büro und Jahr.
+Alle Zahlen stehen in `pitchDeckContent.js`: `PITCH_ZAHLEN` für die
+Kundenvariante, `PITCH_INVESTOR` für die Investorenvariante. Leere Felder
+erscheinen im Deck sichtbar als amber gestricheltes «einzutragen» — nichts wird
+geschätzt.
+
+Kundenseitig: 25'000 Heizungsplanungs-Workflows pro Jahr (Bandbreite
+17'000–35'000), 936'000 noch fossil beheizte Wohngebäude, 15 Projekte pro
+Planer und Jahr, 8 Stunden Einsparung je Projekt, CHF 600 interne Einsparung
+und CHF 1'120 freigesetzte verrechenbare Kapazität je Projekt, Amortisation
+nach rund vier Projekten. Preise: Pilot CHF 7'500 für zwölf Wochen und zwei
+reale Projekte; Lizenz pro Nutzer und Jahr CHF 1'680 / 2'640 / 3'600–4'800.
+
+Investorenseitig zusätzlich: 900–1'800 Firmenkunden, 2'800–6'000 Lizenzen
+(Basis rund 4'200 Nutzer), CHF 5–20 Mio. wiederkehrender Jahresumsatz (Basis
+rund 12 Mio.), CHF 15 Mio. Effizienzpotenzial beim Kunden, Entwicklungskosten
+und Bewertung.
+
+**Nicht mit `docs/PILOT_PLAN.md` deckungsgleich:** Der Plan nennt CHF 5'000 für
+drei begleitete Monate und eine Core-Lizenz von CHF 4'000–6'000 pro Büro und
+Jahr. Das Deck folgt der neueren Vorgabe: CHF 7'500 für zwölf Wochen und ein
+Lizenzmodell pro Nutzer. Ob der Pilotplan nachgezogen wird, entscheidet
+Dominic.
 
 Die Fusszeile zählt Hauptteil und Anhang getrennt (`pitchPosition`). Anhangfolien
 haben in der Punktleiste eckige statt runde Punkte.

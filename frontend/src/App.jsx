@@ -128,7 +128,9 @@ export default function App() {
           {/* Schema-Editor: Vollbild-Canvas, ausserhalb der gepolsterten Shell */}
           <Route path="/projekte/:id/schema" element={<ProtectedRoute><Suspense fallback={<div className="flex h-screen items-center justify-center text-sm text-slate-500">Hydraulikschema wird geladen…</div>}><HydraulikEditor /></Suspense></ProtectedRoute>} />
 
-          {/* Internes Pitchdeck: Vollbild und ausschliesslich für Plattformadmins. */}
+          {/* Internes Pitchdeck: Vollbild und ausschliesslich für Plattformadmins.
+              Zwei Varianten aus derselben Komponente — Kunde und Investor. */}
+          <Route path="/admin/pitchdeck/investor/:slideId?" element={<AdminRoute><PageLoader><PitchDeck variante="investor" /></PageLoader></AdminRoute>} />
           <Route path="/admin/pitchdeck/:slideId?" element={<AdminRoute><PageLoader><PitchDeck /></PageLoader></AdminRoute>} />
 
           {/* Alte Routen umleiten + Fallback */}

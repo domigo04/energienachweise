@@ -39,6 +39,16 @@
   font-weight: 700;
 }
 .pitch-brand img { width: 23px; height: 23px; object-fit: contain; filter: grayscale(1); opacity: .5; }
+.pitch-brand i {
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--pitch-auto) 16%, transparent);
+  color: var(--pitch-auto);
+  font-size: 11px;
+  font-style: normal;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
 
 .pitch-slide {
   box-sizing: border-box;
@@ -203,6 +213,7 @@
 }
 .pitch-case__input b { display: block; margin: 10px 0 3px; font-size: clamp(28px, 3.1vw, 40px); letter-spacing: -.04em; line-height: 1; }
 .pitch-case__input > span { display: block; color: var(--pitch-muted); font-size: 13.5px; }
+.pitch-case__input--preis { margin-top: 30px; }
 .pitch-case .pitch-shot { margin-top: 14px; }
 .pitch-case .pitch-shot img { height: 21vh; max-height: none; object-position: 50% 46%; }
 
@@ -358,6 +369,7 @@
 .pitch-range span { color: var(--pitch-muted); font-size: 18px; }
 .pitch-open { display: inline-flex; align-items: center; gap: 9px; margin-top: 24px; padding: 10px 16px; border: 1px solid color-mix(in srgb, var(--pitch-auto) 40%, transparent); border-radius: 999px; color: var(--pitch-auto); font-weight: 700; }
 .pitch-open svg { width: 18px; }
+.pitch-open--ok { border-color: color-mix(in srgb, var(--pitch-ok) 40%, transparent); color: var(--pitch-ok); }
 .pitch-bands { display: grid; gap: 11px; }
 .pitch-bands > div { display: grid; grid-template-columns: 1fr auto; gap: 2px 16px; padding: 18px 22px; border-radius: 16px; background: var(--pitch-card); border: 1px solid var(--pitch-card-line); }
 .pitch-bands span { grid-area: 1 / 1; font-weight: 650; font-size: clamp(15px, 1.5vw, 19px); }
@@ -373,6 +385,7 @@
 
 .pitch-gates { margin: 5vh 0 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
 .pitch-gates li { padding: 22px 18px; border-radius: 18px; background: var(--pitch-card); border-top: 4px solid var(--pitch-ok); }
+.pitch-gates li.is-jetzt { border-top-color: var(--pitch-blue); background: rgba(255,255,255,.75); }
 .pitch-gates span { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--pitch-blue-deep); color: #fff; font-weight: 750; }
 .pitch-gates b { display: block; margin: 14px 0 8px; font-size: 18px; }
 .pitch-gates p { margin: 0; color: var(--pitch-muted); font-size: 14px; line-height: 1.4; }

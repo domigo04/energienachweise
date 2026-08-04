@@ -17,12 +17,11 @@ from app.calculations.expansion import berechne_expansion
 from app.calculations.leitungsdimension import automatische_dimension
 from app.calculations.schema_sizing import erdsondenfeld, technischer_speicher
 from app.calculations.sole_druckverlust import (
-    INNENDURCHMESSER_MM,
     RAUHEIT_MM_STD,
     ZETA_VERTEILER_STD,
     sole_druckverlust,
-    waermetraeger_vorgabe,
 )
+from app.calculations.sole_rohre import ROHRE, WAERMETRAEGER
 from app.calculations.ventil import berechne_kvs
 from app.calculations.waermepumpe import berechne_waermepumpe
 from app.data.generator_types import SOURCE_CIRCUIT_TYPES
@@ -60,29 +59,32 @@ def _sole_druckverlust(d: dict, quellenleistung_kw):
         wert = _zahl(d.get(key))
         return wert if wert is not None else standard
 
-    rohr = int(zahl("sonden_rohr_mm", 32) or 32)
-    d_sonde = zahl("sole_id_sonde_mm") or INNENDURCHMESSER_MM.get(rohr)
-    if not d_sonde:
-        return {"warnungen": ["Innendurchmesser der Erdwärmesonde fehlt."]}
+    # Durchmesser kommen ausschliesslich aus der Rohrauswahl. Ein
+    # Innendurchmesser ohne zugehöriges Rohr wäre nicht bestellbar und hätte
+    # keine Nenndruckstufe.
+    sonde = ROHRE.get(d.get("sole_rohr_sonde") or "", ROHRE["pe32x2.9"])
+    verteiler = ROHRE.get(d.get("sole_rohr_zuleitung_verteiler") or "", ROHRE["pe50x4.7"])
+    wp = ROHRE.get(d.get("sole_rohr_zuleitung_wp") or "", ROHRE["pe50x4.7"])
     tiefe = zahl("sonden_laenge_m")
     if not tiefe:
         return {"warnungen": ["Sondentiefe fehlt; ohne sie ist der Solekreis nicht berechenbar."]}
-    vorgabe = waermetraeger_vorgabe(zahl("glykol_pct", 30))
+    vorgabe = WAERMETRAEGER.get(d.get("sole_traeger") or "", WAERMETRAEGER["antifrogen_n_25"])
     try:
-        return sole_druckverlust(
+        ergebnis = sole_druckverlust(
             sonden_anzahl=int(zahl("sonden_anzahl", 5) or 5),
             sonden_tiefe_m=tiefe,
-            sonden_innen_d_mm=d_sonde,
+            sonden_innen_d_mm=sonde["innen_mm"],
+            sonden_pn=sonde["pn"],
             sonden_straenge=2 if d.get("sonden_bauart") == "einfach" else 4,
             zuleitung_verteiler_m=zahl("sole_zuleitung_verteiler_m", 0),
-            zuleitung_verteiler_innen_d_mm=zahl("sole_id_zuleitung_verteiler_mm"),
+            zuleitung_verteiler_innen_d_mm=verteiler["innen_mm"],
             zuleitung_wp_m=zahl("sole_zuleitung_wp_m", 0),
-            zuleitung_wp_innen_d_mm=zahl("sole_id_zuleitung_wp_mm"),
+            zuleitung_wp_innen_d_mm=wp["innen_mm"],
             zusatzinhalt_l=zahl("sole_zusatzinhalt_l", 0),
             volumenstrom_m3_h=zahl("sole_volumenstrom_m3h"),
             quellenleistung_kw=quellenleistung_kw,
             sole_dt_k=zahl("sole_dt_k"),
-            konzentration_pct=zahl("glykol_pct", 30),
+            konzentration_pct=zahl("glykol_pct", vorgabe["konzentration_pct"]),
             dichte_kg_m3=zahl("sole_dichte_kg_m3", vorgabe["dichte_kg_m3"]),
             cp_kj_kgk=zahl("sole_cp_kj_kgk", vorgabe["cp_kj_kgk"]),
             viskositaet_mm2_s=zahl("sole_viskositaet_mm2_s", vorgabe["viskositaet_mm2_s"]),
@@ -93,6 +95,12 @@ def _sole_druckverlust(d: dict, quellenleistung_kw):
         )
     except ValueError as exc:
         return {"warnungen": [str(exc)]}
+    ergebnis["rohre"] = {"sonde": sonde, "zuleitung_verteiler": verteiler,
+                         "zuleitung_wp": wp}
+    ergebnis["waermetraeger"] = vorgabe
+    if vorgabe.get("warnung"):
+        ergebnis["warnungen"] = ergebnis.get("warnungen", []) + [vorgabe["warnung"]]
+    return ergebnis
 
 
 def _bauteil_auslegungen(nodes, verteiler_results, heatpump_results):

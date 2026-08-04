@@ -309,8 +309,9 @@ Verteiler, Zuleitung Verteiler bis Wärmepumpe.
   Einfach-U = 2.
 - `V_Zuleitung = π/4 · d² · L · 2` (Vor- und Rücklauf).
 - `V_total = V_Sonde + V_ZulVerteiler + V_ZulWP + V_WP/Expansion`.
-- Innendurchmesser Normsonden SDR 11: 25 mm → 20.4, 32 mm → 26.2, 40 mm → 32.6.
-- Der Innendurchmesser bleibt frei überschreibbar; die Tabelle ist nur Vorgabe.
+- Der Innendurchmesser ist **keine freie Eingabe**, sondern folgt aus der Rohrauswahl.
+  Ein Durchmesser ohne zugehöriges Rohr wäre nicht bestellbar und hätte keine
+  Nenndruckstufe. Tabelle in `backend/app/calculations/sole_rohre.py`.
 
 ### Wärmeträger
 - Vorlagenformel (B25): `V_Glykol = V_total · 1000 / 100 · Konzentration / ρ`.
@@ -363,11 +364,90 @@ Verteiler, Zuleitung Verteiler bis Wärmepumpe.
 - In der Erdwärmesonde ist mindestens «turbulent glatt» gefordert, sonst stimmt der
   Wärmeübergang zum Erdreich nicht. Laminare Sonden werden gewarnt; in den Zuleitungen
   ist Laminarströmung zulässig.
-- Stoffwerte: nur die 28-%-Zeile (ρ 1050 kg/m³, ν 4.15 mm²/s) stammt aus der Vorlage.
-  Die übrigen Zeilen sind Richtwerte für Ethylenglykol bei 0 °C mittlerer Soletemperatur
-  und vom Fachplaner gegen das Produktdatenblatt zu prüfen. Der Temperaturbezug der
-  Vorlage ist nicht dokumentiert; ν = 4.15 mm²/s liegt über dem 0-°C-Literaturwert.
+- Stoffwerte stammen vollständig aus den Zellkommentaren der Vorlage (siehe §19).
+  Die spezifische Wärmekapazität steht dort nicht und bleibt ein Richtwert.
 - Einzelwiderstände ausser dem Verteiler (Bögen, Armaturen, Sondenfuss) sind nicht
   enthalten und über den Zeta-Wert oder einen Zuschlag zu berücksichtigen.
 - Alle Zahlen sind eine Planungshilfe. Die Verantwortung für die Auslegung bleibt beim
   Fachplaner; der Rechenweg ist deshalb im Bauteil und im PDF vollständig ausgewiesen.
+
+## 19. Rohre, Druckstufen und Wärmeträger der Erdsonden (2026-08-04)
+Quellen: SIA 384/6:2021 «Erdwärmesonden», wiedergegeben in der FWS-Präsentation
+«WP-/EWS-Technik Update 2021» (Dr. Walter J. Eugster), sowie die Zellkommentare
+in `Erdsonden.xlsx`. Tabelle in `backend/app/calculations/sole_rohre.py`,
+Auswahlliste gespiegelt in `frontend/src/pages/hc/schema/soleTabellen.js`
+(Abgleich durch `test_frontend_auswahllisten_bleiben_deckungsgleich`).
+
+### Rohrmasse (SIA 384/6:2021 Tabelle 10)
+
+| Aussen | Innen | Wand | Nenndruck | SDR |
+| --- | --- | --- | --- | --- |
+| 32 mm | 26.0 mm | 3.0 mm | PN 16 | SDR 11 |
+| 40 mm | 32.6 mm | 3.7 mm | PN 16 | SDR 11 |
+| 40 mm | 31.0 mm | 4.5 mm | PN 20 | SDR 9 |
+| 40 mm | 29.2 mm | 5.4 mm | PN 25 | SDR 7.4 |
+| 50 mm | 40.8 mm | 4.6 mm | PN 16 | SDR 11 |
+| 50 mm | 38.8 mm | 5.6 mm | PN 20 | SDR 9 |
+| 50 mm | 36.4 mm | 6.9 mm | PN 25 | SDR 7.4 |
+| 50 mm | 32.0 mm | 8.9 mm | PN 32 | SDR 5.6 |
+
+Zusätzlich wählbar bleiben die beiden Masse der Excel-Vorlage, damit bestehende
+Berechnungen nachvollziehbar bleiben: `PE 32 × 2.9` mit innen 26.2 mm und
+`PE 50 × 4.7` mit innen 40.6 mm. **Offener Punkt:** Die Norm nennt für das
+32er-Sondenrohr 26.0 mm, die Vorlage rechnet mit 26.2 mm. Die Zellkommentare der
+Vorlage widersprechen sich hier selbst (26.20 beim Sondenrohr, 26.00 bei den
+Zuleitungen). Fachlicher Entscheid offen; der Unterschied bewegt Re um rund 1 %.
+
+Die Tabelle 10 nennt für das 50er-PN-32-Rohr eine Wanddicke von 7.2 mm, was zum
+angegebenen Innendurchmesser von 32 mm nicht passt. Übernommen wird der
+Innendurchmesser (massgebend für die Strömung); die Wanddicke folgt SDR 5.6.
+
+### Nenndruckstufe nach Sondentiefe (SIA 384/6:2021, informativ)
+
+| Tiefenbereich | Max. Überdruck am Sondenfuss | Nenndruckstufe |
+| --- | --- | --- |
+| 0–170 m | 20 bar | PN 16 |
+| 171–200 m | 24 bar | PN 20 |
+| 201–260 m | 30 bar | PN 25 |
+| 261–360 m | 41 bar | PN 32 |
+
+Der Überdruck enthält 3 bar Betriebsdruck. Das gewählte Sondenrohr bringt seine
+Nenndruckstufe mit; liegt sie unter der für die Tiefe geforderten, wird gewarnt.
+Über 360 m endet die Tabelle — dort ist die Druckstufe fachlich festzulegen.
+
+Zulässige Differenzdrücke je Druckstufe (Tabelle 8) sind in `DRUCKSTUFEN`
+hinterlegt: PN 16/SDR 11 bis PN 40/SDR 5, je mit Prüf- und Betriebsgrenzen.
+
+### Wärmeträger (Zellkommentare `Erdsonden.xlsx`)
+
+| Produkt | Anteil | ρ [kg/m³] | ν [mm²/s] | Frostschutz |
+| --- | --- | --- | --- | --- |
+| Antifrogen L (Propylenglykol) | 21.4 % | 1028 | 5.03 | −8.0 °C |
+| Antifrogen L | 25 % | 1033 | 5.98 | −10.1 °C |
+| Antifrogen L | 30 % | 1039 | 7.65 | −13.5 °C |
+| Antifrogen N (Ethylenglykol) | 20 % | 1040 | 3.49 | −10.4 °C |
+| Antifrogen N | 25 % | 1050 | 4.15 | −13.6 °C |
+| Ethanol | 10 % | 982 | 2.82 | −4.5 °C |
+| Ethanol | 20 % | 969 | 4.29 | −10.5 °C |
+| Ethanol | 30 % | 654 | 5.96 | −20.5 °C |
+
+Damit ist geklärt, woher ρ = 1050 kg/m³ und ν = 4.15 mm²/s im Druckverlustblatt
+stammen: aus **Antifrogen N 25 %**. Die Zelle `Wärmeträger` beschriftet denselben
+Fall als «Et. glykol 28%» — die Beschriftung passt nicht zu den verwendeten
+Stoffwerten. Massgebend sind die Stoffwerte.
+
+Die Dichte 654 kg/m³ für Ethanol 30 % steht so in der Vorlage, ist aber für ein
+Ethanol-Wasser-Gemisch nicht plausibel (erwartet rund 950 kg/m³). Der Wert bleibt
+unverändert hinterlegt, erzeugt bei Auswahl aber eine Warnung.
+
+Die spezifische Wärmekapazität kommt in der Vorlage nicht vor. Sie ist ein
+Richtwert, sichtbar überschreibbar und wird nur gebraucht, wenn der Volumenstrom
+aus Quellenleistung und Sole-ΔT bestimmt wird statt aus dem WP-Datenblatt.
+
+### Bohrdurchmesser (SIA 384/6:2021, informativ)
+
+| Sondentyp | Hammerbohrung | Spülbohrung |
+| --- | --- | --- |
+| 32 mm Duplex | 115 mm | 4 ¾ ʺ (121 mm) |
+| 40 mm Duplex | 130 mm | 5 ⅜ ʺ (136 mm) |
+| 50 mm Duplex | 160 mm | 6 ½ ʺ (165 mm) |

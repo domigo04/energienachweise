@@ -105,6 +105,8 @@ def test_abgabe_klassen_von():
     assert abgabe_klassen_von(["FBH"]) == {"flaeche"}
     assert abgabe_klassen_von(["Heizkörper", "Konvektoren"]) == {"koerper"}
     assert abgabe_klassen_von(["FBH", "Lufterhitzer"]) == {"flaeche", "luft"}
+    assert abgabe_klassen_von(["fbh", "heizregister"]) == {"flaeche", "luft"}
+    assert abgabe_klassen_von(["roehrenradiator", "plattenradiator"]) == {"koerper"}
     assert abgabe_klassen_von([]) == set()
     assert abgabe_klassen_von(None) == set()
 
@@ -533,6 +535,25 @@ def test_adapter_liefert_positionen_brutto_und_netto():
     assert d["abgabe_dominant"] == "FBH"
 
 
+def test_adapter_verwendet_kanonische_fachwerte_und_laesst_altlabels_lesbar():
+    from app.routers.hc_grobkostenschaetzung import _ref_to_calc_dict
+
+    kanonisch = _ref_to_calc_dict(_mock_ref(
+        [("243.3a", 50000.0)],
+        gebaeudetyp="mfh", projektart="neubau",
+        waermeerzeuger=["ews_wp"], waermeabgabe=["fbh", "heizregister"],
+    ))
+    assert kanonisch["waermeerzeuger"] == ["ews_wp"]
+    assert kanonisch["abgabe_klassen"] == {"flaeche", "luft"}
+    assert kanonisch["abgabe_dominant"] == "FBH"
+
+    historisch = _ref_to_calc_dict(_mock_ref(
+        [("243.2a", 30000.0)], waermeabgabe=["Heizkörper"],
+    ))
+    assert historisch["abgabe_klassen"] == {"koerper"}
+    assert historisch["abgabe_dominant"] == "HK"
+
+
 def test_adapter_wp_typ_und_abgabe_ableitung():
     from app.routers.hc_grobkostenschaetzung import _wp_typ_von, _abgabe_dominant_von, _hat_erdsonden
     assert _wp_typ_von(["Luft/Wasser-WP"]) == "luft"
@@ -543,6 +564,8 @@ def test_adapter_wp_typ_und_abgabe_ableitung():
     assert _hat_erdsonden(["ews_wp"]) is True
     assert _abgabe_dominant_von(["FBH", "Heizkörper"]) == "gemischt"
     assert _abgabe_dominant_von(["TABS"]) == "FBH"
+    assert _abgabe_dominant_von(["fbh", "heizkoerper"]) == "gemischt"
+    assert _abgabe_dominant_von(["heizregister"]) == "Luft"
 
 
 # ── Wärmeabgabe als Score-Faktor (Dominic 2026-07-19) ───────────────────────

@@ -9,8 +9,9 @@ import AnlagenkonfigurationAuswahl from "../../components/kv/Anlagenkonfiguratio
 import PageHeader from "../../components/ui/PageHeader";
 import InfoTip from "../../components/ui/InfoTip";
 import { chf, zahl } from "../../lib/format";
+import { fachwertOptionen } from "../../lib/fachwerte";
 import {
-  WAERMEABGABE, WAERMEERZEUGER, hasErdsonde, konfigurationVorschlag,
+  hasErdsonde, konfigurationVorschlag,
 } from "../../data/kv";
 
 // Kurze Erklärungen für die «i»-Tipps — damit klar ist, wozu ein Feld dient
@@ -238,6 +239,14 @@ export default function AuswertungForm() {
   const [kennwerte, setKennwerte] = useState({}); // bkp_nr → Streuung im Bestand
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const waermeerzeugerOptionen = useMemo(
+    () => fachwertOptionen(listen, "generator_types"),
+    [listen],
+  );
+  const waermeabgabeOptionen = useMemo(
+    () => fachwertOptionen(listen, "heat_delivery_types"),
+    [listen],
+  );
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const setBetrag = (nr, v) => setBetraege((b) => ({ ...b, [nr]: v }));
@@ -281,7 +290,7 @@ export default function AuswertungForm() {
         })
         .catch(() => setError("Referenzprojekt konnte nicht geladen werden"));
     }
-  }, [id]);
+  }, [id, isEdit]);
 
   const gruppen = useMemo(() => {
     const g = {};
@@ -442,8 +451,20 @@ export default function AuswertungForm() {
                       <option value="">— keine Angabe —</option>{(listen.certifications || []).map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}
                     </select></div>
                 </div>
-                <CheckboxGruppe label="Wärmeerzeuger (mehrere möglich)" options={WAERMEERZEUGER} value={form.waermeerzeuger} onChange={setWaermeerzeuger} />
-                <CheckboxGruppe label="Wärmeabgabe (mehrere möglich)" options={WAERMEABGABE} value={form.waermeabgabe} onChange={(v) => set("waermeabgabe", v)} />
+                <CheckboxGruppe
+                  label="Wärmeerzeuger"
+                  hint="Mehrere Systeme können gleichzeitig gewählt werden. Die Auswahl wird mit denselben Codes wie im LV-Importer gespeichert."
+                  options={waermeerzeugerOptionen}
+                  value={form.waermeerzeuger}
+                  onChange={setWaermeerzeuger}
+                />
+                <CheckboxGruppe
+                  label="Wärmeabgabe"
+                  hint="Alle im Projekt vorhandenen Abgabesysteme auswählen."
+                  options={waermeabgabeOptionen}
+                  value={form.waermeabgabe}
+                  onChange={(v) => set("waermeabgabe", v)}
+                />
                 <label className="flex flex-wrap items-center gap-2 text-sm text-slate-700">
                   <input type="checkbox" className="size-4 accent-brand-600" checked={!!form.bww_bei_heizung} onChange={(e) => set("bww_bei_heizung", e.target.checked)} />
                   Brauchwarmwasser bei Heizung

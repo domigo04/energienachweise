@@ -59,18 +59,19 @@ gewandert. `[x]` = im Code vorhanden und durch Test/Build abgesichert;
 
 ### 5 Zentrale Auswahllisten
 
-- [ ] keine freien Schreibweisen für vergleichsrelevante Merkmale; zentrale
-      Listen für Gebäudenutzung, Projektart, Zertifizierung, Wärmeerzeuger,
-      Wärmeabgabe, Ausbauumfang (heute teils Freitext in Info-Seite und LV-Review)
+- [~] zentrale Registry und gemeinsame Codes sind in LV-Review,
+      Referenzprojekten und Grobkostenschätzung aktiv; die Projektinfo-Seite
+      muss noch vollständig auf dieselben Listen umgestellt werden
 
 ### 6 Wärmeerzeuger als Multi-Select
 
-- [ ] mehrere gleichzeitig (z. B. EWS-WP + Gas, Fernwärme + WP). Datenmodell hält
-      `waermeerzeuger` bereits als Liste — Eingabe/Erkennung noch einwertig.
+- [~] mehrere gleichzeitig in LV-Review, Referenzprojekt und
+      Grobkostenschätzung; Projektinfo und ProjectContext-Abgleich noch offen
 
 ### 7 Wärmeabgabe als Multi-Select
 
-- [ ] mehrere gleichzeitig (z. B. FBH + Heizkörper)
+- [~] mehrere gleichzeitig in Referenzprojekt und Grobkostenschätzung;
+      Projektinfo und Schema-/ProjectContext-Abgleich noch offen
 
 ### 8 Projektinfos auf dieselben Selects umstellen
 

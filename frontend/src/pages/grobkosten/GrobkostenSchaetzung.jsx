@@ -3,14 +3,14 @@
 // BKP-Einzelposition, gruppiert mit Zwischentotalen und Gesamttotal. Eingaben
 // (Wärmeerzeuger/-abgabe als Mehrfach-Auswahl, wie in der Auswertung) und
 // Ergebnis bleiben pro Projekt gespeichert.
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   AlertTriangle, Calculator, Check, ChevronRight, Database,
   FileSpreadsheet, FileText, ListChecks, LockKeyhole, Pencil, RefreshCw, RotateCcw, Unlock, X,
 } from "lucide-react";
 import {
-  bauindexAutomatischAktualisieren, getBauindex, getProject,
+  bauindexAutomatischAktualisieren, getBauindex, getFachwerte, getProject,
   gkPositionHerkunft, gkProjektExportExcel, gkProjektExportPdf, gkProjektGet, gkProjektSave, gkProjektStatus,
   gkVorbelegung,
 } from "../../api/hcApi";
@@ -18,12 +18,12 @@ import CheckboxGruppe from "../../components/kv/CheckboxGruppe";
 import InfoTip from "../../components/ui/InfoTip";
 import PageHeader from "../../components/ui/PageHeader";
 import GewerkLeiste from "../../components/ui/GewerkLeiste";
-import { WAERMEABGABE, WAERMEERZEUGER, ZERTIFIZIERUNGEN } from "../../data/kv";
-import { chf, gruppeInfo, num, NUTZUNGEN, PROJEKTARTEN } from "../../data/gk";
+import { chf, gruppeInfo, num } from "../../data/gk";
+import { fachwertOptionen } from "../../lib/fachwerte";
 
 const LEER = {
-  ebf_m2: "", leistung_kw: "", anzahl_ne: "", nutzung: "MFH", projektart: "Neubau", zertifizierung: "",
-  waermeerzeuger: ["ews_wp"], waermeabgabe: ["FBH"],
+  ebf_m2: "", leistung_kw: "", anzahl_ne: "", nutzung: "mfh", projektart: "neubau", zertifizierung: "",
+  waermeerzeuger: ["ews_wp"], waermeabgabe: ["fbh"],
   bww_bei_heizung: false, baupreisindex_beruecksichtigen: false,
   weiterbetrieb_umbau: false, etappierung: false,
   rohrmeter: "", bohrmeter: "", hk_anzahl: "",
@@ -151,16 +151,23 @@ export default function GrobkostenSchaetzung() {
   const [versionNr, setVersionNr] = useState(0);
   const [workflowVariante, setWorkflowVariante] = useState("netto");
   const [aufgabenFilter, setAufgabenFilter] = useState("alle");
+  const [listen, setListen] = useState({});
   // §7: welche Felder wurden aus dem Projekt (Grunddaten/Schema) übernommen
   const [vorbelegtFelder, setVorbelegtFelder] = useState([]);
   const timer = useRef(null);
   const autoRechnenUeberspringen = useRef(false);
+  const nutzungsOptionen = useMemo(() => fachwertOptionen(listen, "building_uses"), [listen]);
+  const projektartOptionen = useMemo(() => fachwertOptionen(listen, "project_types"), [listen]);
+  const zertifizierungsOptionen = useMemo(() => fachwertOptionen(listen, "certifications"), [listen]);
+  const erzeugerOptionen = useMemo(() => fachwertOptionen(listen, "generator_types"), [listen]);
+  const abgabeOptionen = useMemo(() => fachwertOptionen(listen, "heat_delivery_types"), [listen]);
 
   const ladeIndexStand = useCallback(
     () => getBauindex().then((e) => setIndexStand(e[0]?.periode || null)).catch(() => {}), []);
 
   useEffect(() => {
     getProject(id).then(setProjekt).catch(() => {});
+    getFachwerte().then((result) => setListen(result.listen || {})).catch(() => {});
     ladeIndexStand();
     gkProjektGet(id).then(({ inputs, result: r, status: gespeicherterStatus, freigegeben_at: gespeichertAt, version_nr: gespeichertVersion, workflow_variante: gespeichertVariante }) => {
       setSchaetzungStatus(gespeicherterStatus || "entwurf");
@@ -439,27 +446,27 @@ export default function GrobkostenSchaetzung() {
               <input className="input" type="number" min="1" step="0.5" value={form.leistung_kw} onChange={(e) => set("leistung_kw", e.target.value)} placeholder="z.B. 35" />
             </Feld>
             <Feld label="Nutzung">
-              <Select value={form.nutzung} onChange={(v) => set("nutzung", v)} optionen={NUTZUNGEN} />
+              <Select value={form.nutzung} onChange={(v) => set("nutzung", v)} optionen={nutzungsOptionen} />
             </Feld>
             <Feld label="Anzahl Einheiten">
               <input className="input" type="number" min="1" value={form.anzahl_ne} onChange={(e) => set("anzahl_ne", e.target.value)} placeholder="z.B. 8" />
             </Feld>
             <Feld label="Projektart">
-              <Select value={form.projektart} onChange={(v) => set("projektart", v)} optionen={PROJEKTARTEN} />
+              <Select value={form.projektart} onChange={(v) => set("projektart", v)} optionen={projektartOptionen} />
             </Feld>
             <Feld label={<span className="inline-flex items-center gap-1">Zertifizierung <InfoTip text={ERKL.zertifizierung} /></span>}>
               <select className="input" value={form.zertifizierung} onChange={(e) => set("zertifizierung", e.target.value)}>
                 <option value="">—</option>
-                {ZERTIFIZIERUNGEN.map((z) => <option key={z} value={z}>{z}</option>)}
+                {zertifizierungsOptionen.map((z) => <option key={z.value} value={z.value}>{z.label}</option>)}
               </select>
             </Feld>
           </div>
 
           <div className="mt-3">
-            <CheckboxGruppe label="Wärmeerzeuger" options={WAERMEERZEUGER} value={form.waermeerzeuger} onChange={(v) => set("waermeerzeuger", v)} />
+            <CheckboxGruppe label="Wärmeerzeuger" options={erzeugerOptionen} value={form.waermeerzeuger} onChange={(v) => set("waermeerzeuger", v)} />
           </div>
           <div className="mt-3">
-            <CheckboxGruppe label="Wärmeabgabe *" options={WAERMEABGABE} value={form.waermeabgabe} onChange={(v) => set("waermeabgabe", v)} />
+            <CheckboxGruppe label="Wärmeabgabe *" options={abgabeOptionen} value={form.waermeabgabe} onChange={(v) => set("waermeabgabe", v)} />
             <p className="mt-1 text-xs text-slate-400">
               Pflicht — es werden nur die Kosten der hier gewählten Abgabesysteme übernommen.
             </p>

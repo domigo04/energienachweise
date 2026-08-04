@@ -121,6 +121,14 @@ _ABGABE_KLASSE = {
     "Deckenstrahlplatten": "deckenstrahl",
     "Heizkörper": "koerper", "Konvektoren": "koerper",
     "Lufterhitzer": "luft",
+    # Kanonische Codes aus app.fachwerte. Historische Labels darüber bleiben
+    # lesbar, neue Eingaben verwenden ausschliesslich diese Codes.
+    "fbh": "flaeche", "tabs": "flaeche", "wandheizung": "flaeche",
+    "deckenheizung": "flaeche", "deckenstrahlplatten": "deckenstrahl",
+    "heizkoerper": "koerper", "roehrenradiator": "koerper",
+    "plattenradiator": "koerper", "konvektoren": "koerper",
+    "geblaesekonvektor": "koerper", "lufterhitzer": "luft",
+    "luftheizapparat": "luft", "heizregister": "luft",
 }
 
 

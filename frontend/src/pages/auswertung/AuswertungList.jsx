@@ -9,16 +9,13 @@ import {
 } from "../../api/hcApi";
 import PageHeader from "../../components/ui/PageHeader";
 import GewerkLeiste from "../../components/ui/GewerkLeiste";
-import { WAERMEABGABE, WAERMEERZEUGER, waermeerzeugerLabel } from "../../data/kv";
 import { LEER, chf, zahl } from "../../lib/format";
+import { fachwertLabel, fachwertLabels, fachwertOptionen } from "../../lib/fachwerte";
 
 // Kennwert = Netto pro m² EBF. Die Zahl, mit der Referenzen verglichen werden;
 // ohne EBF gibt es keinen Kennwert (und keine erfundene Ersatzgrösse).
 const kennwertVon = (r) => (r.ebf_m2 > 0 && r.summe_kosten > 0 ? r.summe_kosten / r.ebf_m2 : null);
 const jahrVon = (r) => (r.datum ? Number(String(r.datum).slice(0, 4)) : null);
-const fachwertLabel = (listen, name, value) =>
-  (listen?.[name] || []).find((item) => item.code === value)?.label || value || LEER;
-
 const quantil = (werte, p) => {
   if (!werte.length) return null;
   const s = [...werte].sort((a, b) => a - b);
@@ -33,7 +30,7 @@ const SPALTEN = [
   { key: "name", titel: "Name", breit: true, wert: (r) => r.name || "" },
   { key: "projektart", titel: "Projektart", wert: (r) => r.projektart || "" },
   { key: "gebaeudetyp", titel: "Nutzung", wert: (r) => r.gebaeudetyp || "" },
-  { key: "waermeerzeuger", titel: "Wärmeerzeuger", wert: (r) => (r.waermeerzeuger || []).map(waermeerzeugerLabel).join(", ") },
+  { key: "waermeerzeuger", titel: "Wärmeerzeuger", wert: (r) => (r.waermeerzeuger || []).join(", ") },
   { key: "ebf_m2", titel: "EBF m²", wert: (r) => r.ebf_m2, num: true },
   { key: "heizleistung_kw", titel: "kW", wert: (r) => r.heizleistung_kw, num: true },
   { key: "summe_kosten", titel: "Netto CHF", wert: (r) => r.summe_kosten, num: true },
@@ -77,6 +74,8 @@ export default function AuswertungList() {
   const [fAbgabe, setFAbgabe] = useState(new Set());
   const [fNutzung, setFNutzung] = useState("");
   const [fProjektart, setFProjektart] = useState("");
+  const erzeugerOptionen = useMemo(() => fachwertOptionen(listen, "generator_types"), [listen]);
+  const abgabeOptionen = useMemo(() => fachwertOptionen(listen, "heat_delivery_types"), [listen]);
 
   const toggleFilter = (setter) => (wert) => setter((s) => {
     const neu = new Set(s);
@@ -243,14 +242,14 @@ export default function AuswertungList() {
           <div className="mb-4 space-y-2 rounded-lg border border-slate-200 bg-white p-3">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <span className="mr-1 w-24 shrink-0 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Erzeuger</span>
-              {WAERMEERZEUGER.map((e) => (
+              {erzeugerOptionen.map((e) => (
                 <ChipToggle key={e.value} label={e.label} aktiv={fErzeuger.has(e.value)} onClick={() => toggleFilter(setFErzeuger)(e.value)} />
               ))}
             </div>
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <span className="mr-1 w-24 shrink-0 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Abgabe</span>
-              {WAERMEABGABE.map((a) => (
-                <ChipToggle key={a} label={a} aktiv={fAbgabe.has(a)} onClick={() => toggleFilter(setFAbgabe)(a)} />
+              {abgabeOptionen.map((a) => (
+                <ChipToggle key={a.value} label={a.label} aktiv={fAbgabe.has(a.value)} onClick={() => toggleFilter(setFAbgabe)(a.value)} />
               ))}
             </div>
             <div className="flex flex-wrap items-center gap-2 pt-1">
@@ -347,7 +346,7 @@ export default function AuswertungList() {
                     <td className="whitespace-nowrap py-2 pr-3 text-slate-500">{fachwertLabel(listen, "project_types", r.projektart)}</td>
                     <td className="whitespace-nowrap py-2 pr-3 text-slate-500">{fachwertLabel(listen, "building_uses", r.gebaeudetyp)}</td>
                     <td className="whitespace-nowrap py-2 pr-3 text-slate-500">
-                      {(r.waermeerzeuger || []).map(waermeerzeugerLabel).join(", ") || LEER}
+                      {fachwertLabels(listen, "generator_types", r.waermeerzeuger, LEER)}
                     </td>
                     <td className="py-2 pr-3 text-right tabular-nums text-slate-600">{zahl(r.ebf_m2)}</td>
                     <td className="py-2 pr-3 text-right tabular-nums text-slate-600">{zahl(r.heizleistung_kw, 1)}</td>

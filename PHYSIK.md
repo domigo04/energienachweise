@@ -383,6 +383,7 @@ Auswahlliste gespiegelt in `frontend/src/pages/hc/schema/soleTabellen.js`
 | Aussen | Innen | Wand | Nenndruck | SDR |
 | --- | --- | --- | --- | --- |
 | 32 mm | 26.0 mm | 3.0 mm | PN 16 | SDR 11 |
+| 32 mm | 24.8 mm | 3.6 mm | PN 20 | SDR 9 |
 | 40 mm | 32.6 mm | 3.7 mm | PN 16 | SDR 11 |
 | 40 mm | 31.0 mm | 4.5 mm | PN 20 | SDR 9 |
 | 40 mm | 29.2 mm | 5.4 mm | PN 25 | SDR 7.4 |
@@ -390,6 +391,11 @@ Auswahlliste gespiegelt in `frontend/src/pages/hc/schema/soleTabellen.js`
 | 50 mm | 38.8 mm | 5.6 mm | PN 20 | SDR 9 |
 | 50 mm | 36.4 mm | 6.9 mm | PN 25 | SDR 7.4 |
 | 50 mm | 32.0 mm | 8.9 mm | PN 32 | SDR 5.6 |
+
+Die 32-mm-Zeile für PN 20 steht nicht in Tabelle 10; sie folgt der Rohrreihe
+SDR 9 (Wanddicke 32/9 = 3.56 mm, aufgerundet auf 3.6 mm) und damit derselben
+Systematik wie die dort aufgeführten Zeilen 40 × 4.5 und 50 × 5.6. Tiefere Sonden
+brauchen die höhere Druckstufe auch im 32er-Durchmesser.
 
 Zusätzlich wählbar bleiben die beiden Masse der Excel-Vorlage, damit bestehende
 Berechnungen nachvollziehbar bleiben: `PE 32 × 2.9` mit innen 26.2 mm und

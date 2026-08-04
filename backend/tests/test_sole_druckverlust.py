@@ -155,6 +155,21 @@ def test_rohrtabelle_entspricht_sia_384_6_tabelle_10():
     assert rohr("pe50x4.7")["innen_mm"] == 40.6
 
 
+def test_32er_sondenrohr_gibt_es_auch_in_pn_20():
+    """Tiefere Sonden brauchen die höhere Druckstufe auch im 32er-Durchmesser."""
+    r = rohr("pe32x3.6")
+
+    assert (r["aussen_mm"], r["innen_mm"], r["pn"], r["sdr"]) == (32, 24.8, "PN 20", "SDR 9")
+    # Wanddicke folgt der Rohrreihe SDR 9 wie die 40er- und 50er-Zeilen der Norm.
+    assert r["wand_mm"] == pytest.approx(32 / 9, abs=0.05)
+    assert r["innen_mm"] == pytest.approx(32 - 2 * r["wand_mm"])
+    # Damit deckt PE 32 die Tiefenbereiche bis 200 m ab.
+    tief = sole_druckverlust(**{**REFERENZ, "sonden_tiefe_m": 195,
+                                "sonden_innen_d_mm": r["innen_mm"], "sonden_pn": r["pn"]})
+    assert tief["druckstufe"]["pn"] == "PN 20"
+    assert tief["druckstufe"]["ausreichend"] is True
+
+
 def test_stoffwerte_stammen_aus_den_zellkommentaren_der_vorlage():
     n25 = waermetraeger("antifrogen_n_25")
     assert (n25["dichte_kg_m3"], n25["viskositaet_mm2_s"], n25["frostschutz_c"]) == (1050, 4.15, -13.6)

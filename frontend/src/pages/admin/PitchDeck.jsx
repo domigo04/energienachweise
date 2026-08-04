@@ -1,7 +1,7 @@
 import { useCallback, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, Clock3, Database,
+  AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, Database,
   Mail, Maximize2, ShieldCheck, Sparkles, TrendingUp,
 } from "lucide-react";
 import logo from "../../png/logo.png";
@@ -12,7 +12,8 @@ import detailVerteiler from "../../assets/pitchdeck/detail-verteiler.png";
 import kontaktQr from "../../assets/pitchdeck/kontakt-qr.svg";
 import portrait from "../../assets/pitchdeck/portrait.jpg";
 import {
-  normaliseSlide, pitchPosition, pitchWert, PITCH_KONTAKT, PITCH_SLIDES, PITCH_ZAHLEN,
+  normaliseSlide, pitchDeck, pitchPosition, pitchWert, PITCH_AUSBAU, PITCH_INVESTOR,
+  PITCH_KONTAKT, PITCH_ZAHLEN,
 } from "./pitchDeckContent";
 import "./PitchDeck.css";
 
@@ -59,7 +60,7 @@ const LEISTUNGEN = [
   ["Firmenvorlagen", "Zwei bis drei Vorlagen, auf Ihre eigenen Prinzipschemata zugeschnitten."],
   ["Wöchentlicher Termin", "Feste Sitzung mit dem Entwickler — Ihre Rückmeldung landet direkt im Werkzeug."],
   ["Direkter Support", "Kein Ticketsystem, sondern der Weg zur Person, die das Werkzeug gebaut hat."],
-  ["Ihre realen Projekte", "Bis fünf Nutzer, echte Aufträge statt Testdaten."],
+  ["Ihre realen Projekte", "Zwei echte Aufträge in zwölf Wochen statt Testdaten."],
   ["Unterlagen", "Einführungsvideo, Kurzanleitung und die bekannten Einschränkungen schriftlich."],
 ];
 
@@ -85,12 +86,6 @@ const STATUS = [
     "Verbindliche Herstellerauslegung",
     "Revit, IFC und bidirektionales CAD",
   ]],
-];
-
-const NUTZEN = [
-  ["Schneller zeichnen", "80–200 h", "2–5 h je Prinzipschema"],
-  ["Weniger Nachführung", "120–320 h", "3–8 h je geänderter Auslegung"],
-  ["Weniger Fehler und Rückfragen", "40–80 h", "1–2 h je Projekt"],
 ];
 
 const GATES = [
@@ -126,10 +121,10 @@ function Wert({ value, einheit = "" }) {
   return <b className={offen ? "is-offen" : ""}>{text}{offen || !einheit ? "" : ` ${einheit}`}</b>;
 }
 
-function KaufmaennischeFolie({ before, accent, subtitle, felder, fuss }) {
+function KaufmaennischeFolie({ before, accent, after = "", subtitle, felder, fuss }) {
   return (
     <>
-      <AccentTitle before={before} accent={accent} />
+      <AccentTitle before={before} accent={accent} after={after} />
       <p className="pitch-subtitle">{subtitle}</p>
       <div className="pitch-kennzahlen">
         {felder.map(([titel, value, hinweis]) => (
@@ -305,56 +300,127 @@ function SlideContent({ slideKey }) {
             caption="Ihre Vorlagen, Ihre Schemas – berechnet im Werkzeug" />
         </div>
       );
+    case "bedarf":
+      return (
+        <KaufmaennischeFolie
+          before="Der Bedarf " accent="verschwindet nicht"
+          subtitle="Warum es dieses Werkzeug in fünf Jahren noch geben wird – und warum sich die Einarbeitung lohnt."
+          felder={[
+            ["Heizungsplanungs-Workflows pro Jahr", PITCH_ZAHLEN.bedarf.workflows,
+              `Schweiz · ${PITCH_ZAHLEN.bedarf.workflowsSpanne}`],
+            ["Wohngebäude noch mit Öl oder Gas beheizt", PITCH_ZAHLEN.bedarf.gebaeude,
+              "Ersatz und Sanierung über die nächsten Jahrzehnte"],
+            ["Davon in Ihrem Büro", PITCH_ZAHLEN.bedarf.projekteProPlaner,
+              "pro Planer und Jahr – die Grundlage der nächsten Folie"],
+          ]}
+          fuss="Nicht jedes Baugesuch ist ein Heizungsprojekt: die Zahl ist auf die real planbaren Vorgänge heruntergerechnet."
+        />
+      );
+    case "rechnung":
+      return (
+        <div className="pitch-split">
+          <div>
+            <div className="pitch-kicker">Zielannahme für das fertige Produkt</div>
+            <AccentTitle before="Was es " accent="Ihnen" after=" bringt" />
+            <div className="pitch-range">
+              <b>{PITCH_ZAHLEN.nutzen.stunden}</b><span>weniger Aufwand je Projekt</span>
+            </div>
+            <div className="pitch-open pitch-open--ok">
+              <CheckCircle2 /> Amortisation {PITCH_ZAHLEN.nutzen.amortisation}
+            </div>
+          </div>
+          <div className="pitch-bands">
+            <div>
+              <span>Direkte interne Kosteneinsparung</span>
+              <b>{PITCH_ZAHLEN.nutzen.intern}</b><small>je Projekt</small>
+            </div>
+            <div>
+              <span>Freigesetzte verrechenbare Kapazität</span>
+              <b>{PITCH_ZAHLEN.nutzen.verrechenbar}</b><small>je Projekt</small>
+            </div>
+            <div>
+              <span>Bei {PITCH_ZAHLEN.bedarf.projekteProPlaner} pro Planer und Jahr</span>
+              <b>{PITCH_ZAHLEN.nutzen.jahrFranken}</b>
+              <small>{PITCH_ZAHLEN.nutzen.jahrStunden} freigesetzte Planungszeit</small>
+            </div>
+            <p>Zielwerte für das fertige Produkt, nicht für den heutigen Pilotstand. Im Piloten werden sie an Ihren realen Projekten gemessen.</p>
+          </div>
+        </div>
+      );
+    case "ausbau":
+      return (
+        <>
+          <AccentTitle before="Was als " accent="Nächstes" after=" kommt" />
+          <p className="pitch-subtitle">In dieser Reihenfolge gebaut – Sie zahlen für das, was schon läuft, nicht für ein Versprechen.</p>
+          <ol className="pitch-gates">
+            {PITCH_AUSBAU.map(([titel, text], i) => (
+              <li key={titel} className={i === 0 ? "is-jetzt" : ""}>
+                <span>{i + 1}</span><b>{titel}</b><p>{text}</p>
+              </li>
+            ))}
+          </ol>
+          <p className="pitch-bottom-line">Stufe 1 ist der Pilotumfang. Alles Weitere folgt erst, wenn sie im realen Betrieb trägt.</p>
+        </>
+      );
+    case "preise":
+      return (
+        <div className="pitch-split">
+          <div>
+            <AccentTitle before="Pilot und " accent="Lizenz" />
+            <div className="pitch-case__input pitch-case__input--preis">
+              <Marker kind="eingabe">Begleiteter Pilot</Marker>
+              <b>{PITCH_ZAHLEN.preise.pilot}</b>
+              <span>{PITCH_ZAHLEN.preise.pilotdauer}</span>
+            </div>
+            <p className="pitch-lead pitch-lead--small">
+              Danach Lizenz pro Nutzer und Jahr – Sie zahlen für die Plätze, die wirklich planen.
+            </p>
+          </div>
+          <div className="pitch-bands">
+            <div><span>Core</span><b>{PITCH_ZAHLEN.preise.core}</b><small>Schema, Hydraulik, Revision, Export</small></div>
+            <div><span>Professional</span><b>{PITCH_ZAHLEN.preise.professional}</b><small>zusätzlich Firmenstandards und Zusammenarbeit</small></div>
+            <div><span>Enterprise</span><b>{PITCH_ZAHLEN.preise.enterprise}</b><small>zusätzlich Kostenindikation und Zusatzmodule</small></div>
+            <p>Beispiel: {PITCH_ZAHLEN.preise.beispiel} pro Jahr für {PITCH_ZAHLEN.preise.beispielBasis}.</p>
+          </div>
+        </div>
+      );
     case "markt":
       return (
         <KaufmaennischeFolie
-          before="Markt" accent="potenzial"
-          subtitle="Warum es dieses Werkzeug in fünf Jahren noch geben wird."
+          before="Markt" accent="grösse" after=" Schweiz"
+          subtitle="Bandbreite und Basisszenario – kein Bestwert, sondern eine Spanne mit Mitte."
           felder={[
-            ["Heizungsplanungsbüros in der Schweiz", PITCH_ZAHLEN.markt.bueros, "Gesamtmarkt"],
-            ["Davon im Zielsegment", PITCH_ZAHLEN.markt.zielsegment, "Büros mit 2–15 Planern"],
-            ["Jährliches Lizenzpotenzial", PITCH_ZAHLEN.markt.potenzial, "Core-Lizenz pro Büro und Jahr"],
+            ["Potenzielle Firmenkunden", PITCH_INVESTOR.markt.firmen, "Planungsbüros mit Heizungsplanung"],
+            ["Zahlende Nutzerlizenzen", PITCH_INVESTOR.markt.lizenzen, `Basisszenario ${PITCH_INVESTOR.markt.nutzerBasis} Nutzer`],
+            ["Wiederkehrender Jahresumsatz", PITCH_INVESTOR.markt.arr, PITCH_INVESTOR.markt.arrBasis],
           ]}
-          fuss={pitchWert(PITCH_ZAHLEN.markt.quelle).offen ? "Quelle der Marktzahlen einzutragen" : `Quelle: ${PITCH_ZAHLEN.markt.quelle}`}
+          fuss={`Gestützt auf ${PITCH_ZAHLEN.bedarf.workflows} Planungs-Workflows und ${PITCH_ZAHLEN.bedarf.gebaeude} noch fossil beheizte Wohngebäude. Effizienzpotenzial beim Kunden schweizweit ${PITCH_INVESTOR.markt.effizienz} pro Jahr.`}
         />
       );
-    case "finanzierung":
+    case "kosten":
       return (
         <KaufmaennischeFolie
-          before="Die " accent="Finanzierung"
-          subtitle="Die Entwicklung läuft nicht auf Kredit, sondern auf Arbeit und Pilotbeiträgen."
+          before="Was der Ausbau " accent="braucht"
+          subtitle="Auf dem bestehenden Code, nicht auf der grünen Wiese."
           felder={[
-            ["Bisher in die Entwicklung geflossen", PITCH_ZAHLEN.finanzierung.bisher, "Eigenleistung und Mittel"],
-            ["Laufender Entwicklungsaufwand", PITCH_ZAHLEN.finanzierung.laufend, "pro Monat"],
-            ["Beitrag pro Pilotbüro", PITCH_ZAHLEN.finanzierung.pilotbeitrag, PITCH_ZAHLEN.finanzierung.pilotdauer],
+            ["Pilot auf bestehendem Code", PITCH_INVESTOR.kosten.pilot, "zusätzlich zum heutigen Stand"],
+            ["Produktiver V1-Stand", PITCH_INVESTOR.kosten.v1, "lizenzfähig im Regelbetrieb"],
+            ["Vollständiges Endprodukt", PITCH_INVESTOR.kosten.endprodukt, "alle Ausbaustufen"],
           ]}
-          fuss="Der Pilotbeitrag deckt Einführung, Vorlagen und Betreuung – nicht die Entwicklung des Werkzeugs."
+          fuss={`Bezahlte Kundenpiloten tragen einen Teil davon: ${PITCH_INVESTOR.kosten.pilotErloes} je Pilot.`}
         />
       );
-    case "funding":
+    case "bewertung":
       return (
         <KaufmaennischeFolie
-          before="Bis zum " accent="Marktstart"
-          subtitle="Was es braucht, damit aus dem Piloten ein Produkt im Regelbetrieb wird."
+          before="Die " accent="Bewertung"
+          subtitle="Unternehmenswert, keine Marktkapitalisierung – SIREGO ist nicht kotiert."
           felder={[
-            ["Finanzierungsbedarf", PITCH_ZAHLEN.funding.bedarf, "bis zum Marktstart"],
-            ["Verwendung", PITCH_ZAHLEN.funding.verwendung, "Schwerpunkt der Mittel"],
-            ["Zeitraum", PITCH_ZAHLEN.funding.zeitraum, "bis zur Lizenzfähigkeit"],
+            ["Heute, Prototyp ohne Umsätze", PITCH_INVESTOR.bewertung.heute, "Pre-Money"],
+            ["Mit bezahlten Piloten", PITCH_INVESTOR.bewertung.mitPiloten, "und extern geprüftem Rechenkern"],
+            ["Bei Schweizer Marktführerschaft", PITCH_INVESTOR.bewertung.marktfuehrer, "langfristig"],
           ]}
-          fuss="Pilotbüros tragen kein Entwicklungsrisiko: Sie zahlen für Begleitung, nicht für Zukunft."
-        />
-      );
-    case "lizenzen":
-      return (
-        <KaufmaennischeFolie
-          before="Lizenzen bei " accent="erfolgreichem Marktstart"
-          subtitle="Was das Werkzeug kostet, wenn es aus dem Piloten heraus in den Regelbetrieb geht."
-          felder={[
-            ["Core-Lizenz", PITCH_ZAHLEN.lizenzen.core, "pro Büro und Jahr · Schema, Berechnungen, Revision, Export"],
-            ["Kondition für Pilotbüros", PITCH_ZAHLEN.lizenzen.pilotkondition, "Gegenleistung für die Pilotarbeit"],
-            ["Add-on", PITCH_ZAHLEN.lizenzen.addon, "eigenes Kontingent, erst nach dem Datengate"],
-          ]}
-          fuss="Preise gelten erst als bestätigt, wenn der Pilot eine Nutzenannahme belegt."
+          fuss={PITCH_INVESTOR.bewertung.grenze}
         />
       );
     case "kontakt":
@@ -395,23 +461,6 @@ function SlideContent({ slideKey }) {
             ))}
           </div>
         </>
-      );
-    case "nutzen":
-      return (
-        <div className="pitch-split">
-          <div>
-            <div className="pitch-kicker">Nutzenhypothese</div>
-            <AccentTitle before="Freigesetzte " accent="Planungskapazität" />
-            <div className="pitch-range"><b>240–600 h</b><span>pro Büro und Jahr</span></div>
-            <div className="pitch-open"><Clock3 /> Im Pilot gemessen: noch offen</div>
-          </div>
-          <div className="pitch-bands">
-            {NUTZEN.map(([titel, spanne, basis]) => (
-              <div key={titel}><span>{titel}</span><b>{spanne}</b><small>{basis}</small></div>
-            ))}
-            <p>Modellannahme: 40 Prinzipschemata pro Büro und Jahr. Keine garantierte Einsparung.</p>
-          </div>
-        </div>
       );
     case "lv":
       return (
@@ -462,12 +511,13 @@ function SlideContent({ slideKey }) {
           <AccentTitle before="Berechnungs" accent="annahmen" />
           <div className="pitch-assumptions">
             <div>
-              <b>Nutzenhypothese</b>
+              <b>Nutzen und Bedarf</b>
               <ul>
-                <li>40 Prinzipschemata pro Büro und Jahr</li>
-                <li>Zeichnen 2–5 h · Nachführung 3–8 h · Fehler 1–2 h je Schema</li>
-                <li>Summe 240–600 h; bei CHF 160 Stundenwert CHF 38'400–96'000</li>
-                <li>Keine garantierte Einsparung – im Pilot gemessen wird Zeit bis zum ersten Schema, Supportzeit und Wiederverwendung</li>
+                <li>Zielannahme 8 Stunden weniger Aufwand je Projekt, im fertigen Produkt</li>
+                <li>CHF 600 direkte interne Einsparung und CHF 1'120 freigesetzte verrechenbare Kapazität je Projekt</li>
+                <li>15 Projekte pro Planer und Jahr → 120 Stunden und CHF 9'000</li>
+                <li>25'000 Planungs-Workflows pro Jahr, Bandbreite 17'000–35'000; nicht alle Baugesuche sind Heizungsprojekte</li>
+                <li>Keine garantierte Einsparung – im Pilot an realen Projekten gemessen</li>
               </ul>
             </div>
             <div>
@@ -485,29 +535,30 @@ function SlideContent({ slideKey }) {
   }
 }
 
-export default function PitchDeck() {
+export default function PitchDeck({ variante = "kunde" }) {
   const { slideId } = useParams();
   const navigate = useNavigate();
-  const index = normaliseSlide(slideId);
-  const slide = PITCH_SLIDES[index];
-  const position = pitchPosition(index);
+  const { pfad, folien } = pitchDeck(variante);
+  const index = normaliseSlide(slideId, variante);
+  const slide = folien[index];
+  const position = pitchPosition(index, variante);
 
   const go = useCallback((next) => {
-    navigate(`/admin/pitchdeck/${normaliseSlide(next)}`);
-  }, [navigate]);
+    navigate(`${pfad}/${normaliseSlide(next, variante)}`);
+  }, [navigate, pfad, variante]);
 
   useEffect(() => {
     const onKeyDown = (event) => {
-      if (["ArrowRight", "PageDown", " "].includes(event.key) && index < PITCH_SLIDES.length - 1) {
+      if (["ArrowRight", "PageDown", " "].includes(event.key) && index < folien.length - 1) {
         event.preventDefault(); go(index + 1);
       } else if (["ArrowLeft", "PageUp"].includes(event.key) && index > 0) {
         event.preventDefault(); go(index - 1);
       } else if (event.key === "Home") go(0);
-      else if (event.key === "End") go(PITCH_SLIDES.length - 1);
+      else if (event.key === "End") go(folien.length - 1);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [go, index]);
+  }, [folien.length, go, index]);
 
   const fullscreen = () => {
     if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
@@ -516,7 +567,10 @@ export default function PitchDeck() {
 
   return (
     <main className="pitch-deck">
-      <div className="pitch-brand"><img src={logo} alt="" /><span>Heizungscockpit</span></div>
+      <div className="pitch-brand">
+        <img src={logo} alt="" /><span>Heizungscockpit</span>
+        {variante === "investor" ? <i>Investoren</i> : null}
+      </div>
       <article key={index} className={`pitch-slide pitch-slide--${slide.key}`} aria-labelledby="pitch-slide-title">
         <div id="pitch-slide-title" className="sr-only">{slide.eyebrow} · {slide.label}</div>
         <SlideContent slideKey={slide.key} />
@@ -525,7 +579,7 @@ export default function PitchDeck() {
       <div className="pitch-caption">{position.text}</div>
       <nav className="pitch-navigation" aria-label="Pitchdeck-Navigation">
         <div className="pitch-dots">
-          {PITCH_SLIDES.map((item) => (
+          {folien.map((item) => (
             <button type="button" key={item.id} className={`${item.anhang ? "is-anhang" : ""} ${item.id === index ? "is-active" : ""}`}
               onClick={() => go(item.id)} aria-label={`${item.anhang ? "Anhang" : "Folie"}: ${item.label}`}
               aria-current={item.id === index ? "page" : undefined} />
@@ -534,7 +588,7 @@ export default function PitchDeck() {
         <div className="pitch-controls">
           <b>{position.zaehler}</b>
           <button type="button" onClick={() => go(index - 1)} disabled={index === 0} aria-label="Vorherige Folie"><ArrowLeft /></button>
-          <button type="button" onClick={() => go(index + 1)} disabled={index === PITCH_SLIDES.length - 1} aria-label="Nächste Folie"><ArrowRight /></button>
+          <button type="button" onClick={() => go(index + 1)} disabled={index === folien.length - 1} aria-label="Nächste Folie"><ArrowRight /></button>
           <button type="button" onClick={fullscreen} aria-label="Vollbild öffnen"><Maximize2 /></button>
         </div>
       </nav>

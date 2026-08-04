@@ -110,7 +110,7 @@ def legende_zeilen(nodes: list, results: dict) -> list:
             if ex and "fehler" not in ex:
                 werte = f"VN {ex['vn_l']} l → {ex['vorschlag_l']} l · p0 {ex['p0_bar']} / pfin {ex['pfin_bar']} bar"
             elif ex:
-                werte = f"⚠ {ex['fehler']}"
+                werte = f"! {ex['fehler']}"
         elif t == "erzeuger":
             er = ergebnisse_erzeuger.get(n["id"], {})
             werte = " · ".join(x for x in [
@@ -326,13 +326,26 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
                           ("Bohrmeter-Formel", "Lerf = Q0 · 1000 / qE · SF", "")]
             dv = c.get("druckverlust") or {}
             if dv:
+                rohre = dv.get("rohre") or {}
+                traeger = dv.get("waermetraeger") or {}
+                stufe = dv.get("druckstufe") or {}
+                def _rohr(schluessel):
+                    r = rohre.get(schluessel) or {}
+                    return (f"{r.get('bezeichnung')} (innen {r.get('innen_mm')} mm, {r.get('pn')})"
+                            if r else None)
                 eingaben += [
                     ("— Solekreis —", "", ""),
+                    ("Rohr Erdwärmesonde", _rohr("sonde"), ""),
+                    ("Rohr Zuleitung Sonde–Verteiler", _rohr("zuleitung_verteiler"), ""),
+                    ("Länge Zuleitung Sonde–Verteiler", d.get("sole_zuleitung_verteiler_m"), "m"),
+                    ("Rohr Zuleitung Verteiler–WP", _rohr("zuleitung_wp"), ""),
+                    ("Länge Zuleitung Verteiler–WP", d.get("sole_zuleitung_wp_m"), "m"),
+                    ("Inhalt WP und Expansion", dv.get("zusatzinhalt_l"), "l"),
                     ("Solevolumenstrom", dv.get("volumenstrom_m3_h"), "m³/h"),
                     ("Herkunft Volumenstrom", dv.get("volumenstrom_quelle"), ""),
-                    ("Zuleitung Sonde–Verteiler", d.get("sole_zuleitung_verteiler_m"), "m"),
-                    ("Zuleitung Verteiler–WP", d.get("sole_zuleitung_wp_m"), "m"),
-                    ("Inhalt WP und Expansion", dv.get("zusatzinhalt_l"), "l"),
+                    ("Wärmeträger", (f"{traeger.get('produkt')} {traeger.get('konzentration_pct')} %"
+                                     if traeger else None), ""),
+                    ("Frostschutz bis", traeger.get("frostschutz_c"), "°C"),
                     ("Dichte Wärmeträger", dv.get("dichte_kg_m3"), "kg/m³"),
                     ("Spez. Wärmekapazität", dv.get("cp_kj_kgk"), "kJ/kgK"),
                     ("Kinematische Zähigkeit", dv.get("viskositaet_mm2_s"), "mm²/s"),
@@ -340,6 +353,13 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
                     ("Druckverlust Wärmepumpe", dv.get("druckverlust_wp_mws"), "mWs"),
                     ("Zeta-Wert Verteiler", dv.get("zeta_verteiler"), ""),
                 ]
+                if stufe:
+                    eingaben += [
+                        ("Nenndruckstufe gewählt", stufe.get("gewaehlt_pn"), ""),
+                        ("Nenndruckstufe erforderlich",
+                         f"{stufe.get('pn')} ({stufe.get('bereich')})" if stufe.get("pn") else None,
+                         "SIA 384/6:2021"),
+                    ]
                 resultate += [("— Solekreis —", "", "")]
                 for ts in dv.get("teilstuecke") or []:
                     resultate += [
@@ -532,7 +552,7 @@ def _legende_seiten(c, zeilen, projekt_name, warnungen=None):
                 y = kopf(seite[1] - 80)
                 c.setFillColorRGB(0.73, 0.11, 0.11)
                 c.setFont("Helvetica-Bold", 9)
-            c.drawString(40, y, f"⚠ {w}")
+            c.drawString(40, y, f"! {w}")
             y -= 15
     c.showPage()
 
@@ -587,10 +607,18 @@ def _berechnungs_seiten(c, abschnitte, projekt_name):
             c.setFillColorRGB(0.45, 0.5, 0.55)
             c.drawString(60, y, "Rechenweg")
             y -= 13
+            gruppe_aktiv = None
             for s in schritte:
                 if y < 70:
                     c.showPage()
                     y = kopf()
+                    gruppe_aktiv = None
+                if s.get("gruppe") and s["gruppe"] != gruppe_aktiv:
+                    gruppe_aktiv = s["gruppe"]
+                    c.setFont("Helvetica-Bold", 8.5)
+                    c.setFillColorRGB(0.86, 0.15, 0.15)
+                    c.drawString(64, y, gruppe_aktiv)
+                    y -= 12
                 c.setFont("Helvetica-Bold", 8)
                 c.setFillColorRGB(0.1, 0.12, 0.2)
                 c.drawString(70, y, f"{s.get('groesse')}: {s.get('formel')}")

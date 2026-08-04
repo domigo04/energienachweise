@@ -10,13 +10,19 @@ durchgehend π verwendet; die Abweichung liegt unter 0.2 % und wird über
 `rel`-Toleranzen abgedeckt.
 """
 
+import pathlib
+import re
+
 import pytest
 
 from app.calculations.hydraulik import berechne_schema
-from app.calculations.sole_druckverlust import (
-    INNENDURCHMESSER_MM,
-    sole_druckverlust,
-    waermetraeger_vorgabe,
+from app.calculations.sole_druckverlust import sole_druckverlust
+from app.calculations.sole_rohre import (
+    ROHRE,
+    WAERMETRAEGER,
+    erforderliche_druckstufe,
+    rohr,
+    waermetraeger,
 )
 
 
@@ -105,7 +111,7 @@ def test_volumenstrom_aus_quellenleistung_und_sole_dt():
     r = sole_druckverlust(**{**REFERENZ, "volumenstrom_m3_h": None,
                              "quellenleistung_kw": 30, "sole_dt_k": 3})
 
-    # V̇ = Q0 · 3600 / (c · ΔT · ρ) = 30 · 3600 / (3.68 · 3 · 1050)
+    # V' = Q0 · 3600 / (c · ΔT · ρ) = 30 · 3600 / (3.68 · 3 · 1050)
     assert r["volumenstrom_m3_h"] == pytest.approx(9.317, rel=1e-3)
     assert r["volumenstrom_quelle"] == "aus Quellenleistung und Sole-ΔT"
 
@@ -133,15 +139,80 @@ def test_einfach_u_sonde_halbiert_inhalt_und_kreise():
     assert r["inhalt_sonden_l"] == pytest.approx(1897.7 / 2, rel=1e-3)
 
 
-def test_stoffwerte_und_innendurchmesser_sind_hinterlegt():
-    assert INNENDURCHMESSER_MM[32] == 26.2
-    assert INNENDURCHMESSER_MM[40] == 32.6
-    vorgabe = waermetraeger_vorgabe(28)
-    assert vorgabe["dichte_kg_m3"] == 1050
-    assert vorgabe["viskositaet_mm2_s"] == 4.15
-    assert "Erdsonden.xlsx" in vorgabe["quelle"]
-    # Zwischenwerte greifen auf die nächstgelegene hinterlegte Zeile zurück.
-    assert waermetraeger_vorgabe(31)["konzentration_pct"] == 30
+def test_rohrtabelle_entspricht_sia_384_6_tabelle_10():
+    """Ø innen und Nenndruck aus SIA 384/6:2021 Tabelle 10."""
+    erwartet = {
+        "pe32x3.0": (26.0, "PN 16"), "pe40x3.7": (32.6, "PN 16"),
+        "pe40x4.5": (31.0, "PN 20"), "pe40x5.4": (29.2, "PN 25"),
+        "pe50x4.6": (40.8, "PN 16"), "pe50x5.6": (38.8, "PN 20"),
+        "pe50x6.9": (36.4, "PN 25"), "pe50x8.9": (32.0, "PN 32"),
+    }
+    for key, (innen, pn) in erwartet.items():
+        assert rohr(key)["innen_mm"] == innen
+        assert rohr(key)["pn"] == pn
+    # Die Vorlage rechnet mit 26.2 mm; beide Rohre bleiben wählbar.
+    assert rohr("pe32x2.9")["innen_mm"] == 26.2
+    assert rohr("pe50x4.7")["innen_mm"] == 40.6
+
+
+def test_stoffwerte_stammen_aus_den_zellkommentaren_der_vorlage():
+    n25 = waermetraeger("antifrogen_n_25")
+    assert (n25["dichte_kg_m3"], n25["viskositaet_mm2_s"], n25["frostschutz_c"]) == (1050, 4.15, -13.6)
+    l30 = waermetraeger("antifrogen_l_30")
+    assert (l30["dichte_kg_m3"], l30["viskositaet_mm2_s"]) == (1039, 7.65)
+    # Die Vorlage nennt 654 kg/m³ für Ethanol 30 % — unplausibel, deshalb markiert.
+    assert "unplausibel" in waermetraeger("ethanol_30")["warnung"]
+
+
+def test_druckstufe_folgt_der_tiefe():
+    assert erforderliche_druckstufe(170)["pn"] == "PN 16"
+    assert erforderliche_druckstufe(180)["pn"] == "PN 20"
+    assert erforderliche_druckstufe(250)["pn"] == "PN 25"
+    assert erforderliche_druckstufe(300)["pn"] == "PN 32"
+    assert erforderliche_druckstufe(300)["max_ueberdruck_bar"] == 41
+    ausserhalb = erforderliche_druckstufe(400)
+    assert ausserhalb["ausserhalb"] is True and ausserhalb["pn"] is None
+
+
+def test_zu_schwaches_sondenrohr_wird_gewarnt():
+    r = sole_druckverlust(**{**REFERENZ, "sonden_tiefe_m": 250, "sonden_pn": "PN 16"})
+
+    assert r["druckstufe"]["pn"] == "PN 25"
+    assert r["druckstufe"]["ausreichend"] is False
+    assert any("mindestens PN 25" in w for w in r["warnungen"])
+
+    stark = sole_druckverlust(**{**REFERENZ, "sonden_tiefe_m": 250, "sonden_pn": "PN 32"})
+    assert stark["druckstufe"]["ausreichend"] is True
+    assert not any("PN" in w for w in stark["warnungen"])
+
+
+def test_rechenweg_ist_nach_gruppen_gegliedert():
+    r = sole_druckverlust(**REFERENZ)
+    gruppen = list(dict.fromkeys(s["gruppe"] for s in r["rechenweg"]))
+
+    assert gruppen == ["1 Füllinhalt", "2 Wärmeträger", "4 Erdwärmesonde",
+                       "5 Zuleitung Sonde–Verteiler", "6 Zuleitung Verteiler–WP",
+                       "7 Pumpenbetriebspunkt"]
+    # Jede Gruppe eines Teilstücks nennt Formel und Zahlenwerte je Schritt.
+    sonde = [s for s in r["rechenweg"] if s["gruppe"] == "4 Erdwärmesonde"]
+    assert [s["groesse"] for s in sonde] == ["V'_Kreis", "w", "Re", "Strömungsart", "λ", "p_dyn", "Δp"]
+    assert all(s["formel"] and s["eingesetzt"] and s["ergebnis"] for s in sonde)
+
+
+def test_frontend_auswahllisten_bleiben_deckungsgleich():
+    """Die JS-Tabellen sind ein Spiegel; driften sie ab, wird hier gemeldet."""
+    js = (pathlib.Path(__file__).resolve().parents[2]
+          / "frontend/src/pages/hc/schema/soleTabellen.js").read_text(encoding="utf-8")
+    rohre_js = {
+        m[0]: (float(m[1]), m[2])
+        for m in re.findall(r"key:'([a-z0-9.x]+)'.*?innen:([\d.]+), pn:'(PN \d+)'", js)
+    }
+    traeger_js = set(re.findall(r"key:'(antifrogen_[a-z0-9_]+|ethanol_\d+)'", js))
+
+    assert set(rohre_js) == set(ROHRE), f"Rohre driften: {set(rohre_js) ^ set(ROHRE)}"
+    assert traeger_js == set(WAERMETRAEGER), f"Wärmeträger driften: {traeger_js ^ set(WAERMETRAEGER)}"
+    for key, werte in ROHRE.items():
+        assert rohre_js[key] == (werte["innen_mm"], werte["pn"]), f"Rohrmasse weichen ab: {key}"
 
 
 def test_ungueltige_eingaben_werden_abgewiesen():

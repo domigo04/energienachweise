@@ -23,10 +23,13 @@ import math
 from typing import Optional
 
 from app.calculations.einzel import _schritt, _z
-
-
-# Innendurchmesser der Normsonden/PE-Rohre (SDR 11), Blatt `infoblatt3_Normsonden`.
-INNENDURCHMESSER_MM = {25: 20.4, 32: 26.2, 40: 32.6, 50: 40.8, 63: 51.4}
+from app.calculations.sole_rohre import (  # noqa: F401  (Re-Export fürs Frontend)
+    KONZENTRAT_DICHTE_KG_L,
+    PN_RANG,
+    erforderliche_druckstufe,
+    rohr,
+    waermetraeger,
+)
 
 # Rohrrauheit PE, Vorgabe der Vorlage.
 RAUHEIT_MM_STD = 0.015
@@ -34,34 +37,13 @@ RAUHEIT_MM_STD = 0.015
 # Umrechnung Pa → mWs wie in der Vorlage.
 PA_JE_MWS = 0.000102
 
-# Zeta-Wert und Druckverlust der Wärmepumpe: Vorgabewerte der Vorlage.
+# Zeta-Wert des Verteilers: Vorgabewert der Vorlage.
 ZETA_VERTEILER_STD = 12.0
 
-# Stoffwerte Ethylenglykol/Wasser. Die 28-%-Zeile stammt direkt aus der Vorlage,
-# die übrigen Zeilen sind Richtwerte bei 0 °C mittlerer Soletemperatur und vom
-# Fachplaner gegen das Produktdatenblatt zu prüfen. Alle Werte sind im Bauteil
-# überschreibbar.
-WAERMETRAEGER = {
-    25: {"dichte_kg_m3": 1043.0, "cp_kj_kgk": 3.79, "viskositaet_mm2_s": 3.1,
-         "quelle": "Richtwert Ethylenglykol 0 °C"},
-    28: {"dichte_kg_m3": 1050.0, "cp_kj_kgk": 3.72, "viskositaet_mm2_s": 4.15,
-         "quelle": "Erdsonden.xlsx (ρ, ν)"},
-    30: {"dichte_kg_m3": 1052.0, "cp_kj_kgk": 3.68, "viskositaet_mm2_s": 3.8,
-         "quelle": "Richtwert Ethylenglykol 0 °C"},
-    35: {"dichte_kg_m3": 1062.0, "cp_kj_kgk": 3.57, "viskositaet_mm2_s": 4.6,
-         "quelle": "Richtwert Ethylenglykol 0 °C"},
-    40: {"dichte_kg_m3": 1071.0, "cp_kj_kgk": 3.46, "viskositaet_mm2_s": 5.6,
-         "quelle": "Richtwert Ethylenglykol 0 °C"},
-}
 
-# Dichte des Glykolkonzentrats (Antifrogen N) aus Blatt `glykol_Erdsonden`.
-KONZENTRAT_DICHTE_KG_L = 1.14
-
-
-def waermetraeger_vorgabe(konzentration_pct: float) -> dict:
-    """Nächstgelegene Stoffwertzeile zur gewünschten Konzentration."""
-    key = min(WAERMETRAEGER, key=lambda k: abs(k - float(konzentration_pct)))
-    return {"konzentration_pct": key, **WAERMETRAEGER[key]}
+def _s(gruppe: str, groesse: str, formel: str, eingesetzt: str, ergebnis: str) -> dict:
+    """Rechenschritt mit Gruppe, damit Editor und PDF ihn gliedern können."""
+    return {"gruppe": gruppe, **_schritt(groesse, formel, eingesetzt, ergebnis)}
 
 
 def _stroemungsart(reynolds: float, dk: float) -> str:
@@ -163,6 +145,7 @@ def sole_druckverlust(
     druckverlust_wp_mws: float = 0.0,
     verteiler_anzahl: float = 1.0,
     zeta_verteiler: float = ZETA_VERTEILER_STD,
+    sonden_pn: Optional[str] = None,
 ) -> dict:
     """Füllinhalt, Druckverlust und Pumpenbetriebspunkt des Solekreises.
 
@@ -197,6 +180,28 @@ def sole_druckverlust(
     warnungen = []
     rechenweg = []
 
+    # ── Druckstufe nach Sondentiefe (SIA 384/6:2021, informativ) ────────────
+    druckstufe = erforderliche_druckstufe(tiefe)
+    druckstufe["gewaehlt_pn"] = sonden_pn
+    if druckstufe["ausserhalb"]:
+        warnungen.append(
+            f"Sondentiefe {tiefe:.0f} m liegt ausserhalb der Druckstufentabelle "
+            "(bis 360 m). Nenndruckstufe fachlich festlegen."
+        )
+        druckstufe["ausreichend"] = None
+    elif sonden_pn:
+        reicht = PN_RANG.get(sonden_pn, 0) >= PN_RANG.get(druckstufe["pn"], 0)
+        druckstufe["ausreichend"] = reicht
+        if not reicht:
+            warnungen.append(
+                f"Sondenrohr ist {sonden_pn}; für {tiefe:.0f} m Tiefe verlangt "
+                f"SIA 384/6 mindestens {druckstufe['pn']} "
+                f"({druckstufe['max_ueberdruck_bar']} bar am Sondenfuss, inkl. "
+                "3 bar Betriebsdruck)."
+            )
+    else:
+        druckstufe["ausreichend"] = None
+
     # ── Füllinhalt ──────────────────────────────────────────────────────────
     inhalt_je_m_sonde = _querschnitt_m2(d_sonde) * 1000 * sonden_straenge
     inhalt_sonden = inhalt_je_m_sonde * tiefe * anzahl
@@ -205,21 +210,25 @@ def sole_druckverlust(
     zusatz = float(zusatzinhalt_l or 0)
     inhalt_total = inhalt_sonden + inhalt_verteiler + inhalt_wp + zusatz
 
-    rechenweg.append(_schritt(
+    rechenweg.append(_s(
+        "1 Füllinhalt",
         "V_Sonde", "V = π/4 · d² · Stränge · Tiefe · Anzahl",
         f"π/4 · {_z(d_sonde, 1)}² · {sonden_straenge} · {_z(tiefe, 1)} · {anzahl}",
         f"{inhalt_sonden:.1f} l"))
     if l_verteiler:
-        rechenweg.append(_schritt(
+        rechenweg.append(_s(
+            "1 Füllinhalt",
             "V_ZulVert", "V = π/4 · d² · L · 2 (Vor- und Rücklauf)",
             f"π/4 · {_z(d_verteiler, 1)}² · {_z(l_verteiler, 1)} · 2",
             f"{inhalt_verteiler:.1f} l"))
     if l_wp:
-        rechenweg.append(_schritt(
+        rechenweg.append(_s(
+            "1 Füllinhalt",
             "V_ZulWP", "V = π/4 · d² · L · 2 (Vor- und Rücklauf)",
             f"π/4 · {_z(d_wp, 1)}² · {_z(l_wp, 1)} · 2",
             f"{inhalt_wp:.1f} l"))
-    rechenweg.append(_schritt(
+    rechenweg.append(_s(
+        "1 Füllinhalt",
         "V_total", "V = V_Sonde + V_ZulVert + V_ZulWP + V_WP/Expansion",
         f"{inhalt_sonden:.1f} + {inhalt_verteiler:.1f} + {inhalt_wp:.1f} + {_z(zusatz, 1)}",
         f"{inhalt_total:.1f} l"))
@@ -232,11 +241,13 @@ def sole_druckverlust(
     traeger_excel_kg = traeger_excel_l * dichte / 1000
     konzentrat_vol_l = inhalt_total * konz / 100
     konzentrat_kg = konzentrat_vol_l * KONZENTRAT_DICHTE_KG_L
-    rechenweg.append(_schritt(
+    rechenweg.append(_s(
+        "2 Wärmeträger",
         "V_Glykol", "V = V_total · 1000 / 100 · Konzentration / ρ  (Vorlage)",
         f"{inhalt_total:.1f} · 1000 / 100 · {_z(konz, 1)} / {_z(dichte, 1)}",
         f"{traeger_excel_l:.1f} l"))
-    rechenweg.append(_schritt(
+    rechenweg.append(_s(
+        "2 Wärmeträger",
         "V_Konz", "V = V_total · Konzentration / 100  (volumetrische Kontrolle)",
         f"{inhalt_total:.1f} · {_z(konz, 1)} / 100",
         f"{konzentrat_vol_l:.1f} l"))
@@ -255,8 +266,9 @@ def sole_druckverlust(
         if q0 and dt and q0 > 0 and dt > 0:
             v_h = q0 * 3600 / (cp * dt * dichte)
             volumenstrom_quelle = "aus Quellenleistung und Sole-ΔT"
-            rechenweg.append(_schritt(
-                "V̇", "V̇ = Q0 · 3600 / (c · ΔT · ρ)",
+            rechenweg.append(_s(
+                "3 Volumenstrom",
+                "V'", "V' = Q0 · 3600 / (c · ΔT · ρ)",
                 f"{_z(q0)} · 3600 / ({_z(cp, 3)} · {_z(dt, 1)} · {_z(dichte, 1)})",
                 f"{v_h:.3f} m³/h"))
         else:
@@ -280,6 +292,7 @@ def sole_druckverlust(
             "konzentrat_volumetrisch_l": round(konzentrat_vol_l, 1),
             "konzentrat_volumetrisch_kg": round(konzentrat_kg, 1),
             "dichte_kg_m3": dichte, "cp_kj_kgk": cp, "viskositaet_mm2_s": viskositaet,
+            "druckstufe": druckstufe,
             "teilstuecke": [], "rechenweg": rechenweg, "warnungen": warnungen,
         }
 
@@ -304,22 +317,45 @@ def sole_druckverlust(
             innen_d_mm=d_wp, laenge_m=l_wp, straenge=2,
             dichte_kg_m3=dichte, viskositaet_mm2_s=viskositaet, rauheit_mm=rauheit))
 
-    for t in teilstuecke:
+    for nr, t in enumerate(teilstuecke, start=4):
+        gruppe = f"{nr} {t['name']}"
         rechenweg.extend([
-            _schritt(f"w ({t['name']})", "w = V̇ / (π/4 · d²)",
-                     f"{t['volumenstrom_m3_s']:.6f} / (π/4 · {_z(t['innen_d_mm'], 1)}²)",
-                     f"{t['geschwindigkeit_m_s']:.3f} m/s"),
-            _schritt(f"Re ({t['name']})", "Re = w · d / ν",
-                     f"{t['geschwindigkeit_m_s']:.3f} · {_z(t['innen_d_mm'], 1)}/1000 / "
-                     f"({_z(viskositaet, 2)}/10⁶)",
-                     f"{t['reynolds']:.0f} — {t['stroemungsart']}"),
+            _s(gruppe, "V'_Kreis", "V'_Kreis = V' / Anzahl Kreise",
+               f"{v_h:g}/3600 / {kreise}" if t["name"] != "Zuleitung Verteiler–WP"
+               else f"{v_h:g}/3600",
+               f"{t['volumenstrom_m3_s']:.6f} m³/s"),
+            _s(gruppe, "w", "w = V'_Kreis / (π/4 · d²)",
+               f"{t['volumenstrom_m3_s']:.6f} / (π/4 · ({_z(t['innen_d_mm'], 1)}/1000)²)",
+               f"{t['geschwindigkeit_m_s']:.3f} m/s"),
+            _s(gruppe, "Re", "Re = w · d / ν",
+               f"{t['geschwindigkeit_m_s']:.3f} · {_z(t['innen_d_mm'], 1)}/1000 / "
+               f"({_z(viskositaet, 2)}/10^6)",
+               f"{t['reynolds']:.0f}"),
+            _s(gruppe, "Strömungsart",
+               "Re < 2340 laminar · Re < 65·dk turbulent glatt · Re > 1300·dk turbulent rauh",
+               f"Re {t['reynolds']:.0f} · dk = {_z(t['innen_d_mm'], 1)}/{_z(rauheit, 3)} "
+               f"= {t['dk']:.0f} · 65·dk = {65 * t['dk']:.0f}",
+               t["stroemungsart"]),
         ])
+        if t["lambda"] is not None:
+            formel = ("λ = 64/Re" if t["stroemungsart"] == "Laminar"
+                      else "λ = 0.3164/Re^0.25 (Blasius)" if t["reynolds"] < 100_000
+                      and t["stroemungsart"] == "Turbulent glatt"
+                      else "λ = 0.0032 + 0.221/Re^0.237 (Nikuradse)"
+                      if t["stroemungsart"] == "Turbulent glatt"
+                      else "λ = 1/(2·log10(3.715·dk))² (Prandtl-Kármán)")
+            rechenweg.append(_s(gruppe, "λ", formel, f"Re = {t['reynolds']:.0f}",
+                                f"{t['lambda']:.5f}"))
+        rechenweg.append(_s(
+            gruppe, "p_dyn", "p_dyn = ρ · w² / 2",
+            f"{_z(dichte, 1)} · {t['geschwindigkeit_m_s']:.3f}² / 2",
+            f"{t['dynamischer_druck_pa']:.1f} Pa"))
         if t["druckverlust_pa"] is not None:
-            rechenweg.append(_schritt(
-                f"Δp ({t['name']})", "Δp = λ · (ρ · w²/2) / d · L · Stränge",
+            rechenweg.append(_s(
+                gruppe, "Δp", "Δp = λ · p_dyn / d · L · Stränge",
                 f"{t['lambda']:.5f} · {t['dynamischer_druck_pa']:.1f} / "
-                f"{_z(t['innen_d_mm'], 1)}/1000 · {_z(t['laenge_m'], 1)} · {t['straenge']}",
-                f"{t['druckverlust_pa']:.0f} Pa"))
+                f"({_z(t['innen_d_mm'], 1)}/1000) · {_z(t['laenge_m'], 1)} · {t['straenge']}",
+                f"{t['druckverlust_pa']:.0f} Pa = {t['druckverlust_mws']:.2f} mWs"))
 
     sonde = teilstuecke[0]
     if sonde["stroemungsart"] == "Laminar":
@@ -349,15 +385,16 @@ def sole_druckverlust(
     dp_wp_mws = float(druckverlust_wp_mws or 0)
     foerderhoehe = dp_leitungen_mws + dp_verteiler_mws + dp_wp_mws
 
+    pumpe = f"{len(teilstuecke) + 4} Pumpenbetriebspunkt"
     rechenweg.extend([
-        _schritt("Δp_Leitungen", "Δp = Σ Teilstücke · 0.000102",
-                 f"{dp_leitungen_pa:.0f} · {PA_JE_MWS}", f"{dp_leitungen_mws:.2f} mWs"),
-        _schritt("Δp_Verteiler", "Δp = ζ · (ρ · w²/2) · 0.000102 · Anzahl",
-                 f"{_z(zeta, 1)} · {sonde['dynamischer_druck_pa']:.1f} · {PA_JE_MWS} · {_z(n_verteiler, 1)}",
-                 f"{dp_verteiler_mws:.2f} mWs"),
-        _schritt("H", "H = Δp_Leitungen + Δp_Verteiler + Δp_Wärmepumpe",
-                 f"{dp_leitungen_mws:.2f} + {dp_verteiler_mws:.2f} + {_z(dp_wp_mws, 2)}",
-                 f"{foerderhoehe:.2f} mWs"),
+        _s(pumpe, "Δp_Leitungen", "Δp = Σ Teilstücke · 0.000102",
+           f"{dp_leitungen_pa:.0f} · {PA_JE_MWS}", f"{dp_leitungen_mws:.2f} mWs"),
+        _s(pumpe, "Δp_Verteiler", "Δp = ζ · p_dyn(Sonde) · 0.000102 · Anzahl",
+           f"{_z(zeta, 1)} · {sonde['dynamischer_druck_pa']:.1f} · {PA_JE_MWS} · {_z(n_verteiler, 1)}",
+           f"{dp_verteiler_mws:.2f} mWs"),
+        _s(pumpe, "H", "H = Δp_Leitungen + Δp_Verteiler + Δp_Wärmepumpe",
+           f"{dp_leitungen_mws:.2f} + {dp_verteiler_mws:.2f} + {_z(dp_wp_mws, 2)}",
+           f"{foerderhoehe:.2f} mWs"),
     ])
     if not dp_wp_mws:
         warnungen.append(
@@ -395,6 +432,7 @@ def sole_druckverlust(
         "verteiler_anzahl": n_verteiler,
         "foerderhoehe_mws": round(foerderhoehe, 2),
         "foerdervolumen_m3_h": round(v_h, 3),
+        "druckstufe": druckstufe,
         "sonde_stroemungsart": sonde["stroemungsart"],
         "sonde_turbulent": sonde["stroemungsart"] in ("Turbulent glatt", "Turbulent rauh"),
         "rechenweg": rechenweg,

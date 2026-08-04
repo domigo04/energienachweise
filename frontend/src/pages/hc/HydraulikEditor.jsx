@@ -997,6 +997,8 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         </>}
         {er?.gesamtinhalt_l != null && ro('Soleinhalt Feld', er.gesamtinhalt_l, 'L')}
         {er?.glykolbedarf_kg != null && ro('Glykolbedarf', er.glykolbedarf_kg, 'kg')}
+        {er?.sole_volumenstrom_m3h != null && ro('Solevolumenstrom', er.sole_volumenstrom_m3h, 'm³/h')}
+        {er?.foerderhoehe_gesamt_mws != null && ro('Pumpenförderhöhe', er.foerderhoehe_gesamt_mws, 'mWS', true)}
         {er?.warnings?.map((w,i)=><div key={i} style={warnSt}>⚠ {w}</div>)}
         <div style={{ fontSize:9, lineHeight:1.5, color:'#64748b', background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:6, padding:'6px 7px' }}>
           Die Quellenleistung kommt automatisch von der Wärmepumpe. Die spezifische Entzugsleistung ist bewusst eine sichtbare Projektangabe; es wird kein standortunabhängiger Pauschalwert eingesetzt.
@@ -1512,6 +1514,22 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, onUpdate, onClos
           <div><label style={lbl}>Sondenrohr</label><select style={inp} value={d.sonden_rohr_mm??32} onChange={e=>set('sonden_rohr_mm',Number(e.target.value))}>{[25,32,40].map(v=><option key={v} value={v}>{v} mm</option>)}</select></div>
           <div><label style={lbl}>Glykolkonzentration [%]</label><input type="number" min="0" max="100" style={inp} value={d.glykol_pct??30} onChange={e=>set('glykol_pct',e.target.value)}/></div>
           <div><label style={lbl}>Zusätzlicher Soleinhalt [L]</label><input type="number" min="0" style={inp} value={d.sole_zusatzinhalt_l??0} onChange={e=>set('sole_zusatzinhalt_l',e.target.value)}/></div>
+          <div><label style={lbl}>Solevolumenstrom manuell [m³/h]</label><input type="number" min="0" step="0.01" style={inp} value={d.sole_volumenstrom_m3h??''} onChange={e=>set('sole_volumenstrom_m3h',e.target.value)} placeholder="leer = Wärmepumpe"/></div>
+          <div><label style={lbl}>Sonden-Innendurchmesser [mm]</label><input type="number" min="1" step="0.1" style={inp} value={d.sonden_innendurchmesser_mm??''} onChange={e=>set('sonden_innendurchmesser_mm',e.target.value)} placeholder="automatisch aus Sondenrohr"/></div>
+        </div>
+        <div style={{ fontSize:12, fontWeight:700, color:'#334155', marginTop:4 }}>Hydraulisch kritischster Weg</div>
+        <div style={{ fontSize:10, color:'#64748b' }}>Längen sind einfache Wege; der Backend-Rechenweg berücksichtigt Vor- und Rücklauf.</div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+          <div><label style={lbl}>Verteiler → entfernteste Bohrung [m einfach]</label><input type="number" min="0" style={inp} value={d.anschlussleitung_kritisch_m??0} onChange={e=>set('anschlussleitung_kritisch_m',e.target.value)}/></div>
+          <div><label style={lbl}>Anschlussleitung ID [mm]</label><input type="number" min="1" step="0.1" style={inp} value={d.anschluss_innendurchmesser_mm??40.6} onChange={e=>set('anschluss_innendurchmesser_mm',e.target.value)}/></div>
+          <div><label style={lbl}>Hauptleitung [m einfach]</label><input type="number" min="0" style={inp} value={d.hauptleitung_m??0} onChange={e=>set('hauptleitung_m',e.target.value)}/></div>
+          <div><label style={lbl}>Hauptleitung ID [mm]</label><input type="number" min="1" step="0.1" style={inp} value={d.hauptleitung_innendurchmesser_mm??40.6} onChange={e=>set('hauptleitung_innendurchmesser_mm',e.target.value)}/></div>
+          <div><label style={lbl}>Alle Anschlussrohre [m VL+RL]</label><input type="number" min="0" style={inp} value={d.anschlussleitung_gesamt_vl_rl_m??0} onChange={e=>set('anschlussleitung_gesamt_vl_rl_m',e.target.value)}/></div>
+          <div><label style={lbl}>WP-Druckverlust [mWS]</label><input type="number" min="0" step="0.01" style={inp} value={d.wp_druckverlust_mws??0} onChange={e=>set('wp_druckverlust_mws',e.target.value)}/></div>
+          <div><label style={lbl}>Verteiler Σζ</label><input type="number" min="0" step="0.1" style={inp} value={d.verteiler_zeta??0} onChange={e=>set('verteiler_zeta',e.target.value)}/></div>
+          <div><label style={lbl}>Sole-Dichte [kg/m³]</label><input type="number" min="1" style={inp} value={d.sole_dichte_kg_m3??1050} onChange={e=>set('sole_dichte_kg_m3',e.target.value)}/></div>
+          <div><label style={lbl}>Kin. Viskosität [mm²/s]</label><input type="number" min="0.01" step="0.01" style={inp} value={d.sole_viskositaet_mm2_s??4.15} onChange={e=>set('sole_viskositaet_mm2_s',e.target.value)}/></div>
+          <div><label style={lbl}>Rohrrauheit [mm]</label><input type="number" min="0.001" step="0.001" style={inp} value={d.rohrrauheit_mm??0.015} onChange={e=>set('rohrrauheit_mm',e.target.value)}/></div>
         </div>
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
           <BigVal label="Duplexsonden" value={anzahl} color="#4f46e5" sub="je zwei U-Rohre"/>
@@ -1524,9 +1542,29 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, onUpdate, onClos
           <BigVal label="Soleinhalt" value={er?.gesamtinhalt_l} unit="L" color="#0369a1" sub="Duplexrohre + Zusatz"/>
           <BigVal label="Glykol" value={er?.glykolbedarf_kg} unit="kg" color="#a16207" sub={`${er?.glykol_konzentration_pct ?? '—'} %`}/>
         </div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+          <BigVal label="Solevolumenstrom" value={er?.sole_volumenstrom_m3h} unit="m³/h" color="#0369a1" sub={er?.volumenstromquelle ?? '—'}/>
+          <BigVal label="Pumpenbetriebspunkt" value={er?.foerderhoehe_gesamt_mws} unit="mWS" color="#7c3aed" sub={er?.foerderhoehe_gesamt_kpa != null ? `${er.foerderhoehe_gesamt_kpa} kPa` : 'kritischer Weg'}/>
+        </div>
+        {er?.druckverlust_abschnitte?.length > 0 && (
+          <div style={{ overflowX:'auto' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:10 }}>
+              <thead><tr>{['Abschnitt','L VL+RL','w','Re / Strömung','λ','Δp'].map(h=><th key={h} style={{textAlign:'left',padding:5,borderBottom:'1px solid #cbd5e1'}}>{h}</th>)}</tr></thead>
+              <tbody>{er.druckverlust_abschnitte.map(a=><tr key={a.name}>
+                <td style={{padding:5,borderBottom:'1px solid #e2e8f0'}}>{a.name}</td><td>{a.laenge_vl_rl_m} m</td><td>{a.geschwindigkeit_m_s} m/s</td><td>{a.reynolds} · {a.stroemungsart}</td><td>{a.lambda}</td><td>{a.druckverlust_pa} Pa</td>
+              </tr>)}</tbody>
+            </table>
+          </div>
+        )}
+        {er?.rechenweg?.length > 0 && <details open style={{background:'#f8fafc',border:'1px solid #cbd5e1',borderRadius:7,padding:'8px 10px'}}>
+          <summary style={{fontSize:12,fontWeight:700,cursor:'pointer'}}>Vollständiger Rechenweg</summary>
+          {er.rechenweg.map((s,i)=><div key={`${s.groesse}-${i}`} style={{padding:'7px 0',borderTop:i?'1px solid #e2e8f0':'none',fontSize:10,lineHeight:1.5}}>
+            <strong>{s.groesse}</strong>: {s.formel}<br/><span style={{fontFamily:'monospace'}}>{s.eingesetzt} = {s.ergebnis}</span>
+          </div>)}
+        </details>}
         {er?.warnings?.map((w,i)=><div key={i} style={warnSt}>⚠ {w}</div>)}
         <div style={{ fontSize:11, color:'#64748b' }}>
-          Die Bohrmeterberechnung ist eine transparente Planungshilfe. Standort-/Bewilligungsdaten und EED-Nachweis bleiben extern zu prüfen; die Druckverlustauslegung folgt separat.
+          Transparente Planungshilfe: Standort-/Bewilligungsdaten und EED-Nachweis bleiben extern zu prüfen. Die Pumpenförderhöhe basiert auf dem kritischsten Weg; der Anlageninhalt auf den gesamten erfassten Rohrmetern.
         </div>
       </div>
     );

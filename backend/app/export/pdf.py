@@ -314,14 +314,37 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
                         ("Spezifische Entzugsleistung", d.get("entzugsleistung_w_m"), "W/m"),
                         ("Sicherheitsfaktor", c.get("sicherheitsfaktor"), ""),
                         ("Sondenrohr", c.get("sonden_aussendurchmesser_mm"), "mm"),
-                        ("Glykolkonzentration", c.get("glykol_konzentration_pct"), "%")]
+                        ("Sonden-Innendurchmesser", c.get("sonden_innendurchmesser_mm"), "mm"),
+                        ("Glykolkonzentration", c.get("glykol_konzentration_pct"), "%"),
+                        ("Solevolumenstrom", c.get("sole_volumenstrom_m3h"), "m³/h"),
+                        ("Volumenstromquelle", c.get("volumenstromquelle"), ""),
+                        ("Kritischer Anschlussweg (einfach)", c.get("anschlussleitung_kritisch_m"), "m"),
+                        ("Alle Anschlussrohre (VL+RL)", c.get("anschlussleitung_gesamt_vl_rl_m"), "m"),
+                        ("Hauptleitung (einfach)", c.get("hauptleitung_m"), "m"),
+                        ("Sole-Dichte", c.get("sole_dichte_kg_m3"), "kg/m³"),
+                        ("Kinematische Viskosität", c.get("sole_viskositaet_mm2_s"), "mm²/s"),
+                        ("Rohrrauheit", c.get("rohrrauheit_mm"), "mm"),
+                        ("WP-Druckverlust", c.get("wp_druckverlust_mws"), "mWS"),
+                        ("Verteiler Σζ", c.get("verteiler_zeta"), "")]
             resultate = [("Gewählte Gesamtbohrmeter", c.get("ist_gesamt_m"), "m"),
                           ("Erforderliche Gesamtbohrmeter", c.get("erforderlich_gesamt_m"), "m"),
                           ("Erforderliche Länge je Sonde", c.get("erforderlich_pro_sonde_m"), "m"),
                           ("Sondeninhalt", c.get("sondeninhalt_l"), "l"),
+                          ("Anschlussinhalt", c.get("anschlussinhalt_l"), "l"),
+                          ("Hauptleitungsinhalt", c.get("hauptleitungsinhalt_l"), "l"),
                           ("Soleinhalt gesamt", c.get("gesamtinhalt_l"), "l"),
                           ("Glykolbedarf", c.get("glykolbedarf_kg"), "kg"),
+                          ("Druckverlust Rohre", c.get("druckverlust_rohre_pa"), "Pa"),
+                          ("Förderhöhe Rohre", c.get("foerderhoehe_rohre_mws"), "mWS"),
+                          ("Förderhöhe Verteiler", c.get("foerderhoehe_verteiler_mws"), "mWS"),
+                          ("Pumpenförderhöhe gesamt", c.get("foerderhoehe_gesamt_mws"), "mWS"),
+                          ("Pumpendruck gesamt", c.get("foerderhoehe_gesamt_kpa"), "kPa"),
                           ("Bohrmeter-Formel", "Lerf = Q0 · 1000 / qE · SF", "")]
+            resultate.extend([
+                (f"{s.get('groesse')}: {s.get('formel')}",
+                 f"{s.get('eingesetzt')} = {s.get('ergebnis')}", "")
+                for s in c.get("rechenweg", [])
+            ])
         else:
             continue
         abschnitte.append({"nr": d.get("nr"), "titel": TITEL.get(t, t), "bezeichnung": d.get("label") or "",
@@ -531,10 +554,30 @@ def _berechnungs_seiten(c, abschnitte, projekt_name):
             c.setFont("Helvetica", 9)
             c.setFillColorRGB(0.1, 0.12, 0.2)
             for name, wert, einheit in rows:
-                c.drawString(70, y, str(name))
-                c.drawRightString(430, y, "—" if wert in (None, "") else str(wert))
-                c.drawString(440, y, einheit)
-                y -= 13
+                if y < 55:
+                    c.showPage()
+                    y = kopf()
+                    c.setFont("Helvetica-Oblique", 8)
+                    c.drawString(60, y, f"{a['titel']} — Fortsetzung")
+                    y -= 14
+                    c.setFont("Helvetica", 9)
+                name_text = str(name)
+                wert_text = "—" if wert in (None, "") else str(wert)
+                # Rechenwege enthalten bewusst vollständige Formeln und
+                # eingesetzte Werte. Lange Zeilen werden untereinander
+                # ausgegeben, damit nichts überdruckt oder abgeschnitten wird.
+                if len(name_text) + len(wert_text) + len(str(einheit)) > 76:
+                    c.drawString(70, y, name_text)
+                    y -= 11
+                    c.setFont("Helvetica", 8)
+                    c.drawString(85, y, f"{wert_text}{(' ' + str(einheit)) if einheit else ''}")
+                    c.setFont("Helvetica", 9)
+                    y -= 14
+                else:
+                    c.drawString(70, y, name_text)
+                    c.drawRightString(430, y, wert_text)
+                    c.drawString(440, y, einheit)
+                    y -= 13
             y -= 4
         y -= 10
     c.showPage()

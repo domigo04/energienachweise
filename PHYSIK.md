@@ -270,7 +270,7 @@ Backend gerechnet; ein manuell gewählter Speicherinhalt wird nicht still übers
 - Stoffwerte der Vorlage: `c = 4.187 kJ/(kg·K)`, `ρ = 988 kg/m³`.
 - Referenzfall: 29.88 kW, 15 min, ΔT 12 K → rund 650 l.
 
-## 17. Erdsondenfeld – erste Auslegungsstufe (2026-08-03)
+## 17. Erdsondenfeld und Solepumpe (2026-08-04)
 Quelle: `Erdsonden.xlsx`, Blätter `glykol_Erdsonden` und
 `Druckverlustberechnung_erdsonde`.
 
@@ -282,15 +282,52 @@ Quelle: `Erdsonden.xlsx`, Blätter `glykol_Erdsonden` und
   `Lerf [m] = Q0 [kW] · 1000 / qE [W/m] · Sicherheitsfaktor`.
 - Sicherheitsfaktor: Standard 1.10 aus der Vorlage, sichtbar überschreibbar.
 - Duplexsonde: zwei U-Rohre = vier Rohrstränge je Sondenmeter.
-- Rohrinhalte der Vorlage: 25 mm → 0.327 l/m, 32 mm → 0.531 l/m,
-  40 mm → 0.835 l/m.
-- `Vsonde = Anzahl · 4 · Sondenlänge · Rohrinhalt`.
-- `mGlykol = (Vsonde + Zusatzinhalt) · Konzentration / 100 · ρGlykol`,
+- Standard-Innendurchmesser aus der Vorlage: DA 25 → 20.4 mm, DA 32 →
+  26.2 mm, DA 40 → 32.6 mm; sichtbar überschreibbar.
+- `Vrohr/m = π · dᵢ² / 4 · 1 m · 1000` und
+  `Vsonde = Anzahl · 4 · Sondenlänge · Vrohr/m`.
+- Für den Anlageninhalt werden zusätzlich alle tatsächlich installierten
+  Anschlussrohrmeter als Summe VL+RL und die Hauptleitung berücksichtigt.
+  Die kritische Weglänge darf dafür nicht als Gesamtrohrmenge missverstanden werden.
+- `Vrohr [l] = π · dᵢ² / 4 · L(VL+RL) · 1000`.
+- `mGlykol = Vgesamt · Konzentration / 100 · ρGlykol`,
   mit `ρGlykol = 1.14 kg/l` aus der Vorlage.
+
+Pumpenauslegung auf dem hydraulisch ungünstigsten Weg:
+
+- Die Anschlusslänge ist die **einfache Strecke vom Verteiler zur entferntesten
+  Bohrung**. Für den Druckverlust wird `L(VL+RL) = 2 · L(einfach)` gerechnet.
+- Duplexsonde: Gesamtvolumenstrom wird auf `Anzahl Sonden · 2 U-Kreise` verteilt.
+- `V̇U = V̇gesamt / Anzahl Sonden / 2`.
+- `w = V̇ / (π · dᵢ² / 4)`.
+- `Re = w · dᵢ / ν`.
+- Laminar `λ = 64 / Re`; turbulente Bereiche gemäss der Fallunterscheidung der
+  Excel-Vorlage. Das dort nicht definierte Übergangsgebiet wird sichtbar mit
+  der Haaland-Näherung gerechnet.
+- Darcy-Weisbach: `Δp = λ · (ρ · w² / 2) / dᵢ · L(VL+RL)`.
+- Verteiler: `ΔpVerteiler = Σζ · ρ · w² / 2`.
+- `Hrohre = ΣΔp / (ρ · g)` und
+  `Hpumpe = Hrohre + HVerteiler + HWP` mit `g = 9.81 m/s²`.
+- Der komplette Rechenweg zeigt Formel, eingesetzte Werte, Zwischenresultate,
+  Strömungsart und Endresultat im Editor und im Berechnungsexport.
+- Fehlt am EWS-Bauteil der Solevolumenstrom, wird der berechnete Quellenstrom
+  genau einer Wärmepumpe übernommen. Bei mehreren Wärmepumpen ist eine manuelle
+  Festlegung nötig.
+- Der berechnete Gesamtinhalt eines einzelnen Erdsondenfelds kann automatisch
+  als Anlageninhalt des EWS-Expansionsgefässes übernommen werden; eine manuelle
+  Volumenangabe am Gefäss hat Vorrang.
+
+Bewusst korrigierte Abweichungen gegenüber der Excel-Vorlage:
+
+- Die Umrechnung von Druck in Förderhöhe erfolgt stoffwertabhängig mit
+  `H = Δp / (ρ · g)` statt mit dem festen Wasserfaktor `0.000102`.
+- Glykolmenge und -masse verwenden die sichtbare Konzentration und Dichte; die
+  in der Vorlage versteckten Konstanten `30 %` und `+2 l` werden nicht übernommen.
+- Die Strömungsart wird in jedem Abschnitt anhand der Reynolds-Zahl bestimmt.
+  Der Zellbezug der Anschlussleitung in der Excel-Anzeige ist inkonsistent;
+  Reibungsbeiwert und Backend verwenden konsistent `Re`.
 
 Die EED-Tabellen der Vorlage gelten nur für deren dokumentierte Standorte und
 Randbedingungen (u.a. 1800 Betriebsstunden und ohne BWW). Sie werden deshalb nicht
-als allgemeine Bohrtiefenautomatik übernommen. Die Druckverlust-/Pumpenauslegung
-folgt erst, wenn Einzellänge, Anschlussleitung und Hauptleitung topologisch eindeutig
-definiert sind. Bohrmeter bleiben eine Planungshilfe; geologische und behördliche
+als allgemeine Bohrtiefenautomatik übernommen. Bohrmeter bleiben eine Planungshilfe; geologische und behördliche
 Nachweise sind extern zu prüfen.

@@ -13,6 +13,7 @@ Konventionen aus dem Editor:
 import re
 from typing import List, Optional
 
+from app.calculations.betriebsfaelle import betriebsfaelle, ist_umschaltventil
 from app.calculations.expansion import berechne_expansion
 from app.calculations.leitungsdimension import automatische_dimension
 from app.calculations.schema_sizing import erdsondenfeld, technischer_speicher
@@ -512,6 +513,40 @@ def _wp_kreis(wp_id: str, system: str, edges: List[dict], node_by_id: dict) -> t
     return treffer, quellen, grenzen
 
 
+def _umschaltventil_im_erzeugerkreis(heiz_edges, edges, node_by_id):
+    """Umschaltventil an der Grenze des Erzeugerkreises finden.
+
+    `_wp_kreis` endet an `valve3`; das Ventil hängt also an einer Kante des
+    Heizkreises. Nur ein ausdrücklich auf «umschaltend» gestelltes Ventil
+    erzeugt Betriebsfälle — ein mischendes Ventil regelt eine Temperatur und
+    schaltet nichts um.
+    """
+    for e in edges:
+        if e["id"] not in heiz_edges:
+            continue
+        for seite in ("source", "target"):
+            knoten = node_by_id.get(e[seite])
+            if not knoten or knoten.get("type") != "valve3":
+                continue
+            if ist_umschaltventil(knoten.get("data") or {}):
+                return knoten["id"]
+    return None
+
+
+def _bww_ladeleistung(nodes) -> Optional[float]:
+    """Ladeleistung aus dem BWW-Speicher — vorerst eine sichtbare Eingabe.
+
+    Die Bemessung aus Wohnungen, Personen oder Ausbaustandard folgt aus dem
+    Berechnungsexcel und wird hier bewusst nicht erfunden.
+    """
+    werte = [
+        _zahl((n.get("data") or {}).get("bww_ladeleistung_kw"))
+        for n in nodes if n.get("type") == "bww"
+    ]
+    werte = [w for w in werte if w is not None and w > 0]
+    return werte[0] if len(werte) == 1 else None
+
+
 def _solekreis_bauteile(nodes, edges, node_by_id) -> dict:
     """Welche Pumpe und welches Erdsondenfeld hängen am Quellenkreis welcher WP?
 
@@ -586,11 +621,24 @@ def _waermepumpen_kreise(nodes, edges, edge_flows, node_flows, calc_edges) -> di
         # Der Wärmeträger des angeschlossenen Sondenfelds gilt auch am
         # Verdampfer — sonst rechnete der Solevolumenstrom mit Wasser.
         ews_id = (solekreis["wp_ews"].get(wid) or {}).get("ews_id")
+        sole_ce = _sole_ce(node_by_id.get(ews_id))
         res = berechne_waermepumpe(
             d,
             hat_quellenseite=hat_hydraulischen_quellenkreis,
-            sole_ce_auto=_sole_ce(node_by_id.get(ews_id)),
+            sole_ce_auto=sole_ce,
         )
+
+        # Umschaltventil im Erzeugerkreis: entweder BWW oder Heizung, nie beides.
+        ventil_id = _umschaltventil_im_erzeugerkreis(heiz_edges, edges, node_by_id)
+        if ventil_id:
+            res["betriebsfaelle"] = betriebsfaelle(
+                d,
+                bww_ladeleistung_kw=_bww_ladeleistung(nodes),
+                hat_quellenseite=hat_hydraulischen_quellenkreis,
+                sole_ce_auto=sole_ce,
+            )
+            res["betriebsfaelle"]["umschaltventil_id"] = ventil_id
+            res["warnings"] += res["betriebsfaelle"]["warnungen"]
         res["heating_port_quelle"] = "port" if "port" in heiz_quellen else ("layer" if heiz_quellen else None)
         res["source_port_quelle"] = "port" if "port" in sole_quellen else ("layer" if sole_quellen else None)
 
@@ -1207,7 +1255,15 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
     for n in nodes:
         t = n.get("type")
         d = data(n)
-        if t in ("valve2", "valve3"):
+        if t == "valve3" and ist_umschaltventil(d):
+            # Umschaltventil: zwei Stellungen statt einer geregelten Temperatur.
+            # Ein kvs wäre hier sinnlos — es wird nichts gedrosselt.
+            ventil_results[n["id"]] = {
+                "v": round(node_flows.get(n["id"]) or 0, 4),
+                "funktion": "umschaltend",
+                "warnings": [],
+            }
+        elif t in ("valve2", "valve3"):
             # Ventil: kvs + Ventilautorität aus dem Leitungs-Durchfluss (PHYSIK §3)
             v = node_flows.get(n["id"]) or 0
             dp_var = _zahl(d.get("dp_var"))

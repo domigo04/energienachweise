@@ -308,6 +308,21 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
                     (f"ΔT {quelle}", _fmt(er.get("source_dt"), 2), "K"),
                     (f"V' {quelle}", _fmt(er.get("source_flow_m3h")), "m³/h"),
                 ])
+            bf = er.get("betriebsfaelle")
+            if bf:
+                # Umschaltventil: die Fälle stehen nebeneinander, nie addiert.
+                resultate.append(("— Betriebsfälle (Umschaltventil) —", "", ""))
+                for fall in bf.get("faelle") or []:
+                    marke = " ◄ massgebend" if fall["key"] == bf.get("massgebend") else ""
+                    resultate.extend([
+                        (f"{fall['titel']}{marke}: Heizleistung", fall.get("q_heiz_kw"), "kW"),
+                        (f"{fall['titel']}: VL/RL",
+                         f"{fall.get('vl_c')}/{fall.get('rl_c')}" if fall.get("vl_c") is not None else None, "°C"),
+                        (f"{fall['titel']}: COP", fall.get("cop"), ""),
+                        (f"{fall['titel']}: Quellenleistung", fall.get("q_source_kw"), "kW"),
+                        (f"{fall['titel']}: V' Sole", _fmt(fall.get("solevolumenstrom_m3h")), "m³/h"),
+                    ])
+                hinweise = bf.get("warnungen") or []
         elif t == "speicher":
             c = speicher_results.get(n["id"], {})
             eingaben = [

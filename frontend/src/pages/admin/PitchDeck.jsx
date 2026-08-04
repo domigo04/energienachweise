@@ -2,7 +2,7 @@ import { useCallback, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, Clock3, Database,
-  FileCheck2, Mail, Maximize2, ShieldCheck, Sparkles, TrendingUp, Users,
+  Mail, Maximize2, ShieldCheck, Sparkles, TrendingUp,
 } from "lucide-react";
 import logo from "../../png/logo.png";
 import schemaUebersicht from "../../assets/pitchdeck/schema-uebersicht.png";
@@ -11,10 +11,12 @@ import detailGruppe from "../../assets/pitchdeck/detail-gruppe.png";
 import detailVerteiler from "../../assets/pitchdeck/detail-verteiler.png";
 import kontaktQr from "../../assets/pitchdeck/kontakt-qr.svg";
 import portrait from "../../assets/pitchdeck/portrait.jpg";
-import { normaliseSlide, pitchPosition, PITCH_KONTAKT, PITCH_SLIDES } from "./pitchDeckContent";
+import {
+  normaliseSlide, pitchPosition, pitchWert, PITCH_KONTAKT, PITCH_SLIDES, PITCH_ZAHLEN,
+} from "./pitchDeckContent";
 import "./PitchDeck.css";
 
-// Porträt der Gründerfolie. Ein anderes Foto ersetzt einfach
+// Porträt der Eingangsfolie. Ein anderes Foto ersetzt einfach
 // `src/assets/pitchdeck/portrait.jpg`; auf null gesetzt zeigt die Folie
 // stattdessen das Monogramm.
 const PORTRAIT = portrait;
@@ -24,7 +26,7 @@ const PORTRAIT = portrait;
 // (PHYSIK.md §1, §4, §10, §14, §17) — Herleitung in docs/PITCHDECK.md.
 const KASKADE = [
   ["auto", "Volumenstrom Gruppe", "1.29 m³/h", "1.81 m³/h"],
-  ["ok", "Rohrdimension", "DN32 · 50 Pa/m", "DN40 · 44 Pa/m"],
+  ["ok", "Rohrdimension", "DN32", "DN40 · 44 Pa/m"],
   ["auto", "Verteiler", "45.00 kW", "51.00 kW"],
   ["auto", "Misch-Rücklauf", "34.3 °C", "35.3 °C"],
   ["auto", "Ventil und Pumpe", "kvs · Förderhöhe", "neu ausgelegt"],
@@ -33,9 +35,32 @@ const KASKADE = [
   ["ok", "Export", "Revision 07", "Revision 08"],
 ];
 
-const KETTE = [
-  "Leistung", "Volumenstrom", "Rohrdimension", "Druckverlust", "Pumpe",
-  "Ventil", "Erzeuger und Quelle", "Speicher und Expansion", "Export",
+const WORKFLOW = [
+  "Schema zeichnen", "Parametrieren", "Backend rechnet",
+  "Warnungen prüfen", "Revision", "PDF-Export",
+];
+
+const COCKPIT = [
+  ["Das Schema ist das Datenmodell", "Jedes Bauteil trägt seine fachlichen Werte, nicht nur ein Symbol."],
+  ["Gerechnet wird im Backend", "Ein Rechenkern für Schema, Schnellrechner und Export — keine zweite Wahrheit."],
+  ["Warnungen statt stiller Annahmen", "Fehlende Grundlagen werden benannt, mit Element, Ursache und Korrektur."],
+  ["Revision und Export aus demselben Stand", "Freigegebene Stände bleiben unverändert und lassen sich wieder öffnen."],
+];
+
+const TIMELINE = [
+  ["Heute", "Rechenkern, Editor, Warnungen und Vektor-PDF laufen."],
+  ["Pilotbereitschaft", "Golden Cases extern geprüft, Datenverlust- und Export-Gate bestanden."],
+  ["Begleiteter Pilot", "Drei Monate, reale Projekte, wöchentlicher Feedbacktermin."],
+  ["Marktstart", "Lizenzbetrieb für Planungsbüros."],
+];
+
+const LEISTUNGEN = [
+  ["Einführung im Büro", "90 Minuten vor Ort, danach arbeiten Sie selbstständig."],
+  ["Firmenvorlagen", "Zwei bis drei Vorlagen, auf Ihre eigenen Prinzipschemata zugeschnitten."],
+  ["Wöchentlicher Termin", "Feste Sitzung mit dem Entwickler — Ihre Rückmeldung landet direkt im Werkzeug."],
+  ["Direkter Support", "Kein Ticketsystem, sondern der Weg zur Person, die das Werkzeug gebaut hat."],
+  ["Ihre realen Projekte", "Bis fünf Nutzer, echte Aufträge statt Testdaten."],
+  ["Unterlagen", "Einführungsvideo, Kurzanleitung und die bekannten Einschränkungen schriftlich."],
 ];
 
 const STATUS = [
@@ -90,25 +115,95 @@ function Shot({ src, alt, caption, className = "" }) {
   );
 }
 
-/** Funktionsfarben: blau Eingabe · orange automatisch · grün geprüft · rot Warnung. */
+/** Funktionsfarben: blau Eingabe · amber automatisch · grün geprüft · rot Warnung. */
 function Marker({ kind, children }) {
   return <span className={`pitch-marker pitch-marker--${kind}`}>{children}</span>;
 }
 
+/** Kaufmännischer Wert; noch nicht eingetragene Felder bleiben sichtbar offen. */
+function Wert({ value, einheit = "" }) {
+  const { text, offen } = pitchWert(value);
+  return <b className={offen ? "is-offen" : ""}>{text}{offen || !einheit ? "" : ` ${einheit}`}</b>;
+}
+
+function KaufmaennischeFolie({ before, accent, subtitle, felder, fuss }) {
+  return (
+    <>
+      <AccentTitle before={before} accent={accent} />
+      <p className="pitch-subtitle">{subtitle}</p>
+      <div className="pitch-kennzahlen">
+        {felder.map(([titel, value, hinweis]) => (
+          <div key={titel}>
+            <span>{titel}</span>
+            <Wert value={value} />
+            <small>{hinweis}</small>
+          </div>
+        ))}
+      </div>
+      {fuss ? <p className="pitch-bottom-line">{fuss}</p> : null}
+    </>
+  );
+}
+
+/** Der Kreislauf: eine Änderung läuft nicht durch Dateien, sondern zurück ins Schema. */
+function Flowchart() {
+  const breite = 148;
+  const luecke = 22;
+  return (
+    <svg className="pitch-flowchart" viewBox="0 0 1020 212" role="img"
+      aria-label="Kreislauf von Schema zeichnen über Berechnung und Revision zum Export, mit Rücksprung bei jeder Änderung">
+      <defs>
+        <marker id="pfeil" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0 0 L10 5 L0 10 z" />
+        </marker>
+        <marker id="pfeil-auto" className="pitch-flowchart__marker-auto" viewBox="0 0 10 10" refX="9" refY="5"
+          markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0 0 L10 5 L0 10 z" />
+        </marker>
+      </defs>
+      {WORKFLOW.map((schritt, i) => {
+        const x = i * (breite + luecke);
+        return (
+          <g key={schritt}>
+            <rect x={x} y={20} width={breite} height={64} rx={14} />
+            <text x={x + breite / 2} y={57}>{schritt}</text>
+            {i < WORKFLOW.length - 1 ? (
+              <path className="pitch-flowchart__weg" markerEnd="url(#pfeil)"
+                d={`M${x + breite + 3} 52 H${x + breite + luecke - 5}`} />
+            ) : null}
+          </g>
+        );
+      })}
+      <path className="pitch-flowchart__rueckweg" markerEnd="url(#pfeil-auto)"
+        d={`M${5 * (breite + luecke) + breite / 2} 92 V158 H${breite + luecke + breite / 2} V96`} />
+      <text className="pitch-flowchart__label" x={510} y={190}>
+        Eine Änderung — und die Kette rechnet neu
+      </text>
+    </svg>
+  );
+}
+
 function SlideContent({ slideKey }) {
   switch (slideKey) {
-    case "titel":
+    case "sirego":
       return (
         <div className="pitch-split pitch-split--hero">
           <div>
-            <div className="pitch-kicker">Fachplanung neu verbunden</div>
+            <div className="pitch-kicker">SIREGO GmbH · Heizungscockpit</div>
             <AccentTitle before="Heizungs" accent="cockpit" />
             <p className="pitch-lead">Ein Schema. Alle Berechnungen.<br />Ein lebender Projektstand.</p>
             <div className="pitch-promise"><Sparkles /> Ändern – neu rechnen – sicher weiterplanen.</div>
           </div>
-          <Shot src={schemaUebersicht} className="pitch-shot--bleed"
-            alt="Hydraulikschema mit Wärmepumpe, Speichern, Verteiler und zwei Verbrauchergruppen"
-            caption="Pilotschema · Sole/Wasser-Wärmepumpe mit Erdsonden" />
+          <div className="pitch-portrait">
+            {PORTRAIT ? <img src={PORTRAIT} alt={PITCH_KONTAKT.name} /> : <span>DG</span>}
+            <b>{PITCH_KONTAKT.name}</b>
+            <small>{PITCH_KONTAKT.rolle} · {PITCH_KONTAKT.firma}</small>
+            <ul>
+              <li>Von einem Heizungsfachplaner für reale Heizungsprojekte gebaut.</li>
+              <li>Die Rechenwege stammen aus den eigenen Planungshilfen.</li>
+              <li>Jede Formel hat eine Quelle und einen lesbaren Rechenweg.</li>
+            </ul>
+          </div>
         </div>
       );
     case "problem":
@@ -131,52 +226,166 @@ function SlideContent({ slideKey }) {
             caption="Heute: ein Schema, fünf getrennte Rechenstände" />
         </div>
       );
-    case "beispiel":
+    case "loesung":
       return (
         <>
-          <div className="pitch-kicker">Konkret · aus dem Pilotschema</div>
-          <AccentTitle before="Eine Eingabe. " accent="Acht Folgen." />
-          <div className="pitch-case">
-            <div className="pitch-case__input">
-              <Marker kind="eingabe">Eingabe</Marker>
-              <b>15 → 21 kW</b>
-              <span>Gruppe «Lufterhitzer» · 50/40 °C</span>
-              <Shot src={detailGruppe} alt="Verbrauchergruppen im Schema mit Dimension und Massenstrom"
-                caption="Der geänderte Verbraucher im Schema" />
-            </div>
-            <div className="pitch-cascade">
-              {KASKADE.map(([kind, name, vorher, nachher]) => (
-                <div key={name} className={`pitch-cascade__row pitch-cascade__row--${kind}`}>
-                  <span>{name}</span><i>{vorher}</i><em>→</em><b>{nachher}</b>
-                </div>
-              ))}
-              <p>Annahmen: COP 4.5 · Entzugsleistung 45 W/m · Sicherheitsfaktor 1.10. Gerechnet vom Backend-Rechenkern, nicht von der Folie.</p>
-            </div>
-          </div>
-        </>
-      );
-    case "kette":
-      return (
-        <>
-          <div className="pitch-kicker">Das Prinzip</div>
+          <div className="pitch-kicker">Die Lösung · Beispiel aus dem Pilotschema</div>
           <AccentTitle before="Eine Änderung. " accent="Das System reagiert." />
-          <div className="pitch-chain-layout">
-            <ol className="pitch-chain">
-              {KETTE.map((stufe, i) => <li key={stufe} style={{ "--i": i }}>{stufe}</li>)}
+          <div className="pitch-case">
+            <div>
+              <div className="pitch-case__input">
+                <Marker kind="eingabe">Eingabe</Marker>
+                <b>15 → 21 kW</b>
+                <span>Gruppe «Lufterhitzer» · 50/40 °C</span>
+              </div>
+              <Shot src={detailGruppe} alt="Verbrauchergruppen im Schema mit Dimension und Massenstrom"
+                caption="Der geänderte Verbraucher" />
+            </div>
+            <ol className="pitch-tail">
+              {KASKADE.map(([kind, name, vorher, nachher], i) => (
+                <li key={name} className={`pitch-tail__step pitch-tail__step--${kind}`} style={{ "--i": i }}>
+                  <span>{name}</span><i>{vorher}</i><em>→</em><b>{nachher}</b>
+                </li>
+              ))}
             </ol>
-            <Shot src={detailVerteiler} alt="Verteilerbalken mit berechneter Leistung, Volumenstrom und Dimension"
-              caption="Berechnete Werte stehen im Schema, nicht in einer Nebendatei" />
           </div>
           <p className="pitch-bottom-line">
-            Schema, Berechnung, Revision und Export verwenden dieselbe Projektgrundlage.
+            Acht Folgewerte aus einer Eingabe – gerechnet vom Backend, nicht von der Folie.
           </p>
         </>
+      );
+    case "workflow":
+      return (
+        <>
+          <AccentTitle before="Ein " accent="Kreislauf" after=" statt einer Dateikette" />
+          <p className="pitch-subtitle">Dieselbe Projektgrundlage trägt Schema, Berechnung, Revision und Export.</p>
+          <Flowchart />
+        </>
+      );
+    case "cockpit":
+      return (
+        <div className="pitch-split">
+          <div>
+            <AccentTitle before="Das Heizungscockpit " accent="erklärt" />
+            <ol className="pitch-steps">
+              {COCKPIT.map(([titel, text]) => <li key={titel}><b>{titel}</b><span>{text}</span></li>)}
+            </ol>
+          </div>
+          <Shot src={schemaUebersicht} alt="Hydraulikschema mit Wärmepumpe, Speichern, Verteiler und Verbrauchergruppen"
+            caption="Ein reales Pilotschema im Editor" />
+        </div>
+      );
+    case "timeline":
+      return (
+        <>
+          <AccentTitle before="Der Weg zum " accent="Marktstart" />
+          <p className="pitch-subtitle">Der nächste Schritt entsteht nicht durch ein Datum, sondern durch ein bestandenes Gate.</p>
+          <ol className="pitch-timeline">
+            {TIMELINE.map(([titel, text], i) => (
+              <li key={titel} className={i === 0 ? "is-jetzt" : ""}>
+                <span>{i + 1}</span><b>{titel}</b><p>{text}</p>
+              </li>
+            ))}
+          </ol>
+        </>
+      );
+    case "leistungen":
+      return (
+        <div className="pitch-split">
+          <div>
+            <div className="pitch-kicker">Im Piloten enthalten</div>
+            <AccentTitle before="Was Sie " accent="bekommen" />
+            <div className="pitch-leistungen">
+              {LEISTUNGEN.map(([titel, text]) => (
+                <div key={titel}><CheckCircle2 /><b>{titel}</b><span>{text}</span></div>
+              ))}
+            </div>
+          </div>
+          <Shot src={detailVerteiler} alt="Verteilerbalken mit berechneter Leistung, Volumenstrom und Dimension"
+            caption="Ihre Vorlagen, Ihre Schemas – berechnet im Werkzeug" />
+        </div>
+      );
+    case "markt":
+      return (
+        <KaufmaennischeFolie
+          before="Markt" accent="potenzial"
+          subtitle="Warum es dieses Werkzeug in fünf Jahren noch geben wird."
+          felder={[
+            ["Heizungsplanungsbüros in der Schweiz", PITCH_ZAHLEN.markt.bueros, "Gesamtmarkt"],
+            ["Davon im Zielsegment", PITCH_ZAHLEN.markt.zielsegment, "Büros mit 2–15 Planern"],
+            ["Jährliches Lizenzpotenzial", PITCH_ZAHLEN.markt.potenzial, "Core-Lizenz pro Büro und Jahr"],
+          ]}
+          fuss={pitchWert(PITCH_ZAHLEN.markt.quelle).offen ? "Quelle der Marktzahlen einzutragen" : `Quelle: ${PITCH_ZAHLEN.markt.quelle}`}
+        />
+      );
+    case "finanzierung":
+      return (
+        <KaufmaennischeFolie
+          before="Die " accent="Finanzierung"
+          subtitle="Die Entwicklung läuft nicht auf Kredit, sondern auf Arbeit und Pilotbeiträgen."
+          felder={[
+            ["Bisher in die Entwicklung geflossen", PITCH_ZAHLEN.finanzierung.bisher, "Eigenleistung und Mittel"],
+            ["Laufender Entwicklungsaufwand", PITCH_ZAHLEN.finanzierung.laufend, "pro Monat"],
+            ["Beitrag pro Pilotbüro", PITCH_ZAHLEN.finanzierung.pilotbeitrag, PITCH_ZAHLEN.finanzierung.pilotdauer],
+          ]}
+          fuss="Der Pilotbeitrag deckt Einführung, Vorlagen und Betreuung – nicht die Entwicklung des Werkzeugs."
+        />
+      );
+    case "funding":
+      return (
+        <KaufmaennischeFolie
+          before="Bis zum " accent="Marktstart"
+          subtitle="Was es braucht, damit aus dem Piloten ein Produkt im Regelbetrieb wird."
+          felder={[
+            ["Finanzierungsbedarf", PITCH_ZAHLEN.funding.bedarf, "bis zum Marktstart"],
+            ["Verwendung", PITCH_ZAHLEN.funding.verwendung, "Schwerpunkt der Mittel"],
+            ["Zeitraum", PITCH_ZAHLEN.funding.zeitraum, "bis zur Lizenzfähigkeit"],
+          ]}
+          fuss="Pilotbüros tragen kein Entwicklungsrisiko: Sie zahlen für Begleitung, nicht für Zukunft."
+        />
+      );
+    case "lizenzen":
+      return (
+        <KaufmaennischeFolie
+          before="Lizenzen bei " accent="erfolgreichem Marktstart"
+          subtitle="Was das Werkzeug kostet, wenn es aus dem Piloten heraus in den Regelbetrieb geht."
+          felder={[
+            ["Core-Lizenz", PITCH_ZAHLEN.lizenzen.core, "pro Büro und Jahr · Schema, Berechnungen, Revision, Export"],
+            ["Kondition für Pilotbüros", PITCH_ZAHLEN.lizenzen.pilotkondition, "Gegenleistung für die Pilotarbeit"],
+            ["Add-on", PITCH_ZAHLEN.lizenzen.addon, "eigenes Kontingent, erst nach dem Datengate"],
+          ]}
+          fuss="Preise gelten erst als bestätigt, wenn der Pilot eine Nutzenannahme belegt."
+        />
+      );
+    case "kontakt":
+      return (
+        <div className="pitch-split">
+          <div>
+            <AccentTitle before="Heizungscockpit " accent="näher kennenlernen" />
+            <ol className="pitch-steps pitch-steps--cta">
+              <li><b>Live-Demo am realen Schema</b><span>30 Minuten</span></li>
+              <li><b>Passendes Projekt gemeinsam auswählen</b><span>30 Minuten</span></li>
+              <li><b>Einführung und Schulung im Büro</b><span>90 Minuten, danach selbstständig</span></li>
+            </ol>
+          </div>
+          <div className="pitch-contact">
+            <img src={kontaktQr} alt={`QR-Code für eine E-Mail an ${PITCH_KONTAKT.mail}`} />
+            <div>
+              <b>{PITCH_KONTAKT.name}</b>
+              <span>{PITCH_KONTAKT.firma}</span>
+              <a href={`mailto:${PITCH_KONTAKT.mail}?subject=${encodeURIComponent(PITCH_KONTAKT.betreff)}`}>
+                <Mail /> {PITCH_KONTAKT.mail}
+              </a>
+              <small>QR scannen – die E-Mail «{PITCH_KONTAKT.betreff}» ist vorbereitet.</small>
+            </div>
+          </div>
+        </div>
       );
     case "status":
       return (
         <>
-          <AccentTitle before="Pilot V1 – " accent="ehrlich abgegrenzt" />
-          <p className="pitch-subtitle">Was heute läuft, was der Pilot beweisen muss und was nicht dazugehört.</p>
+          <AccentTitle before="Funktionsstatus " accent="heute" />
+          <p className="pitch-subtitle">Für Rückfragen: was läuft, was der Pilot beweisen muss, was nicht dazugehört.</p>
           <div className="pitch-status">
             {STATUS.map(([kind, titel, punkte]) => (
               <div key={titel} className={`pitch-status__col pitch-status__col--${kind}`}>
@@ -186,32 +395,6 @@ function SlideContent({ slideKey }) {
             ))}
           </div>
         </>
-      );
-    case "projektstand":
-      return (
-        <div className="pitch-split">
-          <div>
-            <AccentTitle before="Nachvollziehbarer " accent="Projektstand" />
-            <ol className="pitch-steps">
-              {[
-                ["Formel", "Jeder Rechenweg bleibt sichtbar."],
-                ["Herkunft", "Automatisch oder manuell gesetzt ist erkennbar."],
-                ["Warnung", "Fehlende Grundlagen statt stiller Annahmen."],
-                ["Revision", "Freigegebene Stände bleiben unverändert."],
-              ].map(([titel, text]) => <li key={titel}><b>{titel}</b><span>{text}</span></li>)}
-            </ol>
-          </div>
-          <div className="pitch-snapshot">
-            <div className="pitch-snapshot__head"><FileCheck2 /><span>Projektstand · Revision 07</span><b>bereit</b></div>
-            {[
-              ["Schema", "aktuell"], ["Berechnungsversion", "gespeichert"],
-              ["Eingaben und Resultate", "enthalten"], ["Fehlende Grundlagen", "sichtbar"],
-              ["Bearbeiter und Zeitpunkt", "protokolliert"],
-            ].map(([name, stand]) => (
-              <div className="pitch-snapshot__row" key={name}><CheckCircle2 /><span>{name}</span><b>{stand}</b></div>
-            ))}
-          </div>
-        </div>
       );
     case "nutzen":
       return (
@@ -226,94 +409,7 @@ function SlideContent({ slideKey }) {
             {NUTZEN.map(([titel, spanne, basis]) => (
               <div key={titel}><span>{titel}</span><b>{spanne}</b><small>{basis}</small></div>
             ))}
-            <p>Modellannahme: 40 Prinzipschemata pro Büro und Jahr. Keine garantierte Einsparung – Annahmen im Anhang.</p>
-          </div>
-        </div>
-      );
-    case "zielbuero":
-      return (
-        <div className="pitch-split">
-          <div>
-            <AccentTitle before="Für wen der Pilot " accent="passt" />
-            <p className="pitch-subtitle">Gesucht: Büros, die mit echten Projekten messen – nicht nur testen.</p>
-            <ul className="pitch-list pitch-list--checks">
-              <li>2–15 Heizungsplaner</li>
-              <li>Regelmässige Prinzipschemata, heute mit CAD und Excel</li>
-              <li>Zwei reale, passende Wärmepumpenprojekte</li>
-              <li>Eine verantwortliche Person und eigener Softwareentscheid</li>
-            </ul>
-          </div>
-          <div className="pitch-pilot-card">
-            <Users /><b>3 Büros</b><span>6 reale Projekte</span><hr />
-            <strong>Der echte Beweis</strong>
-            <p>Mindestens zwei Büros starten freiwillig das zweite Projekt.</p>
-          </div>
-        </div>
-      );
-    case "angebot":
-      return (
-        <>
-          <AccentTitle before="Das " accent="Pilotangebot" />
-          <div className="pitch-offer">
-            <div>
-              <span>Leistung · 3 Monate begleitet</span>
-              <b>CHF 5'000</b>
-              <small>Bis 5 Nutzer · Einführung · 2–3 Firmenvorlagen · direkter Support · wöchentlicher Feedbacktermin</small>
-            </div>
-            <div>
-              <span>Start</span>
-              <b>Nach dem Export-Gate</b>
-              <small>Kein Kalendertermin: Der Pilot startet, wenn Datenverlust- und Export-Gate bestanden sind.</small>
-            </div>
-            <div>
-              <span>Mitwirkung des Büros</span>
-              <b>90 Min + 30 Min/Woche</b>
-              <small>Einführung, zwei reale Projekte, wöchentliches Feedback, Zeit- und Fehlererfassung</small>
-            </div>
-          </div>
-          <p className="pitch-bottom-line">Nach dem Pilot: Core pro Büro und Jahr – Preise im Anhang.</p>
-        </>
-      );
-    case "hintergrund":
-      return (
-        <div className="pitch-split pitch-split--person">
-          <div className="pitch-portrait">
-            {PORTRAIT ? <img src={PORTRAIT} alt={PITCH_KONTAKT.name} /> : <span>DG</span>}
-            <b>{PITCH_KONTAKT.name}</b>
-            <small>{PITCH_KONTAKT.rolle} · {PITCH_KONTAKT.firma}</small>
-          </div>
-          <div>
-            <div className="pitch-kicker">Fachlicher Hintergrund</div>
-            <AccentTitle before="Von einem " accent="Heizungsfachplaner" after=" gebaut" />
-            <ul className="pitch-list">
-              <li>Die Rechenwege stammen aus den eigenen Planungshilfen: Rohrtabelle, Expansions- und Erdsondenberechnung.</li>
-              <li>Jede Formel hat eine dokumentierte Quelle, einen Backendtest und einen lesbaren Rechenweg im Export.</li>
-              <li>Entstanden, weil dieselbe Leistungsänderung sonst fünfmal von Hand nachgeführt wird.</li>
-            </ul>
-          </div>
-        </div>
-      );
-    case "kontakt":
-      return (
-        <div className="pitch-split">
-          <div>
-            <AccentTitle before="Pilotprojekt " accent="gemeinsam auswählen" />
-            <ol className="pitch-steps pitch-steps--cta">
-              <li><b>Live-Demo am realen Schema</b><span>30 Minuten</span></li>
-              <li><b>Passendes Projekt gemeinsam auswählen</b><span>30 Minuten</span></li>
-              <li><b>Einführung im Büro, danach selbstständig</b><span>90 Minuten</span></li>
-            </ol>
-          </div>
-          <div className="pitch-contact">
-            <img src={kontaktQr} alt={`QR-Code für eine E-Mail an ${PITCH_KONTAKT.mail}`} />
-            <div>
-              <b>{PITCH_KONTAKT.name}</b>
-              <span>{PITCH_KONTAKT.firma}</span>
-              <a href={`mailto:${PITCH_KONTAKT.mail}?subject=${encodeURIComponent(PITCH_KONTAKT.betreff)}`}>
-                <Mail /> {PITCH_KONTAKT.mail}
-              </a>
-              <small>QR scannen – die E-Mail «{PITCH_KONTAKT.betreff}» ist vorbereitet.</small>
-            </div>
+            <p>Modellannahme: 40 Prinzipschemata pro Büro und Jahr. Keine garantierte Einsparung.</p>
           </div>
         </div>
       );
@@ -330,17 +426,6 @@ function SlideContent({ slideKey }) {
           <p className="pitch-bottom-line">
             <Database /> Jedes geprüfte Projekt macht die nächste Indikation belastbarer. Freigabe erst nach Leave-one-out-Test.
           </p>
-        </>
-      );
-    case "modell":
-      return (
-        <>
-          <AccentTitle before="Geschäftsmodell " accent="nach dem Pilot" />
-          <div className="pitch-offer">
-            <div><span>Core · pro Büro und Jahr</span><b>CHF 4'000–6'000</b><small>Schema · Berechnungen · Revision · Export</small></div>
-            <div><span>Add-on · nach Datengate</span><b>LV und Kostenintelligenz</b><small>Eigenes Kontingent, eigene Wertlogik</small></div>
-            <div><span>Belastbar ab</span><b>Erster bestätigter Nutzen</b><small>Preise gelten erst als bestätigt, wenn der Pilot eine Nutzenannahme belegt.</small></div>
-          </div>
         </>
       );
     case "gates":
@@ -430,7 +515,7 @@ export default function PitchDeck() {
   };
 
   return (
-    <main className="pitch-deck" data-tone={slide.tone || "light"}>
+    <main className="pitch-deck">
       <div className="pitch-brand"><img src={logo} alt="" /><span>Heizungscockpit</span></div>
       <article key={index} className={`pitch-slide pitch-slide--${slide.key}`} aria-labelledby="pitch-slide-title">
         <div id="pitch-slide-title" className="sr-only">{slide.eyebrow} · {slide.label}</div>

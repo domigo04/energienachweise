@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  normaliseSlide, pitchPosition, PITCH_ANHANG, PITCH_HAUPTTEIL, PITCH_KONTAKT, PITCH_SLIDES,
+  normaliseSlide, pitchPosition, pitchWert, PITCH_ANHANG, PITCH_HAUPTTEIL,
+  PITCH_KONTAKT, PITCH_SLIDES, PITCH_ZAHLEN,
 } from "./pitchDeckContent";
 
 describe("Pitchdeck-Navigation", () => {
@@ -11,10 +12,13 @@ describe("Pitchdeck-Navigation", () => {
     expect(new Set(PITCH_SLIDES.map((slide) => slide.key)).size).toBe(PITCH_SLIDES.length);
   });
 
-  it("trennt Hauptteil und Anhang", () => {
-    expect(PITCH_HAUPTTEIL).toHaveLength(11);
-    expect(PITCH_ANHANG).toHaveLength(5);
+  it("erzählt den Hauptteil in der abgesprochenen Reihenfolge", () => {
+    expect(PITCH_HAUPTTEIL.map((slide) => slide.key)).toEqual([
+      "sirego", "problem", "loesung", "workflow", "cockpit", "timeline",
+      "leistungen", "markt", "finanzierung", "funding", "lizenzen", "kontakt",
+    ]);
     expect(PITCH_HAUPTTEIL.at(-1).id).toBeLessThan(PITCH_ANHANG[0].id);
+    expect(PITCH_ANHANG).toHaveLength(6);
   });
 
   it("begrenzt ungültige Foliennummern", () => {
@@ -26,13 +30,27 @@ describe("Pitchdeck-Navigation", () => {
   });
 
   it("zählt im Hauptteil Folien und im Anhang Anhänge", () => {
-    expect(pitchPosition(0).zaehler).toBe("1 / 11");
-    expect(pitchPosition(10).text).toMatch(/^Folie 11 von 11 · /);
-    expect(pitchPosition(11).zaehler).toBe("1 / 5");
-    expect(pitchPosition(11).text).toMatch(/^Anhang 1 von 5 · /);
+    expect(pitchPosition(0).zaehler).toBe("1 / 12");
+    expect(pitchPosition(11).text).toMatch(/^Folie 12 von 12 · /);
+    expect(pitchPosition(12).zaehler).toBe("1 / 6");
+    expect(pitchPosition(12).text).toMatch(/^Anhang 1 von 6 · /);
   });
 
   it("hält den Kontakt der Abschlussfolie an einer Stelle", () => {
     expect(PITCH_KONTAKT.mail).toMatch(/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/);
+  });
+});
+
+describe("Kaufmännische Angaben", () => {
+  it("macht leere Felder als offene Stelle sichtbar", () => {
+    expect(pitchWert("")).toEqual({ text: "einzutragen", offen: true });
+    expect(pitchWert("   ")).toEqual({ text: "einzutragen", offen: true });
+    expect(pitchWert(undefined)).toEqual({ text: "einzutragen", offen: true });
+    expect(pitchWert("CHF 5'000")).toEqual({ text: "CHF 5'000", offen: false });
+  });
+
+  it("übernimmt die belegten Werte aus dem Pilotplan", () => {
+    expect(pitchWert(PITCH_ZAHLEN.finanzierung.pilotbeitrag).offen).toBe(false);
+    expect(pitchWert(PITCH_ZAHLEN.lizenzen.core).offen).toBe(false);
   });
 });

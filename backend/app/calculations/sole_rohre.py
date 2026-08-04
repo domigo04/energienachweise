@@ -33,6 +33,11 @@ ROHRE = {
         "wand_mm": 2.9, "pn": "PN 16", "sdr": "SDR 11",
         "quelle": "Erdsonden.xlsx / HAKA-Normsonde", "sonde": True,
     },
+    "pe32x3.6": {
+        "bezeichnung": "PE 32 × 3.6", "aussen_mm": 32, "innen_mm": 24.8,
+        "wand_mm": 3.6, "pn": "PN 20", "sdr": "SDR 9",
+        "quelle": "Rohrreihe SDR 9 (in Tabelle 10 nicht aufgeführt)", "sonde": True,
+    },
     "pe40x3.7": {
         "bezeichnung": "PE 40 × 3.7", "aussen_mm": 40, "innen_mm": 32.6,
         "wand_mm": 3.7, "pn": "PN 16", "sdr": "SDR 11",

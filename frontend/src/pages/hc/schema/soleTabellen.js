@@ -12,6 +12,7 @@ export const SOLE_ROHRE = [
   { key:'pe25x2.3', label:'PE 25 × 2.3 — innen 20.4 mm — PN 16', innen:20.4, pn:'PN 16', sonde:true },
   { key:'pe32x3.0', label:'PE 32 × 3.0 — innen 26.0 mm — PN 16', innen:26.0, pn:'PN 16', sonde:true },
   { key:'pe32x2.9', label:'PE 32 × 2.9 — innen 26.2 mm — PN 16', innen:26.2, pn:'PN 16', sonde:true },
+  { key:'pe32x3.6', label:'PE 32 × 3.6 — innen 24.8 mm — PN 20', innen:24.8, pn:'PN 20', sonde:true },
   { key:'pe40x3.7', label:'PE 40 × 3.7 — innen 32.6 mm — PN 16', innen:32.6, pn:'PN 16', sonde:true },
   { key:'pe40x4.5', label:'PE 40 × 4.5 — innen 31.0 mm — PN 20', innen:31.0, pn:'PN 20', sonde:true },
   { key:'pe40x5.4', label:'PE 40 × 5.4 — innen 29.2 mm — PN 25', innen:29.2, pn:'PN 25', sonde:true },

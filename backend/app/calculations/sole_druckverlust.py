@@ -42,9 +42,28 @@ ERDBESCHLEUNIGUNG_M_S2 = 9.81
 ZETA_VERTEILER_STD = 12.0
 
 
-def _s(gruppe: str, groesse: str, formel: str, eingesetzt: str, ergebnis: str) -> dict:
+def _s(
+    gruppe: str,
+    groesse: str,
+    formel: str,
+    eingesetzt: str,
+    ergebnis: str,
+    *,
+    formel_latex: Optional[str] = None,
+    eingesetzt_latex: Optional[str] = None,
+) -> dict:
     """Rechenschritt mit Gruppe, damit Editor und PDF ihn gliedern können."""
-    return {"gruppe": gruppe, **_schritt(groesse, formel, eingesetzt, ergebnis)}
+    schritt = {"gruppe": gruppe, **_schritt(groesse, formel, eingesetzt, ergebnis)}
+    if formel_latex:
+        schritt["formel_latex"] = formel_latex
+    if eingesetzt_latex:
+        schritt["eingesetzt_latex"] = eingesetzt_latex
+    return schritt
+
+
+def _bruch(zaehler: str, nenner: str) -> str:
+    """LaTeX-Bruch ohne unlesbare Klammerfolgen in dynamischen f-Strings."""
+    return rf"\frac{{{zaehler}}}{{{nenner}}}"
 
 
 def _stroemungsart(reynolds: float, dk: float) -> str:
@@ -231,24 +250,54 @@ def sole_druckverlust(
         "1 Füllinhalt",
         "V_Sonde", "V = π/4 · d² · Stränge · Tiefe · Anzahl",
         f"π/4 · {_z(d_sonde, 1)}² · {sonden_straenge} · {_z(tiefe, 1)} · {anzahl}",
-        f"{inhalt_sonden:.1f} l"))
+        f"{inhalt_sonden:.1f} l",
+        formel_latex=(
+            r"V_{\mathrm{Sonden}} = n \cdot N_{\mathrm{Stränge}} \cdot L "
+            r"\cdot \frac{\pi}{4} \left(\frac{d_i}{1000}\right)^2 \cdot 1000"
+        ),
+        eingesetzt_latex=(
+            rf"{anzahl} \cdot {sonden_straenge} \cdot {_z(tiefe, 1)} \cdot "
+            rf"\frac{{\pi}}{{4}} \left(\frac{{{_z(d_sonde, 1)}}}{{1000}}\right)^2 "
+            rf"\cdot 1000"
+        )))
     if l_verteiler:
         rechenweg.append(_s(
             "1 Füllinhalt",
             "V_ZulVert", "V = π/4 · d² · L_gesamt(VL+RL)",
             f"π/4 · {_z(d_verteiler, 1)}² · {_z(l_verteiler_gesamt, 1)}",
-            f"{inhalt_verteiler:.1f} l"))
+            f"{inhalt_verteiler:.1f} l",
+            formel_latex=(
+                r"V_{\mathrm{Zul,Vert}} = \frac{\pi}{4} "
+                r"\left(\frac{d_i}{1000}\right)^2 "
+                r"\cdot L_{\mathrm{gesamt,VL+RL}} \cdot 1000"
+            ),
+            eingesetzt_latex=(
+                rf"\frac{{\pi}}{{4}} \left(\frac{{{_z(d_verteiler, 1)}}}{{1000}}\right)^2 "
+                rf"\cdot {_z(l_verteiler_gesamt, 1)} \cdot 1000"
+            )))
     if l_wp:
         rechenweg.append(_s(
             "1 Füllinhalt",
             "V_ZulWP", "V = π/4 · d² · L · 2 (Vor- und Rücklauf)",
             f"π/4 · {_z(d_wp, 1)}² · {_z(l_wp, 1)} · 2",
-            f"{inhalt_wp:.1f} l"))
+            f"{inhalt_wp:.1f} l",
+            formel_latex=(
+                r"V_{\mathrm{Zul,WP}} = \frac{\pi}{4} "
+                r"\left(\frac{d_i}{1000}\right)^2 \cdot L \cdot 2 \cdot 1000"
+            ),
+            eingesetzt_latex=(
+                rf"\frac{{\pi}}{{4}} \left(\frac{{{_z(d_wp, 1)}}}{{1000}}\right)^2 "
+                rf"\cdot {_z(l_wp, 1)} \cdot 2 \cdot 1000"
+            )))
     rechenweg.append(_s(
         "1 Füllinhalt",
         "V_total", "V = V_Sonde + V_ZulVert + V_ZulWP + V_WP/Expansion",
         f"{inhalt_sonden:.1f} + {inhalt_verteiler:.1f} + {inhalt_wp:.1f} + {_z(zusatz, 1)}",
-        f"{inhalt_total:.1f} l"))
+        f"{inhalt_total:.1f} l",
+        formel_latex=(
+            r"V_{\mathrm{gesamt}} = V_{\mathrm{Sonden}} + V_{\mathrm{Zul,Vert}} + "
+            r"V_{\mathrm{Zul,WP}} + V_{\mathrm{Zusatz}}"
+        )))
 
     # ── Wärmeträger ─────────────────────────────────────────────────────────
     # Formel der Vorlage (B25). Sie mischt Volumen und Masse; deshalb wird die
@@ -262,12 +311,26 @@ def sole_druckverlust(
         "2 Wärmeträger",
         "V_Glykol", "V = V_total · 1000 / 100 · Konzentration / ρ  (Vorlage)",
         f"{inhalt_total:.1f} · 1000 / 100 · {_z(konz, 1)} / {_z(dichte, 1)}",
-        f"{traeger_excel_l:.1f} l"))
+        f"{traeger_excel_l:.1f} l",
+        formel_latex=(
+            r"V_{\mathrm{Glykol,Vorlage}} = V_{\mathrm{gesamt}} \cdot "
+            r"\frac{1000}{100} \cdot \frac{c}{\rho}"
+        ),
+        eingesetzt_latex=(
+            rf"{inhalt_total:.1f} \cdot \frac{{1000}}{{100}} \cdot "
+            rf"\frac{{{_z(konz, 1)}}}{{{_z(dichte, 1)}}}"
+        )))
     rechenweg.append(_s(
         "2 Wärmeträger",
         "V_Konz", "V = V_total · Konzentration / 100  (volumetrische Kontrolle)",
         f"{inhalt_total:.1f} · {_z(konz, 1)} / 100",
-        f"{konzentrat_vol_l:.1f} l"))
+        f"{konzentrat_vol_l:.1f} l",
+        formel_latex=(
+            r"V_{\mathrm{Konzentrat}} = V_{\mathrm{gesamt}} \cdot \frac{c}{100}"
+        ),
+        eingesetzt_latex=(
+            rf"{inhalt_total:.1f} \cdot \frac{{{_z(konz, 1)}}}{{100}}"
+        )))
     if konzentrat_vol_l > 0 and abs(traeger_excel_l - konzentrat_vol_l) / konzentrat_vol_l > 0.05:
         warnungen.append(
             f"Vorlagenformel ergibt {traeger_excel_l:.0f} l Konzentrat, die volumetrische "
@@ -287,7 +350,14 @@ def sole_druckverlust(
                 "3 Volumenstrom",
                 "V'", "V' = Q0 · 3600 / (c · ΔT · ρ)",
                 f"{_z(q0)} · 3600 / ({_z(cp, 3)} · {_z(dt, 1)} · {_z(dichte, 1)})",
-                f"{v_h:.3f} m³/h"))
+                f"{v_h:.3f} m³/h",
+                formel_latex=(
+                    r"\dot V = \frac{Q_0 \cdot 3600}{c_p \cdot \Delta T \cdot \rho}"
+                ),
+                eingesetzt_latex=(
+                    rf"\frac{{{_z(q0)} \cdot 3600}}{{{_z(cp, 3)} \cdot "
+                    rf"{_z(dt, 1)} \cdot {_z(dichte, 1)}}}"
+                )))
         else:
             volumenstrom_quelle = None
     if v_h is None or v_h <= 0:
@@ -341,19 +411,49 @@ def sole_druckverlust(
             _s(gruppe, "V'_Kreis", "V'_Kreis = V' / Anzahl Kreise",
                f"{v_h:g}/3600 / {kreise}" if t["name"] != "Zuleitung Verteiler–WP"
                else f"{v_h:g}/3600",
-               f"{t['volumenstrom_m3_s']:.6f} m³/s"),
+               f"{t['volumenstrom_m3_s']:.6f} m³/s",
+               formel_latex=(
+                   r"\dot V_{\mathrm{Kreis}} = \frac{\dot V_{\mathrm{gesamt}}}"
+                   r"{N_{\mathrm{Kreise}}}"
+                   if t["name"] != "Zuleitung Verteiler–WP"
+                   else r"\dot V_{\mathrm{Haupt}} = \dot V_{\mathrm{gesamt}}"
+               ),
+               eingesetzt_latex=(
+                   rf"\frac{{{v_h:g}}}{{3600 \cdot {kreise}}}"
+                   if t["name"] != "Zuleitung Verteiler–WP"
+                   else rf"\frac{{{v_h:g}}}{{3600}}"
+               )),
             _s(gruppe, "w", "w = V'_Kreis / (π/4 · d²)",
                f"{t['volumenstrom_m3_s']:.6f} / (π/4 · ({_z(t['innen_d_mm'], 1)}/1000)²)",
-               f"{t['geschwindigkeit_m_s']:.3f} m/s"),
+               f"{t['geschwindigkeit_m_s']:.3f} m/s",
+               formel_latex=r"w = \frac{\dot V}{\frac{\pi}{4}d_i^2}",
+               eingesetzt_latex=_bruch(
+                   f"{t['volumenstrom_m3_s']:.6f}",
+                   _bruch(r"\pi", "4")
+                   + r"\left("
+                   + _bruch(_z(t['innen_d_mm'], 1), "1000")
+                   + r"\right)^2",
+               )),
             _s(gruppe, "Re", "Re = w · d / ν",
                f"{t['geschwindigkeit_m_s']:.3f} · {_z(t['innen_d_mm'], 1)}/1000 / "
                f"({_z(viskositaet, 2)}/10^6)",
-               f"{t['reynolds']:.0f}"),
+               f"{t['reynolds']:.0f}",
+               formel_latex=r"Re = \frac{w \cdot d_i}{\nu}",
+               eingesetzt_latex=_bruch(
+                   rf"{t['geschwindigkeit_m_s']:.3f} \cdot "
+                   + _bruch(_z(t['innen_d_mm'], 1), "1000"),
+                   _bruch(_z(viskositaet, 2), r"10^6"),
+               )),
             _s(gruppe, "Strömungsart",
                "Re < 2340 laminar · Re < 65·dk turbulent glatt · Re > 1300·dk turbulent rauh",
                f"Re {t['reynolds']:.0f} · dk = {_z(t['innen_d_mm'], 1)}/{_z(rauheit, 3)} "
                f"= {t['dk']:.0f} · 65·dk = {65 * t['dk']:.0f}",
-               t["stroemungsart"]),
+               t["stroemungsart"],
+               formel_latex=(
+                   r"Re < 2340:\ \mathrm{laminar};\quad Re < 65d_k:\ "
+                   r"\mathrm{turbulent\ glatt};\quad Re > 1300d_k:\ "
+                   r"\mathrm{turbulent\ rau}"
+               )),
         ])
         if t["lambda"] is not None:
             formel = ("λ = 64/Re" if t["stroemungsart"] == "Laminar"
@@ -362,18 +462,45 @@ def sole_druckverlust(
                       else "λ = 0.0032 + 0.221/Re^0.237 (Nikuradse)"
                       if t["stroemungsart"] == "Turbulent glatt"
                       else "λ = 1/(2·log10(3.715·dk))² (Prandtl-Kármán)")
-            rechenweg.append(_s(gruppe, "λ", formel, f"Re = {t['reynolds']:.0f}",
-                                f"{t['lambda']:.5f}"))
+            latex_formel = (
+                r"\lambda = \frac{64}{Re}"
+                if t["stroemungsart"] == "Laminar"
+                else r"\lambda = \frac{0.3164}{Re^{0.25}}\quad\mathrm{(Blasius)}"
+                if t["reynolds"] < 100_000 and t["stroemungsart"] == "Turbulent glatt"
+                else r"\lambda = 0.0032 + \frac{0.221}{Re^{0.237}}\quad\mathrm{(Nikuradse)}"
+                if t["stroemungsart"] == "Turbulent glatt"
+                else r"\lambda = \frac{1}{\left(2\log_{10}(3.715d_k)\right)^2}"
+            )
+            rechenweg.append(_s(
+                gruppe, "λ", formel, f"Re = {t['reynolds']:.0f}",
+                f"{t['lambda']:.5f}", formel_latex=latex_formel
+            ))
         rechenweg.append(_s(
             gruppe, "p_dyn", "p_dyn = ρ · w² / 2",
             f"{_z(dichte, 1)} · {t['geschwindigkeit_m_s']:.3f}² / 2",
-            f"{t['dynamischer_druck_pa']:.1f} Pa"))
+            f"{t['dynamischer_druck_pa']:.1f} Pa",
+            formel_latex=r"p_{\mathrm{dyn}} = \frac{\rho w^2}{2}",
+            eingesetzt_latex=(
+                rf"\frac{{{_z(dichte, 1)} \cdot {t['geschwindigkeit_m_s']:.3f}^2}}{{2}}"
+            )))
         if t["druckverlust_pa"] is not None:
             rechenweg.append(_s(
                 gruppe, "Δp", "Δp = λ · p_dyn / d · L · Stränge",
                 f"{t['lambda']:.5f} · {t['dynamischer_druck_pa']:.1f} / "
                 f"({_z(t['innen_d_mm'], 1)}/1000) · {_z(t['laenge_m'], 1)} · {t['straenge']}",
-                f"{t['druckverlust_pa']:.0f} Pa = {t['druckverlust_mws']:.2f} mWs"))
+                f"{t['druckverlust_pa']:.0f} Pa = {t['druckverlust_mws']:.2f} mWs",
+                formel_latex=(
+                    r"\Delta p = \lambda \cdot \frac{p_{\mathrm{dyn}}}{d_i} "
+                    r"\cdot L \cdot N_{\mathrm{Stränge}}"
+                ),
+                eingesetzt_latex=(
+                    rf"{t['lambda']:.5f} \cdot "
+                    + _bruch(
+                        f"{t['dynamischer_druck_pa']:.1f}",
+                        _bruch(_z(t['innen_d_mm'], 1), "1000"),
+                    )
+                    + rf" \cdot {_z(t['laenge_m'], 1)} \cdot {t['straenge']}"
+                )))
 
     sonde = teilstuecke[0]
     if sonde["stroemungsart"] == "Laminar":
@@ -410,14 +537,33 @@ def sole_druckverlust(
     rechenweg.extend([
         _s(pumpe, "H_Leitungen", "H = ΣΔp / (ρ · g)",
            f"{dp_leitungen_pa:.0f} / ({_z(dichte, 1)} · {ERDBESCHLEUNIGUNG_M_S2})",
-           f"{dp_leitungen_mws:.2f} mWs"),
+           f"{dp_leitungen_mws:.2f} mWs",
+           formel_latex=r"H_{\mathrm{Leitungen}} = \frac{\sum \Delta p}{\rho g}",
+           eingesetzt_latex=(
+               rf"\frac{{{dp_leitungen_pa:.0f}}}"
+               rf"{{{_z(dichte, 1)} \cdot {ERDBESCHLEUNIGUNG_M_S2}}}"
+           )),
         _s(pumpe, "H_Verteiler", "H = ζ · p_dyn(Sonde) / (ρ · g) · Anzahl",
            f"{_z(zeta, 1)} · {sonde['dynamischer_druck_pa']:.1f} / "
            f"({_z(dichte, 1)} · {ERDBESCHLEUNIGUNG_M_S2}) · {_z(n_verteiler, 1)}",
-           f"{dp_verteiler_mws:.2f} mWs"),
+           f"{dp_verteiler_mws:.2f} mWs",
+           formel_latex=(
+               r"H_{\mathrm{Verteiler}} = \zeta \cdot "
+               r"\frac{p_{\mathrm{dyn,Sonde}}}{\rho g} \cdot N"
+           ),
+           eingesetzt_latex=(
+               rf"{_z(zeta, 1)} \cdot "
+               rf"\frac{{{sonde['dynamischer_druck_pa']:.1f}}}"
+               rf"{{{_z(dichte, 1)} \cdot {ERDBESCHLEUNIGUNG_M_S2}}} \cdot "
+               rf"{_z(n_verteiler, 1)}"
+           )),
         _s(pumpe, "H", "H = Δp_Leitungen + Δp_Verteiler + Δp_Wärmepumpe",
            f"{dp_leitungen_mws:.2f} + {dp_verteiler_mws:.2f} + {_z(dp_wp_mws, 2)}",
-           f"{foerderhoehe:.2f} mWs"),
+           f"{foerderhoehe:.2f} mWs",
+           formel_latex=(
+               r"H_{\mathrm{Pumpe}} = H_{\mathrm{Leitungen}} + "
+               r"H_{\mathrm{Verteiler}} + H_{\mathrm{Wärmepumpe}}"
+           )),
     ])
     if not dp_wp_mws:
         warnungen.append(

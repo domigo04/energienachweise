@@ -28,6 +28,7 @@
     "@tailwindcss/vite": "^4.1.11",
     "@xyflow/react": "^12.11.1",
     "axios": "^1.11.0",
+    "katex": "^0.16.47",
     "lucide-react": "^0.542.0",
     "pdfjs-dist": "^4.10.38",
     "react": "^19.1.1",

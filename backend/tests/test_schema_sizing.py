@@ -33,6 +33,8 @@ def test_erdsondenfeld_rechnet_duplexvolumen_und_bohrmeter():
     assert result["sondeninhalt_l"] == pytest.approx(1869.1)
     assert result["glykolbedarf_kg"] == pytest.approx(596.6)
     assert len(result["rechenweg"]) == 3
+    assert all(schritt.get("formel_latex") for schritt in result["rechenweg"])
+    assert r"\frac{Q_0 \cdot 1000}{q_E}" in result["rechenweg"][0]["formel_latex"]
 
 
 def test_schema_nutzt_automatische_wp_quellenleistung_fuer_erdsonden():
@@ -54,6 +56,10 @@ def test_schema_nutzt_automatische_wp_quellenleistung_fuer_erdsonden():
     assert ews["leistungsquelle"] == "Wärmepumpe"
     assert ews["erforderlich_gesamt_m"] == pytest.approx(733.3, abs=0.1)
     assert ews["ausreichend"] is True
+    assert [s["groesse"] for s in ews["rechenweg"][:2]] == ["P_el", "Q0"]
+    assert ews["rechenweg"][0]["formel_latex"] == (
+        r"P_{\mathrm{el}} = \frac{Q_{\mathrm{Heizung}}}{COP}"
+    )
 
 
 def test_ews_expansion_uebernimmt_automatisch_den_soleinhalt():

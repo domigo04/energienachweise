@@ -186,10 +186,11 @@ def _bauteil_auslegungen(nodes, verteiler_results, heatpump_results):
             leistungsquelle = "manuell"
             mehrere_wp = False
             if q0 is None:
-                wp_quellen = [
-                    _zahl(r.get("q_source_kw")) for r in heatpump_results.values()
+                wp_ergebnisse = [
+                    r for r in heatpump_results.values()
                     if _zahl(r.get("q_source_kw")) is not None
                 ]
+                wp_quellen = [_zahl(r.get("q_source_kw")) for r in wp_ergebnisse]
                 q0 = wp_quellen[0] if len(wp_quellen) == 1 else None
                 mehrere_wp = len(wp_quellen) > 1
                 # Nur etikettieren, wenn wirklich ein Wert übernommen wurde.
@@ -214,6 +215,35 @@ def _bauteil_auslegungen(nodes, verteiler_results, heatpump_results):
                     zusaetzlicher_inhalt_l=_zahl(d.get("sole_zusatzinhalt_l")) or 0,
                 )
                 r["leistungsquelle"] = leistungsquelle
+                if leistungsquelle == "Wärmepumpe" and len(wp_ergebnisse) == 1:
+                    wp = wp_ergebnisse[0]
+                    q_heat = _zahl(wp.get("q_heat_kw"))
+                    p_el = _zahl(wp.get("p_el_kw"))
+                    cop = _zahl(wp.get("cop"))
+                    herleitung = []
+                    if wp.get("p_el_quelle") == "cop" and q_heat and cop and p_el:
+                        herleitung.append({
+                            "groesse": "P_el",
+                            "formel": "P_el = Q_Heizung / COP",
+                            "formel_latex": (
+                                r"P_{\mathrm{el}} = \frac{Q_{\mathrm{Heizung}}}{COP}"
+                            ),
+                            "eingesetzt": f"{q_heat:g} / {cop:g}",
+                            "eingesetzt_latex": rf"\frac{{{q_heat:g}}}{{{cop:g}}}",
+                            "ergebnis": f"{p_el:g} kW",
+                        })
+                    if q_heat and p_el and q0:
+                        herleitung.append({
+                            "groesse": "Q0",
+                            "formel": "Q0 = Q_Heizung - P_el",
+                            "formel_latex": (
+                                r"Q_0 = Q_{\mathrm{Heizung}} - P_{\mathrm{el}}"
+                            ),
+                            "eingesetzt": f"{q_heat:g} - {p_el:g}",
+                            "eingesetzt_latex": rf"{q_heat:g} - {p_el:g}",
+                            "ergebnis": f"{q0:g} kW",
+                        })
+                    r["rechenweg"] = herleitung + r.get("rechenweg", [])
                 r["warnings"] = []
                 if r.get("ausreichend") is False:
                     r["warnings"].append(

@@ -1,0 +1,150 @@
+"""Brauchwarmwasser nach SIA 385/2, geprüft gegen `Warmwasser-Berechnung_SIA385.xlsm`.
+
+Referenzfall des Blattes `Speichervolumen`: 1 Person, Bezugseinheit 1850 l/(d·P),
+Zirkulation, 2 Ladezyklen à 2 h, gewählter Speicher 1000 l, ΔΘ 50 K, η 0.95.
+"""
+
+import pytest
+
+from app.calculations.bww_sia385 import (
+    BEZUGSEINHEITEN,
+    bww_auslegung,
+    personen_aus_nutzflaeche,
+    spitzendeckungsfaktor,
+)
+from app.calculations.hydraulik import berechne_schema
+
+REFERENZ = dict(
+    personen=1, bezugseinheit_key="efh_gehoben", bezugseinheit_durchschnitt=1850,
+    warmhaltesystem="zirkulation", speicherkonfiguration="aussen",
+    ladezyklen_pro_tag=2, ladezeit_h=2, temperaturerhoehung_k=50,
+    wirkungsgrad=0.95, gewaehltes_speichervolumen_l=1000,
+)
+
+
+def test_volumen_und_leistung_entsprechen_der_vorlage():
+    r = bww_auslegung(**REFERENZ)
+
+    assert r["nutzwarmwasserbedarf_l_d"] == 2775          # B20
+    assert r["steuervolumen_l"] == pytest.approx(1388, abs=1)   # B23 = 1387.5
+    assert r["spitzendeckungsvolumen_l"] == 105           # B26
+    assert r["bereitschaftsvolumen_l"] == pytest.approx(1492, abs=1)  # B29
+    assert r["anschlussleistung_kw"] == 15.5             # B46
+
+
+def test_personen_folgen_der_nutzflaeche():
+    """np,i = 3.3 − 2/(1 + (A_NF/100)³), Blatt `Belegungsdaten`."""
+    assert personen_aus_nutzflaeche(200) == pytest.approx(3.0778, abs=1e-4)
+    assert personen_aus_nutzflaeche(100) == pytest.approx(2.3)
+    with pytest.raises(ValueError):
+        personen_aus_nutzflaeche(0)
+
+    r = bww_auslegung(**{**REFERENZ, "personen": None,
+                         "nutzflaechen_m2": [200, 100, 100]})
+    assert r["personen"] == pytest.approx(3.0778 + 2.3 + 2.3, abs=0.01)
+
+
+def test_spitzendeckungsfaktor_ist_eine_stufentabelle():
+    assert spitzendeckungsfaktor(1) == 1.5
+    assert spitzendeckungsfaktor(4) == 0.58
+    # Zwischenwerte behalten die zuletzt erreichte Stufe (VLOOKUP mit WAHR).
+    assert spitzendeckungsfaktor(8) == 0.54
+    assert spitzendeckungsfaktor(10) == 0.53
+    assert spitzendeckungsfaktor(500) == 0.15
+
+
+def test_bezugseinheiten_stammen_aus_der_tabelle():
+    assert BEZUGSEINHEITEN["mfh_allgemein"]["spitze"] == 45
+    assert BEZUGSEINHEITEN["mfh_allgemein"]["durchschnitt"] == 35
+    assert BEZUGSEINHEITEN["efh_gehoben"]["spitze"] == 70
+
+    r = bww_auslegung(personen=10, bezugseinheit_key="mfh_allgemein")
+    assert r["bezugseinheit_durchschnitt_l_p_d"] == 35
+    assert r["bezugseinheit_spitze_l_p_d"] == 45
+    # 10 P · 35 l · 1.5
+    assert r["nutzwarmwasserbedarf_l_d"] == 525
+
+
+def test_unstimmigkeiten_der_vorlage_werden_benannt():
+    r = bww_auslegung(**REFERENZ)
+
+    # Der Faktor Speicherkonfiguration wird in der Vorlage nicht verwendet.
+    assert r["faktor_speicherkonfiguration"] == 1.1
+    assert any("in keiner Formel verwendet" in w for w in r["warnungen"])
+    # Q_A teilt durch n_z · t_z; die Ladung in einem Zyklus wäre doppelt so hoch.
+    assert r["anschlussleistung_je_zyklus_kw"] == pytest.approx(2 * 15.5, abs=0.5)
+    assert any("Bezug von t_z" in w for w in r["warnungen"])
+
+
+def test_zu_kleiner_speicher_wird_gemeldet():
+    r = bww_auslegung(**{**REFERENZ, "gewaehltes_speichervolumen_l": 500})
+
+    assert r["massgebendes_volumen_l"] == 500
+    assert any("kleiner als das Bereitschaftsvolumen" in w for w in r["warnungen"])
+
+
+def test_ohne_personen_gibt_es_keine_auslegung():
+    r = bww_auslegung(personen=None)
+    assert any("Personenzahl oder Nutzflächen fehlen" in w for w in r["warnungen"])
+    assert "anschlussleistung_kw" not in r
+
+
+def test_ungueltige_eingaben_werden_abgewiesen():
+    for feld, wert in [("bezugseinheit_key", "gibtsnicht"),
+                       ("warmhaltesystem", "gibtsnicht"),
+                       ("ladezyklen_pro_tag", 0), ("wirkungsgrad", 1.5)]:
+        with pytest.raises(ValueError):
+            bww_auslegung(**{**REFERENZ, feld: wert})
+
+
+def test_ladeleistung_speist_den_bww_betriebsfall():
+    """Die Anschlussleistung aus SIA 385 wird zur Leistung im Vorrangbetrieb."""
+    VL, RL = "#ef4444", "#3b82f6"
+
+    def k(i, s, t, f, sh=None, th=None):
+        e = {"id": i, "source": s, "target": t, "style": {"stroke": f}}
+        if sh:
+            e["sourceHandle"] = sh
+        if th:
+            e["targetHandle"] = th
+        return e
+
+    nodes = [
+        {"id": "wp", "type": "erzeuger", "data": {
+            "generator_type": "ews_wp", "leistung_kw": 40, "cop": 4,
+            "vl_temp": 35, "rl_temp": 30, "sole_vl": 0, "sole_rl": -3,
+            "bww_vl_temp": 55, "bww_rl_temp": 45, "bww_cop": 2.6}},
+        {"id": "uv", "type": "valve3", "data": {"funktion": "umschaltend"}},
+        {"id": "bww", "type": "bww", "data": {
+            "bww_personen": 12, "bww_bezugseinheit": "mfh_allgemein",
+            "bww_ladezyklen": 2, "bww_ladezeit_h": 2, "speicher_liter": 800}},
+        {"id": "sp", "type": "speicher", "data": {}},
+        {"id": "vt", "type": "verteiler", "data": {"abgaenge": 2}},
+        {"id": "g1", "type": "gruppe", "data": {"q_kw": 24, "vl_temp": 35, "rl_temp": 28}},
+    ]
+    edges = [k("e1", "wp", "uv", VL, "vl", None), k("e2", "uv", "sp", VL),
+             k("e3", "uv", "bww", VL), k("e4", "sp", "wp", RL, None, "rl"),
+             k("e5", "sp", "vt", VL), k("e6", "vt", "sp", RL),
+             k("e7", "vt", "g1", VL), k("e8", "g1", "vt", RL)]
+
+    r = berechne_schema(nodes, edges)
+    auslegung = r["bww_results"]["bww"]
+    bf = r["heatpump_results"]["wp"]["betriebsfaelle"]
+
+    assert auslegung["personen"] == 12
+    assert auslegung["anschlussleistung_kw"] > 0
+    # Die Ladeleistung des Vorrangbetriebs kommt aus der Auslegung.
+    assert bf["bww_ladeleistung_kw"] == auslegung["anschlussleistung_kw"]
+    bww_fall = next(f for f in bf["faelle"] if f["key"] == "bww")
+    assert bww_fall["q_heiz_kw"] == auslegung["anschlussleistung_kw"]
+
+
+def test_manuelle_ladeleistung_hat_vorrang():
+    from app.calculations.hydraulik import _bww_ergebnisse, _bww_ladeleistung
+
+    nodes = [{"id": "bww", "type": "bww", "data": {
+        "bww_personen": 12, "bww_ladeleistung_kw": 42, "speicher_liter": 800}}]
+    ergebnisse = _bww_ergebnisse(nodes)
+
+    assert ergebnisse["bww"]["anschlussleistung_kw"] != 42
+    assert _bww_ladeleistung(nodes, ergebnisse) == 42

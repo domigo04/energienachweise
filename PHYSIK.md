@@ -562,3 +562,51 @@ Die Bemessung des Brauchwarmwassers selbst — Speichervolumen und Ladeleistung
 aus Personen, Bezugseinheit und Ladezyklen nach SIA 385/2 — ist hier bewusst
 nicht enthalten. Die Ladeleistung ist vorerst eine Eingabe am BWW-Speicher.
 Grundlage für den nächsten Schritt ist `Warmwasser-Berechnung_SIA385.xlsm`.
+
+## 22. Brauchwarmwasser nach SIA 385/2 (2026-08-04)
+Quelle: `Warmwasser-Berechnung_SIA385.xlsm`, Blätter `Belegungsdaten`,
+`Speichervolumen` und die zugehörigen Wertetabellen. Umgesetzt in
+`backend/app/calculations/bww_sia385.py`.
+
+### Rechengang
+- Personen je Wohneinheit aus der Nutzfläche:
+  `np,i = 3.3 − 2 / (1 + (A_NF/100)³)`, aufsummiert. Alternativ direkt eingeben.
+- `V_W,d,1 = np · V_W,u · f_Warmhaltesystem`
+- `V_W,sto,ctrl = V_W,d,1 / n_z`
+- `V_W,sto,pk = np · V_W,u,pk · f_pk`
+- `V_W,sto,cont = V_W,sto,ctrl + V_W,sto,pk`
+- `Q_A = MROUND( V_sto · cp · ΔΘ / (n_z · t_z · 3600 · η), 0.5 )` mit
+  `cp = 4.187 kJ/(kg·K)`
+
+Bezugseinheiten Wohnungsbau in l/(d·P), Durchschnitt/Spitze: EFH 40/50, 45/60,
+55/70 je nach Standard; Eigentumswohnung gleich; MFH allgemein 35/45, MFH
+gehoben 45/60. Warmhaltesystem: Zirkulation 1.5, Warmhalteband 1.35.
+Speicherkonfiguration: innenliegender Wärmetauscher 1.25, aussenliegender 1.1.
+Der Spitzendeckungsfaktor ist eine Stufentabelle über die Personenzahl
+(1 P → 1.5 bis ab 301 P → 0.15); zwischen den Stufen gilt der zuletzt erreichte
+Wert, wie beim VLOOKUP mit WAHR in der Vorlage.
+
+Referenzfall der Vorlage (1 P, 1850 l/(d·P), Zirkulation, 2 Zyklen à 2 h,
+1000 l gewählt): 2775 l/d, Steuervolumen 1388 l, Spitzendeckung 105 l,
+Bereitschaftsvolumen 1492 l, Anschlussleistung 15.5 kW — exakt getroffen.
+
+### Anbindung
+Die Anschlussleistung wird zur Leistung im BWW-Betriebsfall der Wärmepumpe
+(§21). Eine manuelle Ladeleistung am Speicher hat Vorrang. Mehrere
+BWW-Speicher werden nicht addiert, solange ihr Zusammenspiel nicht modelliert
+ist.
+
+### Unstimmigkeiten der Vorlage
+Beide werden gerechnet wie in der Vorlage und zusätzlich benannt:
+
+1. Der **Faktor Speicherkonfiguration** wird berechnet, aber in keiner Formel
+   verwendet. Ob das Bereitschaftsvolumen mit ihm zu multiplizieren ist, ist
+   fachlich offen; die Warnung nennt beide Zahlen.
+2. **`Q_A` teilt durch `n_z · t_z`**, verteilt die Ladung also über alle Zyklen
+   zusammen. Wird der Speicher in einem Zyklus von `t_z` geladen, ist die
+   Leistung `n_z`-mal höher. Der Bezug von `t_z` ist festzulegen; beide Werte
+   werden ausgewiesen.
+
+Nicht übernommen ist vorerst das Blatt `Wärmebedarf` (Speicher- und
+Zirkulationsverluste, Hilfsenergie). Es beschreibt den Energiebedarf, nicht die
+Dimensionierung, und gehört zum Energienachweis.

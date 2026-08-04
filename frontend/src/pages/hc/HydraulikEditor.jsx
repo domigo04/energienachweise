@@ -620,7 +620,7 @@ function ErzeugerTypFelder({ data, onSet }) {
   );
 }
 
-function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ventilResults, pumpenResults, expansionResults, anschlussWarnungen, anschlussResults, pwtResults, heatpumpResults, speicherResults, erdsondenResults, onUpdate, onDelete, onSetAbgaenge, navigate, drawingConfig, onDrawingConfig }) {
+function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ventilResults, pumpenResults, expansionResults, anschlussWarnungen, anschlussResults, pwtResults, heatpumpResults, speicherResults, erdsondenResults, bwwResults, onUpdate, onDelete, onSetAbgaenge, navigate, drawingConfig, onDrawingConfig }) {
   // Punkt 13 — nichts ausgewählt heisst nicht „nichts zu zeigen": dann gehören
   // hierher die Eigenschaften der ANSICHT, wie in Revit.
   if (!node) return (
@@ -1050,16 +1050,47 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
   }
 
   if (node.type === 'bww') {
+    const br = bwwResults?.[node.id];
     return (
       <div style={panelSt}>
         <PT>BWW-Speicher</PT>
         {fld('Bezeichnung','label','BWW','','text')}
         {fld('Speicherinhalt','speicher_liter','z.B. 800','L')}
-        {fld('Ladeleistung','bww_ladeleistung_kw','z.B. 15.5','kW')}
+        <Div/>
+        <div style={{ fontSize:9, color:'#94a3b8', marginBottom:4 }}>AUSLEGUNG NACH SIA 385/2</div>
+        {fld('Anzahl Personen','bww_personen','oder Nutzflächen unten','P')}
+        <label style={lbl}>Gebäudeart (Bezugseinheit)</label>
+        <select style={{...inp,cursor:'pointer'}} value={d.bww_bezugseinheit||'mfh_allgemein'}
+          onChange={e=>set('bww_bezugseinheit',e.target.value)}>
+          {BWW_BEZUGSEINHEITEN.map(b=><option key={b.key} value={b.key}>{b.label}</option>)}
+        </select>
+        <label style={lbl}>Warmhaltesystem</label>
+        <select style={{...inp,cursor:'pointer'}} value={d.bww_warmhaltesystem||'zirkulation'}
+          onChange={e=>set('bww_warmhaltesystem',e.target.value)}>
+          <option value="zirkulation">Zirkulation (1.5)</option>
+          <option value="warmhalteband">Warmhalteband (1.35)</option>
+        </select>
+        {fld('Ladezyklen pro Tag','bww_ladezyklen','2','')}
+        {fld('Zeit eines Ladezyklus','bww_ladezeit_h','2','h')}
+        {fld('Temperaturerhöhung ΔΘ','bww_delta_theta_k','50 (10→60 °C)','K')}
+        {br?.anschlussleistung_kw != null && <>
+          <Div/>
+          {ro('Personen', br.personen, 'P')}
+          {ro('Nutzwarmwasserbedarf', br.nutzwarmwasserbedarf_l_d, 'L/d')}
+          {ro('Steuervolumen', br.steuervolumen_l, 'L')}
+          {ro('Spitzendeckungsvolumen', br.spitzendeckungsvolumen_l, 'L')}
+          {ro('Bereitschaftsvolumen', br.bereitschaftsvolumen_l, 'L', true)}
+          {ro('Anschlussleistung', br.anschlussleistung_kw, 'kW', true)}
+          <div style={{ fontSize:9, color:'#64748b', marginBottom:6 }}>
+            Bezugseinheit {br.bezugseinheit_durchschnitt_l_p_d} l/(d·P) · Spitze {br.bezugseinheit_spitze_l_p_d} ·
+            f_pk {br.faktor_spitzendeckung} · f_warm {br.faktor_warmhaltesystem}
+          </div>
+        </>}
+        {fld('Ladeleistung manuell','bww_ladeleistung_kw','leer = aus SIA 385','kW')}
+        {br?.warnungen?.map((w,i)=><div key={i} style={warnSt}>⚠ {w}</div>)}
         <div style={{ fontSize:9, lineHeight:1.5, color:'#64748b', background:'#fff7ed', border:'1px solid #fed7aa', borderRadius:6, padding:'6px 7px' }}>
-          Die Ladeleistung ist vorerst eine Eingabe. Sie bestimmt den BWW-Betriebsfall der
-          Wärmepumpe. Die Bemessung nach SIA 385/2 aus Personen, Bezugseinheit und Ladezyklen
-          folgt als eigener Schritt.
+          Die Anschlussleistung wird zur Leistung im BWW-Betriebsfall der Wärmepumpe — sichtbar
+          dort, sobald ein Umschaltventil im Erzeugerkreis sitzt.
         </div>
         <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
@@ -1877,6 +1908,19 @@ const panelSt = { padding: 12, overflowY: 'auto', flex: 1 };
 const lbl = { display:'block', fontSize:10, color:'#6b7280', marginBottom:3, marginTop:6 };
 const inp = { width:'100%', fontSize:12, border:'1px solid #e2e8f0', borderRadius:5, padding:'5px 8px', boxSizing:'border-box', background:'white' };
 const warnSt = { fontSize:10, color:'#92400e', background:'#fef3c7', border:'1px solid #fde68a', borderRadius:5, padding:'5px 8px', marginTop:4 };
+// Gebäudearten SIA 385/2. Spiegel von backend/app/calculations/bww_sia385.py;
+// gerechnet wird im Backend, hier stehen nur die Beschriftungen.
+const BWW_BEZUGSEINHEITEN = [
+  { key:'efh_einfach', label:'EFH einfacher Standard (40/50)' },
+  { key:'efh_mittel', label:'EFH mittlerer Standard (45/60)' },
+  { key:'efh_gehoben', label:'EFH gehobener Standard (55/70)' },
+  { key:'ew_einfach', label:'Eigentumswohnung einfacher Standard (40/50)' },
+  { key:'ew_mittel', label:'Eigentumswohnung mittlerer Standard (45/60)' },
+  { key:'ew_gehoben', label:'Eigentumswohnung gehobener Standard (55/70)' },
+  { key:'mfh_allgemein', label:'MFH allgemeiner Wohnungsbau (35/45)' },
+  { key:'mfh_gehoben', label:'MFH gehobener Wohnungsbau (45/60)' },
+];
+
 const thSt = { fontSize:10, fontWeight:600, padding:'4px 6px', textAlign:'right', whiteSpace:'nowrap' };
 const tdSt = { padding:'4px 6px', textAlign:'right', whiteSpace:'nowrap', color:'#334155' };
 
@@ -2209,6 +2253,7 @@ function EditorInner() {
   const heatpumpResults = hydraulik.heatpump_results || EMPTY_OBJECT;
   const speicherResults = hydraulik.speicher_results || EMPTY_OBJECT;
   const erdsondenResults = hydraulik.erdsonden_results || EMPTY_OBJECT;
+  const bwwResults = hydraulik.bww_results || EMPTY_OBJECT;
   const alleWarnungen = hydraulik.warnungen || EMPTY_ARRAY;
 
   const editorGraphAnwenden = useCallback((graph) => {
@@ -6275,7 +6320,7 @@ function EditorInner() {
                 onLabel={beschriftungSetzen} onLabelReset={labelZuruecksetzen}
                 onUpdateEdge={updateEdgeData} onUpdateLayer={updateEdgeLayer} onDelete={deleteEdge} />
             ) : (
-              <PropertiesPanel node={selectedNode} nodeFlows={nodeFlows} verteilerResults={verteilerResults} gruppeResults={gruppeResults} ventilResults={ventilResults} pumpenResults={pumpenResults} expansionResults={expansionResults} anschlussWarnungen={anschlussWarnungen} anschlussResults={anschlussResults} pwtResults={pwtResults} heatpumpResults={heatpumpResults} speicherResults={speicherResults} erdsondenResults={erdsondenResults} onUpdate={updateNode} onDelete={deleteNode} onSetAbgaenge={setAbgaenge} navigate={navigate}
+              <PropertiesPanel node={selectedNode} nodeFlows={nodeFlows} verteilerResults={verteilerResults} gruppeResults={gruppeResults} ventilResults={ventilResults} pumpenResults={pumpenResults} expansionResults={expansionResults} anschlussWarnungen={anschlussWarnungen} anschlussResults={anschlussResults} pwtResults={pwtResults} heatpumpResults={heatpumpResults} speicherResults={speicherResults} erdsondenResults={erdsondenResults} bwwResults={bwwResults} onUpdate={updateNode} onDelete={deleteNode} onSetAbgaenge={setAbgaenge} navigate={navigate}
                 drawingConfig={drawingConfig} onDrawingConfig={drawingConfigAktualisieren}/>
             )}
           </aside>

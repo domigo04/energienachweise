@@ -76,6 +76,7 @@ import { dateiZuUnderlay } from './schema/underlay';
 import {
   branchAnschluss, inlineNodePosition, isBranchInsertable, isInlineInsertable,
 } from './schema/componentRegistry';
+import MathFormula from '../../components/ui/MathFormula';
 
 // ── Konstanten ────────────────────────────────────────────────
 const KVS_REIHE = [0.1, 0.16, 0.25, 0.4, 0.63, 1.0, 1.6, 2.5, 4.0, 6.3, 10, 16, 25, 40, 63];
@@ -1502,6 +1503,13 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, onUpdate, onClos
     const anzahl = Math.max(1, Math.min(24, parseInt(d.sonden_anzahl) || 5));
     const laenge = parseFloat(d.sonden_laenge_m);
     const dv = er?.druckverlust;
+    const ewsRechenweg = [
+      ...(er?.rechenweg || []).map(schritt => ({
+        ...schritt,
+        gruppe: '0 Bohrmeterauslegung',
+      })),
+      ...(dv?.rechenweg || []),
+    ];
     const ewsTabs = [['bohrmeter','Bohrmeter'], ['solekreis','Solekreis'], ['rechenweg','Rechenweg']];
     const ewsTab = ewsTabs.some(([k]) => k === tab) ? tab : 'bohrmeter';
     body = (
@@ -1654,9 +1662,9 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, onUpdate, onClos
         </>}
 
         {ewsTab === 'rechenweg' && (
-          dv?.rechenweg?.length > 0 ? (
+          ewsRechenweg.length > 0 ? (
             <div style={{ display:'grid', gap:12 }}>
-              {gruppiert(dv.rechenweg).map(([gruppe, schritte])=>(
+              {gruppiert(ewsRechenweg).map(([gruppe, schritte])=>(
                 <div key={gruppe}>
                   <SubTitel>{gruppe.replace(/^\d+\s/, '')}</SubTitel>
                   <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11, marginTop:4 }}>
@@ -1665,8 +1673,13 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, onUpdate, onClos
                         <tr key={i} style={{ borderTop:'1px solid #f1f5f9' }}>
                           <td style={{ padding:'4px 8px 4px 0', fontWeight:700, color:'#1e293b', whiteSpace:'nowrap', verticalAlign:'top', width:90 }}>{s.groesse}</td>
                           <td style={{ padding:'4px 8px', color:'#334155', verticalAlign:'top' }}>
-                            <div>{s.formel}</div>
-                            <div style={{ fontFamily:'monospace', fontSize:10.5, color:'#64748b', marginTop:1 }}>= {s.eingesetzt}</div>
+                            <div style={{ fontSize:13, overflowX:'auto', padding:'2px 0' }}>
+                              <MathFormula latex={s.formel_latex} fallback={s.formel}/>
+                            </div>
+                            <div style={{ display:'flex', alignItems:'center', gap:5, fontSize:11.5, color:'#64748b', marginTop:2, overflowX:'auto' }}>
+                              <span aria-hidden="true">=</span>
+                              <MathFormula latex={s.eingesetzt_latex} fallback={s.eingesetzt}/>
+                            </div>
                           </td>
                           <td style={{ padding:'4px 0 4px 8px', textAlign:'right', fontWeight:700, color:'#0f172a', whiteSpace:'nowrap', verticalAlign:'top' }}>{s.ergebnis}</td>
                         </tr>

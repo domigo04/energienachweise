@@ -227,6 +227,9 @@ def test_rechenweg_ist_nach_gruppen_gegliedert():
     sonde = [s for s in r["rechenweg"] if s["gruppe"] == "4 Erdwärmesonde"]
     assert [s["groesse"] for s in sonde] == ["V'_Kreis", "w", "Re", "Strömungsart", "λ", "p_dyn", "Δp"]
     assert all(s["formel"] and s["eingesetzt"] and s["ergebnis"] for s in sonde)
+    assert all(s.get("formel_latex") for s in sonde)
+    assert r"\frac{\dot V}" in sonde[1]["formel_latex"]
+    assert r"\frac{p_{\mathrm{dyn}}}{d_i}" in sonde[-1]["formel_latex"]
 
 
 def test_frontend_auswahllisten_bleiben_deckungsgleich():

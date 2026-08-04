@@ -111,23 +111,40 @@ def erdsondenfeld(
         rechenweg.append({
             "groesse": "Lerf",
             "formel": "Lerf = Q0 · 1000 / qE · SF",
+            "formel_latex": r"L_{\mathrm{erf}} = \frac{Q_0 \cdot 1000}{q_E} \cdot SF",
             "eingesetzt": f"{q0:g} · 1000 / {spezifisch:g} · {faktor:g}",
+            "eingesetzt_latex": (
+                rf"\frac{{{q0:g} \cdot 1000}}{{{spezifisch:g}}} \cdot {faktor:g}"
+            ),
             "ergebnis": f"{erforderlich:.1f} m",
         })
     if sondeninhalt is not None:
         rechenweg.append({
             "groesse": "Vsonde",
             "formel": "Vsonde = n · 4 · L · Rohrinhalt",
+            "formel_latex": r"V_{\mathrm{Sonden}} = n \cdot 4 \cdot L \cdot v_{\mathrm{Rohr}}",
             "eingesetzt": f"{anzahl} · 4 · {laenge:g} · {rohrinhalt:g}",
+            "eingesetzt_latex": (
+                rf"{anzahl} \cdot 4 \cdot {laenge:g} \cdot {rohrinhalt:g}"
+            ),
             "ergebnis": f"{sondeninhalt:.1f} l",
         })
     if glykol is not None:
         rechenweg.append({
             "groesse": "mGlykol",
             "formel": "mGlykol = Vgesamt · Konzentration · ρGlykol",
+            "formel_latex": (
+                r"m_{\mathrm{Glykol}} = V_{\mathrm{gesamt}} \cdot "
+                r"\frac{c}{100} \cdot \rho_{\mathrm{Glykol}}"
+            ),
             "eingesetzt": (
                 f"{gesamtinhalt:.1f} · {float(glykol_konzentration_pct):g}/100 · "
                 f"{float(glykol_dichte_kg_l):g}"
+            ),
+            "eingesetzt_latex": (
+                rf"{gesamtinhalt:.1f} \cdot "
+                rf"\frac{{{float(glykol_konzentration_pct):g}}}{{100}} \cdot "
+                rf"{float(glykol_dichte_kg_l):g}"
             ),
             "ergebnis": f"{glykol:.1f} kg",
         })

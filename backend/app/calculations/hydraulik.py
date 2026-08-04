@@ -1257,12 +1257,11 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
         d = data(n)
         if t == "valve3" and ist_umschaltventil(d):
             # Umschaltventil: zwei Stellungen statt einer geregelten Temperatur.
-            # Ein kvs wäre hier sinnlos — es wird nichts gedrosselt.
-            ventil_results[n["id"]] = {
-                "v": round(node_flows.get(n["id"]) or 0, 4),
-                "funktion": "umschaltend",
-                "warnings": [],
-            }
+            # Es wird nichts gedrosselt, also gibt es keine kvs-Auslegung — und
+            # damit bewusst KEINEN Eintrag in `ventil_results`. Ein halb
+            # gefüllter Eintrag würde von allen Anzeigen als Ventilauslegung
+            # gelesen und läuft dort in fehlende Felder.
+            pass
         elif t in ("valve2", "valve3"):
             # Ventil: kvs + Ventilautorität aus dem Leitungs-Durchfluss (PHYSIK §3)
             v = node_flows.get(n["id"]) or 0

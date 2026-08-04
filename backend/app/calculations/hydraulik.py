@@ -14,6 +14,7 @@ import re
 from typing import List, Optional
 
 from app.calculations.betriebsfaelle import betriebsfaelle, ist_umschaltventil
+from app.calculations.bww_sia385 import bww_auslegung
 from app.calculations.expansion import berechne_expansion
 from app.calculations.leitungsdimension import automatische_dimension
 from app.calculations.schema_sizing import erdsondenfeld, technischer_speicher
@@ -533,17 +534,62 @@ def _umschaltventil_im_erzeugerkreis(heiz_edges, edges, node_by_id):
     return None
 
 
-def _bww_ladeleistung(nodes) -> Optional[float]:
-    """Ladeleistung aus dem BWW-Speicher — vorerst eine sichtbare Eingabe.
+def _bww_sia385(d: dict) -> Optional[dict]:
+    """SIA-385/2-Auslegung eines BWW-Speichers aus seinen Eingaben."""
+    flaechen = [f for f in (d.get("bww_nutzflaechen_m2") or []) if _zahl(f)]
+    personen = _zahl(d.get("bww_personen"))
+    if not flaechen and not personen:
+        return None
+    try:
+        return bww_auslegung(
+            personen=personen,
+            nutzflaechen_m2=flaechen or None,
+            bezugseinheit_key=d.get("bww_bezugseinheit") or "mfh_allgemein",
+            bezugseinheit_durchschnitt=_zahl(d.get("bww_bezugseinheit_durchschnitt")),
+            bezugseinheit_spitze=_zahl(d.get("bww_bezugseinheit_spitze")),
+            warmhaltesystem=d.get("bww_warmhaltesystem") or "zirkulation",
+            speicherkonfiguration=d.get("bww_speicherkonfiguration") or "aussen",
+            ladezyklen_pro_tag=_zahl(d.get("bww_ladezyklen")) or 2,
+            ladezeit_h=_zahl(d.get("bww_ladezeit_h")) or 2,
+            temperaturerhoehung_k=_zahl(d.get("bww_delta_theta_k")) or 50,
+            wirkungsgrad=_zahl(d.get("bww_wirkungsgrad")) or 0.95,
+            gewaehltes_speichervolumen_l=_zahl(d.get("speicher_liter")),
+        )
+    except ValueError as exc:
+        return {"warnungen": [str(exc)]}
 
-    Die Bemessung aus Wohnungen, Personen oder Ausbaustandard folgt aus dem
-    Berechnungsexcel und wird hier bewusst nicht erfunden.
+
+def _bww_ergebnisse(nodes) -> dict:
+    """SIA-385-Auslegung je BWW-Speicher."""
+    ergebnisse = {}
+    for n in nodes:
+        if n.get("type") != "bww":
+            continue
+        r = _bww_sia385(n.get("data") or {})
+        if r is not None:
+            ergebnisse[n["id"]] = r
+    return ergebnisse
+
+
+def _bww_ladeleistung(nodes, bww_results: dict) -> Optional[float]:
+    """Ladeleistung des BWW-Speichers für den Vorrang-Betriebsfall.
+
+    Eine ausdrückliche Eingabe hat Vorrang; sonst gilt die Anschlussleistung
+    aus der SIA-385-Auslegung. Mehrere Speicher werden nicht addiert, solange
+    ihr Zusammenspiel nicht modelliert ist.
     """
-    werte = [
-        _zahl((n.get("data") or {}).get("bww_ladeleistung_kw"))
-        for n in nodes if n.get("type") == "bww"
-    ]
-    werte = [w for w in werte if w is not None and w > 0]
+    werte = []
+    for n in nodes:
+        if n.get("type") != "bww":
+            continue
+        d = n.get("data") or {}
+        manuell = _zahl(d.get("bww_ladeleistung_kw"))
+        if manuell and manuell > 0:
+            werte.append(manuell)
+            continue
+        auto = (bww_results.get(n["id"]) or {}).get("anschlussleistung_kw")
+        if auto and auto > 0:
+            werte.append(auto)
     return werte[0] if len(werte) == 1 else None
 
 
@@ -604,6 +650,7 @@ def _waermepumpen_kreise(nodes, edges, edge_flows, node_flows, calc_edges) -> di
     """
     node_by_id = {n["id"]: n for n in nodes}
     solekreis = _solekreis_bauteile(nodes, edges, node_by_id)
+    bww_results = _bww_ergebnisse(nodes)
     results = {}
     for wp in [n for n in nodes if n.get("type") == "erzeuger"]:
         wid = wp["id"]
@@ -633,7 +680,7 @@ def _waermepumpen_kreise(nodes, edges, edge_flows, node_flows, calc_edges) -> di
         if ventil_id:
             res["betriebsfaelle"] = betriebsfaelle(
                 d,
-                bww_ladeleistung_kw=_bww_ladeleistung(nodes),
+                bww_ladeleistung_kw=_bww_ladeleistung(nodes, bww_results),
                 hat_quellenseite=hat_hydraulischen_quellenkreis,
                 sole_ce_auto=sole_ce,
             )
@@ -942,7 +989,7 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
     leer = {"edge_flows": {}, "node_flows": {}, "verteiler_results": {}, "gruppe_results": {},
             "ventil_results": {}, "pumpen_results": {}, "expansion_results": {},
             "leitung_results": {}, "anschluss_results": {}, "pwt_results": {}, "heatpump_results": {},
-            "speicher_results": {}, "erdsonden_results": {},
+            "speicher_results": {}, "erdsonden_results": {}, "bww_results": {},
             "anschluss_warnings": anschluss_warnungen, "warnungen": []}
     if not sek:
         # Ohne Verbraucher gibt es keine Verbraucherkreise — Wärmepumpenkreise
@@ -952,6 +999,7 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
             nodes, edges, leer["edge_flows"], leer["node_flows"], set())
         leer["speicher_results"], leer["erdsonden_results"] = _bauteil_auslegungen(
             nodes, {}, leer["heatpump_results"])
+        leer["bww_results"] = _bww_ergebnisse(nodes)
         ews_inhalte = [
             r.get("gesamtinhalt_l") for r in leer["erdsonden_results"].values()
             if r.get("gesamtinhalt_l") is not None
@@ -1175,6 +1223,7 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
     speicher_results, erdsonden_results = _bauteil_auslegungen(
         nodes, verteiler_results, heatpump_results)
     solekreis_pumpen = _solekreis_bauteile(nodes, edges, node_by_id)["pumpen"]
+    bww_results = _bww_ergebnisse(nodes)
     ews_inhalte = [
         r.get("gesamtinhalt_l") for r in erdsonden_results.values()
         if r.get("gesamtinhalt_l") is not None
@@ -1372,10 +1421,13 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
         "heatpump_results": heatpump_results,
         "speicher_results": speicher_results,
         "erdsonden_results": erdsonden_results,
+        "bww_results": bww_results,
         "anschluss_warnings": anschluss_warnungen,
         "warnungen": _sammle_warnungen(nodes, verteiler_results, anschluss_warnungen, ventil_results, expansion_results)
                      + _wp_warnungen(nodes, heatpump_results)
                      + [f"Plattentauscher: {p['warnung']}" for p in pwt_results.values() if p.get("warnung")]
                      + [w for r in speicher_results.values() for w in r.get("warnings", [])]
-                     + [w for r in erdsonden_results.values() for w in r.get("warnings", [])],
+                     + [w for r in erdsonden_results.values() for w in r.get("warnings", [])]
+                     + [f"Brauchwarmwasser: {w}" for r in bww_results.values()
+                        for w in r.get("warnungen", [])],
     }

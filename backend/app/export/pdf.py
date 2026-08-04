@@ -125,6 +125,31 @@ def legende_zeilen(nodes: list, results: dict) -> list:
                 f"Quelle {_fmt(er.get('q_source_kw'), 1)} kW" if er.get("q_source_kw") is not None else None,
                 f"Sole {_fmt(er.get('source_flow_m3h'))} m³/h" if er.get("source_flow_m3h") is not None else None,
             ] if x) or "—"
+        elif t == "bww":
+            b = bww_results.get(n["id"]) or {}
+            eingaben = [("Gewählter Speicherinhalt", d.get("speicher_liter"), "l")]
+            if b.get("anschlussleistung_kw") is not None:
+                eingaben += [
+                    ("Personen", b.get("personen"), "P"),
+                    ("Gebäudeart", b.get("bezugseinheit"), ""),
+                    ("Bezugseinheit Durchschnitt", b.get("bezugseinheit_durchschnitt_l_p_d"), "l/(d·P)"),
+                    ("Bezugseinheit Spitze", b.get("bezugseinheit_spitze_l_p_d"), "l/(d·P)"),
+                    ("Warmhaltesystem", b.get("warmhaltesystem"), ""),
+                    ("Ladezyklen pro Tag", b.get("ladezyklen_pro_tag"), ""),
+                    ("Zeit eines Ladezyklus", b.get("ladezeit_h"), "h"),
+                    ("Temperaturerhöhung ΔΘ", b.get("temperaturerhoehung_k"), "K"),
+                    ("Wirkungsgrad Wärmeübertragung", b.get("wirkungsgrad"), ""),
+                ]
+                resultate = [
+                    ("Nutzwarmwasserbedarf", b.get("nutzwarmwasserbedarf_l_d"), "l/d"),
+                    ("Steuervolumen", b.get("steuervolumen_l"), "l"),
+                    ("Spitzendeckungsvolumen", b.get("spitzendeckungsvolumen_l"), "l"),
+                    ("Bereitschaftsvolumen", b.get("bereitschaftsvolumen_l"), "l"),
+                    ("Anschlussleistung", b.get("anschlussleistung_kw"), "kW"),
+                    ("Norm", "SIA 385/2", ""),
+                ]
+                rechenweg = b.get("rechenweg") or []
+                hinweise = b.get("warnungen") or []
         elif t == "erdsonden":
             anzahl = max(1, min(24, int(_f(d.get("sonden_anzahl")) or 5)))
             laenge = _f(d.get("sonden_laenge_m"))
@@ -145,6 +170,7 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
     nf = results.get("node_flows") or {}
     ergebnisse_erzeuger = results.get("heatpump_results") or {}
     speicher_results = results.get("speicher_results") or {}
+    bww_results = results.get("bww_results") or {}
     erdsonden_results = results.get("erdsonden_results") or {}
     for n in _sortiert(nodes):
         d = n.get("data") or {}

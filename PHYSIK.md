@@ -307,7 +307,12 @@ Verteiler, Zuleitung Verteiler bis Wärmepumpe.
 ### Füllinhalt
 - `V_Sonde = π/4 · d² · Stränge · Tiefe · Anzahl` — Duplex = 4 Stränge je Sondenmeter,
   Einfach-U = 2.
-- `V_Zuleitung = π/4 · d² · L · 2` (Vor- und Rücklauf).
+- Der kritische Weg Sonde–Verteiler ist die einfache Strecke zur entferntesten
+  Bohrung; für den Druckverlust gilt `L(VL+RL) = 2 · L(kritisch)`.
+- Der Füllinhalt verwendet separat die gesamten tatsächlich installierten
+  Anschlussrohrmeter als Summe VL+RL. Fehlen sie, wird die vorläufige Annahme
+  `2 · L(kritisch)` sichtbar gewarnt.
+- `V_Zuleitung = π/4 · d² · L_gesamt(VL+RL)`.
 - `V_total = V_Sonde + V_ZulVerteiler + V_ZulWP + V_WP/Expansion`.
 - Der Innendurchmesser ist **keine freie Eingabe**, sondern folgt aus der Rohrauswahl.
   Ein Durchmesser ohne zugehöriges Rohr wäre nicht bestellbar und hätte keine
@@ -324,7 +329,9 @@ Verteiler, Zuleitung Verteiler bis Wärmepumpe.
 - Konzentratdichte Antifrogen N: 1.14 kg/l (Blatt `glykol_Erdsonden`).
 
 ### Volumenstrom
-- Erste Wahl: Fördermenge Verdampfer aus dem Wärmepumpen-Datenblatt.
+- Erste Wahl: Fördermenge Verdampfer aus dem Wärmepumpen-Datenblatt; fehlt sie
+  am Erdsondenbauteil, wird der berechnete Quellenstrom genau einer verbundenen
+  Wärmepumpe übernommen.
 - Ersatzweise `V̇ [m³/h] = Q0 [kW] · 3600 / (c [kJ/kgK] · ΔT [K] · ρ [kg/m³])`.
 - Fehlt beides, wird gewarnt statt geschätzt.
 - Aufteilung: jede Sonde hat `Stränge/2` parallele Kreise; die Sonde und die Zuleitung
@@ -342,10 +349,10 @@ Verteiler, Zuleitung Verteiler bis Wärmepumpe.
   definiert; dann wird kein Druckverlust ausgegeben.
 - `Δp = λ · (ρ · w²/2) / d · L · Stränge`, mit 2 Strängen je Teilstück
   (Sonde hinunter und hinauf, Zuleitung Vor- und Rücklauf).
-- `Δp [mWs] = Δp [Pa] · 0.000102`
+- `H [mWs] = Δp [Pa] / (ρ · g)` mit `g = 9.81 m/s²`.
 
 ### Pumpenbetriebspunkt
-- `Δp_Verteiler = ζ · (ρ · w²/2) · 0.000102 · Anzahl`, ζ Vorgabe 12.
+- `H_Verteiler = ζ · (ρ · w²/2) / (ρ · g) · Anzahl`, ζ Vorgabe 12.
 - `H = Δp_Leitungen + Δp_Verteiler + Δp_Wärmepumpe`
 - Fördervolumen = Solevolumenstrom.
 - Die Pumpenauswahl selbst bleibt aussen vor: die Kennlinien der Vorlage gelten für
@@ -354,6 +361,8 @@ Verteiler, Zuleitung Verteiler bis Wärmepumpe.
 ### Bewusste Abweichungen von der Vorlage
 - Die Vorlage rechnet Querschnitte teils mit 3.14 statt π. Hier gilt durchgehend π;
   die Abweichung liegt unter 0.2 %.
+- Die Vorlage wandelt Pascal mit dem festen Wasserfaktor `0.000102` in mWs um.
+  Das Backend verwendet die tatsächliche Soledichte über `H = Δp/(ρ·g)`.
 - Die Vorlage prüft in den Zuleitungsspalten die Strömungsart versehentlich über `dk`
   statt über `Re` und meldet dort immer «Turbulent glatt», obwohl die Lambda-Formel
   daneben bereits laminar rechnet. Hier wird durchgehend `Re` geprüft.

@@ -89,7 +89,9 @@ def faktor_x(leistung_kw: float) -> float:
     return 3.0 - (kw - 10) * (1.5 / 140)
 
 
-def berechne_expansion(d: dict, auto_vl=None, auto_leistung_kw=None) -> Optional[dict]:
+def berechne_expansion(
+    d: dict, auto_vl=None, auto_leistung_kw=None, auto_vsys_l=None
+) -> Optional[dict]:
     """Nennvolumen VN nach Dominics Excel-Methode.
 
     Vsys kommt aus der Rohrinhalt-Tabelle (rohre {Dimension: Meter}) + Zusatz-
@@ -99,6 +101,10 @@ def berechne_expansion(d: dict, auto_vl=None, auto_leistung_kw=None) -> Optional
     Weiter: speicher_l (Vsto), medium, hoehe_m (statische Höhe), psv_bar.
     """
     vsys = anlageinhalt_vsys(d)
+    vsys_quelle = "Bauteil"
+    if vsys is None and str(d.get("medium") or "") == "ews":
+        vsys = _f(auto_vsys_l)
+        vsys_quelle = "Erdsondenfeld"
     vsto = _f(d.get("speicher_l")) or 0.0
     t_mittel = _f(d.get("t_mittel"))
     if t_mittel is None:
@@ -130,6 +136,7 @@ def berechne_expansion(d: dict, auto_vl=None, auto_leistung_kw=None) -> Optional
     vorschlag = next((g for g in NORM_GROESSEN if g >= vn), NORM_GROESSEN[-1])
     return {
         "vsys_l": round(vsys, 2),
+        "vsys_quelle": vsys_quelle,
         "t_mittel": t_mittel,
         "leistung_kw": leistung,
         "e": round(e, 5),

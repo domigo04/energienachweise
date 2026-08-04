@@ -49,7 +49,7 @@ def _zahl(x) -> Optional[float]:
         return None
 
 
-def _sole_druckverlust(d: dict, quellenleistung_kw):
+def _sole_druckverlust(d: dict, quellenleistung_kw, auto_volumenstrom_m3h=None):
     """Bauteil-Eingaben auf den Solekreis-Rechenkern legen.
 
     Fehlen Pflichtangaben aus dem Wärmepumpen-Datenblatt, liefert der Kern eine
@@ -77,11 +77,18 @@ def _sole_druckverlust(d: dict, quellenleistung_kw):
             sonden_pn=sonde["pn"],
             sonden_straenge=2 if d.get("sonden_bauart") == "einfach" else 4,
             zuleitung_verteiler_m=zahl("sole_zuleitung_verteiler_m", 0),
+            zuleitung_verteiler_gesamt_vl_rl_m=zahl(
+                "sole_zuleitung_verteiler_gesamt_vl_rl_m"
+            ),
             zuleitung_verteiler_innen_d_mm=verteiler["innen_mm"],
             zuleitung_wp_m=zahl("sole_zuleitung_wp_m", 0),
             zuleitung_wp_innen_d_mm=wp["innen_mm"],
             zusatzinhalt_l=zahl("sole_zusatzinhalt_l", 0),
-            volumenstrom_m3_h=zahl("sole_volumenstrom_m3h"),
+            volumenstrom_m3_h=(
+                zahl("sole_volumenstrom_m3h")
+                if zahl("sole_volumenstrom_m3h") is not None
+                else auto_volumenstrom_m3h
+            ),
             quellenleistung_kw=quellenleistung_kw,
             sole_dt_k=zahl("sole_dt_k"),
             konzentration_pct=zahl("glykol_pct", vorgabe["konzentration_pct"]),
@@ -98,6 +105,8 @@ def _sole_druckverlust(d: dict, quellenleistung_kw):
     ergebnis["rohre"] = {"sonde": sonde, "zuleitung_verteiler": verteiler,
                          "zuleitung_wp": wp}
     ergebnis["waermetraeger"] = vorgabe
+    if _zahl(d.get("sole_volumenstrom_m3h")) is None and auto_volumenstrom_m3h is not None:
+        ergebnis["volumenstrom_quelle"] = "Wärmepumpe im Schema"
     if vorgabe.get("warnung"):
         ergebnis["warnungen"] = ergebnis.get("warnungen", []) + [vorgabe["warnung"]]
     return ergebnis
@@ -185,6 +194,11 @@ def _bauteil_auslegungen(nodes, verteiler_results, heatpump_results):
                 mehrere_wp = len(wp_quellen) > 1
                 # Nur etikettieren, wenn wirklich ein Wert übernommen wurde.
                 leistungsquelle = "Wärmepumpe" if q0 is not None else None
+            wp_flows = [
+                _zahl(res.get("source_flow_m3h")) for res in heatpump_results.values()
+                if _zahl(res.get("source_flow_m3h")) is not None
+            ]
+            auto_sole_flow = wp_flows[0] if len(wp_flows) == 1 else None
             try:
                 r = erdsondenfeld(
                     quellenleistung_kw=q0,
@@ -209,9 +223,11 @@ def _bauteil_auslegungen(nodes, verteiler_results, heatpump_results):
                     r["warnings"].append("Quellenleistung fehlt; Wärmepumpe mit COP oder elektrische Leistung ergänzen.")
                 if mehrere_wp:
                     r["warnings"].append("Mehrere Wärmepumpen erkannt; Quellenleistung am Erdsondenfeld manuell festlegen.")
+                if len(wp_flows) > 1 and _zahl(d.get("sole_volumenstrom_m3h")) is None:
+                    r["warnings"].append("Mehrere Wärmepumpen erkannt; Solevolumenstrom am Erdsondenfeld manuell festlegen.")
                 if _zahl(d.get("entzugsleistung_w_m")) is None:
                     r["warnings"].append("Spezifische Entzugsleistung fehlt; keine Bohrmeterempfehlung möglich.")
-                r["druckverlust"] = _sole_druckverlust(d, q0)
+                r["druckverlust"] = _sole_druckverlust(d, q0, auto_sole_flow)
                 r["warnings"] += (r["druckverlust"] or {}).get("warnungen", [])
                 # Der Solekreis rechnet den Inhalt aus der echten Geometrie inkl.
                 # Zuleitungen. Sobald er vorliegt, gilt er auch für die
@@ -800,9 +816,18 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
         # Erdsonden ist hydraulisch vollständig bestimmt.
         leer["heatpump_results"] = _waermepumpen_kreise(
             nodes, edges, leer["edge_flows"], leer["node_flows"], set())
+        leer["speicher_results"], leer["erdsonden_results"] = _bauteil_auslegungen(
+            nodes, {}, leer["heatpump_results"])
+        ews_inhalte = [
+            r.get("gesamtinhalt_l") for r in leer["erdsonden_results"].values()
+            if r.get("gesamtinhalt_l") is not None
+        ]
+        auto_ews_inhalt = ews_inhalte[0] if len(ews_inhalte) == 1 else None
         for n in nodes:
             if n.get("type") == "expansion":
-                r = berechne_expansion(n.get("data") or {}, *_expansion_auto(nodes))
+                r = berechne_expansion(
+                    n.get("data") or {}, *_expansion_auto(nodes), auto_ews_inhalt
+                )
                 if r is not None:
                     leer["expansion_results"][n["id"]] = r
         for n in nodes:  # Knoten ohne eigenen Wert: grösster Fluss ihrer Leitungen
@@ -813,8 +838,6 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
                      if e["source"] == nid or e["target"] == nid]
             leer["node_flows"][nid] = round(max(werte), 4) if werte else 0.0
         leer["leitung_results"] = _leitungsdimensionen(edges, leer["edge_flows"])
-        leer["speicher_results"], leer["erdsonden_results"] = _bauteil_auslegungen(
-            nodes, {}, leer["heatpump_results"])
         leer["warnungen"] = (_sammle_warnungen(nodes, {}, anschluss_warnungen, {}, leer["expansion_results"])
                              + _wp_warnungen(nodes, leer["heatpump_results"])
                              + [w for r in leer["speicher_results"].values() for w in r.get("warnings", [])]
@@ -1015,6 +1038,13 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
     # Verbraucherkreise stehen bereits fest, die freie Rückwärts-Propagierung
     # darf die WP-Leitungen danach nicht mehr überschreiben (§2/§6).
     heatpump_results = _waermepumpen_kreise(nodes, edges, edge_flows, node_flows, calc_edges)
+    speicher_results, erdsonden_results = _bauteil_auslegungen(
+        nodes, verteiler_results, heatpump_results)
+    ews_inhalte = [
+        r.get("gesamtinhalt_l") for r in erdsonden_results.values()
+        if r.get("gesamtinhalt_l") is not None
+    ]
+    auto_ews_inhalt = ews_inhalte[0] if len(ews_inhalte) == 1 else None
 
     # ── 3. Freie Topologie: Rückwärts-Propagierung VL/neutral ──
     rev_adj = {n["id"]: [] for n in nodes}
@@ -1142,7 +1172,7 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
                 "mws": round(gesamt / 10, 2) if gesamt > 0 else None,
             }
         elif t == "expansion":
-            r = berechne_expansion(d, *_expansion_auto(nodes))
+            r = berechne_expansion(d, *_expansion_auto(nodes), auto_ews_inhalt)
             if r is not None:
                 expansion_results[n["id"]] = r
         # Wärmezähler braucht keine eigene Rechnung: er übernimmt den
@@ -1152,9 +1182,6 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
     # Sie liest ausschliesslich edge_flows — die WP-Kreise sind dort bereits
     # eingetragen und werden damit automatisch mitdimensioniert.
     leitung_results = _leitungsdimensionen(edges, edge_flows)
-    speicher_results, erdsonden_results = _bauteil_auslegungen(
-        nodes, verteiler_results, heatpump_results)
-
     return {
         "edge_flows": edge_flows,
         "node_flows": node_flows,

@@ -56,6 +56,29 @@ def test_schema_nutzt_automatische_wp_quellenleistung_fuer_erdsonden():
     assert ews["ausreichend"] is True
 
 
+def test_ews_expansion_uebernimmt_automatisch_den_soleinhalt():
+    nodes = [
+        {"id": "wp", "type": "erzeuger", "data": {
+            "generator_type": "ews_wp", "leistung_kw": 40, "cop": 4,
+            "vl_temp": 35, "rl_temp": 30, "sole_vl": 3, "sole_rl": 0,
+        }},
+        {"id": "ews", "type": "erdsonden", "data": {
+            "sonden_anzahl": 4, "sonden_laenge_m": 190,
+            "entzugsleistung_w_m": 45,
+        }},
+        {"id": "exp", "type": "expansion", "data": {
+            "medium": "ews", "hoehe_m": 10, "psv_bar": 3,
+        }},
+    ]
+
+    result = berechne_schema(nodes, [])
+
+    assert result["expansion_results"]["exp"]["vsys_l"] == pytest.approx(
+        result["erdsonden_results"]["ews"]["gesamtinhalt_l"]
+    )
+    assert result["expansion_results"]["exp"]["vsys_quelle"] == "Erdsondenfeld"
+
+
 def test_schema_leitet_speicherleistung_und_temperaturen_aus_gruppen_ab():
     nodes = [
         {"id": "sp", "type": "speicher", "data": {}},

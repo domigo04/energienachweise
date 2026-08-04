@@ -32,6 +32,7 @@ REFERENZ = dict(
     sonden_innen_d_mm=26.2,
     sonden_straenge=4,
     zuleitung_verteiler_m=30,
+    zuleitung_verteiler_gesamt_vl_rl_m=60,
     zuleitung_verteiler_innen_d_mm=40.6,
     zuleitung_wp_m=12,
     zuleitung_wp_innen_d_mm=40.6,
@@ -99,9 +100,9 @@ def test_zuleitung_wird_laminar_erkannt_wo_die_vorlage_sich_verrechnet():
 def test_foerderhoehe_und_betriebspunkt():
     r = sole_druckverlust(**REFERENZ)
 
-    assert r["druckverlust_leitungen_mws"] == pytest.approx(8.16, abs=0.02)  # B41
+    assert r["druckverlust_leitungen_mws"] == pytest.approx(7.76, abs=0.02)
     assert r["druckverlust_verteiler_mws"] == pytest.approx(0.10, abs=0.01)  # B45
-    assert r["foerderhoehe_mws"] == pytest.approx(9.56, abs=0.03)            # B48
+    assert r["foerderhoehe_mws"] == pytest.approx(9.15, abs=0.03)
     assert r["foerdervolumen_m3_h"] == pytest.approx(6.2)                    # B49
     assert r["sonde_turbulent"] is True
     assert r["warnungen"] == []
@@ -114,6 +115,20 @@ def test_volumenstrom_aus_quellenleistung_und_sole_dt():
     # V' = Q0 · 3600 / (c · ΔT · ρ) = 30 · 3600 / (3.68 · 3 · 1050)
     assert r["volumenstrom_m3_h"] == pytest.approx(9.317, rel=1e-3)
     assert r["volumenstrom_quelle"] == "aus Quellenleistung und Sole-ΔT"
+
+
+def test_kritischer_weg_und_gesamtrohrmeter_sind_getrennte_groessen():
+    basis = sole_druckverlust(**REFERENZ)
+    mehr_rohr = sole_druckverlust(**{
+        **REFERENZ, "zuleitung_verteiler_gesamt_vl_rl_m": 240,
+    })
+
+    assert mehr_rohr["teilstuecke"][1]["druckverlust_pa"] == pytest.approx(
+        basis["teilstuecke"][1]["druckverlust_pa"]
+    )
+    assert mehr_rohr["inhalt_zuleitung_verteiler_l"] == pytest.approx(
+        basis["inhalt_zuleitung_verteiler_l"] * 4, abs=0.2
+    )
 
 
 def test_ohne_volumenstrom_gibt_es_warnung_statt_zahl():
@@ -247,7 +262,9 @@ def test_schema_rechnet_solekreis_am_erdsondenknoten():
         {"id": "ews", "type": "erdsonden", "data": {
             "sonden_anzahl": 4, "sonden_laenge_m": 220, "sonden_rohr_mm": 32,
             "entzugsleistung_w_m": 45,
-            "sole_zuleitung_verteiler_m": 30, "sole_id_zuleitung_verteiler_mm": 40.6,
+            "sole_zuleitung_verteiler_m": 30,
+            "sole_zuleitung_verteiler_gesamt_vl_rl_m": 60,
+            "sole_id_zuleitung_verteiler_mm": 40.6,
             "sole_zuleitung_wp_m": 12, "sole_id_zuleitung_wp_mm": 40.6,
             "sole_zusatzinhalt_l": 5, "sole_volumenstrom_m3h": 6.2,
             "glykol_pct": 30, "sole_dichte_kg_m3": 1050,
@@ -259,9 +276,30 @@ def test_schema_rechnet_solekreis_am_erdsondenknoten():
 
     # Der Sondendurchmesser kommt aus der Normsondentabelle (32 mm → ID 26.2).
     assert dv["teilstuecke"][0]["innen_d_mm"] == 26.2
-    assert dv["foerderhoehe_mws"] == pytest.approx(9.56, abs=0.03)
+    assert dv["foerderhoehe_mws"] == pytest.approx(9.15, abs=0.03)
     assert dv["inhalt_total_l"] == pytest.approx(2011.4, rel=1e-3)
     assert dv["rechenweg"]
+
+
+def test_schema_uebernimmt_solevolumenstrom_der_einen_waermepumpe():
+    nodes = [
+        {"id": "wp", "type": "erzeuger", "data": {
+            "generator_type": "ews_wp", "leistung_kw": 40, "cop": 4,
+            "vl_temp": 35, "rl_temp": 30, "sole_vl": 3, "sole_rl": 0,
+        }},
+        {"id": "ews", "type": "erdsonden", "data": {
+            "sonden_anzahl": 4, "sonden_laenge_m": 220,
+            "sole_zuleitung_verteiler_m": 30,
+            "sole_zuleitung_verteiler_gesamt_vl_rl_m": 60,
+        }},
+    ]
+
+    ergebnis = berechne_schema(nodes, [])
+    wp = ergebnis["heatpump_results"]["wp"]
+    dv = ergebnis["erdsonden_results"]["ews"]["druckverlust"]
+
+    assert dv["volumenstrom_m3_h"] == pytest.approx(wp["source_flow_m3h"], abs=0.001)
+    assert dv["volumenstrom_quelle"] == "Wärmepumpe im Schema"
 
 
 def test_bestandsschema_ohne_soleangaben_bleibt_lauffaehig():

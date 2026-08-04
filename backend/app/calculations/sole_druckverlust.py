@@ -34,8 +34,9 @@ from app.calculations.sole_rohre import (  # noqa: F401  (Re-Export fürs Fronte
 # Rohrrauheit PE, Vorgabe der Vorlage.
 RAUHEIT_MM_STD = 0.015
 
-# Umrechnung Pa → mWs wie in der Vorlage.
-PA_JE_MWS = 0.000102
+# Physikalische Umrechnung Pa → Meter Flüssigkeitssäule. Die Vorlage verwendet
+# den festen Wasserfaktor 0.000102; bei Sole muss die tatsächliche Dichte gelten.
+ERDBESCHLEUNIGUNG_M_S2 = 9.81
 
 # Zeta-Wert des Verteilers: Vorgabewert der Vorlage.
 ZETA_VERTEILER_STD = 12.0
@@ -119,7 +120,10 @@ def _teilstueck(
         "lambda": round(lam, 5) if lam is not None else None,
         "dynamischer_druck_pa": round(p_dyn, 1),
         "druckverlust_pa": round(dp_pa, 1) if dp_pa is not None else None,
-        "druckverlust_mws": round(dp_pa * PA_JE_MWS, 3) if dp_pa is not None else None,
+        "druckverlust_mws": (
+            round(dp_pa / (dichte_kg_m3 * ERDBESCHLEUNIGUNG_M_S2), 3)
+            if dp_pa is not None else None
+        ),
     }
 
 
@@ -130,6 +134,7 @@ def sole_druckverlust(
     sonden_innen_d_mm: float,
     sonden_straenge: int = 4,
     zuleitung_verteiler_m: float = 0.0,
+    zuleitung_verteiler_gesamt_vl_rl_m: Optional[float] = None,
     zuleitung_verteiler_innen_d_mm: Optional[float] = None,
     zuleitung_wp_m: float = 0.0,
     zuleitung_wp_innen_d_mm: Optional[float] = None,
@@ -205,10 +210,22 @@ def sole_druckverlust(
     # ── Füllinhalt ──────────────────────────────────────────────────────────
     inhalt_je_m_sonde = _querschnitt_m2(d_sonde) * 1000 * sonden_straenge
     inhalt_sonden = inhalt_je_m_sonde * tiefe * anzahl
-    inhalt_verteiler = _querschnitt_m2(d_verteiler) * 1000 * l_verteiler * 2
+    l_verteiler_gesamt = (
+        float(zuleitung_verteiler_gesamt_vl_rl_m)
+        if zuleitung_verteiler_gesamt_vl_rl_m not in (None, "")
+        else l_verteiler * 2
+    )
+    if l_verteiler_gesamt < 0:
+        raise ValueError("Gesamte Anschlussrohrmeter dürfen nicht negativ sein")
+    inhalt_verteiler = _querschnitt_m2(d_verteiler) * 1000 * l_verteiler_gesamt
     inhalt_wp = _querschnitt_m2(d_wp) * 1000 * l_wp * 2
     zusatz = float(zusatzinhalt_l or 0)
     inhalt_total = inhalt_sonden + inhalt_verteiler + inhalt_wp + zusatz
+    if l_verteiler and zuleitung_verteiler_gesamt_vl_rl_m in (None, ""):
+        warnungen.append(
+            "Gesamte Anschlussrohrmeter fehlen; für den Füllinhalt wird vorläufig "
+            "nur der kritische Weg mit Vor- und Rücklauf verwendet."
+        )
 
     rechenweg.append(_s(
         "1 Füllinhalt",
@@ -218,8 +235,8 @@ def sole_druckverlust(
     if l_verteiler:
         rechenweg.append(_s(
             "1 Füllinhalt",
-            "V_ZulVert", "V = π/4 · d² · L · 2 (Vor- und Rücklauf)",
-            f"π/4 · {_z(d_verteiler, 1)}² · {_z(l_verteiler, 1)} · 2",
+            "V_ZulVert", "V = π/4 · d² · L_gesamt(VL+RL)",
+            f"π/4 · {_z(d_verteiler, 1)}² · {_z(l_verteiler_gesamt, 1)}",
             f"{inhalt_verteiler:.1f} l"))
     if l_wp:
         rechenweg.append(_s(
@@ -282,6 +299,7 @@ def sole_druckverlust(
             "sonden_anzahl": anzahl, "sonden_tiefe_m": round(tiefe, 1),
             "inhalt_sonden_l": round(inhalt_sonden, 1),
             "inhalt_zuleitung_verteiler_l": round(inhalt_verteiler, 1),
+            "zuleitung_verteiler_gesamt_vl_rl_m": round(l_verteiler_gesamt, 1),
             "inhalt_zuleitung_wp_l": round(inhalt_wp, 1),
             "zusatzinhalt_l": round(zusatz, 1),
             "inhalt_total_l": round(inhalt_total, 1),
@@ -378,19 +396,24 @@ def sole_druckverlust(
 
     # ── Verteiler, Wärmepumpe, Förderhöhe ───────────────────────────────────
     dp_leitungen_pa = sum(t["druckverlust_pa"] or 0 for t in teilstuecke)
-    dp_leitungen_mws = dp_leitungen_pa * PA_JE_MWS
+    dp_leitungen_mws = dp_leitungen_pa / (dichte * ERDBESCHLEUNIGUNG_M_S2)
     zeta = float(zeta_verteiler)
     n_verteiler = float(verteiler_anzahl or 0)
-    dp_verteiler_mws = zeta * sonde["dynamischer_druck_pa"] * PA_JE_MWS * n_verteiler
+    dp_verteiler_mws = (
+        zeta * sonde["dynamischer_druck_pa"]
+        / (dichte * ERDBESCHLEUNIGUNG_M_S2) * n_verteiler
+    )
     dp_wp_mws = float(druckverlust_wp_mws or 0)
     foerderhoehe = dp_leitungen_mws + dp_verteiler_mws + dp_wp_mws
 
     pumpe = f"{len(teilstuecke) + 4} Pumpenbetriebspunkt"
     rechenweg.extend([
-        _s(pumpe, "Δp_Leitungen", "Δp = Σ Teilstücke · 0.000102",
-           f"{dp_leitungen_pa:.0f} · {PA_JE_MWS}", f"{dp_leitungen_mws:.2f} mWs"),
-        _s(pumpe, "Δp_Verteiler", "Δp = ζ · p_dyn(Sonde) · 0.000102 · Anzahl",
-           f"{_z(zeta, 1)} · {sonde['dynamischer_druck_pa']:.1f} · {PA_JE_MWS} · {_z(n_verteiler, 1)}",
+        _s(pumpe, "H_Leitungen", "H = ΣΔp / (ρ · g)",
+           f"{dp_leitungen_pa:.0f} / ({_z(dichte, 1)} · {ERDBESCHLEUNIGUNG_M_S2})",
+           f"{dp_leitungen_mws:.2f} mWs"),
+        _s(pumpe, "H_Verteiler", "H = ζ · p_dyn(Sonde) / (ρ · g) · Anzahl",
+           f"{_z(zeta, 1)} · {sonde['dynamischer_druck_pa']:.1f} / "
+           f"({_z(dichte, 1)} · {ERDBESCHLEUNIGUNG_M_S2}) · {_z(n_verteiler, 1)}",
            f"{dp_verteiler_mws:.2f} mWs"),
         _s(pumpe, "H", "H = Δp_Leitungen + Δp_Verteiler + Δp_Wärmepumpe",
            f"{dp_leitungen_mws:.2f} + {dp_verteiler_mws:.2f} + {_z(dp_wp_mws, 2)}",
@@ -410,6 +433,7 @@ def sole_druckverlust(
         "inhalt_je_m_sonde_l": round(inhalt_je_m_sonde, 4),
         "inhalt_sonden_l": round(inhalt_sonden, 1),
         "inhalt_zuleitung_verteiler_l": round(inhalt_verteiler, 1),
+        "zuleitung_verteiler_gesamt_vl_rl_m": round(l_verteiler_gesamt, 1),
         "inhalt_zuleitung_wp_l": round(inhalt_wp, 1),
         "zusatzinhalt_l": round(zusatz, 1),
         "inhalt_total_l": round(inhalt_total, 1),

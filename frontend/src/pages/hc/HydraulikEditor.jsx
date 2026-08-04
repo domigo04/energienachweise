@@ -1564,7 +1564,8 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, onUpdate, onClos
               <select style={inp} value={d.sole_rohr_zuleitung_verteiler??'pe50x4.7'} onChange={e=>set('sole_rohr_zuleitung_verteiler',e.target.value)}>
                 {SOLE_ROHRE.map(r=><option key={r.key} value={r.key}>{r.label}</option>)}
               </select></div>
-            <div><label style={lbl}>Länge [m]</label><input type="number" min="0" style={inp} value={d.sole_zuleitung_verteiler_m??''} onChange={e=>set('sole_zuleitung_verteiler_m',e.target.value)} placeholder="z.B. 30"/></div>
+            <div><label style={lbl}>Kritischer Weg [m einfach]</label><input type="number" min="0" style={inp} value={d.sole_zuleitung_verteiler_m??''} onChange={e=>set('sole_zuleitung_verteiler_m',e.target.value)} placeholder="z.B. 30"/></div>
+            <div><label style={lbl}>Alle Anschlussrohre [m VL+RL]</label><input type="number" min="0" style={inp} value={d.sole_zuleitung_verteiler_gesamt_vl_rl_m??''} onChange={e=>set('sole_zuleitung_verteiler_gesamt_vl_rl_m',e.target.value)} placeholder="für Füllinhalt"/></div>
             <div><label style={lbl}>Rohr Zuleitung Verteiler–WP</label>
               <select style={inp} value={d.sole_rohr_zuleitung_wp??'pe50x4.7'} onChange={e=>set('sole_rohr_zuleitung_wp',e.target.value)}>
                 {SOLE_ROHRE.map(r=><option key={r.key} value={r.key}>{r.label}</option>)}

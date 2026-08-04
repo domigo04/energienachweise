@@ -9,23 +9,59 @@ export const PITCH_KONTAKT = {
   betreff: "Pilotprojekt Heizungscockpit",
 };
 
+// Kaufmännische Angaben der Folien Marktpotenzial, Finanzierung, Funding und
+// Lizenzen. Leere Felder erscheinen im Deck sichtbar als «einzutragen» — sie
+// werden bewusst nicht geschätzt. Belegte Werte stammen aus docs/PILOT_PLAN.md.
+export const PITCH_ZAHLEN = {
+  markt: {
+    bueros: "",        // z. B. "rund 900" – Heizungsplanungsbüros in der Schweiz
+    zielsegment: "",   // z. B. "410" – davon mit 2–15 Planern
+    potenzial: "",     // z. B. "CHF 2.1 Mio." – jährliches Lizenzpotenzial
+    quelle: "",        // Quelle der Marktzahlen, z. B. Verbandsstatistik
+  },
+  finanzierung: {
+    bisher: "",        // bisher in die Entwicklung geflossen
+    laufend: "",       // laufender Aufwand pro Monat oder Jahr
+    pilotbeitrag: "CHF 5'000",       // docs/PILOT_PLAN.md, Phase 6
+    pilotdauer: "3 Monate begleitet", // docs/PILOT_PLAN.md, Phase 6
+  },
+  funding: {
+    bedarf: "",        // Finanzierungsbedarf bis zum Marktstart
+    verwendung: "",    // wofür die Mittel eingesetzt werden
+    zeitraum: "",      // Zeitraum bis zum Marktstart
+  },
+  lizenzen: {
+    core: "CHF 4'000–6'000",  // docs/PILOT_PLAN.md, pro Büro und Jahr
+    pilotkondition: "",       // was Pilotbüros beim Marktstart erhalten
+    addon: "LV und Kostenintelligenz",
+  },
+};
+
+/** Leere kaufmännische Felder bleiben im Deck als offene Stelle sichtbar. */
+export function pitchWert(value) {
+  const text = typeof value === "string" ? value.trim() : "";
+  return text ? { text, offen: false } : { text: "einzutragen", offen: true };
+}
+
 export const PITCH_SLIDES = [
-  { id: 0, key: "titel", label: "Heizungscockpit", eyebrow: "SIREGO GmbH", tone: "dark" },
-  { id: 1, key: "problem", label: "Eine Änderung. Fünf Excel neu.", eyebrow: "Das heutige Problem" },
-  { id: 2, key: "beispiel", label: "15 kW auf 21 kW", eyebrow: "Konkretes Änderungsbeispiel" },
-  { id: 3, key: "kette", label: "Das System reagiert", eyebrow: "Die Berechnungskette", tone: "dark" },
-  { id: 4, key: "status", label: "Pilot V1", eyebrow: "Ehrlicher Funktionsstatus" },
-  { id: 5, key: "projektstand", label: "Nachvollziehbarer Projektstand", eyebrow: "Formel, Warnung, Revision, Export" },
-  { id: 6, key: "nutzen", label: "Nutzenhypothese", eyebrow: "Im Pilot zu messen" },
-  { id: 7, key: "zielbuero", label: "Für wen der Pilot passt", eyebrow: "Design Partner" },
-  { id: 8, key: "angebot", label: "Pilotangebot", eyebrow: "Leistung, Gates, Preis" },
-  { id: 9, key: "hintergrund", label: "Fachlicher Hintergrund", eyebrow: "Warum dieses Problem" },
-  { id: 10, key: "kontakt", label: "Pilotprojekt starten", eyebrow: "Nächster Schritt" },
-  { id: 11, key: "lv", label: "LV und Kostenintelligenz", eyebrow: "Add-on nach dem Kern", anhang: true },
-  { id: 12, key: "modell", label: "Geschäftsmodell nach dem Pilot", eyebrow: "Preise", anhang: true },
-  { id: 13, key: "gates", label: "Technische Gates", eyebrow: "Reihenfolge statt Termine", anhang: true },
-  { id: 14, key: "daten", label: "Daten und Datenschutz", eyebrow: "Vor dem Pilotstart geregelt", anhang: true },
-  { id: 15, key: "annahmen", label: "Berechnungsannahmen", eyebrow: "Grundlage der Nutzenhypothese", anhang: true },
+  { id: 0, key: "sirego", label: "SIREGO", eyebrow: "Wer dahinter steht" },
+  { id: 1, key: "problem", label: "Eine Änderung. Fünf Excel neu.", eyebrow: "Das Problem" },
+  { id: 2, key: "loesung", label: "Das System reagiert", eyebrow: "Die Lösung" },
+  { id: 3, key: "workflow", label: "Der Workflow", eyebrow: "Ein Kreislauf statt Dateien" },
+  { id: 4, key: "cockpit", label: "Heizungscockpit erklärt", eyebrow: "Was im Werkzeug steckt" },
+  { id: 5, key: "timeline", label: "MVP-Timeline", eyebrow: "Der Weg zum Marktstart" },
+  { id: 6, key: "leistungen", label: "Was Sie bekommen", eyebrow: "Im Piloten enthalten" },
+  { id: 7, key: "markt", label: "Marktpotenzial", eyebrow: "Warum es das Werkzeug geben wird" },
+  { id: 8, key: "finanzierung", label: "Finanzierung", eyebrow: "Wie die Entwicklung getragen wird" },
+  { id: 9, key: "funding", label: "Funding", eyebrow: "Bis zum Marktstart" },
+  { id: 10, key: "lizenzen", label: "Lizenzen bei Marktstart", eyebrow: "Danach" },
+  { id: 11, key: "kontakt", label: "Termin vereinbaren", eyebrow: "Nächster Schritt" },
+  { id: 12, key: "status", label: "Funktionsstatus heute", eyebrow: "Anhang · für Rückfragen", anhang: true },
+  { id: 13, key: "nutzen", label: "Nutzenhypothese", eyebrow: "Anhang · im Pilot zu messen", anhang: true },
+  { id: 14, key: "lv", label: "LV und Kostenintelligenz", eyebrow: "Anhang · Add-on", anhang: true },
+  { id: 15, key: "gates", label: "Technische Gates", eyebrow: "Anhang · Reihenfolge statt Termine", anhang: true },
+  { id: 16, key: "daten", label: "Daten und Datenschutz", eyebrow: "Anhang · vor dem Pilotstart", anhang: true },
+  { id: 17, key: "annahmen", label: "Berechnungsannahmen", eyebrow: "Anhang · Grundlagen", anhang: true },
 ];
 
 export const PITCH_HAUPTTEIL = PITCH_SLIDES.filter((slide) => !slide.anhang);

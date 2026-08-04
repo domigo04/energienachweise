@@ -8,24 +8,42 @@ Das Deck ist ein Verkaufsdokument. Es darf nur behaupten, was in
 `docs/PILOT_SCOPE_V1.md`, `docs/PILOT_PLAN.md`, `docs/PITCH_READINESS.md` und
 `PHYSIK.md` belegt ist.
 
+## Publikum
+
+Das Deck wird einem bereits geeigneten Heizungsplanungsbüro gezeigt: heute
+Pilotkunde, nach dem Marktstart Lizenznehmer. Es qualifiziert das Büro nicht
+mehr vor — diese Auswahl ist vor dem Termin passiert.
+
 ## Aufbau
 
-Hauptteil (11 Folien):
+Hauptteil (12 Folien):
 
-1. Heizungscockpit – Kernversprechen (dunkle Akzentfolie)
-2. Eine Änderung. Fünf Excel neu. – heutiges Problem
-3. Eine Eingabe. Acht Folgen. – konkretes Änderungsbeispiel
-4. Das System reagiert – Berechnungskette (dunkle Akzentfolie)
-5. Pilot V1 – heute verifiziert / im Pilot zu validieren / nicht im Pilot
-6. Nachvollziehbarer Projektstand – Formel, Herkunft, Warnung, Revision, Export
-7. Nutzenhypothese – Bandbreite in Stunden, im Pilot zu messen
-8. Für wen der Pilot passt
-9. Pilotangebot – Leistung, Start nach Gate, Preis, Mitwirkung
-10. Fachlicher Hintergrund
-11. Pilotprojekt gemeinsam auswählen – Kontakt und QR-Code
+1. SIREGO – wer dahinter steht, mit Porträt
+2. Eine Änderung. Fünf Excel neu. – das Problem
+3. Eine Änderung. Das System reagiert. – die Lösung am Beispiel
+4. Ein Kreislauf statt einer Dateikette – der Workflow als Diagramm
+5. Das Heizungscockpit erklärt
+6. Der Weg zum Marktstart – MVP-Timeline
+7. Was Sie bekommen – Leistungen im Piloten
+8. Marktpotenzial
+9. Die Finanzierung
+10. Bis zum Marktstart – Funding
+11. Lizenzen bei erfolgreichem Marktstart
+12. Heizungscockpit näher kennenlernen – Kontakt und QR-Code
 
-Anhang (5 Folien): LV und Kostenintelligenz, Geschäftsmodell nach dem Pilot,
-technische Gates, Daten und Datenschutz, Berechnungsannahmen.
+Anhang (6 Folien): Funktionsstatus heute, Nutzenhypothese, LV und
+Kostenintelligenz, technische Gates, Daten und Datenschutz,
+Berechnungsannahmen. Der Funktionsstatus liegt bewusst im Anhang: im Hauptteil
+wird das Zielbild gezeigt, für Rückfragen steht die ehrliche Abgrenzung bereit.
+
+## Kaufmännische Angaben
+
+Marktgrössen, Finanzierungsbedarf und Lizenzkonditionen stehen in
+`PITCH_ZAHLEN` in `pitchDeckContent.js`. Leere Felder erscheinen im Deck
+sichtbar als amber gestricheltes «einzutragen» — sie werden bewusst nicht
+geschätzt. Belegt sind nur die Werte aus `docs/PILOT_PLAN.md`: Pilotbeitrag
+CHF 5'000 für drei begleitete Monate und die Core-Lizenz von CHF 4'000–6'000
+pro Büro und Jahr.
 
 Die Fusszeile zählt Hauptteil und Anhang getrennt (`pitchPosition`). Anhangfolien
 haben in der Punktleiste eckige statt runde Punkte.
@@ -104,10 +122,10 @@ Eine Palette für das ganze Deck, definiert als Variablen am `.pitch-deck`:
 | `--pitch-warn` | `#dc2626` | Rot des Editors für Warnungen |
 
 Funktionale Bedeutung: Blau ist eine Eingabe, Amber ein automatisch neu
-berechneter Wert, Grün ein geprüfter Stand, Rot eine Warnung. Die Farben werden
-nur so verwendet, nicht dekorativ. Abgeleitete Töne entstehen mit `color-mix`,
-damit es keine zweite Palette gibt. Die zwei dunklen Akzentfolien nutzen
-dieselben Farben, nur auf dunklem Grund.
+berechneter Wert oder eine offene Stelle, Grün ein geprüfter Stand, Rot eine
+Warnung. Die Farben werden nur so verwendet, nicht dekorativ. Abgeleitete Töne
+entstehen mit `color-mix`, damit es keine zweite Palette gibt. Alle Folien
+haben denselben hellen Hintergrund; dunkle Akzentfolien gibt es bewusst nicht.
 
 ## Kontakt und QR-Code
 

@@ -1,23 +1,51 @@
+// Kontakt der Abschlussfolie. Der QR-Code in `assets/pitchdeck/kontakt-qr.svg`
+// zeigt auf `mailto:<mail>?subject=<betreff>` und muss bei einer Änderung hier
+// neu erzeugt werden (siehe docs/PITCHDECK.md).
+export const PITCH_KONTAKT = {
+  name: "Dominic Goulon",
+  firma: "SIREGO GmbH",
+  rolle: "Heizungsfachplanung und Produktentwicklung",
+  mail: "dominic.goulon@sirego.ch",
+  betreff: "Pilotprojekt Heizungscockpit",
+};
+
 export const PITCH_SLIDES = [
-  { id: 0, label: "Heizungscockpit", eyebrow: "SIREGO GmbH" },
-  { id: 1, label: "Eine Änderung", eyebrow: "Das bekannte Problem" },
-  { id: 2, label: "Planung heute", eyebrow: "Getrennte Werkzeuge" },
-  { id: 3, label: "Dazwischen", eyebrow: "Die Reibungsverluste" },
-  { id: 4, label: "Die Lösung", eyebrow: "Ein verbundenes System" },
-  { id: 5, label: "Das System reagiert", eyebrow: "Die Magic" },
-  { id: 6, label: "Pilot V1", eyebrow: "Der unterstützte Systemtyp" },
-  { id: 7, label: "Nachvollziehbar", eyebrow: "Keine Blackbox" },
-  { id: 8, label: "LV wird Firmenwissen", eyebrow: "Das zweite Schwungrad" },
-  { id: 9, label: "Der wirtschaftliche Nutzen", eyebrow: "Messbar im Pilot" },
-  { id: 10, label: "Belastbarer Projektstand", eyebrow: "Export heute" },
-  { id: 11, label: "Vom Produkt zum Beweis", eyebrow: "Gate für Gate" },
-  { id: 12, label: "Geschäftsmodell", eyebrow: "Betreut starten" },
-  { id: 13, label: "Design Partner", eyebrow: "Der Pilot" },
-  { id: 14, label: "Gemeinsam testen", eyebrow: "Nächster Schritt" },
+  { id: 0, key: "titel", label: "Heizungscockpit", eyebrow: "SIREGO GmbH", tone: "dark" },
+  { id: 1, key: "problem", label: "Eine Änderung. Fünf Excel neu.", eyebrow: "Das heutige Problem" },
+  { id: 2, key: "beispiel", label: "15 kW auf 21 kW", eyebrow: "Konkretes Änderungsbeispiel" },
+  { id: 3, key: "kette", label: "Das System reagiert", eyebrow: "Die Berechnungskette", tone: "dark" },
+  { id: 4, key: "status", label: "Pilot V1", eyebrow: "Ehrlicher Funktionsstatus" },
+  { id: 5, key: "projektstand", label: "Nachvollziehbarer Projektstand", eyebrow: "Formel, Warnung, Revision, Export" },
+  { id: 6, key: "nutzen", label: "Nutzenhypothese", eyebrow: "Im Pilot zu messen" },
+  { id: 7, key: "zielbuero", label: "Für wen der Pilot passt", eyebrow: "Design Partner" },
+  { id: 8, key: "angebot", label: "Pilotangebot", eyebrow: "Leistung, Gates, Preis" },
+  { id: 9, key: "hintergrund", label: "Fachlicher Hintergrund", eyebrow: "Warum dieses Problem" },
+  { id: 10, key: "kontakt", label: "Pilotprojekt starten", eyebrow: "Nächster Schritt" },
+  { id: 11, key: "lv", label: "LV und Kostenintelligenz", eyebrow: "Add-on nach dem Kern", anhang: true },
+  { id: 12, key: "modell", label: "Geschäftsmodell nach dem Pilot", eyebrow: "Preise", anhang: true },
+  { id: 13, key: "gates", label: "Technische Gates", eyebrow: "Reihenfolge statt Termine", anhang: true },
+  { id: 14, key: "daten", label: "Daten und Datenschutz", eyebrow: "Vor dem Pilotstart geregelt", anhang: true },
+  { id: 15, key: "annahmen", label: "Berechnungsannahmen", eyebrow: "Grundlage der Nutzenhypothese", anhang: true },
 ];
+
+export const PITCH_HAUPTTEIL = PITCH_SLIDES.filter((slide) => !slide.anhang);
+export const PITCH_ANHANG = PITCH_SLIDES.filter((slide) => slide.anhang);
 
 export function normaliseSlide(value) {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed)) return 0;
   return Math.min(Math.max(parsed, 0), PITCH_SLIDES.length - 1);
+}
+
+/** Fusszeile: im Hauptteil zählt die Folie, im Anhang der Anhang. */
+export function pitchPosition(index) {
+  const slide = PITCH_SLIDES[normaliseSlide(index)];
+  const gruppe = slide.anhang ? PITCH_ANHANG : PITCH_HAUPTTEIL;
+  const position = gruppe.findIndex((item) => item.id === slide.id) + 1;
+  return {
+    zaehler: `${position} / ${gruppe.length}`,
+    text: slide.anhang
+      ? `Anhang ${position} von ${gruppe.length} · ${slide.label}`
+      : `Folie ${position} von ${gruppe.length} · ${slide.label}`,
+  };
 }

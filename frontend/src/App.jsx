@@ -6,6 +6,7 @@ import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import { AuthProvider } from "./auth/AuthContext";
 import ProtectedRoute from "./auth/ProtectedRoute";
+import AdminRoute from "./auth/AdminRoute";
 import AppLayout from "./components/AppLayout";
 import { FeatureProvider } from "./lib/features";
 
@@ -33,6 +34,7 @@ const Firmenverwaltung = lazy(() => import("./pages/admin/Firmenverwaltung"));
 const Abonnement = lazy(() => import("./pages/admin/Abonnement"));
 const BaupreisindexAdmin = lazy(() => import("./pages/admin/BaupreisindexAdmin"));
 const HydraulikEditor = lazy(() => import("./pages/hc/HydraulikEditor"));
+const PitchDeck = lazy(() => import("./pages/admin/PitchDeck"));
 
 class PageErrorBoundary extends Component {
   constructor(props) {
@@ -125,6 +127,9 @@ export default function App() {
 
           {/* Schema-Editor: Vollbild-Canvas, ausserhalb der gepolsterten Shell */}
           <Route path="/projekte/:id/schema" element={<ProtectedRoute><Suspense fallback={<div className="flex h-screen items-center justify-center text-sm text-slate-500">Hydraulikschema wird geladen…</div>}><HydraulikEditor /></Suspense></ProtectedRoute>} />
+
+          {/* Internes Pitchdeck: Vollbild und ausschliesslich für Plattformadmins. */}
+          <Route path="/admin/pitchdeck/:slideId?" element={<AdminRoute><PageLoader><PitchDeck /></PageLoader></AdminRoute>} />
 
           {/* Alte Routen umleiten + Fallback */}
           <Route path="/heizungscockpit/*" element={<Navigate to="/start" replace />} />

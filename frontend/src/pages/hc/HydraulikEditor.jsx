@@ -796,20 +796,42 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
   // ── 2WV / 3WM — kvs + Ventilautorität kommen vom Backend ──
   if (node.type === 'valve2' || node.type === 'valve3') {
     const ver = ventilResults?.[node.id];
+    const umschaltend = node.type === 'valve3' && (d.funktion || 'mischend') === 'umschaltend';
     return (
       <div style={panelSt}>
-        <PT>{node.type === 'valve2' ? '2-Wege Regelventil' : '3-Wege Mischventil'}</PT>
+        <PT>{node.type === 'valve2' ? '2-Wege Regelventil'
+          : umschaltend ? '3-Weg-Umschaltventil' : '3-Wege Mischventil'}</PT>
         {fld('Bezeichnung','label','','','text')}
-        {v ? ro("V' (aus Leitung)",v,'m³/h',true) : <div style={warnSt}>In eine Leitung mit Durchfluss setzen</div>}
-        {fld('Δpvar (variable Anlage)','dp_var','z.B. 26','kPa')}
-        {ver ? <>
-          {ro('KVS theoretisch', ver.kvs_theor, 'm³/h·bar½')}
-          <label style={lbl}>KVS gewählt (Norm-Reihe)</label>
-          <select style={{...inp,cursor:'pointer'}} value={d.kvs_eff||ver.kvs_vorschlag||''} onChange={e=>set('kvs_eff',e.target.value)}>
-            {KVS_REIHE.map(k=><option key={k} value={k}>{k}{k===ver.kvs_vorschlag?' ← Vorschlag':''}</option>)}
+        {node.type === 'valve3' && <>
+          <label style={lbl}>Funktion</label>
+          <select style={{...inp,cursor:'pointer'}} value={d.funktion||'mischend'}
+            onChange={e=>set('funktion',e.target.value)}>
+            <option value="mischend">Mischend — regelt eine Temperatur</option>
+            <option value="umschaltend">Umschaltend — zwei Stellungen (BWW-Vorrang)</option>
           </select>
-          <PvBox pv={ver.pv} v={ver.v} kvs_eff={ver.kvs_eff}/>
-        </> : <div style={{ fontSize:9, color:'#94a3b8', marginTop:4 }}>Δpvar eingeben — das Backend rechnet kvs + Autorität.</div>}
+          <div style={{ fontSize:9, lineHeight:1.5, color:'#64748b', marginTop:4, marginBottom:6 }}>
+            {umschaltend
+              ? 'Zwischen Wärmepumpe und technischem Speicher heisst umschaltend: entweder Brauchwarmwasser oder Verbrauchergruppen. Die Wärmepumpe zeigt dann beide Betriebsfälle getrennt; die Lasten werden nicht addiert.'
+              : 'Ein mischendes Ventil regelt eine Temperatur und wird über kvs und Autorität ausgelegt.'}
+          </div>
+        </>}
+        {v ? ro("V' (aus Leitung)",v,'m³/h',true) : <div style={warnSt}>In eine Leitung mit Durchfluss setzen</div>}
+        {umschaltend ? (
+          <div style={{ fontSize:10, color:'#0369a1', background:'#f0f9ff', border:'1px solid #7dd3fc', borderRadius:6, padding:'6px 8px' }}>
+            Ein Umschaltventil wird nicht gedrosselt — es bekommt deshalb kein kvs.
+            Die Betriebsfälle stehen bei der Wärmepumpe.
+          </div>
+        ) : <>
+          {fld('Δpvar (variable Anlage)','dp_var','z.B. 26','kPa')}
+          {ver?.kvs_theor != null ? <>
+            {ro('KVS theoretisch', ver.kvs_theor, 'm³/h·bar½')}
+            <label style={lbl}>KVS gewählt (Norm-Reihe)</label>
+            <select style={{...inp,cursor:'pointer'}} value={d.kvs_eff||ver.kvs_vorschlag||''} onChange={e=>set('kvs_eff',e.target.value)}>
+              {KVS_REIHE.map(k=><option key={k} value={k}>{k}{k===ver.kvs_vorschlag?' ← Vorschlag':''}</option>)}
+            </select>
+            <PvBox pv={ver.pv} v={ver.v} kvs_eff={ver.kvs_eff}/>
+          </> : <div style={{ fontSize:9, color:'#94a3b8', marginTop:4 }}>Δpvar eingeben — das Backend rechnet kvs + Autorität.</div>}
+        </>}
         <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
     );
@@ -936,7 +958,16 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         {quelleMitMedium && <>
           {fld('Sole-VL (zur WP)','sole_vl','','°C')}
           {fld('Sole-RL (zur Quelle)','sole_rl','','°C')}
-          {fld('c·ρ Sole','sole_ce','leer = Wasser 1.163','kWh/m³K')}
+          {fld('c·ρ Sole','sole_ce','leer = aus Erdsondenfeld','kWh/m³K')}
+        </>}
+        {hp?.betriebsfaelle && <>
+          <Div/>
+          <div style={{ fontSize:9, color:'#94a3b8', marginBottom:6 }}>
+            BWW-BETRIEBSPUNKT — bei höherer Vorlauftemperatur gilt ein anderer COP.
+          </div>
+          {fld('BWW-Vorlauf','bww_vl_temp','z.B. 55','°C')}
+          {fld('BWW-Rücklauf','bww_rl_temp','z.B. 45','°C')}
+          {fld('COP bei BWW-Temperatur','bww_cop','z.B. 2.6','')}
         </>}
         {hp && <>
           <Div/>
@@ -953,6 +984,40 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
           </>}
           {hp.warnings?.map((w,i)=><div key={i} style={warnSt}>⚠ {w}</div>)}
         </>}
+        {hp?.betriebsfaelle && (
+          <>
+            <Div/>
+            <div style={{ fontSize:9, fontWeight:700, color:'#475569', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:4 }}>
+              Betriebsfälle (Umschaltventil)
+            </div>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:10 }}>
+              <thead><tr style={{ color:'#94a3b8' }}>
+                <th style={{ textAlign:'left', padding:'2px 0' }}>Fall</th>
+                <th style={{ textAlign:'right' }}>Q</th><th style={{ textAlign:'right' }}>COP</th>
+                <th style={{ textAlign:'right' }}>Quelle</th><th style={{ textAlign:'right' }}>V' Sole</th>
+              </tr></thead>
+              <tbody>
+                {hp.betriebsfaelle.faelle.map(f=>{
+                  const mass = f.key === hp.betriebsfaelle.massgebend;
+                  return (
+                    <tr key={f.key} style={{ borderTop:'1px solid #f1f5f9', fontWeight: mass?700:400,
+                      color: mass?'#15803d':'#475569' }}>
+                      <td style={{ padding:'3px 0' }}>{f.titel}{mass?' ◄':''}</td>
+                      <td style={{ textAlign:'right' }}>{f.q_heiz_kw ?? '—'}</td>
+                      <td style={{ textAlign:'right' }}>{f.cop ?? '—'}</td>
+                      <td style={{ textAlign:'right' }}>{f.q_source_kw ?? '—'}</td>
+                      <td style={{ textAlign:'right' }}>{f.solevolumenstrom_m3h ?? '—'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <div style={{ fontSize:9, lineHeight:1.5, color:'#64748b', marginTop:4 }}>
+              Das Umschaltventil lässt nur einen Fall gleichzeitig zu. Massgebend für Erdsonden
+              und Solekreis ist der mit der grösseren Quellenleistung — die Lasten werden nicht addiert.
+            </div>
+          </>
+        )}
         <button style={btnBlue} onClick={()=>navigate('/rechner/ravel')}>→ RAVEL Wirtschaftlichkeit</button>
         <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
@@ -990,8 +1055,11 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         <PT>BWW-Speicher</PT>
         {fld('Bezeichnung','label','BWW','','text')}
         {fld('Speicherinhalt','speicher_liter','z.B. 800','L')}
+        {fld('Ladeleistung','bww_ladeleistung_kw','z.B. 15.5','kW')}
         <div style={{ fontSize:9, lineHeight:1.5, color:'#64748b', background:'#fff7ed', border:'1px solid #fed7aa', borderRadius:6, padding:'6px 7px' }}>
-          Die SIA-385-Auslegung wird erst nach Klärung der Bezugsgrösse aus der Excel-Vorlage aktiviert. Der manuelle Inhalt bleibt unverändert nutzbar.
+          Die Ladeleistung ist vorerst eine Eingabe. Sie bestimmt den BWW-Betriebsfall der
+          Wärmepumpe. Die Bemessung nach SIA 385/2 aus Personen, Bezugseinheit und Ladezyklen
+          folgt als eigener Schritt.
         </div>
         <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>

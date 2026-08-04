@@ -510,3 +510,48 @@ ordnet der Solepumpe nicht mehr den Astdruckverlust der Heizseite zu.
 Mehrere Sondenfelder am selben Quellenkreis brauchen eine Aufteilung des
 Volumenstroms. Sie ist nicht definiert und wird nicht geraten: es erscheint eine
 Warnung, und der Betriebspunkt bleibt leer.
+
+## 21. Brauchwarmwasser-Vorrang und Betriebsfälle (2026-08-04)
+Ein 3-Weg-Ventil gibt es in zwei Ausführungen. Das **mischende** Ventil regelt
+eine Temperatur und wird über kvs und Ventilautorität ausgelegt (§3). Das
+**umschaltende** Ventil kennt nur zwei Stellungen; es wird nicht gedrosselt und
+bekommt deshalb kein kvs.
+
+Sitzt ein Umschaltventil im Kreis zwischen Wärmepumpe und technischem Speicher,
+läuft die Anlage entweder im Brauchwarmwasser- oder im Heizbetrieb — nie in
+beiden zugleich. Daraus folgt die zentrale Regel:
+
+> **Heizlast und BWW-Ladeleistung werden nie addiert.**
+
+Die Funktion ist eine sichtbare Eingabe am Ventil (`funktion`), keine Erkennung
+aus der Topologie. Ohne Angabe bleibt es ein Mischventil; bestehende Schemas
+ändern sich dadurch nicht.
+
+### Die beiden Betriebsfälle
+Beide werden vollständig und getrennt gerechnet, weil sich mehr ändert als nur
+die Leistung:
+
+| | Heizbetrieb | BWW-Vorrang |
+| --- | --- | --- |
+| Leistung | Nennleistung der Wärmepumpe | Ladeleistung des BWW-Speichers |
+| Vorlauf/Rücklauf | `vl_temp` / `rl_temp` | `bww_vl_temp` / `bww_rl_temp` |
+| COP | `cop` | `bww_cop` bei BWW-Temperatur |
+
+Der COP im Heizbetrieb gilt bei BWW-Temperatur nicht — bei 55 °C statt 35 °C
+Vorlauf fällt er deutlich ab. Fehlt `bww_cop`, wird das benannt statt geschätzt.
+
+Je Fall folgen daraus elektrische Leistung, Quellenleistung
+`Q0 = Q · (1 − 1/COP)` und der Solevolumenstrom (§20).
+
+### Massgebender Fall
+Für die Quellenseite — Erdsonden, Solekreis, Solepumpe — gilt der Fall mit der
+**grösseren Quellenleistung**. Der andere bleibt sichtbar, damit der Fachplaner
+beide Zustände beurteilt. Beispiel: 40 kW Heizen bei COP 4 ergibt 30 kW Quelle,
+30 kW BWW bei COP 2.6 ergibt 18.5 kW — massgebend ist der Heizbetrieb, und die
+Summe von 48.5 kW wäre fachlich falsch. Genau das nennt die Warnung.
+
+### Noch offen
+Die Bemessung des Brauchwarmwassers selbst — Speichervolumen und Ladeleistung
+aus Personen, Bezugseinheit und Ladezyklen nach SIA 385/2 — ist hier bewusst
+nicht enthalten. Die Ladeleistung ist vorerst eine Eingabe am BWW-Speicher.
+Grundlage für den nächsten Schritt ist `Warmwasser-Berechnung_SIA385.xlsm`.

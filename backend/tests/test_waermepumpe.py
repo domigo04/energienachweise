@@ -168,7 +168,12 @@ def test_solekreis_rechnet_mit_quellenleistung_nicht_mit_heizleistung():
     wp = res["heatpump_results"]["wp"]
     assert wp["q_source_kw"] == 37.5
     v_sole = wp["source_flow_m3h"]
-    assert v_sole == round(37.5 / (CE_WASSER * 4), 4)
+    # Der Wärmeträger des angeschlossenen Sondenfelds gilt auch am Verdampfer.
+    # Ohne eigene Wahl ist das der Vorgabewert Antifrogen N 25 %, mit dem auch
+    # der Sondenkreis rechnet — sonst stünden zwei Stoffwerte im selben Kreis.
+    assert wp["source_ce_quelle"] == "waermetraeger"
+    assert v_sole == round(37.5 / (wp["source_ce"] * 4), 4)
+    assert v_sole > round(37.5 / (CE_WASSER * 4), 4)
     # NICHT der Heizvolumenstrom — die Quellenleistung ist kleiner
     assert v_sole != wp["heating_flow_m3h"]
     for eid in ("s1", "s2", "s3"):

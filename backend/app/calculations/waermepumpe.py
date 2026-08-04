@@ -72,11 +72,18 @@ def _rund(x: Optional[float], n: int) -> Optional[float]:
     return round(x, n) if x is not None else None
 
 
-def berechne_waermepumpe(d: dict, hat_quellenseite: bool = False) -> dict:
+def berechne_waermepumpe(d: dict, hat_quellenseite: bool = False,
+                         sole_ce_auto: Optional[float] = None) -> dict:
     """Kennwerte einer Wärmepumpe aus ihren Eigenschaften.
 
     `hat_quellenseite` sagt, ob überhaupt eine Quellenseite erwartet wird — ein
     Gaskessel soll nicht nach dem COP gefragt werden.
+
+    `sole_ce_auto` ist das c·ρ des Wärmeträgers, der im angeschlossenen
+    Erdsondenfeld gewählt wurde. Die Sole der Wärmepumpe und die Sole im
+    Sondenkreis sind dieselbe Flüssigkeit; ohne diesen Wert würde hier mit
+    Wasser gerechnet und der Volumenstrom fiele rund 5 % zu klein aus.
+    Eine Eingabe direkt an der Wärmepumpe hat weiterhin Vorrang.
     """
     q_heat = _zahl(d.get("leistung_kw"))
     vl = _zahl(d.get("vl_temp"))
@@ -128,14 +135,18 @@ def berechne_waermepumpe(d: dict, hat_quellenseite: bool = False) -> dict:
     if hat_quellenseite and q_source and dt_sole is None:
         warnungen.append("Solevolumenstrom nicht berechenbar: Sole-Vorlauf oder Sole-Rücklauf fehlt")
 
-    ce = sole_ce_eingabe if sole_ce_eingabe and sole_ce_eingabe > 0 else CE_WASSER
-    ce_quelle = "eingabe" if ce != CE_WASSER else "wasser"
+    if sole_ce_eingabe and sole_ce_eingabe > 0:
+        ce, ce_quelle = sole_ce_eingabe, "eingabe"
+    elif sole_ce_auto and sole_ce_auto > 0:
+        ce, ce_quelle = sole_ce_auto, "waermetraeger"
+    else:
+        ce, ce_quelle = CE_WASSER, "wasser"
     v_sole = volumenstrom(q_source, dt_sole, ce)
     if v_sole is not None and ce_quelle == "wasser":
         warnungen.append(
-            f"Solevolumenstrom mit der Wasserkonstante {CE_WASSER} kWh/(m³·K) gerechnet — für das "
-            f"Glykolgemisch liegt keine Stoffwertlogik vor. c·ρ der Sole bei der Wärmepumpe "
-            f"eintragen, sobald bekannt."
+            f"Solevolumenstrom mit der Wasserkonstante {CE_WASSER} kWh/(m³·K) gerechnet — der "
+            f"Wärmeträger ist nicht bekannt. Am Erdsondenfeld einen Wärmeträger wählen oder "
+            f"c·ρ der Sole hier eintragen."
         )
 
     return {

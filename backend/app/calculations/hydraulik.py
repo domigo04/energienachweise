@@ -28,6 +28,9 @@ from app.data.generator_types import SOURCE_CIRCUIT_TYPES
 
 VL_FARBE = "#ef4444"
 RL_FARBE = "#3b82f6"
+# 1 mWs = 9.80665 kPa. Der Solekreis rechnet in mWs (so stehen die
+# Pumpenkennlinien), die Heizseite in kPa — die Umrechnung steht genau hier.
+MWS_JE_KPA = 9.80665
 VERBRAUCHER_TYPEN = ("gruppe", "heizkreis")
 BLOCK_TYPEN = ("verteiler", "erzeuger")  # Ast-Suche stoppt hier (PHYSIK §2)
 # Hydraulische Trennstellen: ein Speicher entkoppelt Erzeuger- und
@@ -509,6 +512,54 @@ def _wp_kreis(wp_id: str, system: str, edges: List[dict], node_by_id: dict) -> t
     return treffer, quellen, grenzen
 
 
+def _solekreis_bauteile(nodes, edges, node_by_id) -> dict:
+    """Welche Pumpe und welches Erdsondenfeld hängen am Quellenkreis welcher WP?
+
+    Der Quellenkreis ist bereits über `_wp_kreis(..., "source", ...)` definiert.
+    Eine Pumpe darin ist eine Solepumpe: ihr Betriebspunkt kommt aus der
+    Erdsondenberechnung, nicht aus dem Heizungsverteiler. Ohne diese
+    Unterscheidung würde die Suche nach dem Verteiler quer durch den Solekreis
+    laufen und der Solepumpe den Druckverlust der Heizseite zuordnen.
+    """
+    zuordnung = {"pumpen": {}, "wp_ews": {}}
+    for wp in [n for n in nodes if n.get("type") == "erzeuger"]:
+        sole_edges, _, _ = _wp_kreis(wp["id"], "source", edges, node_by_id)
+        if not sole_edges:
+            continue
+        beteiligt = set()
+        for e in edges:
+            if e["id"] in sole_edges:
+                beteiligt.update((e["source"], e["target"]))
+        felder = [i for i in beteiligt if node_by_id.get(i, {}).get("type") == "erdsonden"]
+        # Mehrere Felder am selben Kreis brauchen eine Aufteilung des
+        # Volumenstroms; die gibt es noch nicht, also wird nichts geraten.
+        ews_id = felder[0] if len(felder) == 1 else None
+        zuordnung["wp_ews"][wp["id"]] = {"ews_id": ews_id, "mehrere": len(felder) > 1}
+        for i in beteiligt:
+            if node_by_id.get(i, {}).get("type") == "pump":
+                zuordnung["pumpen"][i] = {
+                    "wp_id": wp["id"], "ews_id": ews_id, "mehrere_ews": len(felder) > 1,
+                }
+    return zuordnung
+
+
+def _sole_ce(ews_node) -> Optional[float]:
+    """c·ρ des am Erdsondenfeld gewählten Wärmeträgers in kWh/(m³·K).
+
+    `cp [kJ/(kg·K)] · ρ [kg/m³] / 3600` — dieselbe Flüssigkeit, die im
+    Sondenkreis zirkuliert, steht auch am Verdampfer der Wärmepumpe.
+    """
+    if not ews_node:
+        return None
+    d = ews_node.get("data") or {}
+    vorgabe = WAERMETRAEGER.get(d.get("sole_traeger") or "", WAERMETRAEGER["antifrogen_n_25"])
+    cp = _zahl(d.get("sole_cp_kj_kgk")) or vorgabe["cp_kj_kgk"]
+    dichte = _zahl(d.get("sole_dichte_kg_m3")) or vorgabe["dichte_kg_m3"]
+    if not cp or not dichte:
+        return None
+    return cp * dichte / 3600
+
+
 def _waermepumpen_kreise(nodes, edges, edge_flows, node_flows, calc_edges) -> dict:
     """Erzeuger- und Quellenkreis jeder Wärmepumpe rechnen und propagieren.
 
@@ -517,6 +568,7 @@ def _waermepumpen_kreise(nodes, edges, edge_flows, node_flows, calc_edges) -> di
     genau einmal). Bereits belegte Leitungen bleiben unangetastet.
     """
     node_by_id = {n["id"]: n for n in nodes}
+    solekreis = _solekreis_bauteile(nodes, edges, node_by_id)
     results = {}
     for wp in [n for n in nodes if n.get("type") == "erzeuger"]:
         wid = wp["id"]
@@ -531,9 +583,13 @@ def _waermepumpen_kreise(nodes, edges, edge_flows, node_flows, calc_edges) -> di
             str(d.get("generator_type") or "") in SOURCE_CIRCUIT_TYPES
             or bool(sole_edges)
         )
+        # Der Wärmeträger des angeschlossenen Sondenfelds gilt auch am
+        # Verdampfer — sonst rechnete der Solevolumenstrom mit Wasser.
+        ews_id = (solekreis["wp_ews"].get(wid) or {}).get("ews_id")
         res = berechne_waermepumpe(
             d,
             hat_quellenseite=hat_hydraulischen_quellenkreis,
+            sole_ce_auto=_sole_ce(node_by_id.get(ews_id)),
         )
         res["heating_port_quelle"] = "port" if "port" in heiz_quellen else ("layer" if heiz_quellen else None)
         res["source_port_quelle"] = "port" if "port" in sole_quellen else ("layer" if sole_quellen else None)
@@ -1070,6 +1126,7 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
     heatpump_results = _waermepumpen_kreise(nodes, edges, edge_flows, node_flows, calc_edges)
     speicher_results, erdsonden_results = _bauteil_auslegungen(
         nodes, verteiler_results, heatpump_results)
+    solekreis_pumpen = _solekreis_bauteile(nodes, edges, node_by_id)["pumpen"]
     ews_inhalte = [
         r.get("gesamtinhalt_l") for r in erdsonden_results.values()
         if r.get("gesamtinhalt_l") is not None
@@ -1166,6 +1223,40 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
                         "pv": kv["ventilautoritaet_pct"],
                         "warnings": kv["warnings"],
                     }
+        elif t == "pump" and n["id"] in solekreis_pumpen:
+            # Solepumpe: Betriebspunkt kommt vollständig aus dem Solekreis.
+            # Volumenstrom und Förderhöhe reichen für die Fabrikatswahl.
+            zu = solekreis_pumpen[n["id"]]
+            dv = (erdsonden_results.get(zu["ews_id"]) or {}).get("druckverlust") or {}
+            h_mws = dv.get("foerderhoehe_mws")
+            warnungen_pumpe = []
+            if zu["mehrere_ews"]:
+                warnungen_pumpe.append(
+                    "Mehrere Erdsondenfelder am selben Quellenkreis — die Aufteilung des "
+                    "Volumenstroms ist nicht definiert; Betriebspunkt manuell festlegen."
+                )
+            elif zu["ews_id"] is None:
+                warnungen_pumpe.append(
+                    "Kein Erdsondenfeld am Quellenkreis gefunden; ohne dessen Druckverlust "
+                    "gibt es keine Förderhöhe."
+                )
+            elif h_mws is None:
+                warnungen_pumpe.append(
+                    "Erdsondenfeld liefert noch keine Förderhöhe — Rohre, Längen und "
+                    "Solevolumenstrom dort vervollständigen."
+                )
+            pumpen_results[n["id"]] = {
+                "v": node_flows.get(n["id"]),
+                "ist_solepumpe": True,
+                "wp_id": zu["wp_id"],
+                "erdsonden_id": zu["ews_id"],
+                "foerderhoehe_mws": h_mws,
+                "foerderhoehe_kpa": round(h_mws * MWS_JE_KPA, 2) if h_mws is not None else None,
+                "dp_leitungen_mws": dv.get("druckverlust_leitungen_mws"),
+                "dp_verteiler_mws": dv.get("druckverlust_verteiler_mws"),
+                "dp_wp_mws": dv.get("druckverlust_wp_mws"),
+                "warnings": warnungen_pumpe,
+            }
         elif t == "pump":
             # Hauptpumpe: Förderhöhe = Δp gemeinsamer Teil + Δp ungünstigster Ast
             # des Verteilers, den sie speist (Pflichtenheft §5 / PHYSIK §5).

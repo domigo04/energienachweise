@@ -818,6 +818,27 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
   // ── PUMPE (Hauptpumpe) — Förderhöhe = gemeinsamer Teil + ungünstigster Ast ──
   if (node.type === 'pump') {
     const pr = pumpenResults?.[node.id];
+    // Solepumpe: Betriebspunkt kommt vollständig aus dem Erdsondenfeld.
+    // Volumenstrom und Förderhöhe genügen für die Fabrikatswahl.
+    if (pr?.ist_solepumpe) {
+      return (
+        <div style={panelSt}>
+          <PT>Solepumpe (Quellenkreis)</PT>
+          {fld('Bezeichnung','label','Solepumpe','','text')}
+          {ro("Fördervolumen V'", pr.v, 'm³/h', pr.v != null)}
+          {ro('Förderhöhe', pr.foerderhoehe_mws, 'mWs', pr.foerderhoehe_mws != null)}
+          {pr.foerderhoehe_kpa != null && ro('Förderhöhe', pr.foerderhoehe_kpa, 'kPa')}
+          {pr.foerderhoehe_mws != null && (
+            <div style={{fontSize:10,color:'#0369a1',background:'#f0f9ff',border:'1px solid #7dd3fc',borderRadius:6,padding:'6px 8px',marginTop:4}}>
+              Leitungen {pr.dp_leitungen_mws ?? '—'} + Verteiler {pr.dp_verteiler_mws ?? '—'} + Wärmepumpe {pr.dp_wp_mws ?? '—'} mWs.
+              Aus dem Erdsondenfeld übernommen — dort ändern, nicht hier.
+            </div>
+          )}
+          {pr.warnings?.map((w,i)=><div key={i} style={warnSt}>⚠ {w}</div>)}
+          <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
+        </div>
+      );
+    }
     return (
       <div style={panelSt}>
         <PT>Pumpe</PT>
@@ -1339,7 +1360,26 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, onUpdate, onClos
       </div>
     );
   } else if (node.type === 'pump') {
-    body = (
+    body = pr?.ist_solepumpe ? (
+      <div style={{ display:'grid', gap:12 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+          <BigVal label="Fördervolumen" value={pr.v!=null?pr.v.toFixed(3):null} unit="m³/h" color="#15803d"
+            sub="aus dem Solevolumenstrom der Wärmepumpe"/>
+          <BigVal label="Förderhöhe" value={pr.foerderhoehe_mws!=null?pr.foerderhoehe_mws.toFixed(2):null} unit="mWs" color="#7c3aed"
+            sub={pr.foerderhoehe_kpa!=null?`= ${pr.foerderhoehe_kpa.toFixed(1)} kPa`:'Erdsondenfeld vervollständigen'}/>
+        </div>
+        <div style={{ fontSize:11, color:'#334155' }}>
+          Zusammensetzung: Leitungen <b>{pr.dp_leitungen_mws ?? '—'}</b> + Verteiler <b>{pr.dp_verteiler_mws ?? '—'}</b>
+          {' '}+ Wärmepumpe <b>{pr.dp_wp_mws ?? '—'}</b> mWs.
+        </div>
+        <div style={{ fontSize:11, color:'#64748b' }}>
+          Beides kommt aus dem Erdsondenfeld im Quellenkreis; dort sind Rohre, Längen und
+          Wärmeträger hinterlegt. Mit Fördervolumen und Förderhöhe lässt sich die Umwälzpumpe
+          direkt im Fabrikatskatalog auswählen.
+        </div>
+        {pr.warnings?.map((w,i)=><div key={i} style={warnSt}>⚠ {w}</div>)}
+      </div>
+    ) : (
       <div style={{ display:'grid', gap:12 }}>
         <BigVal label="Förder-Volumenstrom V' (aus der Leitung)" value={v?v.toFixed(4):null} unit="m³/h" color="#15803d"/>
         <div style={{ fontSize:11, fontWeight:700, color:'#1e293b' }}>Δp gemeinsamer Teil (Rohr + Apparate)</div>

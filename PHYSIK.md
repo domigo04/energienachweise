@@ -466,3 +466,47 @@ aus Quellenleistung und Sole-ΔT bestimmt wird statt aus dem WP-Datenblatt.
 | 32 mm Duplex | 115 mm | 4 ¾ ʺ (121 mm) |
 | 40 mm Duplex | 130 mm | 5 ⅜ ʺ (136 mm) |
 | 50 mm Duplex | 160 mm | 6 ½ ʺ (165 mm) |
+
+## 20. Verknüpfung Wärmepumpe – Erdsondenfeld – Solepumpe (2026-08-04)
+Der Quellenkreis wird nicht mehr an drei Stellen getrennt eingegeben, sondern
+folgt einer Kette. Massgebend ist der gezeichnete Quellenkreis der Wärmepumpe
+(`_wp_kreis(..., "source", ...)`); was daran hängt, gehört zusammen.
+
+```
+Heizleistung + COP            → Quellenleistung Q0 = Q_heiz · (1 − 1/COP)
+Q0 + spez. Entzugsleistung    → erforderliche Bohrmeter
+Q0 + Sole-ΔT + Wärmeträger    → Solevolumenstrom V'
+V' + Rohre + Längen           → Druckverlust je Teilstück → Förderhöhe H
+V' + H                        → Betriebspunkt der Solepumpe
+```
+
+### Wärmeträger gilt für den ganzen Kreis
+Die Sole am Verdampfer und die Sole in den Sonden sind dieselbe Flüssigkeit.
+Der am Erdsondenfeld gewählte Wärmeträger bestimmt deshalb auch
+`c·ρ` der Wärmepumpe:
+
+`c·ρ [kWh/(m³·K)] = cp [kJ/(kg·K)] · ρ [kg/m³] / 3600`
+
+Für Antifrogen N 25 %: `3.78 · 1050 / 3600 = 1.1025`. Vorher wurde ersatzweise
+mit der Wasserkonstante 1.163 gerechnet; der Solevolumenstrom fiel damit rund
+5 % zu klein aus und der Druckverlust — er wächst etwa quadratisch mit dem
+Volumenstrom — rund 10 % zu klein. Eine Eingabe von `c·ρ` direkt an der
+Wärmepumpe hat weiterhin Vorrang. Ist gar kein Sondenfeld angeschlossen, wird
+weiterhin sichtbar mit Wasser gerechnet und gewarnt.
+
+### Solepumpe
+Eine Pumpe im Quellenkreis ist eine Solepumpe. Ihr Betriebspunkt stammt
+vollständig aus dem Erdsondenfeld:
+
+- Fördervolumen = Solevolumenstrom der Wärmepumpe
+- Förderhöhe = Δp Leitungen + Δp Verteiler + Δp Verdampfer (aus §18)
+- `1 mWs = 9.80665 kPa`
+
+Damit genügen für die Auswahl im Fabrikatskatalog zwei Zahlen. Für Pumpen im
+Heizkreis gilt unverändert die Rechnung über gemeinsamen Teil und ungünstigsten
+Ast (§5); die Verteilersuche läuft nicht mehr durch den Solekreis hindurch und
+ordnet der Solepumpe nicht mehr den Astdruckverlust der Heizseite zu.
+
+Mehrere Sondenfelder am selben Quellenkreis brauchen eine Aufteilung des
+Volumenstroms. Sie ist nicht definiert und wird nicht geraten: es erscheint eine
+Warnung, und der Betriebspunkt bleibt leer.

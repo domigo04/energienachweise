@@ -94,7 +94,12 @@ def legende_zeilen(nodes: list, results: dict) -> list:
         elif t == "pump":
             p = (results.get("pumpen_results") or {}).get(n["id"], {})
             werte = f"V' {_fmt(p.get('v') if p else nf.get(n['id']))} m³/h"
-            if p.get("foerderhoehe_kpa") is not None:
+            if p.get("ist_solepumpe"):
+                werte = "Solepumpe · " + werte
+                if p.get("foerderhoehe_mws") is not None:
+                    werte += (f" · Förderhöhe {p['foerderhoehe_mws']:.2f} mWs "
+                              f"({p['foerderhoehe_kpa']:.1f} kPa) aus dem Erdsondenfeld")
+            elif p.get("foerderhoehe_kpa") is not None:
                 werte += f" · Förderhöhe {p['foerderhoehe_kpa']:.1f} kPa"
                 if p.get("dp_ast_kpa"):
                     werte += f" (gemeinsam {p.get('dp_gemeinsam_kpa') or 0} + Ast {p['dp_ast_kpa']})"
@@ -199,6 +204,24 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
                              ("Ventilautorität Pv", _fmt(ve.get("pv"), 1), "%")]
         elif t == "pump":
             p = (results.get("pumpen_results") or {}).get(n["id"], {})
+            if p.get("ist_solepumpe"):
+                eingaben = [("Einbauort", "Quellenkreis (Sole)", ""),
+                            ("Förder-V' (aus Wärmepumpe)", _fmt(p.get("v")), "m³/h")]
+                resultate = [
+                    ("Δp Leitungen (Erdsondenfeld)", _fmt(p.get("dp_leitungen_mws"), 2), "mWs"),
+                    ("Δp Verteiler", _fmt(p.get("dp_verteiler_mws"), 2), "mWs"),
+                    ("Δp Wärmepumpe (Verdampfer)", _fmt(p.get("dp_wp_mws"), 2), "mWs"),
+                    ("Förderhöhe gesamt", _fmt(p.get("foerderhoehe_mws"), 2), "mWs"),
+                    ("Förderhöhe gesamt", _fmt(p.get("foerderhoehe_kpa"), 1), "kPa"),
+                    ("Betriebspunkt für die Fabrikatswahl",
+                     f"{_fmt(p.get('v'), 2)} m³/h bei {_fmt(p.get('foerderhoehe_mws'), 2)} mWs", ""),
+                ]
+                hinweise = p.get("warnings") or []
+                abschnitte.append({"nr": d.get("nr"), "titel": TITEL.get(t, t),
+                                   "bezeichnung": d.get("label") or "",
+                                   "eingaben": eingaben, "resultate": resultate,
+                                   "rechenweg": rechenweg, "hinweise": hinweise})
+                continue
             eingaben = [("Förder-V' (aus Schema)", _fmt(p.get("v")), "m³/h"), ("Rohrlänge VL+RL", d.get("rohr_m"), "m"),
                         ("Druckgefälle", _f(d.get("pam")) or 70, "Pa/m"), ("Apparate", _f(d.get("apparate_kpa")) or 0, "kPa")]
             if p.get("foerderhoehe_kpa") is not None:

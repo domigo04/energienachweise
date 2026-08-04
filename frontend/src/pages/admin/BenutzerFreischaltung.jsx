@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   Building2,
   Check,
@@ -6,6 +7,7 @@ import {
   RotateCcw,
   Search,
   ShieldCheck,
+  Presentation,
   UserCheck,
   UserX,
   Users,
@@ -240,6 +242,16 @@ export default function BenutzerFreischaltung() {
               ))}
             </div>
           </section>
+
+          <div className="flex justify-end border-t border-slate-200 pt-3">
+            <Link
+              to="/admin/pitchdeck/0"
+              className="inline-flex items-center gap-1.5 text-[11px] text-slate-400 transition hover:text-brand-700"
+              title="Interne Präsentationsansicht"
+            >
+              <Presentation className="size-3.5" /> Interne Präsentation
+            </Link>
+          </div>
         </div>
       )}
     </div>

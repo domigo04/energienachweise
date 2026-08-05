@@ -129,6 +129,12 @@ def legende_zeilen(nodes: list, results: dict) -> list:
             b = bww_results.get(n["id"]) or {}
             eingaben = [("Gewählter Speicherinhalt", d.get("speicher_liter"), "l")]
             if b.get("anschlussleistung_kw") is not None:
+                for wohnung in b.get("wohnungen") or []:
+                    eingaben.append((
+                        wohnung.get("name") or "Wohnung",
+                        wohnung.get("flaeche_m2"),
+                        f"m² → {wohnung.get('personen')} P",
+                    ))
                 eingaben += [
                     ("Personen", b.get("personen"), "P"),
                     ("Gebäudeart", b.get("bezugseinheit"), ""),
@@ -146,6 +152,8 @@ def legende_zeilen(nodes: list, results: dict) -> list:
                     ("Spitzendeckungsvolumen", b.get("spitzendeckungsvolumen_l"), "l"),
                     ("Bereitschaftsvolumen", b.get("bereitschaftsvolumen_l"), "l"),
                     ("Anschlussleistung", b.get("anschlussleistung_kw"), "kW"),
+                    ("Wärmepumpenleistung verfügbar", b.get("waermepumpenleistung_kw"), "kW"),
+                    ("Leistungsreserve", b.get("leistungsreserve_kw"), "kW"),
                     ("Norm", "SIA 385/2", ""),
                 ]
                 rechenweg = b.get("rechenweg") or []

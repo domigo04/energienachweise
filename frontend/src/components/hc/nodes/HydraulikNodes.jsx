@@ -734,6 +734,8 @@ export function ExpansionNode({ data, selected: sel }) {
 
 // ── Brauchwarmwasser-Speicher: wie Speicher, aber GRÜN ───────
 export function BwwNode({ data, selected: sel }) {
+  const c = data._calc || {};
+  const liter = c.bereitschaftsvolumen_l ?? data.speicher_liter;
   return (
     <div style={wrap(sel)}>
       <ZoneHandles prefix="sz" />
@@ -745,8 +747,16 @@ export function BwwNode({ data, selected: sel }) {
       {H(Position.Right,  'right',  { right: -6 })}
       {H(Position.Top, 'warmwasser', { top:-6, left:'50%', background:'#ef4444' })}
       {H(Position.Bottom, 'kaltwasser', { bottom:-6, left:'50%', background:'#16a34a' })}
-      <SymBwwSpeicher liter={data.speicher_liter} />
-      <Label text={data.label || 'BWW'} />
+      <SymBwwSpeicher liter={liter} />
+      {c.leistung_ausreichend === false && (
+        <div title="BWW-Ladeleistung höher als Wärmepumpenleistung"
+          style={{ position:'absolute', right:-11, top:18, width:20, height:20, borderRadius:'50%',
+            display:'grid', placeItems:'center', background:'#fef2f2', border:'1px solid #ef4444',
+            color:'#dc2626', fontSize:12, fontWeight:800, zIndex:4 }}>!</div>
+      )}
+      <Label text={c.anschlussleistung_kw != null
+        ? `${data.label || 'BWW'} · ${c.anschlussleistung_kw} kW`
+        : (data.label || 'BWW')} />
     </div>
   );
 }

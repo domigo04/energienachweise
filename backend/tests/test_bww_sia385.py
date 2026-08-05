@@ -9,6 +9,7 @@ import pytest
 from app.calculations.bww_sia385 import (
     BEZUGSEINHEITEN,
     bww_auslegung,
+    leistungsabgleich,
     personen_aus_nutzflaeche,
     spitzendeckungsfaktor,
 )
@@ -42,6 +43,22 @@ def test_personen_folgen_der_nutzflaeche():
     r = bww_auslegung(**{**REFERENZ, "personen": None,
                          "nutzflaechen_m2": [200, 100, 100]})
     assert r["personen"] == pytest.approx(3.0778 + 2.3 + 2.3, abs=0.01)
+
+
+def test_strukturierte_wohnungen_behalten_name_flaeche_und_personen():
+    r = bww_auslegung(**{**REFERENZ, "personen": None, "wohnungen": [
+        {"id": "w-101", "name": "WHG 101", "flaeche_m2": 200},
+        {"id": "w-201", "name": "WHG 201", "flaeche_m2": 100},
+    ]})
+
+    assert r["personen"] == pytest.approx(3.0778 + 2.3, abs=0.01)
+    assert r["wohnungen"] == [
+        {"id": "w-101", "name": "WHG 101", "flaeche_m2": 200.0,
+         "personen": pytest.approx(3.0778, abs=1e-4)},
+        {"id": "w-201", "name": "WHG 201", "flaeche_m2": 100.0,
+         "personen": pytest.approx(2.3, abs=1e-4)},
+    ]
+    assert any(s.get("formel_latex") for s in r["rechenweg"])
 
 
 def test_spitzendeckungsfaktor_ist_eine_stufentabelle():
@@ -81,6 +98,27 @@ def test_zu_kleiner_speicher_wird_gemeldet():
 
     assert r["massgebendes_volumen_l"] == 500
     assert any("kleiner als das Bereitschaftsvolumen" in w for w in r["warnungen"])
+
+
+def test_zu_kleine_waermepumpe_liefert_konkrete_ladeoptionen():
+    r = bww_auslegung(**REFERENZ)
+    leistungsabgleich(r, 10, "BWW-Leistung am Betriebspunkt")
+
+    assert r["leistung_ausreichend"] is False
+    assert r["leistungsreserve_kw"] == -5.5
+    assert r["ladezeit_min_fuer_wp_h"] > 2
+    assert r["ladezyklen_min_fuer_wp"] > 2
+    assert any("höher als die verfügbare Wärmepumpenleistung" in w
+               for w in r["warnungen"])
+
+
+def test_ausreichende_waermepumpe_hat_positive_reserve():
+    r = bww_auslegung(**REFERENZ)
+    leistungsabgleich(r, 20)
+
+    assert r["leistung_ausreichend"] is True
+    assert r["leistungsreserve_kw"] == 4.5
+    assert "ladezeit_min_fuer_wp_h" not in r
 
 
 def test_ohne_personen_gibt_es_keine_auslegung():
@@ -133,6 +171,9 @@ def test_ladeleistung_speist_den_bww_betriebsfall():
 
     assert auslegung["personen"] == 12
     assert auslegung["anschlussleistung_kw"] > 0
+    assert auslegung["waermepumpenleistung_kw"] == 40
+    assert auslegung["waermepumpenleistung_quelle"] == "Nennleistung der Wärmepumpe"
+    assert auslegung["leistung_ausreichend"] is True
     # Die Ladeleistung des Vorrangbetriebs kommt aus der Auslegung.
     assert bf["bww_ladeleistung_kw"] == auslegung["anschlussleistung_kw"]
     bww_fall = next(f for f in bf["faelle"] if f["key"] == "bww")

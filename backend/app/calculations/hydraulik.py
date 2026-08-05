@@ -14,7 +14,7 @@ import re
 from typing import List, Optional
 
 from app.calculations.betriebsfaelle import betriebsfaelle, ist_umschaltventil
-from app.calculations.bww_sia385 import bww_auslegung
+from app.calculations.bww_sia385 import bww_auslegung, leistungsabgleich
 from app.calculations.expansion import berechne_expansion
 from app.calculations.leitungsdimension import automatische_dimension
 from app.calculations.schema_sizing import erdsondenfeld, technischer_speicher
@@ -25,7 +25,7 @@ from app.calculations.sole_druckverlust import (
 )
 from app.calculations.sole_rohre import ROHRE, WAERMETRAEGER
 from app.calculations.ventil import berechne_kvs
-from app.calculations.waermepumpe import berechne_waermepumpe
+from app.calculations.waermepumpe import berechne_waermepumpe, ist_waermepumpe
 from app.data.generator_types import SOURCE_CIRCUIT_TYPES
 
 VL_FARBE = "#ef4444"
@@ -537,13 +537,15 @@ def _umschaltventil_im_erzeugerkreis(heiz_edges, edges, node_by_id):
 def _bww_sia385(d: dict) -> Optional[dict]:
     """SIA-385/2-Auslegung eines BWW-Speichers aus seinen Eingaben."""
     flaechen = [f for f in (d.get("bww_nutzflaechen_m2") or []) if _zahl(f)]
+    wohnungen = d.get("bww_wohnungen") if isinstance(d.get("bww_wohnungen"), list) else []
     personen = _zahl(d.get("bww_personen"))
-    if not flaechen and not personen:
+    if not wohnungen and not flaechen and not personen:
         return None
     try:
         return bww_auslegung(
             personen=personen,
             nutzflaechen_m2=flaechen or None,
+            wohnungen=wohnungen or None,
             bezugseinheit_key=d.get("bww_bezugseinheit") or "mfh_allgemein",
             bezugseinheit_durchschnitt=_zahl(d.get("bww_bezugseinheit_durchschnitt")),
             bezugseinheit_spitze=_zahl(d.get("bww_bezugseinheit_spitze")),
@@ -568,6 +570,24 @@ def _bww_ergebnisse(nodes) -> dict:
         r = _bww_sia385(n.get("data") or {})
         if r is not None:
             ergebnisse[n["id"]] = r
+    return ergebnisse
+
+
+def _bww_mit_leistungsabgleich(nodes) -> dict:
+    """BWW auslegen und bei genau einer Wärmepumpe deren Leistung prüfen."""
+    ergebnisse = _bww_ergebnisse(nodes)
+    waermepumpen = [n for n in nodes if n.get("type") == "erzeuger"
+                    and ist_waermepumpe(n.get("data") or {})]
+    if len(waermepumpen) != 1:
+        return ergebnisse
+    wp_d = waermepumpen[0].get("data") or {}
+    leistung = _zahl(wp_d.get("bww_leistung_kw"))
+    quelle = "BWW-Leistung am Betriebspunkt"
+    if not leistung:
+        leistung = _zahl(wp_d.get("leistung_kw"))
+        quelle = "Nennleistung der Wärmepumpe"
+    for resultat in ergebnisse.values():
+        leistungsabgleich(resultat, leistung, quelle)
     return ergebnisse
 
 
@@ -999,7 +1019,7 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
             nodes, edges, leer["edge_flows"], leer["node_flows"], set())
         leer["speicher_results"], leer["erdsonden_results"] = _bauteil_auslegungen(
             nodes, {}, leer["heatpump_results"])
-        leer["bww_results"] = _bww_ergebnisse(nodes)
+        leer["bww_results"] = _bww_mit_leistungsabgleich(nodes)
         ews_inhalte = [
             r.get("gesamtinhalt_l") for r in leer["erdsonden_results"].values()
             if r.get("gesamtinhalt_l") is not None
@@ -1023,7 +1043,9 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
         leer["warnungen"] = (_sammle_warnungen(nodes, {}, anschluss_warnungen, {}, leer["expansion_results"])
                              + _wp_warnungen(nodes, leer["heatpump_results"])
                              + [w for r in leer["speicher_results"].values() for w in r.get("warnings", [])]
-                             + [w for r in leer["erdsonden_results"].values() for w in r.get("warnings", [])])
+                             + [w for r in leer["erdsonden_results"].values() for w in r.get("warnings", [])]
+                             + [f"Brauchwarmwasser: {w}" for r in leer["bww_results"].values()
+                                for w in r.get("warnungen", [])])
         return leer
 
     edge_flows, node_flows = {}, {}
@@ -1223,7 +1245,7 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
     speicher_results, erdsonden_results = _bauteil_auslegungen(
         nodes, verteiler_results, heatpump_results)
     solekreis_pumpen = _solekreis_bauteile(nodes, edges, node_by_id)["pumpen"]
-    bww_results = _bww_ergebnisse(nodes)
+    bww_results = _bww_mit_leistungsabgleich(nodes)
     ews_inhalte = [
         r.get("gesamtinhalt_l") for r in erdsonden_results.values()
         if r.get("gesamtinhalt_l") is not None

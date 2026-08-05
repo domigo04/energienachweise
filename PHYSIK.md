@@ -596,6 +596,19 @@ Die Anschlussleistung wird zur Leistung im BWW-Betriebsfall der Wärmepumpe
 BWW-Speicher werden nicht addiert, solange ihr Zusammenspiel nicht modelliert
 ist.
 
+Die Belegungsdaten werden im Schema als benannte Wohnungszeilen gespeichert:
+Bezeichnung, Nutzfläche und daraus berechnete Personenzahl. Alte Schemas mit
+einer reinen Liste von Nutzflächen bleiben lesbar und werden im Dialog als
+`Wohnung 1`, `Wohnung 2` usw. dargestellt.
+
+Bei genau einer Wärmepumpe vergleicht das Backend die erforderliche
+Anschlussleistung mit deren `bww_leistung_kw`; fehlt dieser Betriebspunkt,
+wird sichtbar die Nennleistung `leistung_kw` verwendet. Reicht die Leistung
+nicht, werden keine Eingaben automatisch verändert. Angezeigt werden stattdessen
+die minimale Ladezeit und — gemäss derselben Excel-Formel — die nächste
+ausreichende ganzzahlige Zahl Ladezyklen samt neuem Speichervorschlag. Bei
+mehreren Wärmepumpen wird ohne eindeutige Zuordnung kein Vergleich geraten.
+
 ### Unstimmigkeiten der Vorlage
 Beide werden gerechnet wie in der Vorlage und zusätzlich benannt:
 

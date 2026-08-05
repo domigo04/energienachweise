@@ -96,10 +96,46 @@ def _mround(wert: float, schritt: float) -> float:
     return round(wert / schritt) * schritt
 
 
+def _schritt_latex(groesse: str, formel: str, eingesetzt: str, ergebnis: str,
+                   formel_latex: str, eingesetzt_latex: Optional[str] = None,
+                   gruppe: str = "Brauchwarmwasser") -> dict:
+    """Rechenschritt für UI/PDF, zusätzlich mit lesbarer Bruchdarstellung."""
+    schritt = _schritt(groesse, formel, eingesetzt, ergebnis)
+    schritt["formel_latex"] = formel_latex
+    if eingesetzt_latex:
+        schritt["eingesetzt_latex"] = eingesetzt_latex
+    schritt["gruppe"] = gruppe
+    return schritt
+
+
+def _wohnungen_aufbereiten(wohnungen: Optional[list]) -> tuple[list, list]:
+    """Strukturierte Wohnungszeilen validieren und Personen je Zeile rechnen."""
+    zeilen, fehler = [], []
+    for index, eintrag in enumerate(wohnungen or [], start=1):
+        if not isinstance(eintrag, dict):
+            fehler.append(f"Wohnung {index}: ungültige Belegungszeile.")
+            continue
+        name = str(eintrag.get("name") or f"Wohnung {index}").strip()
+        flaeche = _zahl(eintrag.get("flaeche_m2"))
+        if flaeche is None:
+            continue
+        if flaeche <= 0:
+            fehler.append(f"{name}: Nutzfläche muss grösser als 0 m² sein.")
+            continue
+        zeilen.append({
+            "id": str(eintrag.get("id") or f"wohnung-{index}"),
+            "name": name,
+            "flaeche_m2": round(flaeche, 2),
+            "personen": round(personen_aus_nutzflaeche(flaeche), 4),
+        })
+    return zeilen, fehler
+
+
 def bww_auslegung(
     *,
     personen: Optional[float] = None,
     nutzflaechen_m2: Optional[list] = None,
+    wohnungen: Optional[list] = None,
     bezugseinheit_key: str = "mfh_allgemein",
     bezugseinheit_durchschnitt: Optional[float] = None,
     bezugseinheit_spitze: Optional[float] = None,
@@ -120,12 +156,31 @@ def bww_auslegung(
     rechenweg = []
 
     # ── Personen ────────────────────────────────────────────────────────────
-    if nutzflaechen_m2:
-        einzeln = [personen_aus_nutzflaeche(a) for a in nutzflaechen_m2 if _zahl(a)]
+    wohnungszeilen, wohnungsfehler = _wohnungen_aufbereiten(wohnungen)
+    warnungen.extend(wohnungsfehler)
+    if wohnungszeilen:
+        einzeln = [w["personen"] for w in wohnungszeilen]
         np_ = sum(einzeln)
-        rechenweg.append(_schritt(
-            "np", "np,i = 3.3 − 2 / (1 + (A_NF/100)³), summiert",
-            " + ".join(f"{p:.2f}" for p in einzeln), f"{np_:.2f} P"))
+        flaechen = [w["flaeche_m2"] for w in wohnungszeilen]
+        rechenweg.append(_schritt_latex(
+            "n_{p,i}", "np,i = 3.3 − 2 / (1 + (A_NF/100)³), summiert",
+            " + ".join(f"{p:.2f}" for p in einzeln), f"{np_:.2f} P",
+            r"n_{p,i}=3.3-\frac{2}{1+\left(\frac{A_{NF,i}}{100}\right)^3}",
+            " + ".join(f"{p:.2f}" for p in einzeln), gruppe="Belegungsdaten"))
+    elif nutzflaechen_m2:
+        flaechen = [float(a) for a in nutzflaechen_m2 if _zahl(a)]
+        einzeln = [personen_aus_nutzflaeche(a) for a in flaechen]
+        np_ = sum(einzeln)
+        wohnungszeilen = [
+            {"id": f"wohnung-{i}", "name": f"Wohnung {i}",
+             "flaeche_m2": round(a, 2), "personen": round(p, 4)}
+            for i, (a, p) in enumerate(zip(flaechen, einzeln), start=1)
+        ]
+        rechenweg.append(_schritt_latex(
+            "n_{p,i}", "np,i = 3.3 − 2 / (1 + (A_NF/100)³), summiert",
+            " + ".join(f"{p:.2f}" for p in einzeln), f"{np_:.2f} P",
+            r"n_{p,i}=3.3-\frac{2}{1+\left(\frac{A_{NF,i}}{100}\right)^3}",
+            " + ".join(f"{p:.2f}" for p in einzeln), gruppe="Belegungsdaten"))
     else:
         np_ = _zahl(personen)
         if np_ is None or np_ <= 0:
@@ -164,14 +219,18 @@ def bww_auslegung(
     v_cont = v_ctrl + v_pk
 
     rechenweg.extend([
-        _schritt("V_W,d,1", "V = np · V_W,u · f_Warmhaltesystem",
-                 f"{np_:.2f} · {_z(v_u, 1)} · {_z(f_warm, 2)}", f"{v_tag:.0f} l/d"),
-        _schritt("V_sto,ctrl", "V = V_W,d,1 / n_z",
-                 f"{v_tag:.0f} / {_z(n_z, 1)}", f"{v_ctrl:.0f} l"),
-        _schritt("V_sto,pk", "V = np · V_W,u,pk · f_pk",
-                 f"{np_:.2f} · {_z(v_u_pk, 1)} · {_z(f_pk, 2)}", f"{v_pk:.0f} l"),
-        _schritt("V_sto,cont", "V = V_sto,ctrl + V_sto,pk",
-                 f"{v_ctrl:.0f} + {v_pk:.0f}", f"{v_cont:.0f} l"),
+        _schritt_latex("V_{W,d,1}", "V = np · V_W,u · f_Warmhaltesystem",
+                       f"{np_:.2f} · {_z(v_u, 1)} · {_z(f_warm, 2)}", f"{v_tag:.0f} l/d",
+                       r"V_{W,d,1}=n_p\cdot V_{W,u}\cdot f_{warm}"),
+        _schritt_latex("V_{W,sto,ctrl}", "V = V_W,d,1 / n_z",
+                       f"{v_tag:.0f} / {_z(n_z, 1)}", f"{v_ctrl:.0f} l",
+                       r"V_{W,sto,ctrl}=\frac{V_{W,d,1}}{n_z}"),
+        _schritt_latex("V_{W,sto,pk}", "V = np · V_W,u,pk · f_pk",
+                       f"{np_:.2f} · {_z(v_u_pk, 1)} · {_z(f_pk, 2)}", f"{v_pk:.0f} l",
+                       r"V_{W,sto,pk}=n_p\cdot V_{W,u,pk}\cdot f_{pk}"),
+        _schritt_latex("V_{W,sto,cont}", "V = V_sto,ctrl + V_sto,pk",
+                       f"{v_ctrl:.0f} + {v_pk:.0f}", f"{v_cont:.0f} l",
+                       r"V_{W,sto,cont}=V_{W,sto,ctrl}+V_{W,sto,pk}"),
     ])
 
     # Die Vorlage berechnet den Faktor Speicherkonfiguration, verwendet ihn aber
@@ -195,11 +254,13 @@ def bww_auslegung(
     # Vorlage: Q_A = MROUND( V · cp · ΔΘ / (n_z · t_z · 3600 · η), 0.5 )
     q_a_roh = massgebend * CP_WASSER_KJ_KGK * d_theta / (n_z * t_z * 3600 * eta)
     q_a = _mround(q_a_roh, 0.5)
-    rechenweg.append(_schritt(
+    rechenweg.append(_schritt_latex(
         "Q_A", "Q = V · cp · ΔΘ / (n_z · t_z · 3600 · η)",
         f"{massgebend:.0f} · {CP_WASSER_KJ_KGK} · {_z(d_theta, 1)} / "
         f"({_z(n_z, 1)} · {_z(t_z, 1)} · 3600 · {_z(eta, 2)})",
-        f"{q_a:.1f} kW"))
+        f"{q_a:.1f} kW",
+        r"Q_A=\frac{V_{W,sto}\cdot c_p\cdot\Delta\theta}"
+        r"{n_z\cdot t_z\cdot3600\cdot\eta}", gruppe="Leistungsberechnung"))
 
     # Ein Ladezyklus lädt den Speicher in t_z. Die Vorlage teilt zusätzlich
     # durch n_z, verteilt die Ladung also über alle Zyklen zusammen.
@@ -213,6 +274,7 @@ def bww_auslegung(
 
     return {
         "personen": round(np_, 2),
+        "wohnungen": wohnungszeilen,
         "bezugseinheit": bezug["label"],
         "bezugseinheit_durchschnitt_l_p_d": v_u,
         "bezugseinheit_spitze_l_p_d": v_u_pk,
@@ -236,3 +298,69 @@ def bww_auslegung(
         "rechenweg": rechenweg,
         "warnungen": warnungen,
     }
+
+
+def leistungsabgleich(resultat: dict, waermepumpenleistung_kw: Optional[float],
+                      quelle: str = "Nennleistung") -> dict:
+    """BWW-Anschlussleistung gegen die verfügbare Wärmepumpenleistung prüfen.
+
+    Die Berechnung selbst bleibt unverändert. Dieser Schritt zeigt lediglich,
+    ob der gewählte Ladebetrieb mit der angeschlossenen Wärmepumpe möglich ist
+    und welche Ladezeit bzw. Zykluszahl die Excel-Formel mindestens benötigt.
+    """
+    leistung = _zahl(waermepumpenleistung_kw)
+    bedarf = _zahl(resultat.get("anschlussleistung_kw"))
+    if not leistung or leistung <= 0 or bedarf is None:
+        return resultat
+
+    reserve = leistung - bedarf
+    resultat["waermepumpenleistung_kw"] = round(leistung, 2)
+    resultat["waermepumpenleistung_quelle"] = quelle
+    resultat["leistung_ausreichend"] = reserve >= 0
+    resultat["leistungsreserve_kw"] = round(reserve, 2)
+    if reserve >= 0:
+        return resultat
+
+    volumen = _zahl(resultat.get("massgebendes_volumen_l")) or 0
+    n_z = _zahl(resultat.get("ladezyklen_pro_tag")) or 0
+    t_z = _zahl(resultat.get("ladezeit_h")) or 0
+    d_theta = _zahl(resultat.get("temperaturerhoehung_k")) or 0
+    eta = _zahl(resultat.get("wirkungsgrad")) or 0
+    cp = CP_WASSER_KJ_KGK
+
+    ladezeit_min = None
+    if volumen > 0 and n_z > 0 and d_theta > 0 and eta > 0:
+        roh = volumen * cp * d_theta / (n_z * leistung * 3600 * eta)
+        ladezeit_min = math.ceil(roh * 10) / 10
+        resultat["ladezeit_min_fuer_wp_h"] = round(ladezeit_min, 1)
+
+    v_tag = _zahl(resultat.get("nutzwarmwasserbedarf_l_d")) or 0
+    v_pk = _zahl(resultat.get("spitzendeckungsvolumen_l")) or 0
+    gewaehlt = _zahl(resultat.get("gewaehltes_speichervolumen_l"))
+    zyklen_min = None
+    if v_tag > 0 and t_z > 0 and d_theta > 0 and eta > 0:
+        start = max(1, math.ceil(n_z))
+        for zyklen in range(start + 1, 13):
+            v_ctrl = v_tag / zyklen
+            v_cont = v_ctrl + v_pk
+            massgebend = gewaehlt if gewaehlt and gewaehlt > 0 else v_cont
+            q = _mround(
+                massgebend * cp * d_theta / (zyklen * t_z * 3600 * eta), 0.5)
+            if q <= leistung:
+                zyklen_min = zyklen
+                resultat["ladezyklen_min_fuer_wp"] = zyklen
+                resultat["speichervolumen_bei_zyklen_l"] = round(v_cont)
+                resultat["anschlussleistung_bei_zyklen_kw"] = round(q, 2)
+                break
+
+    optionen = []
+    if ladezeit_min is not None:
+        optionen.append(f"Ladezeit auf mindestens {ladezeit_min:.1f} h erhöhen")
+    if zyklen_min is not None:
+        optionen.append(f"auf mindestens {zyklen_min} Ladezyklen pro Tag erhöhen")
+    hinweis = "; oder ".join(optionen) if optionen else "Ladebetrieb oder Wärmepumpe anpassen"
+    resultat.setdefault("warnungen", []).append(
+        f"BWW-Anschlussleistung {bedarf:.1f} kW ist höher als die verfügbare "
+        f"Wärmepumpenleistung {leistung:.1f} kW ({quelle}). {hinweis}."
+    )
+    return resultat

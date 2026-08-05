@@ -33,6 +33,9 @@ import {
 import { CORNER, ENDPOINT, GRID, MIDPOINT, NEAREST, PORT, fangStil } from './schema/cadSnap';
 import { SOLE_ROHRE, SOLE_TRAEGER } from './schema/soleTabellen';
 import {
+  wohnungAendern, wohnungEntfernen, wohnungHinzufuegen, wohnungenAusDaten,
+} from './schema/bwwWohnungen';
+import {
   abzweigPunkt, fensterAus, labelVerschoben, labelVersatz,
   leitungMitLueckeTrennen, leitungsSystem, leitungVerschieben, routeBereinigen, routeDehnen,
   segmentAusrichten, segmentVerschieben,
@@ -968,6 +971,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
           {fld('BWW-Vorlauf','bww_vl_temp','z.B. 55','°C')}
           {fld('BWW-Rücklauf','bww_rl_temp','z.B. 45','°C')}
           {fld('COP bei BWW-Temperatur','bww_cop','z.B. 2.6','')}
+          {fld('Verfügbare Leistung bei BWW','bww_leistung_kw','leer = Nennleistung','kW')}
         </>}
         {hp && <>
           <Div/>
@@ -1055,42 +1059,20 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
       <div style={panelSt}>
         <PT>BWW-Speicher</PT>
         {fld('Bezeichnung','label','BWW','','text')}
-        {fld('Speicherinhalt','speicher_liter','z.B. 800','L')}
-        <Div/>
-        <div style={{ fontSize:9, color:'#94a3b8', marginBottom:4 }}>AUSLEGUNG NACH SIA 385/2</div>
-        {fld('Anzahl Personen','bww_personen','oder Nutzflächen unten','P')}
-        <label style={lbl}>Gebäudeart (Bezugseinheit)</label>
-        <select style={{...inp,cursor:'pointer'}} value={d.bww_bezugseinheit||'mfh_allgemein'}
-          onChange={e=>set('bww_bezugseinheit',e.target.value)}>
-          {BWW_BEZUGSEINHEITEN.map(b=><option key={b.key} value={b.key}>{b.label}</option>)}
-        </select>
-        <label style={lbl}>Warmhaltesystem</label>
-        <select style={{...inp,cursor:'pointer'}} value={d.bww_warmhaltesystem||'zirkulation'}
-          onChange={e=>set('bww_warmhaltesystem',e.target.value)}>
-          <option value="zirkulation">Zirkulation (1.5)</option>
-          <option value="warmhalteband">Warmhalteband (1.35)</option>
-        </select>
-        {fld('Ladezyklen pro Tag','bww_ladezyklen','2','')}
-        {fld('Zeit eines Ladezyklus','bww_ladezeit_h','2','h')}
-        {fld('Temperaturerhöhung ΔΘ','bww_delta_theta_k','50 (10→60 °C)','K')}
         {br?.anschlussleistung_kw != null && <>
           <Div/>
           {ro('Personen', br.personen, 'P')}
-          {ro('Nutzwarmwasserbedarf', br.nutzwarmwasserbedarf_l_d, 'L/d')}
-          {ro('Steuervolumen', br.steuervolumen_l, 'L')}
-          {ro('Spitzendeckungsvolumen', br.spitzendeckungsvolumen_l, 'L')}
-          {ro('Bereitschaftsvolumen', br.bereitschaftsvolumen_l, 'L', true)}
-          {ro('Anschlussleistung', br.anschlussleistung_kw, 'kW', true)}
-          <div style={{ fontSize:9, color:'#64748b', marginBottom:6 }}>
-            Bezugseinheit {br.bezugseinheit_durchschnitt_l_p_d} l/(d·P) · Spitze {br.bezugseinheit_spitze_l_p_d} ·
-            f_pk {br.faktor_spitzendeckung} · f_warm {br.faktor_warmhaltesystem}
-          </div>
+          {ro('Speichervorschlag', br.bereitschaftsvolumen_l, 'L', true)}
+          {ro('Erforderliche Ladeleistung', br.anschlussleistung_kw, 'kW', true)}
         </>}
-        {fld('Ladeleistung manuell','bww_ladeleistung_kw','leer = aus SIA 385','kW')}
-        {br?.warnungen?.map((w,i)=><div key={i} style={warnSt}>⚠ {w}</div>)}
-        <div style={{ fontSize:9, lineHeight:1.5, color:'#64748b', background:'#fff7ed', border:'1px solid #fed7aa', borderRadius:6, padding:'6px 7px' }}>
-          Die Anschlussleistung wird zur Leistung im BWW-Betriebsfall der Wärmepumpe — sichtbar
-          dort, sobald ein Umschaltventil im Erzeugerkreis sitzt.
+        {br?.leistung_ausreichend === false && (
+          <div style={{ ...warnSt, background:'#fef2f2', borderColor:'#fecaca', color:'#b91c1c' }}>
+            ⚠ Wärmepumpenleistung reicht für den gewählten Ladebetrieb nicht.
+          </div>
+        )}
+        <div style={{ fontSize:10, lineHeight:1.55, color:'#475569', background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:6, padding:'8px 9px', marginTop:8 }}>
+          <b>Doppelklick auf den Speicher</b> öffnet Belegungsdaten, Auslegung,
+          Wärmepumpenabgleich und den vollständigen Rechenweg.
         </div>
         <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
@@ -1298,7 +1280,7 @@ function BigVal({ label, value, unit = '', sub = '', color = '#1d4ed8' }) {
   );
 }
 
-function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, onUpdate, onClose, navigate }) {
+function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, onClose, navigate }) {
   const d = node.data;
   const set = (k, val) => onUpdate(node.id, k, val);
   const [tab, setTab] = useState('gruppe');
@@ -1618,6 +1600,12 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, onUpdate, onClos
             <div><label style={lbl}>COP</label><input type="number" style={inp} value={d.cop??''} onChange={e=>set('cop',e.target.value)} placeholder="z.B. 4.0"/></div>
             <div><label style={lbl}>P_el [kW]</label><input type="number" style={inp} value={d.p_el_kw??''} onChange={e=>set('p_el_kw',e.target.value)} placeholder="hat Vorrang"/></div>
           </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+            <div><label style={lbl}>BWW-Leistung am Betriebspunkt [kW]</label><input type="number" min="0" style={inp} value={d.bww_leistung_kw??''} onChange={e=>set('bww_leistung_kw',e.target.value)} placeholder="leer = Nennleistung"/></div>
+            <div style={{ fontSize:10, color:'#64748b', alignSelf:'end', paddingBottom:6 }}>
+              Wird beim BWW-Speicher gegen die erforderliche Anschlussleistung geprüft.
+            </div>
+          </div>
         </>}
         {quelleMitMedium && <>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
@@ -1653,12 +1641,147 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, onUpdate, onClos
       </div>
     );
   } else if (node.type === 'bww') {
+    const wohnungen = wohnungenAusDaten(d);
+    const setWohnungen = (zeilen) => set('bww_wohnungen', zeilen);
+    const bwwTabs = [['wohnungen','Wohnungen'], ['auslegung','Auslegung'], ['rechenweg','Rechenweg']];
+    const bwwTab = bwwTabs.some(([k]) => k === tab) ? tab : 'wohnungen';
+    const rechenweg = br?.rechenweg || [];
     body = (
-      <div style={{ display:'grid', gap:10 }}>
-        <div><label style={lbl}>Speicherinhalt [L]</label><input type="number" min="0" style={inp} value={d.speicher_liter??''} onChange={e=>set('speicher_liter',e.target.value)}/></div>
-        <div style={{ ...warnSt, background:'#fff7ed', border:'1px solid #fed7aa', color:'#9a3412' }}>
-          SIA-385-Automatik noch nicht aktiv: Die Bezugsgrösse der Excel-Eingabe muss fachlich geklärt werden.
+      <div style={{ display:'grid', gap:12 }}>
+        <div style={{ display:'flex', gap:2, borderBottom:'2px solid #f1f5f9' }}>
+          {bwwTabs.map(([k,t]) => (
+            <button key={k} onClick={()=>setTab(k)}
+              style={{ padding:'7px 18px', fontSize:12, fontWeight:600, cursor:'pointer', background:'none', border:'none',
+                borderBottom: bwwTab===k?'2.5px solid #dc2626':'2.5px solid transparent',
+                color: bwwTab===k?'#dc2626':'#64748b', marginBottom:-2 }}>
+              {t}
+            </button>
+          ))}
         </div>
+
+        {bwwTab === 'wohnungen' && <>
+          <div style={{ fontSize:11, color:'#475569' }}>
+            Pro Wohnung wird die Standardbelegung aus der Nutzfläche berechnet. Die Bezeichnung
+            bleibt frei, damit sie deinem Projekt entspricht.
+          </div>
+          <div style={{ border:'1px solid #e2e8f0', borderRadius:8, overflow:'hidden' }}>
+            <div style={{ display:'grid', gridTemplateColumns:'1.4fr 1fr 90px 34px', gap:8,
+              padding:'7px 10px', background:'#f8fafc', fontSize:10, fontWeight:700, color:'#64748b' }}>
+              <span>Wohnung</span><span>Nutzfläche A<sub>NF</sub> [m²]</span><span>Personen</span><span/>
+            </div>
+            {wohnungen.map((wohnung, index) => {
+              const berechnet = br?.wohnungen?.find(w => w.id === wohnung.id)?.personen;
+              return (
+                <div key={wohnung.id} style={{ display:'grid', gridTemplateColumns:'1.4fr 1fr 90px 34px', gap:8,
+                  alignItems:'center', padding:'7px 10px', borderTop:index?'1px solid #f1f5f9':'none' }}>
+                  <input style={inp} value={wohnung.name}
+                    onChange={e=>setWohnungen(wohnungAendern(wohnungen, wohnung.id, 'name', e.target.value))}/>
+                  <input type="number" min="1" style={inp} value={wohnung.flaeche_m2}
+                    onChange={e=>setWohnungen(wohnungAendern(wohnungen, wohnung.id, 'flaeche_m2', e.target.value))}
+                    placeholder="z.B. 85"/>
+                  <span style={{ textAlign:'right', fontFamily:'monospace', fontWeight:700, color:'#1e293b' }}>
+                    {berechnet != null ? Number(berechnet).toFixed(2) : '—'} P
+                  </span>
+                  <button type="button" title="Wohnung entfernen"
+                    onClick={()=>setWohnungen(wohnungEntfernen(wohnungen, wohnung.id))}
+                    style={{ border:0, background:'transparent', color:'#94a3b8', cursor:'pointer', padding:4 }}>
+                    <Trash2 size={15}/>
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          <button type="button" onClick={()=>setWohnungen(wohnungHinzufuegen(wohnungen))}
+            style={{ ...btnBlue, width:'auto', justifySelf:'start', padding:'7px 14px', marginTop:0 }}>
+            + Wohnung hinzufügen
+          </button>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10 }}>
+            <BigVal label="Wohnungen" value={br?.wohnungen?.length || 0} color="#475569"/>
+            <BigVal label="Personen total" value={br?.personen} unit="P" color="#1d4ed8"/>
+            <BigVal label="Nutzwarmwasser" value={br?.nutzwarmwasserbedarf_l_d} unit="L/d" color="#0f766e"/>
+          </div>
+          <div style={{ borderTop:'1px solid #f1f5f9', paddingTop:8 }}>
+            <label style={lbl}>Alternative Direktangabe Personen [P]</label>
+            <input type="number" min="0" style={{...inp,maxWidth:220}} value={d.bww_personen??''}
+              onChange={e=>set('bww_personen',e.target.value)} placeholder="nur ohne Wohnungsflächen"/>
+          </div>
+        </>}
+
+        {bwwTab === 'auslegung' && <>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10 }}>
+            <div><label style={lbl}>Gebäudeart / Bezugseinheit</label>
+              <select style={inp} value={d.bww_bezugseinheit||'mfh_allgemein'} onChange={e=>set('bww_bezugseinheit',e.target.value)}>
+                {BWW_BEZUGSEINHEITEN.map(b=><option key={b.key} value={b.key}>{b.label}</option>)}
+              </select></div>
+            <div><label style={lbl}>Warmhaltesystem</label>
+              <select style={inp} value={d.bww_warmhaltesystem||'zirkulation'} onChange={e=>set('bww_warmhaltesystem',e.target.value)}>
+                <option value="zirkulation">Zirkulation (1.50)</option>
+                <option value="warmhalteband">Warmhalteband (1.35)</option>
+              </select></div>
+            <div><label style={lbl}>Speicherkonfiguration</label>
+              <select style={inp} value={d.bww_speicherkonfiguration||'aussen'} onChange={e=>set('bww_speicherkonfiguration',e.target.value)}>
+                <option value="aussen">Aussenliegender Wärmetauscher (1.10)</option>
+                <option value="innen">Innenliegender Wärmetauscher (1.25)</option>
+              </select></div>
+            <div><label style={lbl}>Ladezyklen pro Tag</label><input type="number" min="1" step="1" style={inp} value={d.bww_ladezyklen??2} onChange={e=>set('bww_ladezyklen',e.target.value)}/></div>
+            <div><label style={lbl}>Zeit eines Ladezyklus [h]</label><input type="number" min="0.1" step="0.1" style={inp} value={d.bww_ladezeit_h??2} onChange={e=>set('bww_ladezeit_h',e.target.value)}/></div>
+            <div><label style={lbl}>Temperaturerhöhung Δθ [K]</label><input type="number" min="1" style={inp} value={d.bww_delta_theta_k??50} onChange={e=>set('bww_delta_theta_k',e.target.value)}/></div>
+            <div><label style={lbl}>Wirkungsgrad Wärmeübertragung</label><input type="number" min="0.01" max="1" step="0.01" style={inp} value={d.bww_wirkungsgrad??0.95} onChange={e=>set('bww_wirkungsgrad',e.target.value)}/></div>
+            <div><label style={lbl}>Gewählter Speicher [L]</label><input type="number" min="0" style={inp} value={d.speicher_liter??''} onChange={e=>set('speicher_liter',e.target.value)} placeholder="optional"/></div>
+            <div><label style={lbl}>Ladeleistung manuell [kW]</label><input type="number" min="0" style={inp} value={d.bww_ladeleistung_kw??''} onChange={e=>set('bww_ladeleistung_kw',e.target.value)} placeholder="leer = automatisch"/></div>
+          </div>
+
+          <SubTitel>Speicher und Wärmetauscher</SubTitel>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:10 }}>
+            <BigVal label="Steuervolumen" value={br?.steuervolumen_l} unit="L" color="#0369a1"/>
+            <BigVal label="Spitzendeckung" value={br?.spitzendeckungsvolumen_l} unit="L" color="#7c3aed"/>
+            <BigVal label="Speichervorschlag" value={br?.bereitschaftsvolumen_l} unit="L" color="#15803d"/>
+            <BigVal label="Anschlussleistung" value={br?.anschlussleistung_kw} unit="kW" color="#dc2626"/>
+          </div>
+
+          <SubTitel>Abgleich Wärmepumpe</SubTitel>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10 }}>
+            <BigVal label="BWW benötigt" value={br?.anschlussleistung_kw} unit="kW" color="#dc2626"/>
+            <BigVal label="Wärmepumpe verfügbar" value={br?.waermepumpenleistung_kw} unit="kW"
+              color={br?.leistung_ausreichend===false?'#dc2626':'#15803d'} sub={br?.waermepumpenleistung_quelle}/>
+            <BigVal label="Leistungsreserve" value={br?.leistungsreserve_kw} unit="kW"
+              color={br?.leistung_ausreichend===false?'#dc2626':'#15803d'}/>
+          </div>
+          {br?.leistung_ausreichend === false && (
+            <div style={{ ...warnSt, fontSize:11, background:'#fef2f2', borderColor:'#fecaca', color:'#b91c1c' }}>
+              <b>Wärmepumpe zu klein für diesen Ladebetrieb.</b>
+              {br.ladezeit_min_fuer_wp_h != null && <> Ladezeit auf mindestens <b>{br.ladezeit_min_fuer_wp_h} h</b> erhöhen.</>}
+              {br.ladezyklen_min_fuer_wp != null && <> Alternativ mindestens <b>{br.ladezyklen_min_fuer_wp} Ladezyklen/Tag</b>;
+                der Speichervorschlag sinkt dann auf <b>{br.speichervolumen_bei_zyklen_l} L</b>.</>}
+            </div>
+          )}
+          {br?.warnungen?.map((w,i)=><div key={i} style={warnSt}>⚠ {w}</div>)}
+        </>}
+
+        {bwwTab === 'rechenweg' && (
+          rechenweg.length ? (
+            <div style={{ display:'grid', gap:12 }}>
+              {gruppiert(rechenweg).map(([gruppe, schritte])=><div key={gruppe}>
+                <SubTitel>{gruppe}</SubTitel>
+                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11, marginTop:4 }}><tbody>
+                  {schritte.map((s,i)=><tr key={i} style={{ borderTop:'1px solid #f1f5f9' }}>
+                    <td style={{ padding:'6px 8px 6px 0', fontWeight:700, color:'#1e293b', whiteSpace:'nowrap', width:130, verticalAlign:'top' }}>{s.groesse}</td>
+                    <td style={{ padding:'6px 8px', color:'#334155', verticalAlign:'top' }}>
+                      <div style={{ fontSize:15, overflowX:'auto', overflowY:'hidden' }}><MathFormula latex={s.formel_latex} fallback={s.formel}/></div>
+                      <div style={{ display:'flex', gap:5, alignItems:'center', color:'#64748b', marginTop:3, overflowX:'auto', overflowY:'hidden' }}>
+                        <span>=</span><MathFormula latex={s.eingesetzt_latex} fallback={s.eingesetzt}/>
+                      </div>
+                    </td>
+                    <td style={{ padding:'6px 0 6px 8px', textAlign:'right', fontWeight:700, whiteSpace:'nowrap', verticalAlign:'top' }}>{s.ergebnis}</td>
+                  </tr>)}
+                </tbody></table>
+              </div>)}
+              <div style={{ fontSize:11, color:'#64748b' }}>
+                Grundlage: bereitgestellte Excel-Berechnung. Ergebnisse und derselbe Rechenweg werden im Export ausgegeben.
+              </div>
+            </div>
+          ) : <div style={{ fontSize:12, color:'#94a3b8' }}>Wohnungsflächen oder Personenzahl eingeben, damit der Rechenweg entsteht.</div>
+        )}
       </div>
     );
   } else if (node.type === 'erdsonden') {
@@ -1872,7 +1995,7 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, onUpdate, onClos
   return (
     <div onClick={onClose} style={modalBackdrop}>
       <div onClick={e=>e.stopPropagation()}
-        style={node.type === 'erdsonden' ? { ...modalCard, width:'min(1180px, 96vw)' } : modalCard}>
+        style={['erdsonden','bww'].includes(node.type) ? { ...modalCard, width:'min(1180px, 96vw)' } : modalCard}>
         <div style={modalHeader}>
           <div>
             <div style={{ fontSize:10, textTransform:'uppercase', letterSpacing:'0.08em', color:'#94a3b8' }}>Auslegung</div>
@@ -4611,8 +4734,12 @@ function EditorInner() {
       const c = erdsondenResults[n.id];
       return c ? { ...n, data: { ...n.data, _calc: c } } : n;
     }
+    if (n.type === 'bww') {
+      const c = bwwResults[n.id];
+      return c ? { ...n, data: { ...n.data, _calc: c } } : n;
+    }
     return n;
-  }), [nodes, verteilerResults, gruppeResults, nodeFlows, expansionResults, speicherResults, erdsondenResults]);
+  }), [nodes, verteilerResults, gruppeResults, nodeFlows, expansionResults, speicherResults, erdsondenResults, bwwResults]);
 
   // Legende: Nr · Bauteil · Bezeichnung · Kennwerte (reine Anzeige der
   // Backend-Resultate — dieselben Zeilen erscheinen im PDF)
@@ -6717,6 +6844,7 @@ function EditorInner() {
           xr={expansionResults[auslegungNode.id]}
           sr={speicherResults[auslegungNode.id]}
           er={erdsondenResults[auslegungNode.id]}
+          br={bwwResults[auslegungNode.id]}
           onUpdate={updateNode}
           onClose={() => setAuslegung(null)}
           navigate={navigate}

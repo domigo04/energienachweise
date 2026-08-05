@@ -453,6 +453,11 @@ def sole_druckverlust(
                    r"Re < 2340:\ \mathrm{laminar};\quad Re < 65d_k:\ "
                    r"\mathrm{turbulent\ glatt};\quad Re > 1300d_k:\ "
                    r"\mathrm{turbulent\ rau}"
+               ),
+               eingesetzt_latex=(
+                   rf"Re = {t['reynolds']:.0f};\quad d_k = "
+                   + _bruch(_z(t['innen_d_mm'], 1), _z(rauheit, 3))
+                   + rf" = {t['dk']:.0f};\quad 65d_k = {65 * t['dk']:.0f}"
                )),
         ])
         if t["lambda"] is not None:
@@ -473,7 +478,8 @@ def sole_druckverlust(
             )
             rechenweg.append(_s(
                 gruppe, "λ", formel, f"Re = {t['reynolds']:.0f}",
-                f"{t['lambda']:.5f}", formel_latex=latex_formel
+                f"{t['lambda']:.5f}", formel_latex=latex_formel,
+                eingesetzt_latex=rf"Re = {t['reynolds']:.0f}"
             ))
         rechenweg.append(_s(
             gruppe, "p_dyn", "p_dyn = ρ · w² / 2",

@@ -37,6 +37,35 @@ def test_erdsondenfeld_rechnet_duplexvolumen_und_bohrmeter():
     assert r"\frac{Q_0 \cdot 1000}{q_E}" in result["rechenweg"][0]["formel_latex"]
 
 
+def test_einfach_u_sonde_rechnet_mit_zwei_straengen():
+    """Einfach-U hat halb so viel Rohr wie Duplex — im Wert und im Rechenweg."""
+    argumente = dict(quellenleistung_kw=36, sonden_anzahl=4, sonden_laenge_m=220,
+                     spezifische_entzugsleistung_w_m=45, sonden_aussendurchmesser_mm=32)
+    duplex = erdsondenfeld(**argumente)
+    einfach = erdsondenfeld(**argumente, straenge_je_sonde=2)
+
+    assert einfach["sondeninhalt_l"] == pytest.approx(duplex["sondeninhalt_l"] / 2, abs=0.1)
+    assert einfach["straenge_je_sonde"] == 2
+    schritt = next(s for s in einfach["rechenweg"] if s["groesse"] == "Vsonde")
+    assert schritt["eingesetzt"].startswith("4 · 2 · 220")
+    # Bohrmeter hängen nicht an der Bauart.
+    assert einfach["erforderlich_gesamt_m"] == duplex["erforderlich_gesamt_m"]
+    with pytest.raises(ValueError):
+        erdsondenfeld(**argumente, straenge_je_sonde=3)
+
+
+def test_schema_uebernimmt_sondenbauart_in_bohrmeter_und_solekreis():
+    """Editorwahl «Einfach-U» muss in beiden Rechenkernen ankommen."""
+    daten = {"sonden_anzahl": 4, "sonden_laenge_m": 190, "entzugsleistung_w_m": 45,
+             "sonden_bauart": "einfach", "sole_volumenstrom_m3h": 2.5}
+    result = berechne_schema(
+        [{"id": "ews", "type": "erdsonden", "data": daten}], [])
+    ews = result["erdsonden_results"]["ews"]
+
+    assert ews["straenge_je_sonde"] == 2
+    assert ews["druckverlust"]["sonden_straenge"] == 2
+
+
 def test_schema_nutzt_automatische_wp_quellenleistung_fuer_erdsonden():
     nodes = [
         {"id": "wp", "type": "erzeuger", "data": {
@@ -121,6 +150,11 @@ def test_pdf_uebernimmt_speicher_und_erdsonden_rechenwerte():
             "glykol_konzentration_pct": 30, "ist_gesamt_m": 760,
             "erforderlich_gesamt_m": 733.3, "erforderlich_pro_sonde_m": 183.3,
             "sondeninhalt_l": 1614.2, "gesamtinhalt_l": 1614.2, "glykolbedarf_kg": 552.1,
+            "rechenweg": [{
+                "groesse": "Lerf", "formel": "Lerf = Q0 · 1000 / qE · SF",
+                "formel_latex": r"L_{\mathrm{erf}} = \frac{Q_0 \cdot 1000}{q_E} \cdot SF",
+                "eingesetzt": "30 · 1000 / 45 · 1.1", "ergebnis": "733.3 m",
+            }],
         }},
     }
 
@@ -128,4 +162,8 @@ def test_pdf_uebernimmt_speicher_und_erdsonden_rechenwerte():
 
     assert ("Auslegungsvorschlag", 727, "l") in abschnitte["Speicher"]["resultate"]
     assert ("Erforderliche Gesamtbohrmeter", 733.3, "m") in abschnitte["Erdsondenfeld"]["resultate"]
-    assert any(zeile[0] == "Bohrmeter-Formel" for zeile in abschnitte["Erdsondenfeld"]["resultate"])
+    # Die Bohrmeterformel steht nicht mehr als Textzeile in den Resultaten,
+    # sondern als gesetzter Rechenschritt mit Bruch im Rechenweg.
+    schritt = abschnitte["Erdsondenfeld"]["rechenweg"][0]
+    assert schritt["gruppe"] == "0 Bohrmeterauslegung"
+    assert schritt["formel_latex"].startswith(r"L_{\mathrm{erf}} = \frac")

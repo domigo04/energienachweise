@@ -57,21 +57,26 @@ def erdsondenfeld(
     spezifische_entzugsleistung_w_m: Optional[float],
     sicherheitsfaktor: float = 1.10,
     sonden_aussendurchmesser_mm: int = 32,
+    straenge_je_sonde: int = 4,
     glykol_konzentration_pct: float = 30.0,
     glykol_dichte_kg_l: float = 1.14,
     zusaetzlicher_inhalt_l: float = 0.0,
 ) -> dict:
-    """Duplex-Erdsondenfeld: Bohrmeter sowie Sonden-/Glykolinhalt.
+    """Erdsondenfeld: Bohrmeter sowie Sonden-/Glykolinhalt.
 
-    Die standortabhängige Entzugsleistung bleibt eine sichtbare Eingabe. Eine
-    pauschale EED-/Bohrtiefenempfehlung wird nicht aus den ortsgebundenen
-    Tabellen der Vorlage abgeleitet.
+    `straenge_je_sonde` ist die Zahl der Rohrstränge je Sondenmeter:
+    Duplex (2 U-Rohre) = 4, Einfach-U = 2. Die standortabhängige
+    Entzugsleistung bleibt eine sichtbare Eingabe. Eine pauschale
+    EED-/Bohrtiefenempfehlung wird nicht aus den ortsgebundenen Tabellen der
+    Vorlage abgeleitet.
     """
     anzahl = int(sonden_anzahl)
     if anzahl <= 0:
         raise ValueError("Sondenanzahl muss > 0 sein")
     if sonden_aussendurchmesser_mm not in ROHRINHALT_L_M:
         raise ValueError("Sondenrohr muss 25, 32 oder 40 mm sein")
+    if straenge_je_sonde not in (2, 4):
+        raise ValueError("Rohrstränge je Sonde müssen 2 (Einfach-U) oder 4 (Duplex) sein")
     faktor = float(sicherheitsfaktor)
     if faktor < 1:
         raise ValueError("Sicherheitsfaktor muss ≥ 1 sein")
@@ -92,8 +97,10 @@ def erdsondenfeld(
     erforderlich = q0 * 1000 / spezifisch * faktor if q0 and spezifisch else None
     erforderlich_pro_sonde = erforderlich / anzahl if erforderlich else None
     rohrinhalt = ROHRINHALT_L_M[sonden_aussendurchmesser_mm]
-    # Duplexsonde = zwei U-Rohre = vier Rohrstränge je Sondenmeter.
-    sondeninhalt = anzahl * 4 * laenge * rohrinhalt if laenge else None
+    # Duplexsonde = zwei U-Rohre = vier Rohrstränge je Sondenmeter, Einfach-U
+    # = zwei. Der Solekreis rechnet mit derselben Zahl, sonst stünden im Export
+    # zwei verschiedene Sondeninhalte.
+    sondeninhalt = anzahl * straenge_je_sonde * laenge * rohrinhalt if laenge else None
     gesamtinhalt = (
         sondeninhalt + float(zusaetzlicher_inhalt_l)
         if sondeninhalt is not None else None
@@ -121,11 +128,14 @@ def erdsondenfeld(
     if sondeninhalt is not None:
         rechenweg.append({
             "groesse": "Vsonde",
-            "formel": "Vsonde = n · 4 · L · Rohrinhalt",
-            "formel_latex": r"V_{\mathrm{Sonden}} = n \cdot 4 \cdot L \cdot v_{\mathrm{Rohr}}",
-            "eingesetzt": f"{anzahl} · 4 · {laenge:g} · {rohrinhalt:g}",
+            "formel": "Vsonde = n · Stränge · L · Rohrinhalt",
+            "formel_latex": (
+                r"V_{\mathrm{Sonden}} = n \cdot N_{\mathrm{Stränge}} \cdot L "
+                r"\cdot v_{\mathrm{Rohr}}"
+            ),
+            "eingesetzt": f"{anzahl} · {straenge_je_sonde} · {laenge:g} · {rohrinhalt:g}",
             "eingesetzt_latex": (
-                rf"{anzahl} \cdot 4 \cdot {laenge:g} \cdot {rohrinhalt:g}"
+                rf"{anzahl} \cdot {straenge_je_sonde} \cdot {laenge:g} \cdot {rohrinhalt:g}"
             ),
             "ergebnis": f"{sondeninhalt:.1f} l",
         })
@@ -161,6 +171,7 @@ def erdsondenfeld(
         "reserve_m": round(reserve, 1) if reserve is not None else None,
         "ausreichend": reserve >= 0 if reserve is not None else None,
         "sonden_aussendurchmesser_mm": sonden_aussendurchmesser_mm,
+        "straenge_je_sonde": straenge_je_sonde,
         "rohrinhalt_l_m": rohrinhalt,
         "sondeninhalt_l": round(sondeninhalt, 1) if sondeninhalt is not None else None,
         "zusaetzlicher_inhalt_l": round(float(zusaetzlicher_inhalt_l), 1),

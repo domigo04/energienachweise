@@ -213,6 +213,7 @@ def _bauteil_auslegungen(nodes, verteiler_results, heatpump_results):
                     spezifische_entzugsleistung_w_m=_zahl(d.get("entzugsleistung_w_m")),
                     sicherheitsfaktor=_zahl(d.get("sonden_sicherheitsfaktor")) or 1.10,
                     sonden_aussendurchmesser_mm=int(_zahl(d.get("sonden_rohr_mm")) or 32),
+                    straenge_je_sonde=2 if d.get("sonden_bauart") == "einfach" else 4,
                     glykol_konzentration_pct=(
                         _zahl(d.get("glykol_pct"))
                         if _zahl(d.get("glykol_pct")) is not None else 30

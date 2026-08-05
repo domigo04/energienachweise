@@ -13,6 +13,10 @@ from reportlab.pdfgen import canvas as pdfcanvas
 from reportlab.lib.utils import ImageReader
 from svglib.svglib import svg2rlg
 
+from app.calculations.bww_sia385 import CP_WASSER_KJ_KGK
+from app.export import diagramme as diagramm
+from app.export.diagramme import FARBEN
+from app.export.formelsatz import formel
 from app.export.schema_svg import erzeuge_svg
 from app.data.generator_types import (
     HEAT_PUMP_TYPES,
@@ -153,6 +157,73 @@ def legende_zeilen(nodes: list, results: dict) -> list:
     return zeilen
 
 
+# ── Diagramme aus bereits berechneten Reihen ────────────────────────────────
+def _bww_diagramme(b: dict) -> list:
+    """Stundenprofile und Ladefunktion — dieselben Reihen wie im Editor."""
+    daten = b.get("diagramme") or {}
+    reihen = [("werktag", "Summenliniendiagramm Montag bis Freitag"),
+              ("wochenende", "Summenliniendiagramm Samstag/Sonntag"),
+              ("ladefunktion", "Ladefunktion Montag bis Freitag")]
+    diagramme = []
+    for schluessel, titel in reihen:
+        punkte = daten.get(schluessel) or []
+        if not punkte:
+            continue
+        linien = [("kumuliert_l", "Stundenspitze aufsummiert", FARBEN["rot"])]
+        if schluessel == "ladefunktion":
+            linien.append(("ladekurve_l", "Ladekurve (+10 %)", FARBEN["oliv"]))
+        diagramme.append({
+            "art": "saeulen", "hoehe": 148, "titel": titel, "punkte": punkte,
+            "x_schluessel": "stunde", "x_titel": "Tageszeit [h]", "einheit": "L",
+            "saeule": ("stundenvolumen_l", "Stundenspitze", FARBEN["blau"]),
+            "linien": linien,
+        })
+    return diagramme
+
+
+def _erdsonden_diagramme(c: dict, dv: dict) -> list:
+    """Bohrmeter, Druckverlust und Füllinhalt als Balken — ohne neue Rechnung."""
+    diagramme = []
+    if c.get("ist_gesamt_m") is not None or c.get("erforderlich_gesamt_m") is not None:
+        reicht = c.get("ausreichend")
+        diagramme.append({
+            "art": "balken", "hoehe": 60, "einheit": "m",
+            "titel": "Bohrmeter — gewählt gegen erforderlich",
+            "eintraege": [
+                ("Gewählt (Anzahl × Sondenlänge)", c.get("ist_gesamt_m"), FARBEN["violett"]),
+                ("Erforderlich (aus Quellenleistung)", c.get("erforderlich_gesamt_m"),
+                 FARBEN["rot"] if reicht is False else FARBEN["gruen"]),
+            ],
+        })
+    if dv.get("foerderhoehe_mws") is not None:
+        eintraege = [(f"Δp {t['name']}", t.get("druckverlust_mws"), FARBEN["blau"])
+                     for t in dv.get("teilstuecke") or []]
+        eintraege += [
+            ("Δp Verteiler", dv.get("druckverlust_verteiler_mws"), FARBEN["tuerkis"]),
+            ("Δp Wärmepumpe (Verdampfer)", dv.get("druckverlust_wp_mws"), FARBEN["grau"]),
+            ("Förderhöhe Solepumpe", dv.get("foerderhoehe_mws"), FARBEN["violett"]),
+        ]
+        diagramme.append({
+            "art": "balken", "hoehe": 24 + 15 * len(eintraege), "einheit": "mWs",
+            "titel": "Druckverlust im Solekreis und Betriebspunkt der Solepumpe",
+            "eintraege": eintraege,
+        })
+    if dv.get("inhalt_total_l"):
+        diagramme.append({
+            "art": "balken", "hoehe": 24 + 15 * 6, "einheit": "l",
+            "titel": "Füllinhalt des Solekreises und Wärmeträger",
+            "eintraege": [
+                ("Erdwärmesonden", dv.get("inhalt_sonden_l"), FARBEN["blau"]),
+                ("Zuleitung Sonde–Verteiler", dv.get("inhalt_zuleitung_verteiler_l"), FARBEN["tuerkis"]),
+                ("Zuleitung Verteiler–WP", dv.get("inhalt_zuleitung_wp_l"), FARBEN["gruen"]),
+                ("Wärmepumpe und Expansion", dv.get("zusatzinhalt_l"), FARBEN["grau"]),
+                ("Füllinhalt total", dv.get("inhalt_total_l"), FARBEN["violett"]),
+                ("Wärmeträger (Konzentrat)", dv.get("konzentrat_volumetrisch_l"), FARBEN["gelb"]),
+            ],
+        })
+    return diagramme
+
+
 # ── Berechnungen pro Bauteil (Eingaben + Resultate mit Einheit) ─────────────
 def berechnungs_abschnitte(nodes: list, results: dict) -> list:
     abschnitte = []
@@ -166,7 +237,7 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
     for n in _sortiert(nodes):
         d = n.get("data") or {}
         t = n.get("type")
-        eingaben, resultate, rechenweg, hinweise = [], [], [], []
+        eingaben, resultate, rechenweg, hinweise, diagramme = [], [], [], [], []
         if t == "gruppe":
             c = gr.get(n["id"], {})
             schaltung = {"einspritz": "Einspritzschaltung (2WV)", "beimisch": "Beimischschaltung (3WV)",
@@ -260,7 +331,8 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
                 abschnitte.append({"nr": d.get("nr"), "titel": TITEL.get(t, t),
                                    "bezeichnung": d.get("label") or "",
                                    "eingaben": eingaben, "resultate": resultate,
-                                   "rechenweg": rechenweg, "hinweise": hinweise})
+                                   "rechenweg": rechenweg, "hinweise": hinweise,
+                                   "diagramme": diagramme})
                 continue
             eingaben = [("Förder-V' (aus Schema)", _fmt(p.get("v")), "m³/h"), ("Rohrlänge VL+RL", d.get("rohr_m"), "m"),
                         ("Druckgefälle", _f(d.get("pam")) or 70, "Pa/m"), ("Apparate", _f(d.get("apparate_kpa")) or 0, "kPa")]
@@ -374,30 +446,49 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
                 ))
             if b.get("anschlussleistung_kw") is not None:
                 eingaben += [
-                    ("Personen", b.get("personen"), "P"),
+                    ("Personen np", b.get("personen"), "P"),
                     ("Gebäudeart", b.get("bezugseinheit"), ""),
-                    ("Bezugseinheit Durchschnitt", b.get("bezugseinheit_durchschnitt_l_p_d"), "l/(d·P)"),
-                    ("Bezugseinheit Spitze", b.get("bezugseinheit_spitze_l_p_d"), "l/(d·P)"),
+                    ("Bezugseinheit Durchschnitt V_W,u", b.get("bezugseinheit_durchschnitt_l_p_d"), "l/(d·P)"),
+                    ("Bezugseinheit Spitze V_W,u,pk", b.get("bezugseinheit_spitze_l_p_d"), "l/(d·P)"),
                     ("Warmhaltesystem", b.get("warmhaltesystem"), ""),
-                    ("Ladezyklen pro Tag", b.get("ladezyklen_pro_tag"), ""),
-                    ("Zeit eines Ladezyklus", b.get("ladezeit_h"), "h"),
+                    ("Faktor Warmhaltesystem f_warm", b.get("faktor_warmhaltesystem"), ""),
+                    ("Faktor Spitzendeckung f_pk (nach np)", b.get("faktor_spitzendeckung"), ""),
+                    ("Speicherkonfiguration", b.get("speicherkonfiguration"), ""),
+                    ("Faktor Speicherkonfiguration f_sto", b.get("faktor_speicherkonfiguration"), ""),
+                    ("Ladezyklen pro Tag n_z", b.get("ladezyklen_pro_tag"), ""),
+                    ("Zeit eines Ladezyklus t_z", b.get("ladezeit_h"), "h"),
                     ("Temperaturerhöhung ΔΘ", b.get("temperaturerhoehung_k"), "K"),
-                    ("Wirkungsgrad Wärmeübertragung", b.get("wirkungsgrad"), ""),
+                    ("Spez. Wärmekapazität Wasser cp", CP_WASSER_KJ_KGK, "kJ/(kg·K)"),
+                    ("Wirkungsgrad Wärmeübertragung η", b.get("wirkungsgrad"), ""),
                     ("Gewähltes Register", "aussenliegend mit PWT" if b.get("register_bauart") == "aussen" else "innenliegend", ""),
                 ]
                 resultate = [
-                    ("Nutzwarmwasserbedarf", b.get("nutzwarmwasserbedarf_l_d"), "l/d"),
-                    ("Steuervolumen", b.get("steuervolumen_l"), "l"),
-                    ("Spitzendeckungsvolumen", b.get("spitzendeckungsvolumen_l"), "l"),
-                    ("Bereitschaftsvolumen", b.get("bereitschaftsvolumen_l"), "l"),
+                    ("Nutzwarmwasserbedarf V_W,d,1", b.get("nutzwarmwasserbedarf_l_d"), "l/d"),
+                    ("Steuervolumen V_W,sto,ctrl", b.get("steuervolumen_l"), "l"),
+                    ("Spitzendeckungsvolumen V_W,sto,pk", b.get("spitzendeckungsvolumen_l"), "l"),
+                    ("Bereitschaftsvolumen V_W,sto,cont", b.get("bereitschaftsvolumen_l"), "l"),
                     ("Speichervolumen inkl. Konfigurationsfaktor", b.get("speichervolumen_l"), "l"),
-                    ("Anschlussleistung", b.get("anschlussleistung_kw"), "kW"),
+                    ("Massgebendes Volumen für die Leistung", b.get("massgebendes_volumen_l"), "l"),
+                    ("Anschlussleistung Q_A", b.get("anschlussleistung_kw"), "kW"),
                     ("Registervorschlag", "aussenliegend mit PWT" if b.get("register_vorschlag") == "aussen" else "innenliegend", ""),
                     ("Wärmepumpenleistung verfügbar", b.get("waermepumpenleistung_kw"), "kW"),
+                    ("Herkunft Wärmepumpenleistung", b.get("waermepumpenleistung_quelle"), ""),
                     ("Leistungsreserve", b.get("leistungsreserve_kw"), "kW"),
                     ("Norm", "SIA 385/2", ""),
                 ]
+                # Nur wenn die Wärmepumpe zu klein ist, rechnet der Kern
+                # Auswege aus; dann gehören sie auch in den Export.
+                if b.get("ladezeit_min_fuer_wp_h") is not None:
+                    resultate.append(("Mindestladezeit für diese Wärmepumpe",
+                                      b["ladezeit_min_fuer_wp_h"], "h"))
+                if b.get("ladezyklen_min_fuer_wp") is not None:
+                    resultate += [
+                        ("Mindestladezyklen für diese Wärmepumpe", b["ladezyklen_min_fuer_wp"], ""),
+                        ("Speichervolumen bei diesen Zyklen", b.get("speichervolumen_bei_zyklen_l"), "l"),
+                        ("Anschlussleistung bei diesen Zyklen", b.get("anschlussleistung_bei_zyklen_kw"), "kW"),
+                    ]
                 rechenweg = b.get("rechenweg") or []
+                diagramme = _bww_diagramme(b)
                 hinweise = list(b.get("warnungen") or [])
                 if b.get("register_vorschlag_text"):
                     hinweise.append(b["register_vorschlag_text"])
@@ -420,27 +511,35 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
             ]
         elif t == "erdsonden":
             c = erdsonden_results.get(n["id"], {})
+            dv = c.get("druckverlust") or {}
             # Anzahl aus dem Rechenkern, damit PDF und Berechnung nicht
             # auseinanderlaufen (die Auswahl im Editor ist auf 24 begrenzt).
             anzahl = c.get("sonden_anzahl") or max(1, min(24, int(_f(d.get("sonden_anzahl")) or 5)))
             laenge = _f(d.get("sonden_laenge_m"))
-            eingaben = [("Ausführung", "Duplex (2 U-Rohre)", ""),
+            straenge = c.get("straenge_je_sonde") or 4
+            eingaben = [("Ausführung",
+                         "Einfach-U (1 U-Rohr)" if straenge == 2 else "Duplex (2 U-Rohre)", ""),
                         ("Anzahl Erdsonden", anzahl, ""),
                         ("Sondenlänge", laenge, "m"),
-                        ("Quellenleistung", c.get("quellenleistung_kw"), "kW"),
+                        ("Quellenleistung Q0", c.get("quellenleistung_kw"), "kW"),
                         ("Leistungsquelle", c.get("leistungsquelle"), ""),
-                        ("Spezifische Entzugsleistung", d.get("entzugsleistung_w_m"), "W/m"),
-                        ("Sicherheitsfaktor", c.get("sicherheitsfaktor"), ""),
+                        ("Spezifische Entzugsleistung qE", c.get("spezifische_entzugsleistung_w_m"), "W/m"),
+                        ("Sicherheitsfaktor SF", c.get("sicherheitsfaktor"), ""),
                         ("Sondenrohr", c.get("sonden_aussendurchmesser_mm"), "mm"),
+                        ("Rohrinhalt je Meter", c.get("rohrinhalt_l_m"), "l/m"),
                         ("Glykolkonzentration", c.get("glykol_konzentration_pct"), "%")]
             resultate = [("Gewählte Gesamtbohrmeter", c.get("ist_gesamt_m"), "m"),
                           ("Erforderliche Gesamtbohrmeter", c.get("erforderlich_gesamt_m"), "m"),
                           ("Erforderliche Länge je Sonde", c.get("erforderlich_pro_sonde_m"), "m"),
+                          ("Reserve (gewählt − erforderlich)", c.get("reserve_m"), "m"),
                           ("Sondeninhalt", c.get("sondeninhalt_l"), "l"),
                           ("Soleinhalt gesamt", c.get("gesamtinhalt_l"), "l"),
-                          ("Glykolbedarf", c.get("glykolbedarf_kg"), "kg"),
-                          ("Bohrmeter-Formel", "Lerf = Q0 · 1000 / qE · SF", "")]
-            dv = c.get("druckverlust") or {}
+                          ("Herkunft Soleinhalt", c.get("inhalt_quelle") or "Sondengeometrie", ""),
+                          ("Glykolbedarf", c.get("glykolbedarf_kg"), "kg")]
+            # Die Bohrmeterschritte tragen keine eigene Gruppe; sie stehen im
+            # Export vor den Solekreisschritten, genau wie im Editor.
+            rechenweg = [{**schritt, "gruppe": schritt.get("gruppe") or "0 Bohrmeterauslegung"}
+                         for schritt in c.get("rechenweg") or []]
             if dv:
                 rohre = dv.get("rohre") or {}
                 traeger = dv.get("waermetraeger") or {}
@@ -478,11 +577,14 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
                          f"{stufe.get('pn')} ({stufe.get('bereich')})" if stufe.get("pn") else None,
                          "SIA 384/6:2021"),
                     ]
-                resultate += [("— Solekreis —", "", "")]
+                resultate += [("— Solekreis —", "", ""),
+                              ("Parallele Sondenkreise", dv.get("kreise"), ""),
+                              ("Rohrstränge je Sondenmeter", dv.get("sonden_straenge"), "")]
                 for ts in dv.get("teilstuecke") or []:
                     resultate += [
                         (f"{ts['name']}: w", _fmt(ts.get("geschwindigkeit_m_s"), 3), "m/s"),
                         (f"{ts['name']}: Re", ts.get("reynolds"), f"— {ts.get('stroemungsart')}"),
+                        (f"{ts['name']}: λ", ts.get("lambda"), ""),
                         (f"{ts['name']}: Δp", _fmt(ts.get("druckverlust_mws"), 2), "mWs"),
                     ]
                 resultate += [
@@ -494,13 +596,17 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
                     ("Förderhöhe Solepumpe", dv.get("foerderhoehe_mws"), "mWs"),
                     ("Fördervolumen Solepumpe", dv.get("foerdervolumen_m3_h"), "m³/h"),
                 ]
-                rechenweg = dv.get("rechenweg") or []
-                hinweise = dv.get("warnungen") or []
+                rechenweg += dv.get("rechenweg") or []
+            # `warnings` enthält die Solekreis-Warnungen bereits mit; sie sind
+            # sonst nur im Editor sichtbar und würden im PDF fehlen.
+            hinweise = c.get("warnings") or dv.get("warnungen") or []
+            diagramme = _erdsonden_diagramme(c, dv)
         else:
             continue
         abschnitte.append({"nr": d.get("nr"), "titel": TITEL.get(t, t), "bezeichnung": d.get("label") or "",
                            "eingaben": eingaben, "resultate": resultate,
-                           "rechenweg": rechenweg, "hinweise": hinweise})
+                           "rechenweg": rechenweg, "hinweise": hinweise,
+                           "diagramme": diagramme})
     return abschnitte
 
 
@@ -675,6 +781,94 @@ def _legende_seiten(c, zeilen, projekt_name, warnungen=None):
     c.showPage()
 
 
+TEXTFARBE = (0.1, 0.12, 0.2)
+GRAUFARBE = (0.42, 0.47, 0.53)
+
+
+def _gruppentitel(gruppe: str) -> str:
+    """Sortiernummer vor der Gruppe ist nur fürs Sortieren, nicht fürs Auge."""
+    teile = str(gruppe).split(" ", 1)
+    return teile[1] if len(teile) == 2 and teile[0].isdigit() else str(gruppe)
+
+
+def _groessen_formel(groesse, max_breite: float):
+    """Formelzeichen setzen; einfache Namen wie `V_Sonde` bleiben Klartext."""
+    text = str(groesse or "")
+    latex = text if ("{" in text or "\\" in text) else None
+    return formel(latex, groesse=8.5, fallback=text, max_breite=max_breite)
+
+
+def _rechenweg_block(c, schritte: list, y: float, kopf) -> float:
+    """Rechenweg mit echtem Formelsatz: Bruchstrich statt «/», Formelzeichen.
+
+    Gezeichnet wird dieselbe LaTeX-Fassung, die der Editor mit KaTeX anzeigt;
+    ohne LaTeX bleibt der Klartext des Rechenwegs stehen.
+    """
+    if not schritte:
+        return y
+    c.setFont("Helvetica-Bold", 9)
+    c.setFillColorRGB(0.45, 0.5, 0.55)
+    c.drawString(60, y, "Rechenweg")
+    y -= 15
+    gruppe_aktiv = None
+    for s in schritte:
+        bezeichner = _groessen_formel(s.get("groesse"), 74)
+        links = formel(s.get("formel_latex"), groesse=8.5,
+                       fallback=s.get("formel"), max_breite=248)
+        werte = formel(s.get("eingesetzt_latex"), groesse=8.0,
+                       fallback=s.get("eingesetzt"), max_breite=330)
+        gruppe = (s.get("gruppe") or "").strip()
+        neue_gruppe = gruppe and gruppe != gruppe_aktiv
+        oben = max(links.ueber, bezeichner.ueber)
+        hoehe = oben + max(links.unter, bezeichner.unter) + 3 + werte.hoehe + 7
+        if y - hoehe - (13 if neue_gruppe else 0) < 52:
+            c.showPage()
+            y = kopf()
+            neue_gruppe, gruppe_aktiv = bool(gruppe), None
+        if neue_gruppe:
+            gruppe_aktiv = gruppe
+            c.setFont("Helvetica-Bold", 8.5)
+            c.setFillColorRGB(0.86, 0.15, 0.15)
+            c.drawString(64, y, _gruppentitel(gruppe))
+            y -= 13
+        grundlinie = y - oben
+        bezeichner.zeichne(c, 68, grundlinie, farbe=TEXTFARBE)
+        links.zeichne(c, 148, grundlinie, farbe=TEXTFARBE)
+        c.setFont("Helvetica-Bold", 8)
+        c.setFillColorRGB(*TEXTFARBE)
+        c.drawRightString(545, grundlinie, str(s.get("ergebnis") or ""))
+        zweite = grundlinie - max(links.unter, bezeichner.unter) - 3 - werte.ueber
+        c.setFont("Helvetica", 8)
+        c.setFillColorRGB(*GRAUFARBE)
+        c.drawString(150, zweite, "=")
+        werte.zeichne(c, 160, zweite, farbe=GRAUFARBE)
+        y = zweite - werte.unter - 7
+    c.setFillColorRGB(*TEXTFARBE)
+    return y - 3
+
+
+def _diagramm_block(c, diagramme: list, y: float, kopf) -> float:
+    """Diagramme des Bauteils zeichnen — je eines über die ganze Textbreite."""
+    if not diagramme:
+        return y
+    c.setFont("Helvetica-Bold", 9)
+    c.setFillColorRGB(0.45, 0.5, 0.55)
+    c.drawString(60, y, "Diagramme")
+    y -= 8
+    for dia in diagramme:
+        hoehe = dia.get("hoehe") or 148
+        if y - hoehe < 46:
+            c.showPage()
+            y = kopf()
+        zeichner = (diagramm.saeulendiagramm if dia.get("art") == "saeulen"
+                    else diagramm.balkendiagramm)
+        werte = {k: v for k, v in dia.items() if k not in ("art", "hoehe")}
+        zeichner(c, 60, y - hoehe, 485, hoehe, **werte)
+        y -= hoehe + 10
+    c.setFillColorRGB(*TEXTFARBE)
+    return y
+
+
 def _berechnungs_seiten(c, abschnitte, projekt_name):
     w, h = A4
     def kopf():
@@ -686,7 +880,9 @@ def _berechnungs_seiten(c, abschnitte, projekt_name):
 
     y = kopf()
     for a in abschnitte:
-        bedarf = 30 + 14 * (len(a["eingaben"]) + len(a["resultate"]) + 2)
+        # Kopf und erste Zeilen sollen zusammenbleiben; ganze Abschnitte
+        # passen mit Rechenweg und Diagrammen ohnehin nicht auf eine Seite.
+        bedarf = min(220, 30 + 14 * (len(a["eingaben"]) + len(a["resultate"]) + 2))
         if y - bedarf < 50:
             c.showPage()
             y = kopf()
@@ -719,33 +915,8 @@ def _berechnungs_seiten(c, abschnitte, projekt_name):
 
         # Rechenweg: Formel, eingesetzte Werte und Ergebnis je Schritt. Ohne ihn
         # ist die Zahl im Export nur eine Behauptung.
-        schritte = a.get("rechenweg") or []
-        if schritte:
-            c.setFont("Helvetica-Bold", 9)
-            c.setFillColorRGB(0.45, 0.5, 0.55)
-            c.drawString(60, y, "Rechenweg")
-            y -= 13
-            gruppe_aktiv = None
-            for s in schritte:
-                if y < 70:
-                    c.showPage()
-                    y = kopf()
-                    gruppe_aktiv = None
-                if s.get("gruppe") and s["gruppe"] != gruppe_aktiv:
-                    gruppe_aktiv = s["gruppe"]
-                    c.setFont("Helvetica-Bold", 8.5)
-                    c.setFillColorRGB(0.86, 0.15, 0.15)
-                    c.drawString(64, y, gruppe_aktiv)
-                    y -= 12
-                c.setFont("Helvetica-Bold", 8)
-                c.setFillColorRGB(0.1, 0.12, 0.2)
-                c.drawString(70, y, f"{s.get('groesse')}: {s.get('formel')}")
-                y -= 10
-                c.setFont("Helvetica", 8)
-                c.setFillColorRGB(0.35, 0.4, 0.45)
-                c.drawString(78, y, f"= {s.get('eingesetzt')}  →  {s.get('ergebnis')}")
-                y -= 12
-            y -= 4
+        y = _rechenweg_block(c, a.get("rechenweg") or [], y, kopf)
+        y = _diagramm_block(c, a.get("diagramme") or [], y, kopf)
 
         for hinweis in a.get("hinweise") or []:
             if y < 60:

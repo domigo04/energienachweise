@@ -780,7 +780,7 @@ export function ExpansionNode({ data, selected: sel }) {
 // ── Brauchwarmwasser-Speicher: wie Speicher, aber GRÜN ───────
 export function BwwNode({ data, selected: sel }) {
   const c = data._calc || {};
-  const liter = c.bereitschaftsvolumen_l ?? data.speicher_liter;
+  const liter = c.speichervolumen_l ?? c.bereitschaftsvolumen_l ?? data.speicher_liter;
   return (
     <div style={wrap(sel)}>
       <ZoneHandles prefix="sz" />

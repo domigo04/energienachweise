@@ -1,9 +1,8 @@
 """Brauchwarmwasser nach SIA 385/2 — Speichervolumen und Anschlussleistung.
 
 Quelle: `Warmwasser-Berechnung_SIA385.xlsm`, Blätter `Belegungsdaten`,
-`Speichervolumen` und die zugehörigen Wertetabellen. Die Formeln sind 1:1
-übernommen; bewusste Abweichungen und Unstimmigkeiten der Vorlage stehen in
-PHYSIK.md §22 und erscheinen als Warnung.
+`Speichervolumen`, `Summenliniendiagramm`, `Ladefunktion` und die zugehörigen
+Wertetabellen. Die Formeln und Lastprofile sind 1:1 übernommen.
 
 Rechengang:
 
@@ -12,6 +11,7 @@ Rechengang:
     V_W,d,1 / n_z           → Steuervolumen         V_W,sto,ctrl
     np · V_W,u,pk · f_pk    → Spitzendeckungsvolumen V_W,sto,pk
     ctrl + pk               → Bereitschaftsvolumen  V_W,sto,cont
+    V_W,sto,cont · f_sto    → Speichervolumen       V_W,sto,1
     V_sto · cp · Δθ / …     → Anschlussleistung     Q_A
 """
 
@@ -57,6 +57,17 @@ SPITZENDECKUNG_STUFEN = [
 ]
 
 CP_WASSER_KJ_KGK = 4.187
+
+# Stundenanteile aus `Summenliniendiagramm`, jeweils in Prozent des
+# berechneten Speichervolumens. Beide Tagesprofile summieren sich auf 100 %.
+STUNDENPROFIL_WERKTAG_PROZENT = (
+    0.5, 0.5, 0, 0, 0, 2, 4.5, 7.5, 7, 8.5, 5.5, 5,
+    5, 5, 3.5, 4, 6, 7, 10, 8.5, 4, 3, 2, 1,
+)
+STUNDENPROFIL_WOCHENENDE_PROZENT = (
+    0.5, 0.5, 0, 0, 0, 0.5, 1.5, 4, 8.5, 15, 10.5, 7,
+    6.5, 3, 4, 5.5, 6.5, 6, 7.5, 5, 3, 2, 2, 1,
+)
 
 
 def _zahl(x) -> Optional[float]:
@@ -129,6 +140,39 @@ def _wohnungen_aufbereiten(wohnungen: Optional[list]) -> tuple[list, list]:
             "personen": round(personen_aus_nutzflaeche(flaeche), 4),
         })
     return zeilen, fehler
+
+
+def _stundenprofil(prozente: tuple, speichervolumen_l: float) -> list:
+    """Stunden- und Summenlinie wie in den beiden Excel-Diagrammen."""
+    kumuliert = 0.0
+    punkte = []
+    for stunde, prozent in enumerate(prozente):
+        volumen = speichervolumen_l * prozent / 100
+        kumuliert += volumen
+        punkte.append({
+            "stunde": stunde,
+            "anteil_prozent": prozent,
+            "stundenvolumen_l": round(volumen, 2),
+            "kumuliert_l": round(kumuliert, 2),
+        })
+    return punkte
+
+
+def _diagrammdaten(speichervolumen_l: float) -> dict:
+    """Drei Diagrammreihen der korrigierten Arbeitsmappe bereitstellen."""
+    werktag = _stundenprofil(STUNDENPROFIL_WERKTAG_PROZENT, speichervolumen_l)
+    wochenende = _stundenprofil(
+        STUNDENPROFIL_WOCHENENDE_PROZENT, speichervolumen_l)
+    reserve = speichervolumen_l * 0.10
+    ladefunktion = [
+        {**punkt, "ladekurve_l": round(punkt["kumuliert_l"] + reserve, 2)}
+        for punkt in werktag
+    ]
+    return {
+        "werktag": werktag,
+        "wochenende": wochenende,
+        "ladefunktion": ladefunktion,
+    }
 
 
 def bww_auslegung(
@@ -217,37 +261,37 @@ def bww_auslegung(
     v_ctrl = v_tag / n_z
     v_pk = np_ * v_u_pk * f_pk
     v_cont = v_ctrl + v_pk
+    v_sto = v_cont * f_sto
 
     rechenweg.extend([
         _schritt_latex("V_{W,d,1}", "V = np · V_W,u · f_Warmhaltesystem",
                        f"{np_:.2f} · {_z(v_u, 1)} · {_z(f_warm, 2)}", f"{v_tag:.0f} l/d",
-                       r"V_{W,d,1}=n_p\cdot V_{W,u}\cdot f_{warm}"),
+                       r"V_{W,d,1}=n_p\cdot V_{W,u}\cdot f_{warm}",
+                       rf"{np_:.2f}\cdot {_z(v_u, 1)}\cdot {_z(f_warm, 2)}"),
         _schritt_latex("V_{W,sto,ctrl}", "V = V_W,d,1 / n_z",
                        f"{v_tag:.0f} / {_z(n_z, 1)}", f"{v_ctrl:.0f} l",
-                       r"V_{W,sto,ctrl}=\frac{V_{W,d,1}}{n_z}"),
+                       r"V_{W,sto,ctrl}=\frac{V_{W,d,1}}{n_z}",
+                       rf"\frac{{{v_tag:.2f}}}{{{_z(n_z, 1)}}}"),
         _schritt_latex("V_{W,sto,pk}", "V = np · V_W,u,pk · f_pk",
                        f"{np_:.2f} · {_z(v_u_pk, 1)} · {_z(f_pk, 2)}", f"{v_pk:.0f} l",
-                       r"V_{W,sto,pk}=n_p\cdot V_{W,u,pk}\cdot f_{pk}"),
+                       r"V_{W,sto,pk}=n_p\cdot V_{W,u,pk}\cdot f_{pk}",
+                       rf"{np_:.2f}\cdot {_z(v_u_pk, 1)}\cdot {_z(f_pk, 2)}"),
         _schritt_latex("V_{W,sto,cont}", "V = V_sto,ctrl + V_sto,pk",
                        f"{v_ctrl:.0f} + {v_pk:.0f}", f"{v_cont:.0f} l",
-                       r"V_{W,sto,cont}=V_{W,sto,ctrl}+V_{W,sto,pk}"),
+                       r"V_{W,sto,cont}=V_{W,sto,ctrl}+V_{W,sto,pk}",
+                       rf"{v_ctrl:.2f}+{v_pk:.2f}"),
+        _schritt_latex("V_{W,sto,1}", "V = V_W,sto,cont · f_sto",
+                       f"{v_cont:.2f} · {_z(f_sto, 2)}", f"{v_sto:.0f} l",
+                       r"V_{W,sto,1}=V_{W,sto,cont,1}\cdot f_{sto}",
+                       rf"{v_cont:.2f}\cdot {_z(f_sto, 2)}"),
     ])
 
-    # Die Vorlage berechnet den Faktor Speicherkonfiguration, verwendet ihn aber
-    # in keiner Formel. Er wird deshalb ausgewiesen, nicht still eingerechnet.
-    warnungen.append(
-        f"Faktor Speicherkonfiguration {f_sto:g} "
-        f"({SPEICHERKONFIGURATIONEN[speicherkonfiguration]['label']}) ist in der "
-        f"Vorlage berechnet, aber in keiner Formel verwendet. Mit ihm wären es "
-        f"{v_cont * f_sto:.0f} l statt {v_cont:.0f} l — fachlich zu klären."
-    )
-
     gewaehlt = _zahl(gewaehltes_speichervolumen_l)
-    massgebend = gewaehlt if gewaehlt and gewaehlt > 0 else v_cont
-    if gewaehlt and gewaehlt > 0 and gewaehlt < v_cont:
+    massgebend = v_sto
+    if gewaehlt and gewaehlt > 0 and gewaehlt < v_sto:
         warnungen.append(
             f"Gewählter Speicher {gewaehlt:.0f} l ist kleiner als das "
-            f"Bereitschaftsvolumen {v_cont:.0f} l."
+            f"berechnete Speichervolumen {v_sto:.0f} l."
         )
 
     # ── Anschlussleistung ───────────────────────────────────────────────────
@@ -260,17 +304,10 @@ def bww_auslegung(
         f"({_z(n_z, 1)} · {_z(t_z, 1)} · 3600 · {_z(eta, 2)})",
         f"{q_a:.1f} kW",
         r"Q_A=\frac{V_{W,sto}\cdot c_p\cdot\Delta\theta}"
-        r"{n_z\cdot t_z\cdot3600\cdot\eta}", gruppe="Leistungsberechnung"))
-
-    # Ein Ladezyklus lädt den Speicher in t_z. Die Vorlage teilt zusätzlich
-    # durch n_z, verteilt die Ladung also über alle Zyklen zusammen.
-    q_a_je_zyklus = _mround(massgebend * CP_WASSER_KJ_KGK * d_theta / (t_z * 3600 * eta), 0.5)
-    if abs(q_a_je_zyklus - q_a) > 0.5:
-        warnungen.append(
-            f"Vorlagenformel teilt durch n_z · t_z ({n_z:g} · {t_z:g} h) und ergibt "
-            f"{q_a:.1f} kW. Wird der Speicher in einem Zyklus von {t_z:g} h geladen, "
-            f"sind es {q_a_je_zyklus:.1f} kW. Bezug von t_z fachlich festlegen."
-        )
+        r"{n_z\cdot t_z\cdot3600\cdot\eta}",
+        rf"\frac{{{massgebend:.2f}\cdot {CP_WASSER_KJ_KGK}\cdot {_z(d_theta, 1)}}}"
+        rf"{{{_z(n_z, 1)}\cdot {_z(t_z, 1)}\cdot3600\cdot {_z(eta, 2)}}}",
+        gruppe="Leistungsberechnung"))
 
     return {
         "personen": round(np_, 2),
@@ -291,10 +328,11 @@ def bww_auslegung(
         "steuervolumen_l": round(v_ctrl),
         "spitzendeckungsvolumen_l": round(v_pk),
         "bereitschaftsvolumen_l": round(v_cont),
+        "speichervolumen_l": round(v_sto),
         "gewaehltes_speichervolumen_l": round(gewaehlt) if gewaehlt else None,
         "massgebendes_volumen_l": round(massgebend),
         "anschlussleistung_kw": round(q_a, 2),
-        "anschlussleistung_je_zyklus_kw": round(q_a_je_zyklus, 2),
+        "diagramme": _diagrammdaten(v_sto),
         "rechenweg": rechenweg,
         "warnungen": warnungen,
     }
@@ -336,20 +374,20 @@ def leistungsabgleich(resultat: dict, waermepumpenleistung_kw: Optional[float],
 
     v_tag = _zahl(resultat.get("nutzwarmwasserbedarf_l_d")) or 0
     v_pk = _zahl(resultat.get("spitzendeckungsvolumen_l")) or 0
-    gewaehlt = _zahl(resultat.get("gewaehltes_speichervolumen_l"))
+    f_sto = _zahl(resultat.get("faktor_speicherkonfiguration")) or 1
     zyklen_min = None
     if v_tag > 0 and t_z > 0 and d_theta > 0 and eta > 0:
         start = max(1, math.ceil(n_z))
         for zyklen in range(start + 1, 13):
             v_ctrl = v_tag / zyklen
             v_cont = v_ctrl + v_pk
-            massgebend = gewaehlt if gewaehlt and gewaehlt > 0 else v_cont
+            massgebend = v_cont * f_sto
             q = _mround(
                 massgebend * cp * d_theta / (zyklen * t_z * 3600 * eta), 0.5)
             if q <= leistung:
                 zyklen_min = zyklen
                 resultat["ladezyklen_min_fuer_wp"] = zyklen
-                resultat["speichervolumen_bei_zyklen_l"] = round(v_cont)
+                resultat["speichervolumen_bei_zyklen_l"] = round(massgebend)
                 resultat["anschlussleistung_bei_zyklen_kw"] = round(q, 2)
                 break
 

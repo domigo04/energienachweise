@@ -151,6 +151,7 @@ def legende_zeilen(nodes: list, results: dict) -> list:
                     ("Steuervolumen", b.get("steuervolumen_l"), "l"),
                     ("Spitzendeckungsvolumen", b.get("spitzendeckungsvolumen_l"), "l"),
                     ("Bereitschaftsvolumen", b.get("bereitschaftsvolumen_l"), "l"),
+                    ("Speichervolumen inkl. Konfigurationsfaktor", b.get("speichervolumen_l"), "l"),
                     ("Anschlussleistung", b.get("anschlussleistung_kw"), "kW"),
                     ("Wärmepumpenleistung verfügbar", b.get("waermepumpenleistung_kw"), "kW"),
                     ("Leistungsreserve", b.get("leistungsreserve_kw"), "kW"),

@@ -564,8 +564,9 @@ nicht enthalten. Die Ladeleistung ist vorerst eine Eingabe am BWW-Speicher.
 Grundlage für den nächsten Schritt ist `Warmwasser-Berechnung_SIA385.xlsm`.
 
 ## 22. Brauchwarmwasser nach SIA 385/2 (2026-08-04)
-Quelle: `Warmwasser-Berechnung_SIA385.xlsm`, Blätter `Belegungsdaten`,
-`Speichervolumen` und die zugehörigen Wertetabellen. Umgesetzt in
+Quelle: korrigierte `Warmwasser-Berechnung_SIA385.xlsm`, Blätter
+`Belegungsdaten`, `Speichervolumen`, `Summenliniendiagramm`, `Ladefunktion`
+und die zugehörigen Wertetabellen. Umgesetzt in
 `backend/app/calculations/bww_sia385.py`.
 
 ### Rechengang
@@ -575,6 +576,7 @@ Quelle: `Warmwasser-Berechnung_SIA385.xlsm`, Blätter `Belegungsdaten`,
 - `V_W,sto,ctrl = V_W,d,1 / n_z`
 - `V_W,sto,pk = np · V_W,u,pk · f_pk`
 - `V_W,sto,cont = V_W,sto,ctrl + V_W,sto,pk`
+- `V_W,sto,1 = V_W,sto,cont · f_sto`
 - `Q_A = MROUND( V_sto · cp · ΔΘ / (n_z · t_z · 3600 · η), 0.5 )` mit
   `cp = 4.187 kJ/(kg·K)`
 
@@ -586,9 +588,18 @@ Der Spitzendeckungsfaktor ist eine Stufentabelle über die Personenzahl
 (1 P → 1.5 bis ab 301 P → 0.15); zwischen den Stufen gilt der zuletzt erreichte
 Wert, wie beim VLOOKUP mit WAHR in der Vorlage.
 
-Referenzfall der Vorlage (1 P, 1850 l/(d·P), Zirkulation, 2 Zyklen à 2 h,
-1000 l gewählt): 2775 l/d, Steuervolumen 1388 l, Spitzendeckung 105 l,
-Bereitschaftsvolumen 1492 l, Anschlussleistung 15.5 kW — exakt getroffen.
+Referenzfall der korrigierten Vorlage (eine Wohnung mit 200 m², 3.0778 P,
+EFH gehobener Standard, Warmhalteband, aussenliegender Wärmetauscher,
+2 Zyklen à 2 h): 228.525 l/d, Steuervolumen 114.263 l,
+Spitzendeckungsvolumen 144.348 l, Bereitschaftsvolumen 258.610 l,
+Speichervolumen 284.471 l und Anschlussleistung 4.5 kW — exakt getroffen.
+
+Die Stundenprofile Montag–Freitag und Samstag/Sonntag aus der Vorlage werden
+als 24 Prozentanteile gespeichert und im Backend mit dem berechneten
+Speichervolumen skaliert. Angezeigt werden Stundenvolumen, Summenlinie und für
+Montag–Freitag zusätzlich die Ladefunktion mit 10 % Reserve. Damit reagieren
+alle drei Diagramme auf dieselben Backendwerte wie die Resultate und der
+Rechenweg.
 
 ### Anbindung
 Die Anschlussleistung wird zur Leistung im BWW-Betriebsfall der Wärmepumpe
@@ -608,17 +619,6 @@ nicht, werden keine Eingaben automatisch verändert. Angezeigt werden stattdesse
 die minimale Ladezeit und — gemäss derselben Excel-Formel — die nächste
 ausreichende ganzzahlige Zahl Ladezyklen samt neuem Speichervorschlag. Bei
 mehreren Wärmepumpen wird ohne eindeutige Zuordnung kein Vergleich geraten.
-
-### Unstimmigkeiten der Vorlage
-Beide werden gerechnet wie in der Vorlage und zusätzlich benannt:
-
-1. Der **Faktor Speicherkonfiguration** wird berechnet, aber in keiner Formel
-   verwendet. Ob das Bereitschaftsvolumen mit ihm zu multiplizieren ist, ist
-   fachlich offen; die Warnung nennt beide Zahlen.
-2. **`Q_A` teilt durch `n_z · t_z`**, verteilt die Ladung also über alle Zyklen
-   zusammen. Wird der Speicher in einem Zyklus von `t_z` geladen, ist die
-   Leistung `n_z`-mal höher. Der Bezug von `t_z` ist festzulegen; beide Werte
-   werden ausgewiesen.
 
 Nicht übernommen ist vorerst das Blatt `Wärmebedarf` (Speicher- und
 Zirkulationsverluste, Hilfsenergie). Es beschreibt den Energiebedarf, nicht die

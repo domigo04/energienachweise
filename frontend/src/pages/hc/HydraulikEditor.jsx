@@ -80,6 +80,10 @@ import {
   branchAnschluss, inlineNodePosition, isBranchInsertable, isInlineInsertable,
 } from './schema/componentRegistry';
 import MathFormula from '../../components/ui/MathFormula';
+import {
+  Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer,
+  Tooltip, XAxis, YAxis,
+} from 'recharts';
 
 // ── Konstanten ────────────────────────────────────────────────
 const KVS_REIHE = [0.1, 0.16, 0.25, 0.4, 0.63, 1.0, 1.6, 2.5, 4.0, 6.3, 10, 16, 25, 40, 63];
@@ -1065,7 +1069,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         {br?.anschlussleistung_kw != null && <>
           <Div/>
           {ro('Personen', br.personen, 'P')}
-          {ro('Speichervorschlag', br.bereitschaftsvolumen_l, 'L', true)}
+          {ro('Berechnetes Speichervolumen', br.speichervolumen_l, 'L', true)}
           {ro('Erforderliche Ladeleistung', br.anschlussleistung_kw, 'kW', true)}
         </>}
         {br?.leistung_ausreichend === false && (
@@ -1075,7 +1079,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         )}
         <div style={{ fontSize:10, lineHeight:1.55, color:'#475569', background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:6, padding:'8px 9px', marginTop:8 }}>
           <b>Doppelklick auf den Speicher</b> öffnet Belegungsdaten, Auslegung,
-          Wärmepumpenabgleich und den vollständigen Rechenweg.
+          Wärmepumpenabgleich, Diagramme und den vollständigen Rechenweg.
         </div>
         <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
@@ -1279,6 +1283,36 @@ function BigVal({ label, value, unit = '', sub = '', color = '#1d4ed8' }) {
         {value != null && value !== '' ? `${value}${unit ? ' ' + unit : ''}` : '—'}
       </div>
       {sub && <div style={{ fontSize:10, color:'#94a3b8', marginTop:2 }}>{sub}</div>}
+    </div>
+  );
+}
+
+function BwwDiagramm({ titel, daten, ladefunktion = false }) {
+  if (!daten?.length) return null;
+  return (
+    <div style={{ border:'1px solid #e2e8f0', borderRadius:10, background:'#fff', padding:'12px 12px 8px' }}>
+      <div style={{ fontSize:12, fontWeight:700, color:'#334155', marginBottom:8 }}>{titel}</div>
+      <div style={{ width:'100%', height:270 }}>
+        <ResponsiveContainer>
+          <ComposedChart data={daten} margin={{ top:8, right:12, bottom:6, left:2 }}>
+            <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3" vertical={false}/>
+            <XAxis dataKey="stunde" tick={{ fontSize:10 }}
+              label={{ value:'Tageszeit [h]', position:'insideBottom', offset:-2, fontSize:10 }}/>
+            <YAxis yAxisId="volumen" tick={{ fontSize:10 }} width={48} unit=" L"/>
+            <Tooltip formatter={(value, name) => [`${Number(value).toFixed(1)} L`, name]}
+              labelFormatter={value => `${value}:00 Uhr`}/>
+            <Legend wrapperStyle={{ fontSize:10, paddingTop:8 }}/>
+            <Bar yAxisId="volumen" dataKey="stundenvolumen_l" name="Stundenspitze"
+              fill="#3b82f6" radius={[2,2,0,0]}/>
+            <Line yAxisId="volumen" dataKey="kumuliert_l" name="Stundenspitze aufsummiert"
+              stroke="#dc2626" strokeWidth={2.5} dot={false}/>
+            {ladefunktion && (
+              <Line yAxisId="volumen" dataKey="ladekurve_l" name="Ladekurve (+10 %)"
+                stroke="#84a832" strokeWidth={2.5} dot={false}/>
+            )}
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
     </div>
   );
 }
@@ -1681,7 +1715,7 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
   } else if (node.type === 'bww') {
     const wohnungen = wohnungenAusDaten(d);
     const setWohnungen = (zeilen) => set('bww_wohnungen', zeilen);
-    const bwwTabs = [['wohnungen','Wohnungen'], ['auslegung','Auslegung'], ['rechenweg','Rechenweg']];
+    const bwwTabs = [['wohnungen','Wohnungen'], ['auslegung','Auslegung'], ['diagramme','Diagramme'], ['rechenweg','Rechenweg']];
     const bwwTab = bwwTabs.some(([k]) => k === tab) ? tab : 'wohnungen';
     const rechenweg = br?.rechenweg || [];
     body = (
@@ -1765,15 +1799,17 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
             <div><label style={lbl}>Zeit eines Ladezyklus [h]</label><input type="number" min="0.1" step="0.1" style={inp} value={d.bww_ladezeit_h??2} onChange={e=>set('bww_ladezeit_h',e.target.value)}/></div>
             <div><label style={lbl}>Temperaturerhöhung Δθ [K]</label><input type="number" min="1" style={inp} value={d.bww_delta_theta_k??50} onChange={e=>set('bww_delta_theta_k',e.target.value)}/></div>
             <div><label style={lbl}>Wirkungsgrad Wärmeübertragung</label><input type="number" min="0.01" max="1" step="0.01" style={inp} value={d.bww_wirkungsgrad??0.95} onChange={e=>set('bww_wirkungsgrad',e.target.value)}/></div>
-            <div><label style={lbl}>Gewählter Speicher [L]</label><input type="number" min="0" style={inp} value={d.speicher_liter??''} onChange={e=>set('speicher_liter',e.target.value)} placeholder="optional"/></div>
+            <div><label style={lbl}>Gewählter Speicher zum Vergleich [L]</label><input type="number" min="0" style={inp} value={d.speicher_liter??''} onChange={e=>set('speicher_liter',e.target.value)} placeholder="optional"/></div>
             <div><label style={lbl}>Ladeleistung manuell [kW]</label><input type="number" min="0" style={inp} value={d.bww_ladeleistung_kw??''} onChange={e=>set('bww_ladeleistung_kw',e.target.value)} placeholder="leer = automatisch"/></div>
           </div>
 
           <SubTitel>Speicher und Wärmetauscher</SubTitel>
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:10 }}>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(5, 1fr)', gap:10 }}>
             <BigVal label="Steuervolumen" value={br?.steuervolumen_l} unit="L" color="#0369a1"/>
             <BigVal label="Spitzendeckung" value={br?.spitzendeckungsvolumen_l} unit="L" color="#7c3aed"/>
-            <BigVal label="Speichervorschlag" value={br?.bereitschaftsvolumen_l} unit="L" color="#15803d"/>
+            <BigVal label="Bereitschaft" value={br?.bereitschaftsvolumen_l} unit="L" color="#0f766e"/>
+            <BigVal label="Speichervolumen" value={br?.speichervolumen_l} unit="L" color="#15803d"
+              sub={`${br?.speicherkonfiguration || 'Konfiguration'} · f ${br?.faktor_speicherkonfiguration ?? '—'}`}/>
             <BigVal label="Anschlussleistung" value={br?.anschlussleistung_kw} unit="kW" color="#dc2626"/>
           </div>
 
@@ -1794,6 +1830,18 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
             </div>
           )}
           {br?.warnungen?.map((w,i)=><div key={i} style={warnSt}>⚠ {w}</div>)}
+        </>}
+
+        {bwwTab === 'diagramme' && <>
+          <div style={{ fontSize:11, color:'#475569' }}>
+            Die Stundenprofile und Summenlinien stammen aus der geprüften Excel-Vorlage.
+            Die Literwerte reagieren direkt auf das berechnete Speichervolumen.
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+            <BwwDiagramm titel="Summenliniendiagramm Montag bis Freitag" daten={br?.diagramme?.werktag}/>
+            <BwwDiagramm titel="Summenliniendiagramm Samstag/Sonntag" daten={br?.diagramme?.wochenende}/>
+          </div>
+          <BwwDiagramm titel="Ladefunktion Montag bis Freitag" daten={br?.diagramme?.ladefunktion} ladefunktion/>
         </>}
 
         {bwwTab === 'rechenweg' && (

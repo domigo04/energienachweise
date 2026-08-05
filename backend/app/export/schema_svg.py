@@ -298,26 +298,51 @@ def _handle_pos_base(node, handle: Optional[str]):
 
 KASTEN_ZEILE = 9.5      # Zeilenhöhe im Datenblock
 KASTEN_KOPF = 18.0      # Abstand Titelzeile → erste Kennwertzeile
+KASTEN_LUFT = 4.5       # Luft vor einem Abschnittstitel
 
 
-def datenkasten_masse(titel: str, kennwerte: list) -> tuple:
+def kasten_zeilen(abschnitte: list) -> list:
+    """Abschnitte zu einer Zeilenfolge (art, name, wert) verflachen.
+
+    art ist 'luft', 'titel' oder 'wert'. Editor und Export bauen daraus
+    denselben Block; die Reihenfolge entsteht genau einmal — hier.
+    """
+    zeilen = []
+    for abschnitt in abschnitte or []:
+        if abschnitt.get("titel"):
+            if zeilen:
+                zeilen.append(("luft", "", ""))
+            zeilen.append(("titel", abschnitt["titel"], ""))
+        for name, wert in abschnitt.get("zeilen") or ():
+            zeilen.append(("wert", name, wert))
+    return zeilen
+
+
+def datenkasten_masse(titel: str, abschnitte: list) -> tuple:
     """Breite und Höhe des Datenblocks — Editor und Export nutzen dasselbe."""
-    namen = max([len(str(n)) + 1 for n, _ in kennwerte] + [0])
-    werte = max([len(str(w)) for _, w in kennwerte] + [0])
-    breite = max(60.0, len(str(titel)) * 4.9 + 6, namen * 4.4 + werte * 4.4 + 12)
-    return (min(210.0, breite), KASTEN_KOPF + len(kennwerte) * KASTEN_ZEILE)
+    zeilen = kasten_zeilen(abschnitte)
+    namen = max([len(str(n)) + 1 for art, n, _ in zeilen if art == "wert"] + [0])
+    werte = max([len(str(w)) for art, _, w in zeilen if art == "wert"] + [0])
+    kopfzeilen = [titel] + [n for art, n, _ in zeilen if art == "titel"]
+    breite = max([60.0, namen * 4.4 + werte * 4.4 + 12]
+                 + [len(str(k)) * 4.9 + 6 for k in kopfzeilen])
+    hoehe = KASTEN_KOPF + sum(KASTEN_LUFT if art == "luft" else KASTEN_ZEILE
+                              for art, _, _ in zeilen)
+    return (min(210.0, breite), hoehe)
 
 
 def zeichne_datenkasten(parts: list, mitte_x: float, oben_y: float,
-                        titel: str, kennwerte: list) -> None:
+                        titel: str, abschnitte: list) -> None:
     """Bauteilname und Kennwerte als Datenblock unter dem Bauteil.
 
     Gestalt wie in Dominics Vorlage: Titelzeile, darunter je Kennwert die
     Bezeichnung mit Doppelpunkt links und der Wert in einer zweiten Spalte.
+    Eine Verbrauchergruppe bringt mehrere Abschnitte mit (Pumpe, Ventil,
+    Wärmezähler); die bekommen je einen eigenen Zwischentitel.
     Kein Rahmen — nur eine weisse Unterlegung, damit der Block über Rastern
     und Unterlagen lesbar bleibt.
     """
-    breite, hoehe = datenkasten_masse(titel, kennwerte)
+    breite, hoehe = datenkasten_masse(titel, abschnitte)
     x = mitte_x - breite / 2
     wert_x = x + max(52.0, breite * 0.56)
     parts.append(
@@ -328,16 +353,63 @@ def zeichne_datenkasten(parts: list, mitte_x: float, oben_y: float,
         f'<text x="{_svg_num(x)}" y="{_svg_num(oben_y + 8.5)}" font-size="8.5" '
         f'font-weight="700" fill="#0f172a">{_esc(titel)}</text>'
     )
-    for i, (name, wert) in enumerate(kennwerte):
-        zeile_y = oben_y + KASTEN_KOPF + i * KASTEN_ZEILE
-        parts.append(
-            f'<text x="{_svg_num(x)}" y="{_svg_num(zeile_y)}" font-size="8" '
-            f'fill="#334155">{_esc(name)}:</text>'
-        )
-        parts.append(
-            f'<text x="{_svg_num(wert_x)}" y="{_svg_num(zeile_y)}" font-size="8" '
-            f'fill="#0f172a">{_esc(wert)}</text>'
-        )
+    zeile_y = oben_y + KASTEN_KOPF
+    for art, name, wert in kasten_zeilen(abschnitte):
+        if art == "luft":
+            zeile_y += KASTEN_LUFT
+            continue
+        if art == "titel":
+            parts.append(
+                f'<text x="{_svg_num(x)}" y="{_svg_num(zeile_y)}" font-size="8" '
+                f'font-weight="700" fill="#0f172a">{_esc(name)}</text>'
+            )
+        else:
+            parts.append(
+                f'<text x="{_svg_num(x)}" y="{_svg_num(zeile_y)}" font-size="8" '
+                f'fill="#334155">{_esc(name)}:</text>'
+            )
+            parts.append(
+                f'<text x="{_svg_num(wert_x)}" y="{_svg_num(zeile_y)}" font-size="8" '
+                f'fill="#0f172a">{_esc(wert)}</text>'
+            )
+        zeile_y += KASTEN_ZEILE
+
+
+CAPTION_NAMEN = {
+    "erzeuger": "Wärmeerzeuger", "erdsonden": "Erdsondenfeld",
+    "speicher": "Speicher", "bww": "BWW-Speicher", "verteiler": "Verteiler",
+    "gruppe": "Verbrauchergruppe", "heizkreis": "Heizkreis", "pump": "Pumpe",
+    "valve2": "2-Weg-Ventil", "valve3": "3-Weg-Ventil", "shutoff": "Absperrventil",
+    "stad": "STAD", "checkvalve": "Rückschlagventil", "waermezaehler": "Wärmezähler",
+    "waermezaehler_cad": "Wärmezähler", "expansion": "Expansionsgefäss",
+    "sicherheitsventil": "Sicherheitsventil", "pwt": "Plattentauscher",
+    "lufterhitzer": "Lufterhitzer", "lufterhitzer_gruppe": "Lufterhitzer-Gruppe",
+}
+
+
+def caption_titel(node) -> str:
+    """Kopfzeile des Datenblocks — dieselbe Liste wie im Editor (mitNr)."""
+    d = node.get("data") or {}
+    return d.get("label") or CAPTION_NAMEN.get(node.get("type"), node.get("type") or "Bauteil")
+
+
+def datenblock_anker(node) -> tuple:
+    """Mitte-X und Oberkante des Datenblocks — verschoben wie im Editor."""
+    d = node.get("data") or {}
+    w, h = node_groesse(node)
+    x = (node.get("position") or {}).get("x", 0)
+    y = (node.get("position") or {}).get("y", 0)
+    return (x + w / 2 + (_f(d.get("caption_offset_x")) or 0),
+            y + h + 10 + max(0, _f(d.get("caption_offset_y")) or 0))
+
+
+def zeichne_datenblock(parts: list, node, results) -> None:
+    """Datenblock unter dem Bauteil — für Einzelteile wie für Gruppen gleich."""
+    if (node.get("data") or {}).get("nr") is None:
+        return
+    mitte_x, oben_y = datenblock_anker(node)
+    zeichne_datenkasten(parts, mitte_x, oben_y, caption_titel(node),
+                        bauteil_kennwerte(node, results))
 
 
 def _schraffur(x: float, y: float, w: float, h: float, abstand: float) -> list:
@@ -673,6 +745,7 @@ def zeichne_verteiler(parts, node, results):
         sx = x + vt_stutzen_x(i)
         parts.append(f'<text x="{sx + 6}" y="{y + 17}" font-size="9" font-weight="700" fill="white" font-family="monospace">{i}</text>')
     _nr_badge(parts, x + w - 14, y - 2, (node.get("data") or {}).get("nr"))
+    zeichne_datenblock(parts, node, results)
 
 
 def zeichne_gruppe(parts, node, results):
@@ -761,6 +834,9 @@ def zeichne_gruppe(parts, node, results):
             parts.append(f'<text x="{bx - 4}" y="{y + _gy(210)}" transform="rotate(-90 {bx - 4} {y + _gy(210)})" text-anchor="middle" '
                          f'font-size="8" fill="{RL_FARBE}" font-family="monospace">Bypass {c.get("m_bypass", 0):.3f} m³/h</text>')
     _nr_badge(parts, x + GR_W - 14, y + _gy(64), d.get("nr"))
+    # Eine Gruppe ist kein Einzelbauteil: ihr Block führt Pumpe, Regelventil
+    # und Wärmezähler in eigenen Abschnitten (Vorlage Dominic 2026-08-05).
+    zeichne_datenblock(parts, node, results)
 
 
 def zeichne_lufterhitzer_gruppe(parts, node, results):
@@ -878,6 +954,7 @@ def zeichne_lufterhitzer_gruppe(parts, node, results):
     if schaltung == "drossel":
         entleerhahn(540)
     _nr_badge(parts, x + LH_W, y, d.get("nr"))
+    zeichne_datenblock(parts, node, results)
 
 
 def zeichne_erdsonden(parts, node, results):
@@ -955,6 +1032,7 @@ def zeichne_standard(parts, node, results):
 
     if t == "erdsonden":
         zeichne_erdsonden(parts, node, results)
+        zeichne_datenblock(parts, node, results)
         return
     if t == "heizkreis":
         parts.append(f'<circle cx="{cx}" cy="{cy}" r="{w / 2}" fill="#f0fdf4" stroke="#16a34a" stroke-width="2.5"/>')
@@ -1076,20 +1154,7 @@ def zeichne_standard(parts, node, results):
     # Bauteillage an derselben Stelle und lesbar bleiben (Dominic 2026-08-05).
     # Der Editor rendert sie aus demselben Grund ausserhalb der Drehung.
     _nr_badge(parts, x + w, y, d.get("nr"))
-    if d.get("nr") is not None:
-        caption = label or {
-            "erzeuger": "Wärmeerzeuger", "erdsonden": "Erdsondenfeld",
-            "speicher": "Speicher", "bww": "BWW-Speicher", "verteiler": "Verteiler",
-            "gruppe": "Verbrauchergruppe", "heizkreis": "Heizkreis", "pump": "Pumpe",
-            "valve2": "2-Weg-Ventil", "valve3": "3-Weg-Ventil", "shutoff": "Absperrventil",
-            "stad": "STAD", "checkvalve": "Rückschlagventil", "waermezaehler": "Wärmezähler",
-            "expansion": "Expansionsgefäss", "sicherheitsventil": "Sicherheitsventil",
-            "pwt": "Plattentauscher",
-        }.get(t, t)
-        offset_x = _f(d.get("caption_offset_x")) or 0
-        offset_y = max(0, _f(d.get("caption_offset_y")) or 0)
-        zeichne_datenkasten(parts, cx + offset_x, y + h + 10 + offset_y, caption,
-                            bauteil_kennwerte(node, results))
+    zeichne_datenblock(parts, node, results)
 
 
 def _svg_num(value):
@@ -1255,11 +1320,12 @@ def erzeuge_svg(nodes: list, edges: list, results: dict) -> str:
             xs += [px, px + w]
             ys += [py, py + h]
         if (n.get("data") or {}).get("nr") is not None:
-            d = n.get("data") or {}
-            cap_x = px + w / 2 + (_f(d.get("caption_offset_x")) or 0)
-            cap_y = py + h + 10 + max(0, _f(d.get("caption_offset_y")) or 0)
-            xs += [cap_x - 85, cap_x + 85]
-            ys += [cap_y, cap_y + 18]
+            # Der Datenblock wird gemessen, nicht geschätzt: eine Gruppe bringt
+            # mehrere Abschnitte mit und würde sonst unten abgeschnitten.
+            cap_x, cap_y = datenblock_anker(n)
+            cap_b, cap_h = datenkasten_masse(caption_titel(n), bauteil_kennwerte(n, results))
+            xs += [cap_x - cap_b / 2 - 2, cap_x + cap_b / 2 + 2]
+            ys += [cap_y, cap_y + cap_h]
     for edge in edges:
         edge_data = edge.get("data") or {}
         route_for_bounds = edge_data.get("export_route") or edge_data.get("points") or []

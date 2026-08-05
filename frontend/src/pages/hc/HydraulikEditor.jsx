@@ -626,6 +626,28 @@ function ErzeugerTypFelder({ data, onSet }) {
   );
 }
 
+// ── Typenschild: Fabrikat, Typ, DN ──────────────────────────────────────────
+// Dieselben Felder stehen im Datenkästchen am Bauteil und im PDF-Export
+// (backend/app/export/bauteil_infos.py). Die eingebauten Bauteile einer
+// Verbrauchergruppe verwenden dieselben Felder mit Präfix (`pumpe_fabrikat` …).
+const TYPENSCHILD_FELDER = [['Fabrikat', 'fabrikat', 'text'], ['Typ', 'typ', 'text'], ['DN', 'dn', 'number']];
+// Armaturen ohne eigene Auslegung — sie brauchen trotzdem ein Typenschild.
+const ARMATUREN = new Set(['shutoff', 'stad', 'checkvalve', 'sicherheitsventil', 'waermezaehler_cad']);
+
+function Typenschild({ d, set, praefix = '' }) {
+  return (
+    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 62px', gap:6, marginBottom:7 }}>
+      {TYPENSCHILD_FELDER.map(([label, key, typ]) => (
+        <div key={key}>
+          <label style={lbl}>{label}</label>
+          <input type={typ} style={inp} value={d[praefix + key] ?? ''}
+            onChange={e => set(praefix + key, e.target.value)} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ventilResults, pumpenResults, expansionResults, anschlussWarnungen, anschlussResults, pwtResults, heatpumpResults, speicherResults, erdsondenResults, bwwResults, onUpdate, onDelete, onSetAbgaenge, navigate, drawingConfig, onDrawingConfig }) {
   // Punkt 13 — nichts ausgewählt heisst nicht „nichts zu zeigen": dann gehören
   // hierher die Eigenschaften der ANSICHT, wie in Revit.
@@ -848,6 +870,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         <PT>{node.type === 'valve2' ? '2-Wege Regelventil'
           : umschaltend ? '3-Weg-Umschaltventil' : '3-Wege Mischventil'}</PT>
         {fld('Bezeichnung','label','','','text')}
+        <Typenschild d={d} set={set}/>
         {node.type === 'valve3' && <>
           <label style={lbl}>Funktion</label>
           <select style={{...inp,cursor:'pointer'}} value={d.funktion||'mischend'}
@@ -893,6 +916,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         <div style={panelSt}>
           <PT>Solepumpe (Quellenkreis)</PT>
           {fld('Bezeichnung','label','Solepumpe','','text')}
+          <Typenschild d={d} set={set}/>
           {ro("Fördervolumen V'", pr.v, 'm³/h', pr.v != null)}
           {ro('Förderhöhe', pr.foerderhoehe_mws, 'mWs', pr.foerderhoehe_mws != null)}
           {pr.foerderhoehe_kpa != null && ro('Förderhöhe', pr.foerderhoehe_kpa, 'kPa')}
@@ -911,6 +935,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
       <div style={panelSt}>
         <PT>Pumpe</PT>
         {fld('Bezeichnung','label','','','text')}
+        <Typenschild d={d} set={set}/>
         {v ? ro("V' (aus Leitung)",v,'m³/h',true) : <div style={warnSt}>In eine Leitung mit Durchfluss setzen</div>}
         <div style={{fontSize:10,fontWeight:700,color:'#475569',marginTop:8,marginBottom:4,textTransform:'uppercase',letterSpacing:'0.05em'}}>Δp gemeinsamer Teil</div>
         {fld('Rohrlänge VL+RL','rohr_m','z.B. 60','m')}
@@ -935,8 +960,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
       <div style={panelSt}>
         <PT>Wärmezähler</PT>
         {fld('Bezeichnung','label','','','text')}
-        {fld('Typ','typ','z.B. Ultraschall','','text')}
-        {fld('Fabrikat','fabrikat','','','text')}
+        <Typenschild d={d} set={set}/>
         {v ? ro('Durchfluss (aus Leitung)', v, 'm³/h', true)
            : <div style={warnSt}>In eine Leitung mit Durchfluss setzen — der Zähler übernimmt automatisch.</div>}
         <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
@@ -1298,8 +1322,12 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
   // ── DEFAULT ──
   return (
     <div style={panelSt}>
-      <PT>{node.type}</PT>
+      <PT>{TITLES[node.type] || node.type}</PT>
       {fld('Bezeichnung','label','','','text')}
+      {ARMATUREN.has(node.type) && <>
+        <Typenschild d={d} set={set}/>
+        {v ? ro("V' (aus Leitung)", v, 'm³/h', true) : null}
+      </>}
       <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
     </div>
   );
@@ -1315,6 +1343,8 @@ const TITLES = {
   stad: 'STAD-Strangregulierventil', temperatur: 'Temperaturfühler',
   sicherheitsventil: 'Sicherheitsventil', pwt: 'Plattentauscher (PWT)',
   checkvalve: 'Rückschlagventil', anschluss: 'Anschluss-Marker',
+  waermezaehler_cad: 'Wärmezähler', lufterhitzer: 'Lufterhitzer',
+  lufterhitzer_gruppe: 'Lufterhitzer-Gruppe',
 };
 
 function BigVal({ label, value, unit = '', sub = '', color = '#1d4ed8' }) {
@@ -1423,12 +1453,14 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
               <input type="checkbox" checked={!!d.hat_wz} onChange={e=>set('hat_wz',e.target.checked)}/>
               Wärmezähler im Strang (SIA-410-Symbol, mit Fühler im VL und RL)
             </label>
+            {d.hat_wz && <Typenschild d={d} set={set} praefix="wz_"/>}
           </>
         )}
 
         {aktTab === 'pumpe' && (
           <>
             <div style={{ fontSize:12, fontWeight:700, color:'#1e293b' }}>{d.label ? `${d.label} — ` : ''}Pumpe (Sekundärkreis, V' = {gr?.m_sek!=null?Number(gr.m_sek).toFixed(3):'—'} m³/h)</div>
+            <Typenschild d={d} set={set} praefix="pumpe_"/>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
               <div><label style={lbl}>Rohr VL+RL [m]</label><input type="number" style={inp} value={d.pumpe_rohr_m??''} onChange={e=>set('pumpe_rohr_m',e.target.value)} placeholder="40"/></div>
               <div><label style={lbl}>Auf [Pa/m]</label><input type="number" style={inp} value={d.pumpe_pam??''} onChange={e=>set('pumpe_pam',e.target.value)} placeholder="70"/></div>
@@ -1443,6 +1475,7 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
         {aktTab === 'ventil' && (
           <>
             <div style={{ fontSize:12, fontWeight:700, color:'#1e293b' }}>{d.label ? `${d.label} — ` : ''}{ventilTitel} · Primärseite, V' = {gr?.m_prim!=null?Number(gr.m_prim).toFixed(3):'—'} m³/h</div>
+            <Typenschild d={d} set={set} praefix="ventil_"/>
             <div><label style={lbl}>Druckverlust geregelter Ast ohne Regelventil [kPa]</label>
               <input type="number" style={inp} value={d.dp_kpa??''} onChange={e=>set('dp_kpa',e.target.value)} placeholder="20"/></div>
             {gr?.ventil ? (
@@ -1498,10 +1531,17 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
         {gr?.pumpe && <BigVal label="Umwälzpumpe" value={gr.pumpe.dp_kpa!=null?gr.pumpe.dp_kpa.toFixed(1):null} unit="kPa"
           sub={gr.pumpe.dp_kpa!=null?`${gr.pumpe.mws.toFixed(2)} mWS · V' ${Number(gr.pumpe.v??0).toFixed(3)} m³/h`:'Rohrlänge/Apparate bei der Verbrauchergruppe ergänzen'}/>}
 
+        {/* Typenschilder der eingebauten Bauteile — sie stehen im Datenkästchen
+            am Bauteil und im PDF-Export. */}
+        {gr?.pumpe && <div><div style={{ fontSize:11, fontWeight:700, color:'#1e293b', marginBottom:4 }}>Umwälzpumpe</div>
+          <Typenschild d={d} set={set} praefix="pumpe_"/></div>}
+        <div><div style={{ fontSize:11, fontWeight:700, color:'#1e293b', marginBottom:4 }}>Regelventil</div>
+          <Typenschild d={d} set={set} praefix="ventil_"/></div>
         <label style={{ display:'flex', gap:6, alignItems:'center', cursor:'pointer', fontSize:12, color:'#374151' }}>
           <input type="checkbox" checked={!!d.hat_wz} onChange={e=>set('hat_wz',e.target.checked)}/>
           Wärmezähler im Rücklauf
         </label>
+        {d.hat_wz && <Typenschild d={d} set={set} praefix="wz_"/>}
       </div>
     );
   } else if (node.type === 'verteiler') {
@@ -2515,6 +2555,9 @@ function EditorInner() {
   const speicherResults = hydraulik.speicher_results || EMPTY_OBJECT;
   const erdsondenResults = hydraulik.erdsonden_results || EMPTY_OBJECT;
   const bwwResults = hydraulik.bww_results || EMPTY_OBJECT;
+  // Kennwerte fürs Datenkästchen am Bauteil — fertig aus dem Backend, damit im
+  // Editor dieselben Zeilen stehen wie im PDF-Export (app/export/bauteil_infos).
+  const nodeInfos = hydraulik.node_infos || EMPTY_OBJECT;
   const alleWarnungen = hydraulik.warnungen || EMPTY_ARRAY;
 
   const editorGraphAnwenden = useCallback((graph) => {

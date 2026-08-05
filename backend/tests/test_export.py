@@ -5,8 +5,12 @@ import pytest
 from pypdf import PdfReader
 
 from app.calculations.hydraulik import berechne_schema
+from app.export.bauteil_infos import bauteil_kennwerte, node_infos
 from app.export.pdf import berechnungs_abschnitte, erzeuge_pdf, legende_zeilen
 from app.export.schema_svg import (
+    caption_titel,
+    datenblock_anker,
+    datenkasten_masse,
     erzeuge_svg,
     ews_breite,
     handle_pos,
@@ -733,3 +737,88 @@ def test_lufterhitzer_ohne_waermezaehler_zeichnet_keinen():
     nodes, edges = _lufterhitzer_anlage([18])
     r = berechne_schema(nodes, edges)
     assert '<polygon points="36,76 84,76 36,180" fill="#000"/>' not in erzeuge_svg(nodes, edges, r)
+
+
+# ── Datenblock am Bauteil (Vorlage Dominic 2026-08-05) ───────────────────────
+def test_datenblock_am_einzelbauteil_zeigt_typenschild_und_kennwerte():
+    """Ein Einzelbauteil hat genau einen Abschnitt — ohne Zwischentitel."""
+    nodes = [
+        {"id": "v", "type": "valve2", "position": {"x": 0, "y": 0}, "data": {
+            "nr": 7, "label": "Regelventil", "fabrikat": "Siemens",
+            "typ": "VVF22.40-25", "dn": "40", "dp_var": "26"}},
+    ]
+    results = berechne_schema(nodes, [])
+    abschnitte = bauteil_kennwerte(nodes[0], results)
+
+    assert [a["titel"] for a in abschnitte] == [None]
+    assert ("Fabrikat", "Siemens") in abschnitte[0]["zeilen"]
+    assert ("Typ", "VVF22.40-25") in abschnitte[0]["zeilen"]
+    assert ("DN", "40") in abschnitte[0]["zeilen"]     # nicht «4» — kein Nullstrippen
+
+    svg = erzeuge_svg(nodes, [], results)
+    assert ">Regelventil<" in svg and ">Fabrikat:<" in svg and ">VVF22.40-25<" in svg
+
+
+def test_datenblock_der_gruppe_hat_je_eingebautem_bauteil_einen_abschnitt():
+    """Eine Gruppe ist kein Einzelteil: Pumpe, Ventil und Zähler stehen getrennt."""
+    nodes, edges = _graph()
+    gruppe = next(n for n in nodes if n["id"] == "g1")
+    gruppe["data"] = {**gruppe["data"], "schaltung": "einspritz", "hat_wz": True,
+                      "pumpe_rohr_m": "40", "pumpe_fabrikat": "Biral",
+                      "ventil_fabrikat": "Siemens", "ventil_dn": "25",
+                      "wz_fabrikat": "Kamstrup"}
+    results = berechne_schema(nodes, edges)
+    abschnitte = bauteil_kennwerte(gruppe, results)
+
+    assert [a["titel"] for a in abschnitte] == [
+        None, "Umwälzpumpe", "Zweiweg-Ventil", "Wärmezähler"]
+    kopf = dict(abschnitte[0]["zeilen"])
+    assert kopf["Temperaturen"] == "35/28 °C"
+    assert kopf["Leistung"] == "5 kW"
+    assert kopf["Massenstrom"].endswith(" kg/h")         # Vorlage rechnet in kg/h
+    assert ("Fabrikat", "Biral") in abschnitte[1]["zeilen"]
+    assert ("DN", "25") in abschnitte[2]["zeilen"]
+    assert ("Fabrikat", "Kamstrup") in abschnitte[3]["zeilen"]
+
+    # Die Abschnittstitel müssen auch wirklich im Schema-SVG stehen.
+    svg = erzeuge_svg(nodes, edges, results)
+    assert ">Umwälzpumpe<" in svg and ">Zweiweg-Ventil<" in svg and ">Wärmezähler<" in svg
+
+
+def test_beimischschaltung_beschriftet_das_dreiwegeventil():
+    nodes, edges = _graph()
+    gruppe = next(n for n in nodes if n["id"] == "g1")
+    gruppe["data"] = {**gruppe["data"], "schaltung": "beimisch", "ventil_fabrikat": "Belimo"}
+    abschnitte = bauteil_kennwerte(gruppe, berechne_schema(nodes, edges))
+    assert "Dreiweg-Ventil" in [a["titel"] for a in abschnitte]
+
+
+def test_drosselgruppe_hat_keinen_pumpenabschnitt():
+    """Drossel hat nie eine Gruppenpumpe (PHYSIK §6) — also auch keinen Abschnitt."""
+    nodes, edges = _graph()
+    gruppe = next(n for n in nodes if n["id"] == "g1")
+    gruppe["data"] = {**gruppe["data"], "schaltung": "drossel", "pumpe_fabrikat": "Biral"}
+    titel = [a["titel"] for a in bauteil_kennwerte(gruppe, berechne_schema(nodes, edges))]
+    assert "Umwälzpumpe" not in titel
+
+
+def test_bildausschnitt_schneidet_den_datenblock_nicht_ab():
+    """Der Block wird gemessen: eine Gruppe braucht mehr Platz als eine Zeile."""
+    nodes, edges = _graph()
+    gruppe = next(n for n in nodes if n["id"] == "g1")
+    gruppe["data"] = {**gruppe["data"], "hat_wz": True, "pumpe_rohr_m": "40"}
+    results = berechne_schema(nodes, edges)
+    _, hoehe = datenkasten_masse(caption_titel(gruppe), bauteil_kennwerte(gruppe, results))
+    _, unterkante = datenblock_anker(gruppe)
+
+    viewbox = erzeuge_svg(nodes, edges, results).split('viewBox="')[1].split('"')[0]
+    y0, box_hoehe = float(viewbox.split()[1]), float(viewbox.split()[3])
+    assert y0 + box_hoehe >= unterkante + hoehe
+
+
+def test_node_infos_liefert_abschnitte_fuer_den_editor():
+    """Der Editor bekommt dieselben Abschnitte wie der PDF-Export."""
+    nodes, edges = _graph()
+    infos = node_infos(nodes, berechne_schema(nodes, edges))
+    assert infos["g1"][0]["titel"] is None
+    assert {"name": "Temperaturen", "wert": "35/28 °C"} in infos["g1"][0]["zeilen"]

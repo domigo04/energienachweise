@@ -1084,7 +1084,10 @@ function mitNr(Comp) {
       lufterhitzer:'Lufterhitzer', lufterhitzer_gruppe:'Lufterhitzer-Gruppe',
       waermezaehler_cad:'Wärmezähler',
     }[props.type] || 'Bauteil';
-    const kennwerte = Array.isArray(props.data?._calc?.kennwerte) ? props.data._calc.kennwerte : [];
+    // Abschnitte: [{titel, zeilen:[{name,wert}]}]. Ein Einzelbauteil hat genau
+    // einen Abschnitt ohne Titel, eine Verbrauchergruppe je eingebautem Gerät
+    // einen eigenen (Pumpe, Regelventil, Wärmezähler).
+    const abschnitte = Array.isArray(props.data?._calc?.kennwerte) ? props.data._calc.kennwerte : [];
     const captionPointerDown = (event) => {
       if (event.button !== 0) return;
       event.preventDefault();
@@ -1143,19 +1146,24 @@ function mitNr(Comp) {
             <div style={{ fontWeight:700 }}>{caption}</div>
             {/* Kennwerte kommen fertig aus dem Backend (node_infos) — dieselbe
                 Quelle zeichnet das Kästchen im PDF-Export. */}
-            {kennwerte.length > 0 && (
-              <table style={{ borderTop:'1px solid #cbd5e1', marginTop:2, width:'100%',
-                borderCollapse:'collapse', fontSize:8 }}>
-                <tbody>
-                  {kennwerte.map((k, i) => (
-                    <tr key={i}>
-                      <td style={{ color:'#64748b', textAlign:'left', paddingRight:6 }}>{k.name}</td>
-                      <td style={{ color:'#0f172a', textAlign:'right' }}>{k.wert}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+            {abschnitte.map((abschnitt, a) => (
+              <div key={a}>
+                {abschnitt.titel
+                  ? <div style={{ fontWeight:700, textAlign:'left', marginTop:4 }}>{abschnitt.titel}</div>
+                  : null}
+                <table style={{ borderTop:a === 0 ? '1px solid #cbd5e1' : 'none', marginTop:2,
+                  width:'100%', borderCollapse:'collapse', fontSize:8 }}>
+                  <tbody>
+                    {(abschnitt.zeilen || []).map((k, i) => (
+                      <tr key={i}>
+                        <td style={{ color:'#64748b', textAlign:'left', paddingRight:6 }}>{k.name}</td>
+                        <td style={{ color:'#0f172a', textAlign:'right' }}>{k.wert}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
           </div>
         )}
       </div>

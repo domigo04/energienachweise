@@ -612,6 +612,15 @@ Bezeichnung, Nutzfläche und daraus berechnete Personenzahl. Alte Schemas mit
 einer reinen Liste von Nutzflächen bleiben lesbar und werden im Dialog als
 `Wohnung 1`, `Wohnung 2` usw. dargestellt.
 
+Als transparente Auslegungshilfe empfiehlt das Backend bei einer berechneten
+Anschlussleistung von mehr als 10 kW ein aussenliegendes Register. Bis und mit
+10 kW wird ein innenliegendes Register vorgeschlagen. Die Grenze ist eine
+Planungsvorgabe, keine SIA-Formel: Die gewählte Registerart wird deshalb nie
+stillschweigend geändert. Weicht die Wahl vom Vorschlag ab, bleibt sie erhalten
+und wird mit einem Hinweis ausgegeben. Ein aussenliegendes Register erscheint
+im Schema als Plattenwärmetauscher neben dem BWW-Speicher; dieser Hinweis
+erzeugt bewusst keinen zusätzlichen hydraulischen Rechenknoten.
+
 Bei genau einer Wärmepumpe vergleicht das Backend die erforderliche
 Anschlussleistung mit deren `bww_leistung_kw`; fehlt dieser Betriebspunkt,
 wird sichtbar die Nennleistung `leistung_kw` verwendet. Reicht die Leistung

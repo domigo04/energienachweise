@@ -209,3 +209,21 @@ def test_manuelle_ladeleistung_hat_vorrang():
 
     assert ergebnisse["bww"]["anschlussleistung_kw"] != 42
     assert _bww_ladeleistung(nodes, ergebnisse) == 42
+
+
+def test_registervorschlag_folgt_der_zehn_kw_grenze_ohne_auswahl_zu_ueberschreiben():
+    from app.calculations.hydraulik import _bww_ergebnisse
+
+    klein = _bww_ergebnisse([{"id": "klein", "type": "bww", "data": {
+        "bww_personen": 2, "bww_speicherkonfiguration": "innen",
+    }}])["klein"]
+    gross = _bww_ergebnisse([{"id": "gross", "type": "bww", "data": {
+        "bww_personen": 100, "bww_speicherkonfiguration": "innen",
+    }}])["gross"]
+
+    assert klein["anschlussleistung_kw"] <= 10
+    assert klein["register_vorschlag"] == "innen"
+    assert gross["anschlussleistung_kw"] > 10
+    assert gross["register_vorschlag"] == "aussen"
+    assert gross["register_bauart"] == "innen"  # Vorschlag, keine stille Umstellung
+    assert any("Aussenliegendes Register" in w for w in gross["warnungen"])

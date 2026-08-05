@@ -9,6 +9,7 @@ import {
   segmentAchse,
   mitgezogeneWaypoints,
   adaptivePolyline,
+  orthogonalerAnschlussEckpunkt,
   roundedPolylinePath,
 } from "./geometry";
 
@@ -168,6 +169,16 @@ describe("adaptivePolyline — CAD-Grundsatz", () => {
     const nachher = adaptivePolyline({ x: 40, y: 0 }, { x: 40, y: 90 }, [], "bottom", "top");
     expect(vorher).toHaveLength(2);
     expect(nachher).toHaveLength(2); // weiterhin gerade, kein Knick
+  });
+});
+
+describe("orthogonalerAnschlussEckpunkt", () => {
+  it("lässt bereits fluchtende Anschlüsse exakt gerade", () => {
+    expect(orthogonalerAnschlussEckpunkt({ x:40, y:0 }, { x:40, y:120 }, "top")).toBeNull();
+  });
+
+  it("erzeugt auch bei einem freien Leitungsende einen 90-Grad-Knick", () => {
+    expect(orthogonalerAnschlussEckpunkt({ x:0, y:0 }, { x:120, y:40 })).toEqual({ x:120, y:0 });
   });
 });
 

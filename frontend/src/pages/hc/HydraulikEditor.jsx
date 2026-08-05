@@ -18,7 +18,7 @@ import './HydraulikEditor.css';
 import { NODE_TYPES, NUMMERIERT, ROTATABLE } from '../../components/hc/nodes/HydraulikNodes';
 import { anfahrtsSeite, anschluesseNachDrehung, gedrehteSeite } from '../../components/hc/nodes/anschlussSeite';
 import { EDGE_TYPES } from '../../components/hc/edges/FlowEdge';
-import { pairedHandleId, parallelWaypoints, roundedPolylinePath, splitRouteAtCorner, splitRouteAtPoint, reconnectThroughNode, adaptivePolyline, segmentAchse, mitgezogeneWaypoints } from '../../components/hc/edges/geometry';
+import { pairedHandleId, parallelWaypoints, roundedPolylinePath, splitRouteAtCorner, splitRouteAtPoint, reconnectThroughNode, adaptivePolyline, orthogonalerAnschlussEckpunkt, segmentAchse, mitgezogeneWaypoints } from '../../components/hc/edges/geometry';
 import { createHydraulicEdge, canStartHydraulicLine } from './schema/edgeFactory';
 import {
   ALIGN, BREAK, DRAW_PIPE, HOME, MOVE, PLACE, STRETCH,
@@ -35,6 +35,7 @@ import { SOLE_ROHRE, SOLE_TRAEGER } from './schema/soleTabellen';
 import {
   wohnungAendern, wohnungEntfernen, wohnungHinzufuegen, wohnungenAusDaten,
 } from './schema/bwwWohnungen';
+import { eingefuegterKnoten, kopierbarerKnoten } from './schema/nodeClipboard';
 import {
   abzweigPunkt, fensterAus, labelVerschoben, labelVersatz,
   leitungMitLueckeTrennen, leitungsSystem, leitungVerschieben, routeBereinigen, routeDehnen,
@@ -236,19 +237,6 @@ function anschlussSeite(handle, internal) {
     ['bottom', Math.abs(height - centerY)],
   ];
   return candidates.sort((a, b) => a[1] - b[1])[0]?.[0] || null;
-}
-
-// Der letzte Abschnitt trifft den Bauteilanschluss immer rechtwinklig. Die
-// Seite des Handles entscheidet, ob die Anfahrt horizontal oder vertikal ist.
-function orthogonalerAnschlussEckpunkt(origin, target, side) {
-  if (!origin || !target || !side) return null;
-  let corner = null;
-  if (side === 'left' || side === 'right') corner = { x:origin.x, y:target.y };
-  if (side === 'top' || side === 'bottom') corner = { x:target.x, y:origin.y };
-  if (!corner) return null;
-  const sameAsOrigin = Math.hypot(corner.x - origin.x, corner.y - origin.y) < 1;
-  const sameAsTarget = Math.hypot(corner.x - target.x, corner.y - target.y) < 1;
-  return sameAsOrigin || sameAsTarget ? null : corner;
 }
 
 function projektionAufSegment(point, a, b) {
@@ -724,7 +712,15 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
           <div><label style={{...lbl,color:'#3b82f6'}}>RL [°C]</label>
             <input type="number" style={{...inp,borderColor:'#93c5fd'}} value={d.rl_temp??''} onChange={e=>set('rl_temp',e.target.value)} placeholder="28"/></div>
         </div>
-        {fld('Leistung Q','q_kw','z.B. 8.5','kW')}
+        {gr?.q_kw_quelle === 'lufterhitzer_untergruppen' ? (
+          <>
+            {ro('Leistung Q (automatische Summe)', gr.q_kw, 'kW', true)}
+            <div style={{ fontSize:9, color:'#0369a1', background:'#f0f9ff', border:'1px solid #bae6fd', borderRadius:6, padding:'6px 8px', marginTop:3 }}>
+              Aus {gr.untergruppen_anzahl} angeschlossenen Lufterhitzergruppe(n) summiert.
+              Die manuelle Gruppenleistung bleibt gespeichert und gilt wieder, sobald der separate Anschluss deaktiviert oder keine Untergruppe verbunden ist.
+            </div>
+          </>
+        ) : fld('Leistung Q','q_kw','z.B. 8.5','kW')}
         {fld('Druckverlust Ast','dp_kpa','z.B. 20','kPa')}
         {vl>0&&rl>0&&dt<=0&&<div style={warnSt}>⚠ VL muss grösser als RL sein</div>}
         <label style={lbl}>Schaltung</label>
@@ -1104,6 +1100,12 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
           {ro('Personen', br.personen, 'P')}
           {ro('Berechnetes Speichervolumen', br.speichervolumen_l, 'L', true)}
           {ro('Erforderliche Ladeleistung', br.anschlussleistung_kw, 'kW', true)}
+          <div style={{ fontSize:9, lineHeight:1.5, color:br.register_vorschlag==='aussen'?'#9a3412':'#166534',
+            background:br.register_vorschlag==='aussen'?'#fff7ed':'#f0fdf4',
+            border:`1px solid ${br.register_vorschlag==='aussen'?'#fed7aa':'#bbf7d0'}`,
+            borderRadius:6, padding:'6px 8px', marginTop:5 }}>
+            <b>Registervorschlag:</b> {br.register_vorschlag_text}
+          </div>
         </>}
         {br?.leistung_ausreichend === false && (
           <div style={{ ...warnSt, background:'#fef2f2', borderColor:'#fecaca', color:'#b91c1c' }}>
@@ -1259,7 +1261,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         </div>
         {fld('Schriftgrösse','fontSize','12','px')}
         <div style={{ fontSize:10, color:'#94a3b8', lineHeight:1.5 }}>
-          Direkt auf der Leinwand: Doppelklick zum Bearbeiten, ziehen zum Verschieben.
+          Direkt auf der Leinwand: Doppelklick zum Bearbeiten, ziehen zum Verschieben. Ausgewählten Textblock mit ⌘C/⌘V kopieren.
         </div>
         <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
@@ -1832,7 +1834,12 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
               <select style={inp} value={d.bww_speicherkonfiguration||'aussen'} onChange={e=>set('bww_speicherkonfiguration',e.target.value)}>
                 <option value="aussen">Aussenliegender Wärmetauscher (1.10)</option>
                 <option value="innen">Innenliegender Wärmetauscher (1.25)</option>
-              </select></div>
+              </select>
+              {br?.register_vorschlag_text && (
+                <div style={{ fontSize:9, lineHeight:1.45, color:br.register_vorschlag==='aussen'?'#9a3412':'#166534', marginTop:4 }}>
+                  Vorschlag bei Grenze {br.register_grenze_kw} kW: {br.register_vorschlag_text}
+                </div>
+              )}</div>
             <div><label style={lbl}>Ladezyklen pro Tag</label><input type="number" min="1" step="1" style={inp} value={d.bww_ladezyklen??2} onChange={e=>set('bww_ladezyklen',e.target.value)}/></div>
             <div><label style={lbl}>Zeit eines Ladezyklus [h]</label><input type="number" min="0.1" step="0.1" style={inp} value={d.bww_ladezeit_h??2} onChange={e=>set('bww_ladezeit_h',e.target.value)}/></div>
             <div><label style={lbl}>Temperaturerhöhung Δθ [K]</label><input type="number" min="1" style={inp} value={d.bww_delta_theta_k??50} onChange={e=>set('bww_delta_theta_k',e.target.value)}/></div>
@@ -4670,15 +4677,23 @@ function EditorInner() {
         ev.preventDefault(); redo();
       }
       if ((ev.metaKey || ev.ctrlKey) && (ev.key === 'c' || ev.key === 'C')) {
-        if (selected) { const n = nodesRef.current.find(x => x.id === selected.id); if (n) clipboard.current = n; }
+        const ausgewaehlt = nodesRef.current.find(node => node.selected)
+          || (selected ? nodesRef.current.find(node => node.id === selected.id) : null);
+        if (ausgewaehlt) {
+          ev.preventDefault();
+          clipboard.current = kopierbarerKnoten(ausgewaehlt);
+        }
       }
       if ((ev.metaKey || ev.ctrlKey) && (ev.key === 'v' || ev.key === 'V') && clipboard.current) {
         ev.preventDefault();
         const src = clipboard.current;
         snap();
-        setNodes(ns => [...ns, { ...src, id: newId(), selected: false,
-          position: { x: (src.position?.x || 0) + 24, y: (src.position?.y || 0) + 24 },
-          data: { ...src.data, ...(NUMMERIERT.includes(src.type) ? { nr: naechsteNr(ns) } : {}) } }]);
+        const nummer = NUMMERIERT.includes(src.type) ? naechsteNr(nodesRef.current) : null;
+        const neu = eingefuegterKnoten(src, newId(), { nummer });
+        setNodes(ns => [...ns.map(node => ({ ...node, selected:false })), neu]);
+        clipboard.current = kopierbarerKnoten(neu);
+        setSelected(neu);
+        setSelectedEdgeId(null);
       }
       if (!ev.metaKey && !ev.ctrlKey) {
         const key = ev.key.toLowerCase();
@@ -4840,7 +4855,7 @@ function EditorInner() {
         data: c ? { ...n.data, _calc: c } : n.data,
       };
     }
-    if (n.type === 'gruppe' || n.type === 'heizkreis') {
+    if (n.type === 'gruppe' || n.type === 'heizkreis' || n.type === 'lufterhitzer_gruppe') {
       return { ...n, data: { ...n.data, _calc: { ...(gruppeResults[n.id] || {}), v: nodeFlows[n.id] } } };
     }
     if (n.type === 'waermezaehler') {
@@ -4880,7 +4895,10 @@ function EditorInner() {
           const c = gruppeResults[n.id] || {};
           const sn = { einspritz: 'Einspritz', beimisch: 'Beimisch', drossel: 'Drossel' }[schaltungVon(d)];
           const bez = d.label || 'Gruppe';
-          werte = `${sn} · ${d.q_kw ?? '—'} kW · ${d.vl_temp ?? '—'}/${d.rl_temp ?? '—'} °C · sek ${fx(c.m_sek)} / prim ${fx(c.m_prim)} m³/h${d.dp_kpa ? ` · Δp ${d.dp_kpa} kPa` : ''}${d.hat_wz ? ' · WZ' : ''}${c.pumpe?.dp_kpa != null ? ` · ${bez} Pumpe ${c.pumpe.dp_kpa.toFixed(1)} kPa` : ''}${c.ventil?.pv != null ? ` · ${bez} Ventil kvs ${c.ventil.kvs_eff} (Pv ${c.ventil.pv.toFixed(1)}%)` : ''}`;
+          werte = `${sn} · ${c.q_kw ?? d.q_kw ?? '—'} kW · ${d.vl_temp ?? '—'}/${d.rl_temp ?? '—'} °C · sek ${fx(c.m_sek)} / prim ${fx(c.m_prim)} m³/h${c.q_kw_quelle === 'lufterhitzer_untergruppen' ? ` · Summe aus ${c.untergruppen_anzahl} Lufterhitzern` : ''}${d.dp_kpa ? ` · Δp ${d.dp_kpa} kPa` : ''}${d.hat_wz ? ' · WZ' : ''}${c.pumpe?.dp_kpa != null ? ` · ${bez} Pumpe ${c.pumpe.dp_kpa.toFixed(1)} kPa` : ''}${c.ventil?.pv != null ? ` · ${bez} Ventil kvs ${c.ventil.kvs_eff} (Pv ${c.ventil.pv.toFixed(1)}%)` : ''}`;
+        } else if (n.type === 'lufterhitzer_gruppe') {
+          const c = gruppeResults[n.id] || {};
+          werte = `${d.q_kw ?? '—'} kW · VL/RL ${c.vl ?? '—'}/${c.rl ?? '—'} °C · V' ${fx(c.m_sek)} m³/h${c.ventil?.kvs_eff != null ? ` · kvs ${c.ventil.kvs_eff}` : ''}`;
         } else if (n.type === 'heizkreis') {
           werte = `${d.q_kw ?? '—'} kW · ${d.vl_temp ?? '—'}/${d.rl_temp ?? '—'} °C · V' ${fx(nodeFlows[n.id])} m³/h`;
         } else if (n.type === 'verteiler') {

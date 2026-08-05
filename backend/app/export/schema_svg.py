@@ -555,8 +555,8 @@ def zeichne_gruppe(parts, node, results):
     hat_ventil = d.get("hat_ventil") is not False
 
     # Strangleitung: oben VL (primär), unten RL
-    parts.append(f'<line x1="{cx}" y1="{y}" x2="{cx}" y2="{y + _gy(128)}" stroke="{VL_FARBE}" stroke-width="2"/>')
-    parts.append(f'<line x1="{cx}" y1="{y + _gy(278)}" x2="{cx}" y2="{y + GR_H}" stroke="{RL_FARBE}" stroke-width="2"/>')
+    parts.append(f'<line x1="{cx}" y1="{y}" x2="{cx}" y2="{y + _gy(145)}" stroke="{VL_FARBE}" stroke-width="2"/>')
+    parts.append(f'<line x1="{cx}" y1="{y + _gy(255)}" x2="{cx}" y2="{y + GR_H}" stroke="{RL_FARBE}" stroke-width="2"/>')
     # Primär-Fluss oben
     if c.get("m_prim") is not None:
         parts.append(f'<text x="{cx + 8}" y="{y + 12}" font-size="9" fill="#1e293b" font-family="monospace">m\': {_kg_h(c.get("m_prim"))} kg/h</text>')
@@ -584,10 +584,11 @@ def zeichne_gruppe(parts, node, results):
             parts.append(f'<line x1="{cx}" y1="{fy}" x2="{cx + 9}" y2="{fy}" stroke="#1e293b" stroke-width="1.4"/>')
             parts.append(f'<circle cx="{cx + 12.5}" cy="{fy}" r="3.5" fill="white" stroke="#1e293b" stroke-width="1.4"/>')
     # Rotes Rechteck mit gedrehtem Text
-    parts.append(f'<rect x="{x + 55}" y="{y + _gy(128)}" width="40" height="{_gy(278) - _gy(128)}" fill="white" stroke="{VL_FARBE}" stroke-width="1.8"/>')
+    parts.append(f'<rect x="{x + 55}" y="{y + _gy(145)}" width="40" height="{_gy(255) - _gy(145)}" fill="white" stroke="{VL_FARBE}" stroke-width="1.8"/>')
+    q_anzeige = c.get("q_kw") if c.get("q_kw") is not None else d.get("q_kw")
     zeilen = [
         d.get("label") or "Verbrauchergruppe",
-        f'{_esc(d.get("q_kw") or "—")} kW · VL/RL {_esc(d.get("vl_temp") or "—")}/{_esc(d.get("rl_temp") or "—")} °C',
+        f'{_esc(q_anzeige if q_anzeige is not None else "—")} kW · VL/RL {_esc(d.get("vl_temp") or "—")}/{_esc(d.get("rl_temp") or "—")} °C',
         f'm\': {_kg_h(c.get("m_sek"))} kg/h',
     ]
     for i, z in enumerate(zeilen):
@@ -843,7 +844,8 @@ def zeichne_standard(parts, node, results):
         parts.append('<path d="M65 4 L75 14 M75 4 L65 14" fill="none" stroke="#111827" stroke-width="2"/>')
         parts.append('<path d="M20 45 A50 25 0 0 1 120 45 L120 245 A50 25 0 0 1 20 245 Z" fill="#e5e7eb" stroke="#111827" stroke-width="3"/>')
         parts.append('<line x1="20" y1="45" x2="120" y2="45" stroke="#111827" stroke-width="3"/>')
-        c = (results.get("speicher_results") or {}).get(node["id"], {}) if t == "speicher" else {}
+        c = ((results.get("speicher_results") or {}).get(node["id"], {}) if t == "speicher"
+             else (results.get("bww_results") or {}).get(node["id"], {}))
         liter = _f(d.get("speicher_liter")) or _f(c.get("speichervolumen_l"))
         liter_text = f"{liter:.0f} L" if liter and liter > 0 else "… L"
         parts.append(f'<text x="70" y="78" text-anchor="middle" font-size="16" font-weight="700">{liter_text}</text>')
@@ -856,6 +858,13 @@ def zeichne_standard(parts, node, results):
             parts.append('<path d="M70 45 V2 M65 9 L70 2 L75 9" fill="none" stroke="#ef4444" stroke-width="3"/>')
             parts.append('<path d="M70 245 V288 M65 281 L70 288 L75 281" fill="none" stroke="#16a34a" stroke-width="3" stroke-dasharray="7 5"/>')
         parts.append("</g>")
+        if t == "bww" and (c.get("register_bauart") or d.get("bww_speicherkonfiguration") or "aussen") == "aussen":
+            # Aussenliegendes Register: PWT direkt am BWW-Speicher sichtbar,
+            # ohne einen zusätzlichen topologischen Knoten vorzutäuschen.
+            _sym(parts, x - 47, y + 51, 40, "pwt", SYM_INNER["pwt"])
+            parts.append(f'<line x1="{x - 7}" y1="{y + 60}" x2="{x + 10}" y2="{y + 60}" stroke="{VL_FARBE}" stroke-width="2"/>')
+            parts.append(f'<line x1="{x - 7}" y1="{y + 80}" x2="{x + 10}" y2="{y + 80}" stroke="{RL_FARBE}" stroke-width="2" stroke-dasharray="6,4"/>')
+            parts.append(f'<text x="{x - 38}" y="{y + 94}" font-size="7" font-weight="700" fill="#475569">PWT</text>')
     elif t == "waermezaehler":
         parts.append(f'<circle cx="{cx}" cy="{cy}" r="16" fill="white" stroke="#0f766e" stroke-width="2.5"/>')
         parts.append(f'<text x="{cx}" y="{cy + 3.5}" text-anchor="middle" font-size="10" font-weight="700" fill="#0f766e">WZ</text>')

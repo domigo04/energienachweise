@@ -284,6 +284,26 @@ def test_bww_speicher_hat_trinkwarm_und_trinkkaltwasser_im_export():
     assert handle_pos(node, "kaltwasser") == (66, 189)
 
 
+def test_bww_mit_aussenregister_zeichnet_pwt_und_pdf_exportiert():
+    node = {
+        "id": "bww", "type": "bww", "position": {"x": 80, "y": 40},
+        "data": {
+            "label": "BWW", "bww_personen": 40,
+            "bww_speicherkonfiguration": "aussen",
+        },
+    }
+    results = berechne_schema([node], [])
+    svg = erzeuge_svg([node], [], results)
+    assert ">PWT</text>" in svg
+    assert "aussenliegendes Register/PWT" in legende_zeilen([node], results)[0]["werte"]
+
+    pdf = erzeuge_pdf("P", "BWW", "beides", [node], [], results)
+    assert pdf.startswith(b"%PDF")
+    text = "\n".join(page.extract_text() or "" for page in PdfReader(io.BytesIO(pdf)).pages)
+    assert "Anschlussleistung" in text
+    assert "Registervorschlag" in text
+
+
 def test_svg_exportiert_beton_skalierung_und_bauteilbeschriftung():
     nodes = [
         {"id": "beton", "type": "concrete_area", "position": {"x": 0, "y": 0},
@@ -603,13 +623,34 @@ def test_lufterhitzer_summe_stimmt_mit_der_hauptgruppe_ueberein():
     assert not any("summieren" in w for w in r["anschluss_warnings"])
 
 
-def test_lufterhitzer_summe_weicht_ab_und_warnt():
-    nodes, edges = _lufterhitzer_anlage([18, 5])           # 23 statt 30 kW
+def test_lufterhitzer_summe_ersetzt_die_manuelle_hauptgruppenleistung():
+    nodes, edges = _lufterhitzer_anlage([18, 5])           # automatisch 23 statt manuell 30 kW
     r = berechne_schema(nodes, edges)
-    warnung = next(w for w in r["anschluss_warnings"] if "summieren" in w)
-    assert "23.0 kW" in warnung
-    assert "30.0 kW" in warnung
-    assert "-7.0 kW" in warnung
+    gruppe = r["gruppe_results"]["g"]
+
+    assert gruppe["q_kw"] == 23
+    assert gruppe["q_kw_quelle"] == "lufterhitzer_untergruppen"
+    assert gruppe["untergruppen_anzahl"] == 2
+    assert gruppe["m_sek"] == pytest.approx(23 / (1.163 * 15), abs=0.001)
+    assert r["anschluss_results"]["m"]["q_kw"] == 23
+    assert not any("summieren" in w for w in r["anschluss_warnings"])
+
+
+def test_lufterhitzer_summe_warnt_bei_fehlender_untergruppenleistung():
+    nodes, edges = _lufterhitzer_anlage([18, ""])
+    r = berechne_schema(nodes, edges)
+
+    assert r["gruppe_results"]["g"]["q_kw"] == 18
+    assert r["gruppe_results"]["g"]["untergruppen_leistung_fehlend"] == 1
+    assert any("automatische Summe ist unvollständig" in w for w in r["anschluss_warnings"])
+
+
+def test_hauptgruppe_ohne_lufterhitzer_behaelt_manuelle_leistung():
+    nodes, _ = _lufterhitzer_anlage([])
+    r = berechne_schema(nodes, [])
+
+    assert r["gruppe_results"]["g"]["q_kw"] == 30
+    assert r["gruppe_results"]["g"]["q_kw_quelle"] == "manuell"
 
 
 def test_lufterhitzer_gruppe_zeichnet_kennwerte_und_waermezaehler():

@@ -5,11 +5,16 @@ import pytest
 from pypdf import PdfReader
 
 from app.calculations.hydraulik import berechne_schema
+from app.export.bauteil_infos import bauteil_kennwerte, node_infos
 from app.export.pdf import berechnungs_abschnitte, erzeuge_pdf, legende_zeilen
 from app.export.schema_svg import (
+    caption_titel,
+    datenblock_anker,
+    datenkasten_masse,
     erzeuge_svg,
     ews_breite,
     handle_pos,
+    node_groesse,
     vt_hoehe,
     vt_stutzen_x,
 )
@@ -312,9 +317,71 @@ def test_svg_exportiert_beton_skalierung_und_bauteilbeschriftung():
          "data": {"nr": 1, "label": "Pumpe Heizkreis", "caption_offset_x": 12}},
     ]
     svg = erzeuge_svg(nodes, [], {})
-    assert 'width="17.0" height="17.0"' in svg
     assert "Pumpe Heizkreis" in svg
     assert 'width="210.0" height="120.0"' in svg
+    # Die Schraffur muss aus echten Linien bestehen: ein SVG-`pattern` überlebt
+    # die Wandlung nach PDF nicht und die Fläche käme leer heraus.
+    assert "<pattern" not in svg
+    schraffur = [zeile for zeile in svg.splitlines()
+                 if "<line" in zeile and 'stroke="#94a3b8"' in zeile]
+    # Rasterweite 17 auf 210×120 → (210+120)/17 Durchläufe, je zwei Richtungen.
+    assert len(schraffur) == 38
+
+
+def test_gezogene_flaeche_behaelt_ihre_groesse_im_export():
+    """React Flow 12 schreibt die gezogene Grösse an den Knoten, nicht in style."""
+    beton = {"id": "beton", "type": "concrete_area", "position": {"x": 0, "y": 0},
+             "width": 420, "height": 260, "data": {}}
+    assert node_groesse(beton) == (420, 260)
+    assert 'width="420.0" height="260.0"' in erzeuge_svg([beton], [], {})
+
+    # Ohne jede Angabe bleibt es beim Standardmass.
+    assert node_groesse({"id": "b2", "type": "concrete_area",
+                         "position": {"x": 0, "y": 0}, "data": {}}) == (180, 120)
+
+
+def test_gemessene_geometrie_aus_dem_editor_hat_vorrang():
+    """Box und Anschlusspunkte kommen aus dem Browser — nicht aus Standardmassen."""
+    pumpe = {
+        "id": "p", "type": "pump", "position": {"x": 100, "y": 50},
+        "data": {
+            "rotation": 180,
+            "export_box": {"x": 100, "y": 50, "width": 34, "height": 34},
+            "export_handles": {"top": {"x": 117, "y": 50}, "bottom": {"x": 117, "y": 84}},
+        },
+    }
+    assert node_groesse(pumpe) == (34, 34)
+    # Der gemessene Punkt gilt unverändert: er enthält die Drehung bereits.
+    assert handle_pos(pumpe, "top") == (117, 50)
+    assert handle_pos(pumpe, "bottom") == (117, 84)
+
+    anker = {"id": "a", "type": "junction", "position": {"x": 300, "y": 50},
+             "data": {"cad_anchor": True}}
+    kante = {"id": "e", "source": "p", "sourceHandle": "bottom",
+             "target": "a", "targetHandle": "center-target",
+             "data": {"layer_id": "heizung_vl"}}
+    assert "M 117.0 84.0" in erzeuge_svg([pumpe, anker], [kante], {})
+
+    # Leitungsknoten sind reine Fangpunkte und bleiben unsichtbar wie im Editor
+    # — auch ein Altbestand ohne `cad_anchor` zeichnet kein T-Stück mehr.
+    for knoten in (anker, {**anker, "data": {}}):
+        assert "<line" not in erzeuge_svg([knoten], [], {})
+
+
+def test_gespiegeltes_bauteil_wird_gespiegelt_exportiert():
+    ventil = {"id": "v", "type": "valve2", "position": {"x": 0, "y": 0},
+              "data": {"mirrored": True}}
+    breite, hoehe = node_groesse(ventil)
+
+    # Die Flussachse liegt bei 75 % der Breite; gespiegelt bei 25 %.
+    assert handle_pos(ventil, "top") == (breite * 0.25, 0)
+    assert 'scale(-1,1)' in erzeuge_svg([ventil], [], {})
+
+    gedreht = {**ventil, "data": {"rotation": 90, "mirrored": True}}
+    # Erst spiegeln, dann drehen — wie die CSS-Transformation im Editor.
+    cx, cy = breite / 2, hoehe / 2
+    px, py = breite * 0.25, 0
+    assert handle_pos(gedreht, "top") == (cx - (py - cy), cy + (px - cx))
 
 
 # ── Legende + Berechnungen ──────────────────────────────────────────────────
@@ -670,3 +737,88 @@ def test_lufterhitzer_ohne_waermezaehler_zeichnet_keinen():
     nodes, edges = _lufterhitzer_anlage([18])
     r = berechne_schema(nodes, edges)
     assert '<polygon points="36,76 84,76 36,180" fill="#000"/>' not in erzeuge_svg(nodes, edges, r)
+
+
+# ── Datenblock am Bauteil (Vorlage Dominic 2026-08-05) ───────────────────────
+def test_datenblock_am_einzelbauteil_zeigt_typenschild_und_kennwerte():
+    """Ein Einzelbauteil hat genau einen Abschnitt — ohne Zwischentitel."""
+    nodes = [
+        {"id": "v", "type": "valve2", "position": {"x": 0, "y": 0}, "data": {
+            "nr": 7, "label": "Regelventil", "fabrikat": "Siemens",
+            "typ": "VVF22.40-25", "dn": "40", "dp_var": "26"}},
+    ]
+    results = berechne_schema(nodes, [])
+    abschnitte = bauteil_kennwerte(nodes[0], results)
+
+    assert [a["titel"] for a in abschnitte] == [None]
+    assert ("Fabrikat", "Siemens") in abschnitte[0]["zeilen"]
+    assert ("Typ", "VVF22.40-25") in abschnitte[0]["zeilen"]
+    assert ("DN", "40") in abschnitte[0]["zeilen"]     # nicht «4» — kein Nullstrippen
+
+    svg = erzeuge_svg(nodes, [], results)
+    assert ">Regelventil<" in svg and ">Fabrikat:<" in svg and ">VVF22.40-25<" in svg
+
+
+def test_datenblock_der_gruppe_hat_je_eingebautem_bauteil_einen_abschnitt():
+    """Eine Gruppe ist kein Einzelteil: Pumpe, Ventil und Zähler stehen getrennt."""
+    nodes, edges = _graph()
+    gruppe = next(n for n in nodes if n["id"] == "g1")
+    gruppe["data"] = {**gruppe["data"], "schaltung": "einspritz", "hat_wz": True,
+                      "pumpe_rohr_m": "40", "pumpe_fabrikat": "Biral",
+                      "ventil_fabrikat": "Siemens", "ventil_dn": "25",
+                      "wz_fabrikat": "Kamstrup"}
+    results = berechne_schema(nodes, edges)
+    abschnitte = bauteil_kennwerte(gruppe, results)
+
+    assert [a["titel"] for a in abschnitte] == [
+        None, "Umwälzpumpe", "Zweiweg-Ventil", "Wärmezähler"]
+    kopf = dict(abschnitte[0]["zeilen"])
+    assert kopf["Temperaturen"] == "35/28 °C"
+    assert kopf["Leistung"] == "5 kW"
+    assert kopf["Massenstrom"].endswith(" kg/h")         # Vorlage rechnet in kg/h
+    assert ("Fabrikat", "Biral") in abschnitte[1]["zeilen"]
+    assert ("DN", "25") in abschnitte[2]["zeilen"]
+    assert ("Fabrikat", "Kamstrup") in abschnitte[3]["zeilen"]
+
+    # Die Abschnittstitel müssen auch wirklich im Schema-SVG stehen.
+    svg = erzeuge_svg(nodes, edges, results)
+    assert ">Umwälzpumpe<" in svg and ">Zweiweg-Ventil<" in svg and ">Wärmezähler<" in svg
+
+
+def test_beimischschaltung_beschriftet_das_dreiwegeventil():
+    nodes, edges = _graph()
+    gruppe = next(n for n in nodes if n["id"] == "g1")
+    gruppe["data"] = {**gruppe["data"], "schaltung": "beimisch", "ventil_fabrikat": "Belimo"}
+    abschnitte = bauteil_kennwerte(gruppe, berechne_schema(nodes, edges))
+    assert "Dreiweg-Ventil" in [a["titel"] for a in abschnitte]
+
+
+def test_drosselgruppe_hat_keinen_pumpenabschnitt():
+    """Drossel hat nie eine Gruppenpumpe (PHYSIK §6) — also auch keinen Abschnitt."""
+    nodes, edges = _graph()
+    gruppe = next(n for n in nodes if n["id"] == "g1")
+    gruppe["data"] = {**gruppe["data"], "schaltung": "drossel", "pumpe_fabrikat": "Biral"}
+    titel = [a["titel"] for a in bauteil_kennwerte(gruppe, berechne_schema(nodes, edges))]
+    assert "Umwälzpumpe" not in titel
+
+
+def test_bildausschnitt_schneidet_den_datenblock_nicht_ab():
+    """Der Block wird gemessen: eine Gruppe braucht mehr Platz als eine Zeile."""
+    nodes, edges = _graph()
+    gruppe = next(n for n in nodes if n["id"] == "g1")
+    gruppe["data"] = {**gruppe["data"], "hat_wz": True, "pumpe_rohr_m": "40"}
+    results = berechne_schema(nodes, edges)
+    _, hoehe = datenkasten_masse(caption_titel(gruppe), bauteil_kennwerte(gruppe, results))
+    _, unterkante = datenblock_anker(gruppe)
+
+    viewbox = erzeuge_svg(nodes, edges, results).split('viewBox="')[1].split('"')[0]
+    y0, box_hoehe = float(viewbox.split()[1]), float(viewbox.split()[3])
+    assert y0 + box_hoehe >= unterkante + hoehe
+
+
+def test_node_infos_liefert_abschnitte_fuer_den_editor():
+    """Der Editor bekommt dieselben Abschnitte wie der PDF-Export."""
+    nodes, edges = _graph()
+    infos = node_infos(nodes, berechne_schema(nodes, edges))
+    assert infos["g1"][0]["titel"] is None
+    assert {"name": "Temperaturen", "wert": "35/28 °C"} in infos["g1"][0]["zeilen"]

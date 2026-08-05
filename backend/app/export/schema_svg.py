@@ -13,6 +13,7 @@ import re
 from typing import Optional
 
 from app.data.generator_types import generator_type_label
+from app.export.bauteil_infos import bauteil_kennwerte
 
 VL_FARBE = "#ef4444"
 RL_FARBE = "#3b82f6"
@@ -114,6 +115,32 @@ def ews_breite(node) -> float:
     return 52 + ews_anzahl(node) * EWS_S
 
 
+def export_box(node):
+    """Im Browser gemessene Bauteilbox (`data.export_box`), falls vorhanden.
+
+    Der Editor misst jedes Bauteil im DOM. Diese Messung ist die Wahrheit —
+    hergeleitete Standardmasse gelten nur, wenn keine Messung mitgeschickt wird
+    (zum Beispiel beim Export eines gespeicherten Schemas ohne offenen Editor).
+    """
+    box = (node.get("data") or {}).get("export_box")
+    if not isinstance(box, dict):
+        return None
+    w, h = _f(box.get("width")), _f(box.get("height"))
+    return box if w and h and w > 0 and h > 0 else None
+
+
+def gezogene_groesse(node):
+    """Von Hand gezogene Grösse: React Flow 12 schreibt sie an den Knoten.
+
+    Ältere Stände (und der Vorlagen-Import) tragen sie in `style`; beide Wege
+    müssen gelten, sonst exportiert eine skalierte Betonfläche in Standardmass.
+    """
+    style = node.get("style") or {}
+    w = _f(node.get("width")) or _f(style.get("width"))
+    h = _f(node.get("height")) or _f(style.get("height"))
+    return (w, h)
+
+
 def node_groesse(node):
     if node.get("type") == "junction" and (node.get("data") or {}).get("cad_anchor"):
         return (1, 1)
@@ -125,24 +152,47 @@ def node_groesse(node):
         return (LH_W, LH_H)
     if node.get("type") == "erdsonden":
         return (ews_breite(node), EWS_H)
-    if node.get("type") in ("concrete_area", "interface_line"):
-        style = node.get("style") or {}
-        w = _f(style.get("width"))
-        h = _f(style.get("height"))
-        fallback = GROESSEN[node.get("type")]
-        return (w or fallback[0], h or fallback[1])
-    return GROESSEN.get(node.get("type"), (60, 60))
+    box = export_box(node)
+    if box:
+        return (_f(box["width"]), _f(box["height"]))
+    w, h = gezogene_groesse(node)
+    fallback = GROESSEN.get(node.get("type"), (60, 60))
+    return (w or fallback[0], h or fallback[1])
+
+
+def export_handle_pos(node, handle: Optional[str]):
+    """Im Browser gemessener Anschlusspunkt (`data.export_handles`)."""
+    punkte = (node.get("data") or {}).get("export_handles")
+    punkt = punkte.get(handle) if isinstance(punkte, dict) and handle else None
+    if not isinstance(punkt, dict):
+        return None
+    x, y = _f(punkt.get("x")), _f(punkt.get("y"))
+    return (x, y) if x is not None and y is not None else None
 
 
 def handle_pos(node, handle: Optional[str]):
-    """Anschluss-Position inkl. optionaler Drehung (data.rotation) um die Bauteil-Mitte."""
+    """Absolute Anschluss-Position eines Bauteils.
+
+    Zuerst gilt die Messung aus dem Editor: sie enthält Drehung, Spiegelung und
+    die tatsächliche Bauteilgrösse bereits. Nur ohne Messung wird die Position
+    aus den Standardmassen hergeleitet und die Transformation nachgerechnet —
+    in derselben Reihenfolge wie im Editor (`rotate() scaleX(-1)`: erst
+    spiegeln, dann drehen).
+    """
+    gemessen = export_handle_pos(node, handle)
+    if gemessen:
+        return gemessen
     px, py = _handle_pos_base(node, handle)
-    rot = int(_f((node.get("data") or {}).get("rotation")) or 0) % 360
-    if rot:
+    d = node.get("data") or {}
+    rot = int(_f(d.get("rotation")) or 0) % 360
+    mirrored = bool(d.get("mirrored"))
+    if rot or mirrored:
         x = (node.get("position") or {}).get("x", 0)
         y = (node.get("position") or {}).get("y", 0)
         w, h = node_groesse(node)
         cx, cy = x + w / 2, y + h / 2
+        if mirrored:
+            px = 2 * cx - px
         for _ in range(rot // 90):
             px, py = cx - (py - cy), cy + (px - cx)  # 90° im Uhrzeigersinn (wie CSS rotate)
     return (px, py)
@@ -244,6 +294,164 @@ def _handle_pos_base(node, handle: Optional[str]):
     # pump, stad, checkvalve, shutoff, default
     return {"top": (x + w / 2, y), "bottom": (x + w / 2, y + h),
             "left": (x, y + h / 2), "right": (x + w, y + h / 2)}.get(handle, (x + w / 2, y + h / 2))
+
+
+KASTEN_ZEILE = 9.5      # Zeilenhöhe im Datenblock
+KASTEN_KOPF = 18.0      # Abstand Titelzeile → erste Kennwertzeile
+KASTEN_LUFT = 4.5       # Luft vor einem Abschnittstitel
+
+
+def kasten_zeilen(abschnitte: list) -> list:
+    """Abschnitte zu einer Zeilenfolge (art, name, wert) verflachen.
+
+    art ist 'luft', 'titel' oder 'wert'. Editor und Export bauen daraus
+    denselben Block; die Reihenfolge entsteht genau einmal — hier.
+    """
+    zeilen = []
+    for abschnitt in abschnitte or []:
+        if abschnitt.get("titel"):
+            if zeilen:
+                zeilen.append(("luft", "", ""))
+            zeilen.append(("titel", abschnitt["titel"], ""))
+        for name, wert in abschnitt.get("zeilen") or ():
+            zeilen.append(("wert", name, wert))
+    return zeilen
+
+
+def datenkasten_masse(titel: str, abschnitte: list) -> tuple:
+    """Breite und Höhe des Datenblocks — Editor und Export nutzen dasselbe."""
+    zeilen = kasten_zeilen(abschnitte)
+    namen = max([len(str(n)) + 1 for art, n, _ in zeilen if art == "wert"] + [0])
+    werte = max([len(str(w)) for art, _, w in zeilen if art == "wert"] + [0])
+    kopfzeilen = [titel] + [n for art, n, _ in zeilen if art == "titel"]
+    breite = max([60.0, namen * 4.4 + werte * 4.4 + 12]
+                 + [len(str(k)) * 4.9 + 6 for k in kopfzeilen])
+    hoehe = KASTEN_KOPF + sum(KASTEN_LUFT if art == "luft" else KASTEN_ZEILE
+                              for art, _, _ in zeilen)
+    return (min(210.0, breite), hoehe)
+
+
+def zeichne_datenkasten(parts: list, mitte_x: float, oben_y: float,
+                        titel: str, abschnitte: list) -> None:
+    """Bauteilname und Kennwerte als Datenblock unter dem Bauteil.
+
+    Gestalt wie in Dominics Vorlage: Titelzeile, darunter je Kennwert die
+    Bezeichnung mit Doppelpunkt links und der Wert in einer zweiten Spalte.
+    Eine Verbrauchergruppe bringt mehrere Abschnitte mit (Pumpe, Ventil,
+    Wärmezähler); die bekommen je einen eigenen Zwischentitel.
+    Kein Rahmen — nur eine weisse Unterlegung, damit der Block über Rastern
+    und Unterlagen lesbar bleibt.
+    """
+    breite, hoehe = datenkasten_masse(titel, abschnitte)
+    x = mitte_x - breite / 2
+    wert_x = x + max(52.0, breite * 0.56)
+    parts.append(
+        f'<rect x="{_svg_num(x - 2)}" y="{_svg_num(oben_y)}" width="{_svg_num(breite + 4)}" '
+        f'height="{_svg_num(hoehe)}" fill="white" fill-opacity="0.82" stroke="none"/>'
+    )
+    parts.append(
+        f'<text x="{_svg_num(x)}" y="{_svg_num(oben_y + 8.5)}" font-size="8.5" '
+        f'font-weight="700" fill="#0f172a">{_esc(titel)}</text>'
+    )
+    zeile_y = oben_y + KASTEN_KOPF
+    for art, name, wert in kasten_zeilen(abschnitte):
+        if art == "luft":
+            zeile_y += KASTEN_LUFT
+            continue
+        if art == "titel":
+            parts.append(
+                f'<text x="{_svg_num(x)}" y="{_svg_num(zeile_y)}" font-size="8" '
+                f'font-weight="700" fill="#0f172a">{_esc(name)}</text>'
+            )
+        else:
+            parts.append(
+                f'<text x="{_svg_num(x)}" y="{_svg_num(zeile_y)}" font-size="8" '
+                f'fill="#334155">{_esc(name)}:</text>'
+            )
+            parts.append(
+                f'<text x="{_svg_num(wert_x)}" y="{_svg_num(zeile_y)}" font-size="8" '
+                f'fill="#0f172a">{_esc(wert)}</text>'
+            )
+        zeile_y += KASTEN_ZEILE
+
+
+CAPTION_NAMEN = {
+    "erzeuger": "Wärmeerzeuger", "erdsonden": "Erdsondenfeld",
+    "speicher": "Speicher", "bww": "BWW-Speicher", "verteiler": "Verteiler",
+    "gruppe": "Verbrauchergruppe", "heizkreis": "Heizkreis", "pump": "Pumpe",
+    "valve2": "2-Weg-Ventil", "valve3": "3-Weg-Ventil", "shutoff": "Absperrventil",
+    "stad": "STAD", "checkvalve": "Rückschlagventil", "waermezaehler": "Wärmezähler",
+    "waermezaehler_cad": "Wärmezähler", "expansion": "Expansionsgefäss",
+    "sicherheitsventil": "Sicherheitsventil", "pwt": "Plattentauscher",
+    "lufterhitzer": "Lufterhitzer", "lufterhitzer_gruppe": "Lufterhitzer-Gruppe",
+}
+
+
+def caption_titel(node) -> str:
+    """Kopfzeile des Datenblocks — dieselbe Liste wie im Editor (mitNr)."""
+    d = node.get("data") or {}
+    return d.get("label") or CAPTION_NAMEN.get(node.get("type"), node.get("type") or "Bauteil")
+
+
+def datenblock_anker(node) -> tuple:
+    """Mitte-X und Oberkante des Datenblocks — verschoben wie im Editor."""
+    d = node.get("data") or {}
+    w, h = node_groesse(node)
+    x = (node.get("position") or {}).get("x", 0)
+    y = (node.get("position") or {}).get("y", 0)
+    return (x + w / 2 + (_f(d.get("caption_offset_x")) or 0),
+            y + h + 10 + max(0, _f(d.get("caption_offset_y")) or 0))
+
+
+def zeichne_datenblock(parts: list, node, results) -> None:
+    """Datenblock unter dem Bauteil — für Einzelteile wie für Gruppen gleich."""
+    if (node.get("data") or {}).get("nr") is None:
+        return
+    mitte_x, oben_y = datenblock_anker(node)
+    zeichne_datenkasten(parts, mitte_x, oben_y, caption_titel(node),
+                        bauteil_kennwerte(node, results))
+
+
+def _schraffur(x: float, y: float, w: float, h: float, abstand: float) -> list:
+    """Kreuzschraffur als echte Linien.
+
+    Ein SVG-`pattern` wäre kürzer, überlebt aber die Wandlung nach PDF nicht —
+    die Fläche käme leer heraus. Die Linien werden am Rechteck abgeschnitten.
+    """
+    linien = []
+    schritt = max(2.0, float(abstand))
+    d = 0.0
+    while d <= w + h:
+        # Richtung «\»: (x+d, y) → (x+d+h, y+h)
+        t0, t1 = max(0.0, -(d - h)), min(h, w - (d - h))
+        if t1 > t0:
+            ax, ay = x + (d - h) + t0, y + t0
+            linien.append((ax, ay, x + (d - h) + t1, y + t1))
+        # Richtung «/»: (x+d, y) → (x+d-h, y+h)
+        t0, t1 = max(0.0, d - w), min(h, d)
+        if t1 > t0:
+            linien.append((x + d - t0, y + t0, x + d - t1, y + t1))
+        d += schritt
+    return linien
+
+
+def bauteil_transform(d: dict, cx: float, cy: float) -> str:
+    """Drehung und Spiegelung eines Bauteils um seine Mitte.
+
+    Gleiche Reihenfolge wie die CSS-Transformation im Editor
+    (`rotate(x) scaleX(-1)`): erst spiegeln, dann drehen.
+    """
+    rot = int(_f(d.get("rotation")) or 0) % 360
+    mirrored = bool(d.get("mirrored"))
+    if not rot and not mirrored:
+        return ""
+    teile = [f"translate({cx:.2f},{cy:.2f})"]
+    if rot:
+        teile.append(f"rotate({rot})")
+    if mirrored:
+        teile.append("scale(-1,1)")
+    teile.append(f"translate({-cx:.2f},{-cy:.2f})")
+    return " ".join(teile)
 
 
 # ── Bauteil-Zeichner (liefern SVG-Fragmente, Koordinaten absolut) ───────────
@@ -537,6 +745,7 @@ def zeichne_verteiler(parts, node, results):
         sx = x + vt_stutzen_x(i)
         parts.append(f'<text x="{sx + 6}" y="{y + 17}" font-size="9" font-weight="700" fill="white" font-family="monospace">{i}</text>')
     _nr_badge(parts, x + w - 14, y - 2, (node.get("data") or {}).get("nr"))
+    zeichne_datenblock(parts, node, results)
 
 
 def zeichne_gruppe(parts, node, results):
@@ -625,6 +834,9 @@ def zeichne_gruppe(parts, node, results):
             parts.append(f'<text x="{bx - 4}" y="{y + _gy(210)}" transform="rotate(-90 {bx - 4} {y + _gy(210)})" text-anchor="middle" '
                          f'font-size="8" fill="{RL_FARBE}" font-family="monospace">Bypass {c.get("m_bypass", 0):.3f} m³/h</text>')
     _nr_badge(parts, x + GR_W - 14, y + _gy(64), d.get("nr"))
+    # Eine Gruppe ist kein Einzelbauteil: ihr Block führt Pumpe, Regelventil
+    # und Wärmezähler in eigenen Abschnitten (Vorlage Dominic 2026-08-05).
+    zeichne_datenblock(parts, node, results)
 
 
 def zeichne_lufterhitzer_gruppe(parts, node, results):
@@ -742,6 +954,7 @@ def zeichne_lufterhitzer_gruppe(parts, node, results):
     if schaltung == "drossel":
         entleerhahn(540)
     _nr_badge(parts, x + LH_W, y, d.get("nr"))
+    zeichne_datenblock(parts, node, results)
 
 
 def zeichne_erdsonden(parts, node, results):
@@ -819,6 +1032,7 @@ def zeichne_standard(parts, node, results):
 
     if t == "erdsonden":
         zeichne_erdsonden(parts, node, results)
+        zeichne_datenblock(parts, node, results)
         return
     if t == "heizkreis":
         parts.append(f'<circle cx="{cx}" cy="{cy}" r="{w / 2}" fill="#f0fdf4" stroke="#16a34a" stroke-width="2.5"/>')
@@ -897,27 +1111,25 @@ def zeichne_standard(parts, node, results):
         parts.append(f'<polygon points="{x + 26},{y + 25} {x + 19},{y + 29} {x + 26},{y + 33}" fill="{RL_FARBE}"/>')
         return
     elif t == "junction":
-        if d.get("cad_anchor"):
-            return
-        parts.append(f'<line x1="{x}" y1="{y + 30}" x2="{x + 46}" y2="{y + 30}" stroke="#1e293b" stroke-width="6" stroke-linecap="round"/>')
-        parts.append(f'<line x1="{x + 23}" y1="{y + 30}" x2="{x + 23}" y2="{y + 4}" stroke="#1e293b" stroke-width="6" stroke-linecap="round"/>')
+        # Leitungsknoten sind reine Fangpunkte und im Editor unsichtbar; alte
+        # Knoten werden beim Laden zu `cad_anchor` migriert. Ein T-Symbol im PDF
+        # hätte auf dem Bildschirm keine Entsprechung.
+        return
     elif t == "label":
         parts.append(f'<text x="{x}" y="{y + 11}" font-size="10" fill="#64748b">{_esc(label)}</text>')
         return
     elif t == "concrete_area":
         scale = max(3, min(60, _f(d.get("hatch_scale")) or 8))
-        pattern_id = "hatch-" + re.sub(r"[^a-zA-Z0-9_-]", "-", str(node.get("id") or "area"))
-        parts.append(
-            f'<defs><pattern id="{pattern_id}" width="{scale}" height="{scale}" '
-            'patternUnits="userSpaceOnUse">'
-            f'<path d="M0 0 L{scale} {scale} M{scale} 0 L0 {scale}" '
-            'stroke="#94a3b8" stroke-width="0.6" opacity="0.55"/>'
-            '</pattern></defs>'
-        )
         parts.append(
             f'<rect x="{x}" y="{y}" width="{w}" height="{h}" '
-            f'fill="url(#{pattern_id})" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4,3"/>'
+            'fill="none" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4,3"/>'
         )
+        for x1, y1, x2, y2 in _schraffur(x, y, w, h, scale):
+            parts.append(
+                f'<line x1="{_svg_num(x1)}" y1="{_svg_num(y1)}" '
+                f'x2="{_svg_num(x2)}" y2="{_svg_num(y2)}" '
+                'stroke="#94a3b8" stroke-width="0.6" opacity="0.55"/>'
+            )
         return
     elif t == "interface_line":
         dash = ' stroke-dasharray="8,5"' if d.get("dashed") else ""
@@ -932,34 +1144,17 @@ def zeichne_standard(parts, node, results):
             f'stroke="#0f172a" stroke-width="2"{dash}/>'
         )
         return
-    # Drehung um 90° (data.rotation): nur das Symbol dreht — Nr-Badge bleibt aufrecht.
-    rot = int(_f(d.get("rotation")) or 0) % 360
-    if rot:
-        parts.insert(sym_start, f'<g transform="rotate({rot} {cx:.2f} {cy:.2f})">')
+    # Drehung und Spiegelung wie im Editor: nur das Symbol wird transformiert,
+    # Nummer und Beschriftung bleiben aufrecht und seitenrichtig.
+    transform = bauteil_transform(d, cx, cy)
+    if transform:
+        parts.insert(sym_start, f'<g transform="{transform}">')
         parts.append("</g>")
+    # Nummer und Beschriftung drehen NICHT mit: sie sollen bei jeder
+    # Bauteillage an derselben Stelle und lesbar bleiben (Dominic 2026-08-05).
+    # Der Editor rendert sie aus demselben Grund ausserhalb der Drehung.
     _nr_badge(parts, x + w, y, d.get("nr"))
-    if d.get("nr") is not None:
-        caption = label or {
-            "erzeuger": "Wärmeerzeuger", "erdsonden": "Erdsondenfeld",
-            "speicher": "Speicher", "bww": "BWW-Speicher", "verteiler": "Verteiler",
-            "gruppe": "Verbrauchergruppe", "heizkreis": "Heizkreis", "pump": "Pumpe",
-            "valve2": "2-Weg-Ventil", "valve3": "3-Weg-Ventil", "shutoff": "Absperrventil",
-            "stad": "STAD", "checkvalve": "Rückschlagventil", "waermezaehler": "Wärmezähler",
-            "expansion": "Expansionsgefäss", "sicherheitsventil": "Sicherheitsventil",
-            "pwt": "Plattentauscher",
-        }.get(t, t)
-        offset_x = _f(d.get("caption_offset_x")) or 0
-        offset_y = max(0, _f(d.get("caption_offset_y")) or 0)
-        cap_x, cap_y = cx + offset_x, y + h + 10 + offset_y
-        cap_w = max(54, min(160, len(str(caption)) * 5.7 + 14))
-        parts.append(
-            f'<rect x="{cap_x - cap_w / 2}" y="{cap_y}" width="{cap_w}" height="18" '
-            'rx="2" fill="white" stroke="#94a3b8" stroke-width="0.8"/>'
-        )
-        parts.append(
-            f'<text x="{cap_x}" y="{cap_y + 12}" text-anchor="middle" font-size="9" '
-            f'fill="#334155">{_esc(caption)}</text>'
-        )
+    zeichne_datenblock(parts, node, results)
 
 
 def _svg_num(value):
@@ -1115,14 +1310,22 @@ def erzeuge_svg(nodes: list, edges: list, results: dict) -> str:
         w, h = node_groesse(n)
         px = (n.get("position") or {}).get("x", 0)
         py = (n.get("position") or {}).get("y", 0)
-        xs += [px, px + w]
-        ys += [py, py + h]
+        # Ein quer gedrehtes Bauteil braucht in der anderen Achse mehr Platz;
+        # sonst schneidet der Ausschnitt es an.
+        if int(_f((n.get("data") or {}).get("rotation")) or 0) % 180 == 90:
+            mx, my = px + w / 2, py + h / 2
+            xs += [mx - h / 2, mx + h / 2]
+            ys += [my - w / 2, my + w / 2]
+        else:
+            xs += [px, px + w]
+            ys += [py, py + h]
         if (n.get("data") or {}).get("nr") is not None:
-            d = n.get("data") or {}
-            cap_x = px + w / 2 + (_f(d.get("caption_offset_x")) or 0)
-            cap_y = py + h + 10 + max(0, _f(d.get("caption_offset_y")) or 0)
-            xs += [cap_x - 85, cap_x + 85]
-            ys += [cap_y, cap_y + 18]
+            # Der Datenblock wird gemessen, nicht geschätzt: eine Gruppe bringt
+            # mehrere Abschnitte mit und würde sonst unten abgeschnitten.
+            cap_x, cap_y = datenblock_anker(n)
+            cap_b, cap_h = datenkasten_masse(caption_titel(n), bauteil_kennwerte(n, results))
+            xs += [cap_x - cap_b / 2 - 2, cap_x + cap_b / 2 + 2]
+            ys += [cap_y, cap_y + cap_h]
     for edge in edges:
         edge_data = edge.get("data") or {}
         route_for_bounds = edge_data.get("export_route") or edge_data.get("points") or []

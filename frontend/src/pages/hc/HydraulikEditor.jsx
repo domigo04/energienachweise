@@ -16,7 +16,13 @@ import {
 import '@xyflow/react/dist/style.css';
 import './HydraulikEditor.css';
 import { NODE_TYPES, NUMMERIERT, ROTATABLE } from '../../components/hc/nodes/HydraulikNodes';
-import { anfahrtsSeite, anschluesseNachDrehung, gedrehteSeite } from '../../components/hc/nodes/anschlussSeite';
+import {
+  anfahrtsSeite,
+  anschluesseNachDrehung,
+  besteAnschluesse,
+  gedrehteSeite,
+  GLEICHWERTIGE_ANSCHLUESSE,
+} from '../../components/hc/nodes/anschlussSeite';
 import { EDGE_TYPES } from '../../components/hc/edges/FlowEdge';
 import { pairedHandleId, parallelWaypoints, roundedPolylinePath, splitRouteAtCorner, splitRouteAtPoint, reconnectThroughNode, adaptivePolyline, orthogonalerAnschlussEckpunkt, segmentAchse, mitgezogeneWaypoints } from '../../components/hc/edges/geometry';
 import { createHydraulicEdge, canStartHydraulicLine } from './schema/edgeFactory';
@@ -36,6 +42,7 @@ import {
   wohnungAendern, wohnungEntfernen, wohnungHinzufuegen, wohnungenAusDaten,
 } from './schema/bwwWohnungen';
 import { eingefuegterKnoten, kopierbarerKnoten } from './schema/nodeClipboard';
+import { nodesMitExportGeometrie } from './schema/exportGeometrie';
 import {
   abzweigPunkt, fensterAus, labelVerschoben, labelVersatz,
   leitungMitLueckeTrennen, leitungsSystem, leitungVerschieben, routeBereinigen, routeDehnen,
@@ -619,6 +626,28 @@ function ErzeugerTypFelder({ data, onSet }) {
   );
 }
 
+// ── Typenschild: Fabrikat, Typ, DN ──────────────────────────────────────────
+// Dieselben Felder stehen im Datenkästchen am Bauteil und im PDF-Export
+// (backend/app/export/bauteil_infos.py). Die eingebauten Bauteile einer
+// Verbrauchergruppe verwenden dieselben Felder mit Präfix (`pumpe_fabrikat` …).
+const TYPENSCHILD_FELDER = [['Fabrikat', 'fabrikat', 'text'], ['Typ', 'typ', 'text'], ['DN', 'dn', 'number']];
+// Armaturen ohne eigene Auslegung — sie brauchen trotzdem ein Typenschild.
+const ARMATUREN = new Set(['shutoff', 'stad', 'checkvalve', 'sicherheitsventil', 'waermezaehler_cad']);
+
+function Typenschild({ d, set, praefix = '' }) {
+  return (
+    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 62px', gap:6, marginBottom:7 }}>
+      {TYPENSCHILD_FELDER.map(([label, key, typ]) => (
+        <div key={key}>
+          <label style={lbl}>{label}</label>
+          <input type={typ} style={inp} value={d[praefix + key] ?? ''}
+            onChange={e => set(praefix + key, e.target.value)} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ventilResults, pumpenResults, expansionResults, anschlussWarnungen, anschlussResults, pwtResults, heatpumpResults, speicherResults, erdsondenResults, bwwResults, onUpdate, onDelete, onSetAbgaenge, navigate, drawingConfig, onDrawingConfig }) {
   // Punkt 13 — nichts ausgewählt heisst nicht „nichts zu zeigen": dann gehören
   // hierher die Eigenschaften der ANSICHT, wie in Revit.
@@ -841,6 +870,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         <PT>{node.type === 'valve2' ? '2-Wege Regelventil'
           : umschaltend ? '3-Weg-Umschaltventil' : '3-Wege Mischventil'}</PT>
         {fld('Bezeichnung','label','','','text')}
+        <Typenschild d={d} set={set}/>
         {node.type === 'valve3' && <>
           <label style={lbl}>Funktion</label>
           <select style={{...inp,cursor:'pointer'}} value={d.funktion||'mischend'}
@@ -886,6 +916,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         <div style={panelSt}>
           <PT>Solepumpe (Quellenkreis)</PT>
           {fld('Bezeichnung','label','Solepumpe','','text')}
+          <Typenschild d={d} set={set}/>
           {ro("Fördervolumen V'", pr.v, 'm³/h', pr.v != null)}
           {ro('Förderhöhe', pr.foerderhoehe_mws, 'mWs', pr.foerderhoehe_mws != null)}
           {pr.foerderhoehe_kpa != null && ro('Förderhöhe', pr.foerderhoehe_kpa, 'kPa')}
@@ -904,6 +935,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
       <div style={panelSt}>
         <PT>Pumpe</PT>
         {fld('Bezeichnung','label','','','text')}
+        <Typenschild d={d} set={set}/>
         {v ? ro("V' (aus Leitung)",v,'m³/h',true) : <div style={warnSt}>In eine Leitung mit Durchfluss setzen</div>}
         <div style={{fontSize:10,fontWeight:700,color:'#475569',marginTop:8,marginBottom:4,textTransform:'uppercase',letterSpacing:'0.05em'}}>Δp gemeinsamer Teil</div>
         {fld('Rohrlänge VL+RL','rohr_m','z.B. 60','m')}
@@ -928,8 +960,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
       <div style={panelSt}>
         <PT>Wärmezähler</PT>
         {fld('Bezeichnung','label','','','text')}
-        {fld('Typ','typ','z.B. Ultraschall','','text')}
-        {fld('Fabrikat','fabrikat','','','text')}
+        <Typenschild d={d} set={set}/>
         {v ? ro('Durchfluss (aus Leitung)', v, 'm³/h', true)
            : <div style={warnSt}>In eine Leitung mit Durchfluss setzen — der Zähler übernimmt automatisch.</div>}
         <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
@@ -1291,8 +1322,12 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
   // ── DEFAULT ──
   return (
     <div style={panelSt}>
-      <PT>{node.type}</PT>
+      <PT>{TITLES[node.type] || node.type}</PT>
       {fld('Bezeichnung','label','','','text')}
+      {ARMATUREN.has(node.type) && <>
+        <Typenschild d={d} set={set}/>
+        {v ? ro("V' (aus Leitung)", v, 'm³/h', true) : null}
+      </>}
       <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
     </div>
   );
@@ -1308,6 +1343,8 @@ const TITLES = {
   stad: 'STAD-Strangregulierventil', temperatur: 'Temperaturfühler',
   sicherheitsventil: 'Sicherheitsventil', pwt: 'Plattentauscher (PWT)',
   checkvalve: 'Rückschlagventil', anschluss: 'Anschluss-Marker',
+  waermezaehler_cad: 'Wärmezähler', lufterhitzer: 'Lufterhitzer',
+  lufterhitzer_gruppe: 'Lufterhitzer-Gruppe',
 };
 
 function BigVal({ label, value, unit = '', sub = '', color = '#1d4ed8' }) {
@@ -1416,12 +1453,14 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
               <input type="checkbox" checked={!!d.hat_wz} onChange={e=>set('hat_wz',e.target.checked)}/>
               Wärmezähler im Strang (SIA-410-Symbol, mit Fühler im VL und RL)
             </label>
+            {d.hat_wz && <Typenschild d={d} set={set} praefix="wz_"/>}
           </>
         )}
 
         {aktTab === 'pumpe' && (
           <>
             <div style={{ fontSize:12, fontWeight:700, color:'#1e293b' }}>{d.label ? `${d.label} — ` : ''}Pumpe (Sekundärkreis, V' = {gr?.m_sek!=null?Number(gr.m_sek).toFixed(3):'—'} m³/h)</div>
+            <Typenschild d={d} set={set} praefix="pumpe_"/>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
               <div><label style={lbl}>Rohr VL+RL [m]</label><input type="number" style={inp} value={d.pumpe_rohr_m??''} onChange={e=>set('pumpe_rohr_m',e.target.value)} placeholder="40"/></div>
               <div><label style={lbl}>Auf [Pa/m]</label><input type="number" style={inp} value={d.pumpe_pam??''} onChange={e=>set('pumpe_pam',e.target.value)} placeholder="70"/></div>
@@ -1436,6 +1475,7 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
         {aktTab === 'ventil' && (
           <>
             <div style={{ fontSize:12, fontWeight:700, color:'#1e293b' }}>{d.label ? `${d.label} — ` : ''}{ventilTitel} · Primärseite, V' = {gr?.m_prim!=null?Number(gr.m_prim).toFixed(3):'—'} m³/h</div>
+            <Typenschild d={d} set={set} praefix="ventil_"/>
             <div><label style={lbl}>Druckverlust geregelter Ast ohne Regelventil [kPa]</label>
               <input type="number" style={inp} value={d.dp_kpa??''} onChange={e=>set('dp_kpa',e.target.value)} placeholder="20"/></div>
             {gr?.ventil ? (
@@ -1491,10 +1531,17 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
         {gr?.pumpe && <BigVal label="Umwälzpumpe" value={gr.pumpe.dp_kpa!=null?gr.pumpe.dp_kpa.toFixed(1):null} unit="kPa"
           sub={gr.pumpe.dp_kpa!=null?`${gr.pumpe.mws.toFixed(2)} mWS · V' ${Number(gr.pumpe.v??0).toFixed(3)} m³/h`:'Rohrlänge/Apparate bei der Verbrauchergruppe ergänzen'}/>}
 
+        {/* Typenschilder der eingebauten Bauteile — sie stehen im Datenkästchen
+            am Bauteil und im PDF-Export. */}
+        {gr?.pumpe && <div><div style={{ fontSize:11, fontWeight:700, color:'#1e293b', marginBottom:4 }}>Umwälzpumpe</div>
+          <Typenschild d={d} set={set} praefix="pumpe_"/></div>}
+        <div><div style={{ fontSize:11, fontWeight:700, color:'#1e293b', marginBottom:4 }}>Regelventil</div>
+          <Typenschild d={d} set={set} praefix="ventil_"/></div>
         <label style={{ display:'flex', gap:6, alignItems:'center', cursor:'pointer', fontSize:12, color:'#374151' }}>
           <input type="checkbox" checked={!!d.hat_wz} onChange={e=>set('hat_wz',e.target.checked)}/>
           Wärmezähler im Rücklauf
         </label>
+        {d.hat_wz && <Typenschild d={d} set={set} praefix="wz_"/>}
       </div>
     );
   } else if (node.type === 'verteiler') {
@@ -2508,6 +2555,9 @@ function EditorInner() {
   const speicherResults = hydraulik.speicher_results || EMPTY_OBJECT;
   const erdsondenResults = hydraulik.erdsonden_results || EMPTY_OBJECT;
   const bwwResults = hydraulik.bww_results || EMPTY_OBJECT;
+  // Kennwerte fürs Datenkästchen am Bauteil — fertig aus dem Backend, damit im
+  // Editor dieselben Zeilen stehen wie im PDF-Export (app/export/bauteil_infos).
+  const nodeInfos = hydraulik.node_infos || EMPTY_OBJECT;
   const alleWarnungen = hydraulik.warnungen || EMPTY_ARRAY;
 
   const editorGraphAnwenden = useCallback((graph) => {
@@ -2889,6 +2939,12 @@ function EditorInner() {
   // Richtig ist: die Leitung, die von oben kommt, hängt danach an dem
   // Anschluss, der jetzt oben liegt.
   //
+  // Bei geometrisch gleichwertigen Armaturen (Pumpe, Absperrventil, …) gilt die
+  // schärfere Regel: die Leitung hängt immer an dem Anschluss, der ihrer
+  // Anfahrt entspricht — auch an einem bisher freien. Bei Bauteilen mit
+  // bedeutungstragenden Anschlüssen bleibt es beim reinen Tausch, sonst würde
+  // eine Drehung Vorlauf und Rücklauf vertauschen.
+  //
   // Die Regel selbst ist rein und getestet (`nodes/anschlussSeite.js`); hier
   // werden nur die Anfahrten gemessen und das Ergebnis eingetragen.
   const leitungenNeuZuordnen = useCallback((id, rotation, mirrored) => {
@@ -2915,15 +2971,22 @@ function EditorInner() {
           ende === 'source' ? edge.target : edge.source,
           ende === 'source' ? edge.targetHandle : edge.sourceHandle,
         );
-        const nachbar = (ende === 'source' ? punkte[0] : punkte.at(-1)) || anderesEnde;
         const punkt = handlePosition(id, handleId);
+        // Der erste Stützpunkt liegt oft genau auf dem Anschluss; er sagt dann
+        // nichts über die Anfahrtsrichtung. Deshalb den ersten Punkt nehmen,
+        // der wirklich woanders liegt — sonst das andere Leitungsende.
+        const reihe = ende === 'source' ? punkte : [...punkte].reverse();
+        const nachbar = reihe.find(p => p && punkt
+          && Math.hypot((p.x || 0) - punkt.x, (p.y || 0) - punkt.y) > 0.5) || anderesEnde;
         const anfahrt = anfahrtsSeite(punkt, nachbar);
         if (anfahrt) anschluesse.push({ edgeId:edge.id, ende, handleId, anfahrt });
       }
     }
     if (!anschluesse.length) return;
 
-    const wechsel = anschluesseNachDrehung(handles, anschluesse, rotation, mirrored);
+    const typ = nodesRef.current.find(node => node.id === id)?.type;
+    const regel = GLEICHWERTIGE_ANSCHLUESSE.has(typ) ? besteAnschluesse : anschluesseNachDrehung;
+    const wechsel = regel(handles, anschluesse, rotation, mirrored);
     if (!wechsel.length) return;
     const proEdge = new Map(wechsel.map(w => [`${w.edgeId}:${w.ende}`, w.handleId]));
     setEdges(items => items.map(edge => {
@@ -3046,9 +3109,11 @@ function EditorInner() {
   // bleiben unangetastet. Nur Leitungen MIT Stützpunkten sind betroffen — ohne
   // Stützpunkt wird der Knick ohnehin bei jedem Frame frisch orthogonal berechnet.
   const nodeDragAchsen = useRef({});
+  const nodeDragBewegte = useRef([]);
   const onNodeDragStart = useCallback((_event, node, dragNodes) => {
     snap();
     const bewegte = new Set((dragNodes?.length ? dragNodes : [node]).map(n => n.id));
+    nodeDragBewegte.current = [...bewegte];
     const achsen = {};
     edgesRef.current.forEach(edge => {
       const wp = edge.data?.points;
@@ -3072,18 +3137,29 @@ function EditorInner() {
 
   const onNodeDragStop = useCallback(() => {
     const achsen = nodeDragAchsen.current;
+    const bewegte = nodeDragBewegte.current;
     nodeDragAchsen.current = {};
-    if (!Object.keys(achsen).length) return;
-    setEdges(items => items.map(edge => {
-      const a = achsen[edge.id];
-      const wp = edge.data?.points;
-      if (!a || !Array.isArray(wp) || !wp.length) return edge;
-      const start = a.startAchse ? handlePosition(edge.source, edge.sourceHandle) : null;
-      const end = a.endAchse ? handlePosition(edge.target, edge.targetHandle) : null;
-      const neu = mitgezogeneWaypoints(wp, { start, end, startAchse: a.startAchse, endAchse: a.endAchse });
-      return { ...edge, data:{ ...(edge.data || {}), cad_polyline:true, points:neu } };
-    }));
-  }, [handlePosition, setEdges]);
+    nodeDragBewegte.current = [];
+    if (Object.keys(achsen).length) {
+      setEdges(items => items.map(edge => {
+        const a = achsen[edge.id];
+        const wp = edge.data?.points;
+        if (!a || !Array.isArray(wp) || !wp.length) return edge;
+        const start = a.startAchse ? handlePosition(edge.source, edge.sourceHandle) : null;
+        const end = a.endAchse ? handlePosition(edge.target, edge.targetHandle) : null;
+        const neu = mitgezogeneWaypoints(wp, { start, end, startAchse: a.startAchse, endAchse: a.endAchse });
+        return { ...edge, data:{ ...(edge.data || {}), cad_polyline:true, points:neu } };
+      }));
+    }
+    // Eine verschobene Armatur nimmt den Anschluss, der jetzt zur Leitung
+    // passt. Sonst liefe die Leitung nach dem Verschieben hinter dem Bauteil
+    // durch — im Editor kaum sichtbar, im Export sofort.
+    bewegte.forEach(id => {
+      const node = nodesRef.current.find(item => item.id === id);
+      if (!node || !GLEICHWERTIGE_ANSCHLUESSE.has(node.type)) return;
+      leitungenNeuZuordnen(id, node.data?.rotation || 0, Boolean(node.data?.mirrored));
+    });
+  }, [handlePosition, leitungenNeuZuordnen, setEdges]);
 
   // Eine einzige, pro Graphänderung neu aufgebaute Fangpunktliste hält den
   // Pointer-Move-Pfad leichtgewichtig. Darin liegen alle Bauteilanschlüsse und
@@ -4835,7 +4911,11 @@ function EditorInner() {
   // Verteiler-Rahmen: nur die Balken sind greifbar (dragHandle), die Lücke
   // dazwischen lässt Klicks durch (pointerEvents none) und liegt hinter den
   // Strängen (zIndex -10) — so lassen sich Gruppen zwischen die Balken stellen.
-  const displayNodes = useMemo(() => nodes.map(n => {
+  const displayNodes = useMemo(() => nodes.map(raw => {
+    // Kennwerte fürs Datenkästchen: fertig aus dem Backend (node_infos), damit
+    // Editor und PDF-Export dieselben Werte am Bauteil zeigen.
+    const infos = nodeInfos[raw.id];
+    const n = infos ? { ...raw, data:{ ...raw.data, _calc:{ ...(raw.data?._calc || {}), kennwerte:infos } } } : raw;
     if (n.type === 'junction') {
       return {
         ...n,
@@ -4852,33 +4932,33 @@ function EditorInner() {
         dragHandle: '.vt-bar',
         zIndex: -10,
         style: { ...n.style, pointerEvents: 'none' },
-        data: c ? { ...n.data, _calc: c } : n.data,
+        data: c ? { ...n.data, _calc: { ...(n.data?._calc || {}), ...c } } : n.data,
       };
     }
     if (n.type === 'gruppe' || n.type === 'heizkreis' || n.type === 'lufterhitzer_gruppe') {
-      return { ...n, data: { ...n.data, _calc: { ...(gruppeResults[n.id] || {}), v: nodeFlows[n.id] } } };
+      return { ...n, data: { ...n.data, _calc: { ...(n.data?._calc || {}), ...(gruppeResults[n.id] || {}), v: nodeFlows[n.id] } } };
     }
     if (n.type === 'waermezaehler') {
-      return { ...n, data: { ...n.data, _calc: { v: nodeFlows[n.id] } } };
+      return { ...n, data: { ...n.data, _calc: { ...(n.data?._calc || {}), v: nodeFlows[n.id] } } };
     }
     if (n.type === 'expansion') {
       const c = expansionResults[n.id];
-      return c ? { ...n, data: { ...n.data, _calc: c } } : n;
+      return c ? { ...n, data: { ...n.data, _calc: { ...(n.data?._calc || {}), ...c } } } : n;
     }
     if (n.type === 'speicher') {
       const c = speicherResults[n.id];
-      return c ? { ...n, data: { ...n.data, _calc: c } } : n;
+      return c ? { ...n, data: { ...n.data, _calc: { ...(n.data?._calc || {}), ...c } } } : n;
     }
     if (n.type === 'erdsonden') {
       const c = erdsondenResults[n.id];
-      return c ? { ...n, data: { ...n.data, _calc: c } } : n;
+      return c ? { ...n, data: { ...n.data, _calc: { ...(n.data?._calc || {}), ...c } } } : n;
     }
     if (n.type === 'bww') {
       const c = bwwResults[n.id];
-      return c ? { ...n, data: { ...n.data, _calc: c } } : n;
+      return c ? { ...n, data: { ...n.data, _calc: { ...(n.data?._calc || {}), ...c } } } : n;
     }
     return n;
-  }), [nodes, verteilerResults, gruppeResults, nodeFlows, expansionResults, speicherResults, erdsondenResults, bwwResults]);
+  }), [nodes, nodeInfos, verteilerResults, gruppeResults, nodeFlows, expansionResults, speicherResults, erdsondenResults, bwwResults]);
 
   // Legende: Nr · Bauteil · Bezeichnung · Kennwerte (reine Anzeige der
   // Backend-Resultate — dieselben Zeilen erscheinen im PDF)
@@ -5099,8 +5179,10 @@ function EditorInner() {
           export_route:routePunkte(edge),
         },
       }));
+      // Dasselbe für die Bauteile: Box und Anschlusspunkte kommen aus der
+      // Messung im Browser, damit das Backend keine zweite Geometrie herleitet.
       const graph = graphFuerSpeicherung(
-        nodes,
+        nodesMitExportGeometrie(nodes, getInternalNode),
         exportEdges,
         { active_layer_id:activeLayerId, visibility:layerVisibility },
         drawingConfig,

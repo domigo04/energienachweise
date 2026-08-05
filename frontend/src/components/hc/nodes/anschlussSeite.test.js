@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { Position } from '@xyflow/react';
-import { anfahrtsSeite, anschluesseNachDrehung, gedrehteSeite } from './anschlussSeite';
+import {
+  anfahrtsSeite,
+  anschluesseNachDrehung,
+  besteAnschluesse,
+  gedrehteSeite,
+  GLEICHWERTIGE_ANSCHLUESSE,
+} from './anschlussSeite';
 
 describe('gedrehteSeite', () => {
   it('lässt eine Seite ohne Drehung unverändert', () => {
@@ -162,5 +168,69 @@ describe('anschluesseNachDrehung — Grenzen', () => {
     expect(anschluesseNachDrehung(ventil, [
       { edgeId: 'A', ende: 'target', handleId: 'gibtsnicht', anfahrt: Position.Top },
     ], 180)).toEqual([]);
+  });
+});
+
+describe('besteAnschluesse — gleichwertige Armaturen', () => {
+  // Pumpe mit allen vier Anschlüssen; hydraulisch sind sie gleichwertig.
+  const pumpe = [
+    { id: 'top', position: Position.Top },
+    { id: 'bottom', position: Position.Bottom },
+    { id: 'left', position: Position.Left },
+    { id: 'right', position: Position.Right },
+  ];
+
+  it('nimmt auch einen freien Anschluss — die Leitung läuft nie hinter dem Bauteil durch', () => {
+    // Eine einzige Leitung von oben, Pumpe um 180° gedreht: «top» liegt jetzt
+    // unten. Der reine Tausch fände kein Ziel, hier springt die Leitung auf
+    // «bottom», der nach der Drehung oben liegt.
+    const einzeln = [{ edgeId: 'A', ende: 'target', handleId: 'top', anfahrt: Position.Top }];
+
+    expect(anschluesseNachDrehung(pumpe, einzeln, 180)).toEqual([]);
+    expect(besteAnschluesse(pumpe, einzeln, 180)).toEqual([
+      { edgeId: 'A', ende: 'target', handleId: 'bottom' },
+    ]);
+  });
+
+  it('hängt beide Leitungen einer senkrechten Pumpe bei 180° um', () => {
+    const anschluesse = [
+      { edgeId: 'A', ende: 'target', handleId: 'top', anfahrt: Position.Top },
+      { edgeId: 'B', ende: 'source', handleId: 'bottom', anfahrt: Position.Bottom },
+    ];
+    expect(besteAnschluesse(pumpe, anschluesse, 180)).toEqual([
+      { edgeId: 'A', ende: 'target', handleId: 'bottom' },
+      { edgeId: 'B', ende: 'source', handleId: 'top' },
+    ]);
+  });
+
+  it('greift auch ohne Drehung — etwa wenn die Pumpe verschoben wurde', () => {
+    // Die Leitung kommt jetzt von links an, hängt aber noch oben.
+    const verschoben = [{ edgeId: 'A', ende: 'target', handleId: 'top', anfahrt: Position.Left }];
+    expect(besteAnschluesse(pumpe, verschoben, 0)).toEqual([
+      { edgeId: 'A', ende: 'target', handleId: 'left' },
+    ]);
+  });
+
+  it('lässt einen bereits passenden Anschluss in Ruhe', () => {
+    const passend = [{ edgeId: 'A', ende: 'target', handleId: 'left', anfahrt: Position.Left }];
+    expect(besteAnschluesse(pumpe, passend, 0)).toEqual([]);
+  });
+
+  it('gibt zwei Leitungen nie denselben Anschluss', () => {
+    const beide = [
+      { edgeId: 'A', ende: 'target', handleId: 'top', anfahrt: Position.Left },
+      { edgeId: 'B', ende: 'source', handleId: 'bottom', anfahrt: Position.Left },
+    ];
+    const wechsel = besteAnschluesse(pumpe, beide, 0);
+    expect(wechsel).toEqual([{ edgeId: 'A', ende: 'target', handleId: 'left' }]);
+  });
+
+  it('nur geometrisch gleichwertige Bauteile stehen in der Liste', () => {
+    expect(GLEICHWERTIGE_ANSCHLUESSE.has('pump')).toBe(true);
+    expect(GLEICHWERTIGE_ANSCHLUESSE.has('shutoff')).toBe(true);
+    // Bauteile, an deren Anschluss die Hydraulik hängt, bleiben aussen vor.
+    ['erzeuger', 'verteiler', 'speicher', 'bww', 'valve3'].forEach(typ => {
+      expect(GLEICHWERTIGE_ANSCHLUESSE.has(typ)).toBe(false);
+    });
   });
 });

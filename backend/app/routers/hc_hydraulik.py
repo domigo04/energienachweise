@@ -6,6 +6,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from app.calculations.hydraulik import berechne_schema
+from app.export.bauteil_infos import node_infos
 
 router = APIRouter(prefix="/api/v1/hydraulik", tags=["Heizungscockpit – Hydraulik"])
 
@@ -47,7 +48,10 @@ def hydraulik_berechnen(body: GraphInput):
     """
     nodes = [n.model_dump() for n in body.nodes]
     edges = [e.model_dump() for e in body.edges]
-    return _berechne_gecacht(
+    ergebnis = _berechne_gecacht(
         json.dumps(nodes, sort_keys=True, separators=(",", ":")),
         json.dumps(edges, sort_keys=True, separators=(",", ":")),
     )
+    # Die Kennwerte fürs Datenkästchen am Bauteil kommen aus derselben Quelle
+    # wie im PDF-Export — sonst steht im Plan etwas anderes als am Bildschirm.
+    return {**ergebnis, "node_infos": node_infos(nodes, ergebnis)}

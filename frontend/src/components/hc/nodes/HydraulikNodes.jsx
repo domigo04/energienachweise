@@ -1084,6 +1084,7 @@ function mitNr(Comp) {
       lufterhitzer:'Lufterhitzer', lufterhitzer_gruppe:'Lufterhitzer-Gruppe',
       waermezaehler_cad:'Wärmezähler',
     }[props.type] || 'Bauteil';
+    const kennwerte = Array.isArray(props.data?._calc?.kennwerte) ? props.data._calc.kennwerte : [];
     const captionPointerDown = (event) => {
       if (event.button !== 0) return;
       event.preventDefault();
@@ -1139,7 +1140,22 @@ function mitNr(Comp) {
               color:'#334155', fontSize:9, lineHeight:1.2, textAlign:'center',
               whiteSpace:'nowrap', cursor:'move', zIndex:18,
             }}>
-            {caption}
+            <div style={{ fontWeight:700 }}>{caption}</div>
+            {/* Kennwerte kommen fertig aus dem Backend (node_infos) — dieselbe
+                Quelle zeichnet das Kästchen im PDF-Export. */}
+            {kennwerte.length > 0 && (
+              <table style={{ borderTop:'1px solid #cbd5e1', marginTop:2, width:'100%',
+                borderCollapse:'collapse', fontSize:8 }}>
+                <tbody>
+                  {kennwerte.map((k, i) => (
+                    <tr key={i}>
+                      <td style={{ color:'#64748b', textAlign:'left', paddingRight:6 }}>{k.name}</td>
+                      <td style={{ color:'#0f172a', textAlign:'right' }}>{k.wert}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         )}
       </div>

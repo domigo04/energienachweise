@@ -13,6 +13,7 @@ import re
 from typing import Optional
 
 from app.data.generator_types import generator_type_label
+from app.export.bauteil_infos import bauteil_kennwerte
 
 VL_FARBE = "#ef4444"
 RL_FARBE = "#3b82f6"
@@ -293,6 +294,50 @@ def _handle_pos_base(node, handle: Optional[str]):
     # pump, stad, checkvalve, shutoff, default
     return {"top": (x + w / 2, y), "bottom": (x + w / 2, y + h),
             "left": (x, y + h / 2), "right": (x + w, y + h / 2)}.get(handle, (x + w / 2, y + h / 2))
+
+
+KASTEN_ZEILE = 9.5      # Zeilenhöhe im Datenblock
+KASTEN_KOPF = 18.0      # Abstand Titelzeile → erste Kennwertzeile
+
+
+def datenkasten_masse(titel: str, kennwerte: list) -> tuple:
+    """Breite und Höhe des Datenblocks — Editor und Export nutzen dasselbe."""
+    namen = max([len(str(n)) + 1 for n, _ in kennwerte] + [0])
+    werte = max([len(str(w)) for _, w in kennwerte] + [0])
+    breite = max(60.0, len(str(titel)) * 4.9 + 6, namen * 4.4 + werte * 4.4 + 12)
+    return (min(210.0, breite), KASTEN_KOPF + len(kennwerte) * KASTEN_ZEILE)
+
+
+def zeichne_datenkasten(parts: list, mitte_x: float, oben_y: float,
+                        titel: str, kennwerte: list) -> None:
+    """Bauteilname und Kennwerte als Datenblock unter dem Bauteil.
+
+    Gestalt wie in Dominics Vorlage: Titelzeile, darunter je Kennwert die
+    Bezeichnung mit Doppelpunkt links und der Wert in einer zweiten Spalte.
+    Kein Rahmen — nur eine weisse Unterlegung, damit der Block über Rastern
+    und Unterlagen lesbar bleibt.
+    """
+    breite, hoehe = datenkasten_masse(titel, kennwerte)
+    x = mitte_x - breite / 2
+    wert_x = x + max(52.0, breite * 0.56)
+    parts.append(
+        f'<rect x="{_svg_num(x - 2)}" y="{_svg_num(oben_y)}" width="{_svg_num(breite + 4)}" '
+        f'height="{_svg_num(hoehe)}" fill="white" fill-opacity="0.82" stroke="none"/>'
+    )
+    parts.append(
+        f'<text x="{_svg_num(x)}" y="{_svg_num(oben_y + 8.5)}" font-size="8.5" '
+        f'font-weight="700" fill="#0f172a">{_esc(titel)}</text>'
+    )
+    for i, (name, wert) in enumerate(kennwerte):
+        zeile_y = oben_y + KASTEN_KOPF + i * KASTEN_ZEILE
+        parts.append(
+            f'<text x="{_svg_num(x)}" y="{_svg_num(zeile_y)}" font-size="8" '
+            f'fill="#334155">{_esc(name)}:</text>'
+        )
+        parts.append(
+            f'<text x="{_svg_num(wert_x)}" y="{_svg_num(zeile_y)}" font-size="8" '
+            f'fill="#0f172a">{_esc(wert)}</text>'
+        )
 
 
 def _schraffur(x: float, y: float, w: float, h: float, abstand: float) -> list:
@@ -1043,16 +1088,8 @@ def zeichne_standard(parts, node, results):
         }.get(t, t)
         offset_x = _f(d.get("caption_offset_x")) or 0
         offset_y = max(0, _f(d.get("caption_offset_y")) or 0)
-        cap_x, cap_y = cx + offset_x, y + h + 10 + offset_y
-        cap_w = max(54, min(160, len(str(caption)) * 5.7 + 14))
-        parts.append(
-            f'<rect x="{cap_x - cap_w / 2}" y="{cap_y}" width="{cap_w}" height="18" '
-            'rx="2" fill="white" stroke="#94a3b8" stroke-width="0.8"/>'
-        )
-        parts.append(
-            f'<text x="{cap_x}" y="{cap_y + 12}" text-anchor="middle" font-size="9" '
-            f'fill="#334155">{_esc(caption)}</text>'
-        )
+        zeichne_datenkasten(parts, cx + offset_x, y + h + 10 + offset_y, caption,
+                            bauteil_kennwerte(node, results))
 
 
 def _svg_num(value):

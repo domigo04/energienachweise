@@ -4868,7 +4868,11 @@ function EditorInner() {
   // Verteiler-Rahmen: nur die Balken sind greifbar (dragHandle), die Lücke
   // dazwischen lässt Klicks durch (pointerEvents none) und liegt hinter den
   // Strängen (zIndex -10) — so lassen sich Gruppen zwischen die Balken stellen.
-  const displayNodes = useMemo(() => nodes.map(n => {
+  const displayNodes = useMemo(() => nodes.map(raw => {
+    // Kennwerte fürs Datenkästchen: fertig aus dem Backend (node_infos), damit
+    // Editor und PDF-Export dieselben Werte am Bauteil zeigen.
+    const infos = nodeInfos[raw.id];
+    const n = infos ? { ...raw, data:{ ...raw.data, _calc:{ ...(raw.data?._calc || {}), kennwerte:infos } } } : raw;
     if (n.type === 'junction') {
       return {
         ...n,
@@ -4885,33 +4889,33 @@ function EditorInner() {
         dragHandle: '.vt-bar',
         zIndex: -10,
         style: { ...n.style, pointerEvents: 'none' },
-        data: c ? { ...n.data, _calc: c } : n.data,
+        data: c ? { ...n.data, _calc: { ...(n.data?._calc || {}), ...c } } : n.data,
       };
     }
     if (n.type === 'gruppe' || n.type === 'heizkreis' || n.type === 'lufterhitzer_gruppe') {
-      return { ...n, data: { ...n.data, _calc: { ...(gruppeResults[n.id] || {}), v: nodeFlows[n.id] } } };
+      return { ...n, data: { ...n.data, _calc: { ...(n.data?._calc || {}), ...(gruppeResults[n.id] || {}), v: nodeFlows[n.id] } } };
     }
     if (n.type === 'waermezaehler') {
-      return { ...n, data: { ...n.data, _calc: { v: nodeFlows[n.id] } } };
+      return { ...n, data: { ...n.data, _calc: { ...(n.data?._calc || {}), v: nodeFlows[n.id] } } };
     }
     if (n.type === 'expansion') {
       const c = expansionResults[n.id];
-      return c ? { ...n, data: { ...n.data, _calc: c } } : n;
+      return c ? { ...n, data: { ...n.data, _calc: { ...(n.data?._calc || {}), ...c } } } : n;
     }
     if (n.type === 'speicher') {
       const c = speicherResults[n.id];
-      return c ? { ...n, data: { ...n.data, _calc: c } } : n;
+      return c ? { ...n, data: { ...n.data, _calc: { ...(n.data?._calc || {}), ...c } } } : n;
     }
     if (n.type === 'erdsonden') {
       const c = erdsondenResults[n.id];
-      return c ? { ...n, data: { ...n.data, _calc: c } } : n;
+      return c ? { ...n, data: { ...n.data, _calc: { ...(n.data?._calc || {}), ...c } } } : n;
     }
     if (n.type === 'bww') {
       const c = bwwResults[n.id];
-      return c ? { ...n, data: { ...n.data, _calc: c } } : n;
+      return c ? { ...n, data: { ...n.data, _calc: { ...(n.data?._calc || {}), ...c } } } : n;
     }
     return n;
-  }), [nodes, verteilerResults, gruppeResults, nodeFlows, expansionResults, speicherResults, erdsondenResults, bwwResults]);
+  }), [nodes, nodeInfos, verteilerResults, gruppeResults, nodeFlows, expansionResults, speicherResults, erdsondenResults, bwwResults]);
 
   // Legende: Nr · Bauteil · Bezeichnung · Kennwerte (reine Anzeige der
   // Backend-Resultate — dieselben Zeilen erscheinen im PDF)

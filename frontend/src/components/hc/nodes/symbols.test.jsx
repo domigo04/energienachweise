@@ -3,7 +3,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import {
-  SymCheckValve, SymPump, SymShutoff, SymSTAD, SymValve2V, SymValve3, SymWE,
+  ARMATUR_H, SymAbsperrklappe, SymCheckValve, SymEntleerung, SymPump, SymShutoff,
+  SymSTAD, SymTemperatur, SymValve2V, SymValve3, SymWE,
 } from './symbols';
 
 describe('Wärmeerzeugersymbole', () => {
@@ -35,11 +36,22 @@ describe('Wärmeerzeugersymbole', () => {
 });
 
 describe('Kompakte Armaturen und Feldgeräte', () => {
-  it('zeichnet Pumpe und Ventile ungefähr halb so gross wie zuvor', () => {
-    expect(renderToStaticMarkup(<SymPump/>)).toContain('width="24"');
-    expect(renderToStaticMarkup(<SymValve2V/>)).toContain('width="34"');
-    expect(renderToStaticMarkup(<SymValve3/>)).toContain('width="38"');
-    expect(renderToStaticMarkup(<SymSTAD/>)).toContain('width="12"');
+  // Dominic 2026-08-05: alle Armaturen sind gleich hoch. Nur die Pumpe ist
+  // grösser, Entleerung und Temperaturfühler sind kleiner.
+  it('zeichnet alle Armaturen gleich hoch', () => {
+    const armaturen = [
+      <SymShutoff key="kh"/>, <SymAbsperrklappe key="ak"/>, <SymValve2V key="v2"/>,
+      <SymValve3 key="v3"/>, <SymSTAD key="st"/>, <SymCheckValve key="rv"/>,
+    ];
+    for (const sym of armaturen) {
+      expect(renderToStaticMarkup(sym)).toContain(`height="${ARMATUR_H}"`);
+    }
+  });
+
+  it('zeichnet die Pumpe grösser und Fühler/Entleerung kleiner als die Armaturen', () => {
+    expect(renderToStaticMarkup(<SymPump/>)).toContain('height="34"');
+    expect(renderToStaticMarkup(<SymTemperatur/>)).toContain('height="16"');
+    expect(renderToStaticMarkup(<SymEntleerung/>)).toContain('height="9.6"');
   });
 
   it('zeichnet Kugelhahn und Rückschlagventil mit vollständigen Leitungsstutzen', () => {

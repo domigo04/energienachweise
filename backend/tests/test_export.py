@@ -131,10 +131,15 @@ def test_handle_positionen():
     # rl-1 oben am RL-Balken (Höhe dynamisch)
     _, y_rl = handle_pos(vt, "rl-1")
     assert y_rl == 150 + vt_hoehe(vt) - 26
-    # Gruppe: VL oben Mitte, RL unten Mitte
+    # Gruppe: VL oben Mitte, RL unten Mitte. Die Stranghöhe ist 2026-08-05 auf
+    # das Mass der Lufterhitzergruppe gewachsen (Dominic) — deshalb GR_H statt
+    # einer festen Zahl.
+    from app.export.schema_svg import GR_H
+
+    assert GR_H == 560
     g1 = nodes[2]
     assert handle_pos(g1, "vl") == (330 + 75, 186)
-    assert handle_pos(g1, "rl") == (330 + 75, 186 + 400)
+    assert handle_pos(g1, "rl") == (330 + 75, 186 + GR_H)
 
 
 def test_erdsondenfeld_waechst_mit_duplexsonden_und_exportiert_identisch():
@@ -498,3 +503,75 @@ def test_lufterhitzer_gruppe_hat_keine_absperrklappe_im_ruecklauf():
             "position": {"x": 0, "y": 0}, "data": {}}
     svg = erzeuge_svg([node], [], {})
     assert svg.count('<rect x="4" y="8" width="36" height="60"') == 1
+
+
+# ── Serielle Lufterhitzer-Untergruppen (Dominic 2026-08-05) ──────────────────
+def _lufterhitzer_anlage(kette):
+    """Hauptgruppe «Lufterhitzer» → Anschlussmarker → seriell die Anlagen."""
+    nodes = [
+        {"id": "g", "type": "gruppe", "position": {"x": 0, "y": 0}, "data": {
+            "label": "Lufterhitzer", "q_kw": "30", "vl_temp": "60", "rl_temp": "45",
+            "hat_anschluss": True, "anschluss_buchstabe": "A"}},
+        {"id": "m", "type": "anschluss", "position": {"x": 300, "y": 0}, "data": {"buchstabe": "A"}},
+    ]
+    edges = []
+    vorher = "m"
+    for i, q in enumerate(kette, start=1):
+        nid = f"lh{i}"
+        nodes.append({"id": nid, "type": "lufterhitzer_gruppe",
+                      "position": {"x": 400 + i * 200, "y": 0},
+                      "data": {"anlage_nr": f"LE {i}", "q_kw": str(q), "ventil_dp_var": "26"}})
+        edges.append({"id": f"e{i}", "source": vorher, "target": nid, "stroke": VL})
+        vorher = nid
+    return nodes, edges
+
+
+def test_lufterhitzer_uebernimmt_vl_rl_und_legt_das_ventil_aus():
+    nodes, edges = _lufterhitzer_anlage([18, 12])
+    r = berechne_schema(nodes, edges)
+
+    lh1 = r["gruppe_results"]["lh1"]
+    # VL/RL kommen von der Hauptgruppe, die Leistung von der Anlage selbst.
+    assert (lh1["vl"], lh1["rl"]) == (60.0, 45.0)
+    assert lh1["q_kw"] == 18.0
+    # V' = Q / (1.163 · ΔT) = 18 / (1.163 · 15)
+    assert lh1["m_sek"] == pytest.approx(1.0318, abs=0.001)
+    assert r["node_flows"]["lh1"] == pytest.approx(1.0318, abs=0.001)
+    # Ventil wird aus Δpvar und dem eigenen V' ausgelegt.
+    assert lh1["ventil"]["kvs_eff"] == pytest.approx(2.5, abs=0.1)
+    # Auch die zweite, seriell dahinterliegende Anlage wird erreicht.
+    assert r["gruppe_results"]["lh2"]["m_sek"] == pytest.approx(0.6879, abs=0.001)
+
+
+def test_lufterhitzer_summe_stimmt_mit_der_hauptgruppe_ueberein():
+    nodes, edges = _lufterhitzer_anlage([18, 12])          # 18 + 12 = 30 kW
+    r = berechne_schema(nodes, edges)
+    assert not any("summieren" in w for w in r["anschluss_warnings"])
+
+
+def test_lufterhitzer_summe_weicht_ab_und_warnt():
+    nodes, edges = _lufterhitzer_anlage([18, 5])           # 23 statt 30 kW
+    r = berechne_schema(nodes, edges)
+    warnung = next(w for w in r["anschluss_warnings"] if "summieren" in w)
+    assert "23.0 kW" in warnung
+    assert "30.0 kW" in warnung
+    assert "-7.0 kW" in warnung
+
+
+def test_lufterhitzer_gruppe_zeichnet_kennwerte_und_waermezaehler():
+    nodes, edges = _lufterhitzer_anlage([18])
+    nodes[-1]["data"]["hat_wz"] = True
+    r = berechne_schema(nodes, edges)
+    svg = erzeuge_svg(nodes, edges, r)
+
+    assert "LE 1" in svg and "18 kW" in svg
+    assert "V' 1.032 m³/h" in svg
+    # Wärmezähler: Volumenmessteil mit halbschwarzer Diagonale und Rechenwerk.
+    assert '<polygon points="36,76 84,76 36,180" fill="#000"/>' in svg
+    assert '<rect x="120" y="116" width="34" height="22"' in svg
+
+
+def test_lufterhitzer_ohne_waermezaehler_zeichnet_keinen():
+    nodes, edges = _lufterhitzer_anlage([18])
+    r = berechne_schema(nodes, edges)
+    assert '<polygon points="36,76 84,76 36,180" fill="#000"/>' not in erzeuge_svg(nodes, edges, r)

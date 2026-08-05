@@ -406,6 +406,7 @@ const PALETTE_GRUPPEN = [
     { type: 'expansion',  label: 'Expansionsgefäss',    desc: 'VN nach Dominics Excel-Methode' },
     { type: 'sicherheitsventil', label: 'Sicherheitsventil', desc: 'SV mit Feder' },
     { type: 'waermezaehler', label: 'Wärmezähler',      desc: 'übernimmt Leitungs-Durchfluss' },
+    { type: 'waermezaehler_cad', label: 'Wärmezähler (CAD)', desc: 'Volumenmessteil, Fühler und Rechenwerk' },
     { type: 'temperatur', label: 'Temperaturfühler',    desc: 'nur Symbol' },
   ]},
   { titel: 'Verbindungen', items: [
@@ -1385,6 +1386,41 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
             )}
           </>
         )}
+      </div>
+    );
+  } else if (node.type === 'lufterhitzer_gruppe') {
+    // Untergruppe am Anschlussmarker: VL/RL kommen von der Hauptgruppe, nur
+    // Leistung und Druckverlust werden hier eingegeben (Dominic 2026-08-05).
+    body = (
+      <div style={{ display:'grid', gap:12 }}>
+        <div><label style={lbl}>Anlagennummer / Bezeichnung</label>
+          <input type="text" style={inp} value={d.anlage_nr??''} onChange={e=>set('anlage_nr',e.target.value)} placeholder="z.B. LE 3 — Halle Nord"/></div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+          <div><label style={lbl}>Leistung Q [kW]</label>
+            <input type="number" style={inp} value={d.q_kw??''} onChange={e=>set('q_kw',e.target.value)} placeholder="12"/></div>
+          <div><label style={lbl}>Druckverlust Ast [kPa]</label>
+            <input type="number" style={inp} value={d.dp_kpa??''} onChange={e=>set('dp_kpa',e.target.value)} placeholder="20"/></div>
+        </div>
+        <div><label style={lbl}>Δpvar — Druckabfall variabler Anlagenteil [kPa]</label>
+          <input type="number" style={inp} value={d.ventil_dp_var??''} onChange={e=>set('ventil_dp_var',e.target.value)} placeholder="26"/></div>
+
+        {gr?.vl != null
+          ? <div style={{ fontSize:11, color:'#475569', background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:8, padding:'8px 10px' }}>
+              VL/RL <b>{gr.vl} / {gr.rl} °C</b> — übernommen von {gr.quelle || 'der Hauptgruppe'} über den Anschlussmarker.
+            </div>
+          : <div style={warnSt}>Noch keine Hauptgruppe verbunden. Anschlussmarker setzen und mit der Lufterhitzer-Verbrauchergruppe koppeln — dann kommen VL/RL von dort.</div>}
+
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+          <BigVal label="V' Lufterhitzer" value={gr?.m_sek!=null?Number(gr.m_sek).toFixed(3):null} unit="m³/h" color="#15803d"
+            sub={gr?.dt_sek!=null?`ΔT = ${gr.dt_sek} K`:''}/>
+          <BigVal label="Ventil kvs" value={gr?.ventil?.kvs_eff??null} unit=""
+            sub={gr?.ventil?.pv!=null?`Ventilautorität Pv = ${gr.ventil.pv.toFixed(1)} %`:'Δpvar eingeben'}/>
+        </div>
+
+        <label style={{ display:'flex', gap:6, alignItems:'center', cursor:'pointer', fontSize:12, color:'#374151' }}>
+          <input type="checkbox" checked={!!d.hat_wz} onChange={e=>set('hat_wz',e.target.checked)}/>
+          Wärmezähler im Rücklauf
+        </label>
       </div>
     );
   } else if (node.type === 'verteiler') {

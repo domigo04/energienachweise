@@ -1,10 +1,15 @@
 // SIA 410 Hydraulik-Symbole
 
+// Dominic 2026-08-05: alle Armaturen sind gleich hoch — Absperrklappe,
+// Kugelhahn, Regelventile, STAD und Rückschlagventil. Nur die Pumpe ist
+// grösser; Entleerung und Temperaturfühler sind kleiner.
+export const ARMATUR_H = 28;
+
 // Kreis (weiss) + Durchmesserlinie + gefülltes Dreieck (Flussrichtung nach
 // unten). Ohne Motor-Kasten (Dominic-Feedback: brauchen wir nicht).
 export function SymPump() {
   return (
-    <svg viewBox="0 0 44 44" width="24" height="24">
+    <svg viewBox="0 0 44 44" width="34" height="34">
       <line x1="22" y1="0" x2="22" y2="4" stroke="#1e293b" strokeWidth="1.6" />
       <line x1="22" y1="40" x2="22" y2="44" stroke="#1e293b" strokeWidth="1.6" />
       <circle cx="22" cy="22" r="18" fill="white" stroke="#1e293b" strokeWidth="1.6" />
@@ -19,7 +24,7 @@ export function SymPump() {
 // kasten (Σ) links. Die hydraulische Flussachse liegt exakt in der Mitte.
 export function SymValve2V() {
   return (
-    <svg viewBox="0 0 100 100" width="34" height="24">
+    <svg viewBox="0 0 100 100" width="35" height={ARMATUR_H}>
       {/* Dominic 2026-07-31: die Doppelkegel waren fast so hoch wie das ganze
           Symbol und wirkten dadurch in die Länge gezogen. Sie sind jetzt
           gestaucht und etwas breiter — dasselbe Zeichen, ruhigere Proportion. */}
@@ -40,7 +45,7 @@ export function SymValve2V() {
 // Die Hauptachse liegt mittig, das dritte Tor exakt rechts.
 export function SymValve3() {
   return (
-    <svg viewBox="0 0 100 100" width="38" height="24">
+    <svg viewBox="0 0 100 100" width="38" height={ARMATUR_H}>
       <line x1="50" y1="0" x2="50" y2="8" stroke="#1e293b" strokeWidth="2.6" />
       <line x1="50" y1="92" x2="50" y2="100" stroke="#1e293b" strokeWidth="2.6" />
       <line x1="92" y1="50" x2="100" y2="50" stroke="#1e293b" strokeWidth="2.6" />
@@ -59,7 +64,7 @@ export function SymValve3() {
 // Sanduhr zwischen zwei Balken + Messkreis + Pfeil nach oben.
 export function SymSTAD() {
   return (
-    <svg viewBox="0 0 60 135" width="12" height="28">
+    <svg viewBox="0 0 60 135" width="12" height={ARMATUR_H}>
       {/* Deckt die Leitung ab: Bauteile liegen auf dem Strang, nicht darunter. */}
       <polygon points="12,11 50,11 31,58" fill="white" />
       <polygon points="12,105 50,105 31,58" fill="white" />
@@ -80,7 +85,7 @@ export function SymSTAD() {
 // Kreis + Diagonalpfeil + T. (Blaue RL-Leitung zeichnet der Strang selbst.)
 export function SymTemperatur() {
   return (
-    <svg viewBox="10 6 90 66" width="26" height="19">
+    <svg viewBox="10 6 90 66" width="22" height="16">
       <g fill="none" stroke="#1e293b" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="38" cy="36" r="12" fill="white" />
         <line x1="18" y1="56" x2="56" y2="18" />
@@ -146,7 +151,7 @@ export function SymPWT() {
 
 export function SymCheckValve() {
   return (
-    <svg viewBox="0 0 44 80" width="16" height="28">
+    <svg viewBox="0 0 44 80" width="16" height={ARMATUR_H}>
       <line x1="22" y1="0" x2="22" y2="16" stroke="#1e293b" strokeWidth="2.4" />
       <polygon points="10,16 34,16 22,43" fill="white" stroke="#1e293b" strokeWidth="2.4" strokeLinejoin="round" />
       <line x1="8" y1="43" x2="36" y2="43" stroke="#1e293b" strokeWidth="2.8" />
@@ -160,7 +165,7 @@ export function SymCheckValve() {
 // Antriebskasten. Flussachse senkrecht durch x=104 (mittig).
 export function SymShutoff() {
   return (
-    <svg viewBox="78 6 52 118" width="14" height="28">
+    <svg viewBox="78 6 52 118" width="14" height={ARMATUR_H}>
       <line x1="104" y1="6" x2="104" y2="14" stroke="#1e293b" strokeWidth="3" />
       <polygon points="79,14 130,14 104,65" fill="white" stroke="#000" strokeWidth="3.2" strokeLinejoin="round" />
       <polygon points="79,116 130,116 104,65" fill="white" stroke="#000" strokeWidth="3.2" strokeLinejoin="round" />
@@ -175,7 +180,7 @@ export function SymShutoff() {
 // übernimmt das STAD die Absperrung (Dominic 2026-08-05).
 export function SymAbsperrklappe() {
   return (
-    <svg viewBox="0 0 44 76" width="16" height="28">
+    <svg viewBox="0 0 44 76" width="16" height={ARMATUR_H}>
       <line x1="22" y1="0" x2="22" y2="8" stroke="#1e293b" strokeWidth="3" />
       <line x1="22" y1="68" x2="22" y2="76" stroke="#1e293b" strokeWidth="3" />
       <rect x="4" y="8" width="36" height="60" fill="white" stroke="#000" strokeWidth="3" />
@@ -189,9 +194,11 @@ export function SymAbsperrklappe() {
 // Stutzen mit Kreuz. Sitzt seitlich an der Leitung; der Ursprung des Symbols
 // liegt auf der Rohrachse.
 export function SymEntleerung() {
+  // Dominic 2026-08-05: war zu gross und zu fett. Strichstärke jetzt auf dem
+  // Niveau des Kugelhahns (≈0.9 px effektiv).
   return (
-    <svg viewBox="0 0 40 24" width="20" height="12">
-      <g stroke="#000" strokeWidth="2.6" strokeLinecap="round">
+    <svg viewBox="0 0 40 24" width="16" height="9.6">
+      <g stroke="#000" strokeWidth="2.2" strokeLinecap="round">
         <line x1="3" y1="5" x2="3" y2="19" />
         <line x1="3" y1="12" x2="20" y2="12" />
         <line x1="20" y1="3" x2="34" y2="21" />
@@ -205,8 +212,8 @@ export function SymEntleerung() {
 // Stutzen, Doppeldreieck und Kappe — ebenfalls seitlich an der Leitung.
 export function SymEntleerhahn() {
   return (
-    <svg viewBox="0 0 46 22" width="23" height="11">
-      <g stroke="#000" strokeWidth="2.6" strokeLinejoin="round">
+    <svg viewBox="0 0 46 22" width="19" height="9.1">
+      <g stroke="#000" strokeWidth="2.2" strokeLinejoin="round">
         <line x1="3" y1="4" x2="3" y2="18" />
         <line x1="3" y1="11" x2="8" y2="11" />
         <polygon points="8,2 8,20 21,11" fill="white" />
@@ -214,6 +221,36 @@ export function SymEntleerhahn() {
         <line x1="34" y1="11" x2="39" y2="11" />
         <path d="M35 2 L41 2 L41 20 L35 20" fill="none" />
       </g>
+    </svg>
+  );
+}
+
+// ── Wärmezähler CAD (Vorlage Dominic 2026-08-05) ──────────────
+// Volumenmessteil (Rechteck mit Diagonale, eine Hälfte schwarz), Fühler im
+// Kreis darüber und Rechenwerk rechts. Die orangen Strichpunktlinien sind die
+// Signalleitungen zum Rechenwerk. Rohrachse bei 30 % der Symbolbreite.
+// Der Fühler sitzt im Rücklauf direkt über dem Volumenmessteil; den zweiten
+// Fühler im Vorlauf zeichnet die Gruppe (Dominic 2026-08-05).
+export function SymWaermezaehlerCad({ width = 32 }) {
+  return (
+    <svg viewBox="0 0 200 260" width={width} height={width * 260 / 200}>
+      {/* Signalleitungen zuerst — die Bauteile decken sie danach ab. */}
+      <g fill="none" stroke="#f08c2e" strokeWidth="3" strokeDasharray="12 6 3 6" strokeLinecap="round">
+        <path d="M101 30 H137 V116" />
+        <line x1="84" y1="127" x2="120" y2="127" />
+        <line x1="154" y1="127" x2="200" y2="127" />
+      </g>
+      <g stroke="#000" strokeWidth="3.5" strokeLinecap="round">
+        <line x1="36" y1="30" x2="74" y2="30" />
+        <line x1="36" y1="58" x2="84" y2="58" />
+        <line x1="36" y1="68" x2="84" y2="68" />
+        <line x1="36" y1="188" x2="84" y2="188" />
+        <line x1="36" y1="198" x2="84" y2="198" />
+      </g>
+      <circle cx="88" cy="30" r="13" fill="white" stroke="#000" strokeWidth="3.5" />
+      <rect x="36" y="76" width="48" height="104" fill="white" stroke="#000" strokeWidth="3.5" />
+      <polygon points="36,76 84,76 36,180" fill="#000" />
+      <rect x="120" y="116" width="34" height="22" fill="white" stroke="#000" strokeWidth="3.5" />
     </svg>
   );
 }

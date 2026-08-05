@@ -5,6 +5,7 @@ import {
   SymShutoff, SymWE, SymVerbraucher, SymSpeicher, SymBwwSpeicher, SymBypass,
   SymSTAD, SymTemperatur, SymSicherheitsventil, SymPWT,
   SymLufterhitzer, SymAbsperrklappe, SymEntleerung, SymEntleerhahn,
+  SymWaermezaehlerCad,
 } from './symbols';
 
 // Alle Handles als "source" + ConnectionMode.Loose → jeder mit jedem verbindbar
@@ -225,14 +226,23 @@ export function LufterhitzerGruppeNode({ data, selected: sel }) {
   // Dieselben Symbolkomponenten wie bei einzeln platzierten Bauteilen — damit
   // bleiben Proportionen und spätere Symbolkorrekturen an genau einer Stelle.
   const Fuehler = ({ cy }) => (
-    <g transform={`translate(${cx - 8} ${cy - 9})`}><SymTemperatur /></g>
+    <g transform={`translate(${cx - 6.8} ${cy - 7.3})`}><SymTemperatur /></g>
   );
   const Entleerung = ({ cy }) => (
-    <g transform={`translate(${cx - 1} ${cy - 6})`}><SymEntleerung /></g>
+    <g transform={`translate(${cx - 1.2} ${cy - 4.8})`}><SymEntleerung /></g>
   );
   const Entleerhahn = ({ cy }) => (
-    <g transform={`translate(${cx - 1} ${cy - 5.5})`}><SymEntleerhahn /></g>
+    <g transform={`translate(${cx - 1.2} ${cy - 4.5})`}><SymEntleerhahn /></g>
   );
+
+  const c = data._calc || {};
+  const zahl = (v, n = 2) => (v == null ? null : Number(v).toFixed(n));
+  const zeilen = [
+    data.anlage_nr || data.label || null,
+    data.q_kw != null && data.q_kw !== '' ? `${data.q_kw} kW` : null,
+    c.m_sek != null ? `V' ${zahl(c.m_sek, 3)} m³/h` : null,
+    c.ventil?.kvs_eff != null ? `kvs ${c.ventil.kvs_eff}` : null,
+  ].filter(Boolean);
 
   return (
     <div style={{ width: W, height: H, position: 'relative', cursor: 'grab' }}>
@@ -246,10 +256,16 @@ export function LufterhitzerGruppeNode({ data, selected: sel }) {
         <line x1={cx} y1="0" x2={cx} y2={REGISTER_OBEN} stroke="#ef4444" strokeWidth="2.5" />
         <line x1={cx} y1={REGISTER_UNTEN} x2={cx} y2={H} stroke="#3b82f6" strokeWidth="2.5" strokeDasharray="9,6" />
 
+        {/* Anlagennummer und Kennwerte — rechts oben, wo der Strang frei ist. */}
+        {zeilen.map((t, i) => (
+          <text key={i} x="98" y={12 + i * 12} fontSize="8.5" fill="#1e293b"
+            fontFamily="monospace">{t}</text>
+        ))}
+
         <g transform={`translate(${cx - 8} 20)`}><SymAbsperrklappe /></g>
         <Entleerhahn cy={88} />
         {/* Antrieb rechts wie in der Vorlage → Symbol gespiegelt. */}
-        <g transform={`translate(${cx + 17} 128) scale(-1 1)`}><SymValve2V /></g>
+        <g transform={`translate(${cx + 17.5} 126) scale(-1 1)`}><SymValve2V /></g>
         <Fuehler cy={196} />
         <Entleerung cy={244} />
 
@@ -264,11 +280,34 @@ export function LufterhitzerGruppeNode({ data, selected: sel }) {
           fontFamily="Arial, sans-serif">T</text>
 
         <Entleerung cy={388} />
-        <Fuehler cy={432} />
-        <Entleerhahn cy={478} />
-        <g transform={`translate(${cx - 6} 508)`}><SymSTAD /></g>
+        {data.hat_wz && (
+          <>
+            {/* Zweiter Fühler des Wärmezählers: der Vorlauffühler, per oranger
+                Signalleitung ans Rechenwerk im Rücklauf angebunden. */}
+            <path d={`M ${cx + 16} 196 H ${cx + 34} V 421 H ${cx + 22.4}`} fill="none"
+              stroke="#f08c2e" strokeWidth="1.6" strokeDasharray="6 3 1.5 3" strokeLinecap="round" />
+            <g transform={`translate(${cx - 9.6} 401)`}><SymWaermezaehlerCad /></g>
+          </>
+        )}
+        <Fuehler cy={462} />
+        <Entleerhahn cy={500} />
+        <g transform={`translate(${cx - 6} 520)`}><SymSTAD /></g>
       </svg>
       <Label text={data.label} />
+    </div>
+  );
+}
+
+// ── Wärmezähler CAD: Volumenmessteil, Fühler und Rechenwerk ──
+// Rohrachse bei 30 % der Symbolbreite — Rechenwerk und Signalleitungen liegen
+// rechts daneben.
+export function WaermezaehlerCadNode({ data, selected: sel }) {
+  return (
+    <div style={wrap(sel)}>
+      {H(Position.Top,    'top',    { top: -3,    left: '30%' })}
+      {H(Position.Bottom, 'bottom', { bottom: -3, left: '30%' })}
+      <SymWaermezaehlerCad />
+      <Label text={data.label || 'WZ'} />
     </div>
   );
 }
@@ -571,7 +610,11 @@ export function GruppeNode({ data, selected: sel }) {
   const schaltung = ['einspritz', 'beimisch', 'drossel'].includes(data.schaltung) ? data.schaltung : 'einspritz';
   const hatPumpe = schaltung !== 'drossel' && data.hat_pumpe !== false;
   const hatVentil = data.hat_ventil !== false;
-  const W = 150, H = 400, cx = 75;
+  // Dominic 2026-08-05: gleiche Abstände wie die Lufterhitzergruppe (150×560).
+  // Die Geometrie war auf 400 px Höhe gezeichnet; `sy` streckt nur die
+  // Abstände — die Symbole behalten ihre eigene Grösse.
+  const W = 150, H = 560, cx = 75;
+  const sy = (v) => +(v * H / 400).toFixed(1);
   const kg = (v) => (v == null ? '—' : `${Math.round(v * 1000).toLocaleString('de-CH')} kg/h`);
 
   const hSt = (top, bg) => ({
@@ -596,14 +639,14 @@ export function GruppeNode({ data, selected: sel }) {
       <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H}>
         {sel && <rect x="1" y="1" width={W - 2} height={H - 2} rx="8" fill="none" stroke="#3b82f6" strokeWidth="2" strokeDasharray="6,4" />}
         {/* Strangleitung: oben VL (primär), unten RL */}
-        <line x1={cx} y1="0" x2={cx} y2="120" stroke="#ef4444" strokeWidth="2.5" />
-        <line x1={cx} y1="285" x2={cx} y2={H} stroke="#3b82f6" strokeWidth="2.5" />
+        <line x1={cx} y1="0" x2={cx} y2={sy(120)} stroke="#ef4444" strokeWidth="2.5" />
+        <line x1={cx} y1={sy(285)} x2={cx} y2={H} stroke="#3b82f6" strokeWidth="2.5" />
         {/* Primär-Fluss am Strangkopf */}
         <text x={cx + 8} y="12" fontSize="9" fill="#1e293b" fontFamily="monospace">{`m': ${kg(c.m_prim)}`}</text>
         {/* Anschluss-Marker für separate Gruppe — beim roten Rechteck, auf Höhe
             des Wärmeabgabe-Typs; koppelt über den Buchstaben (PHYSIK §9) */}
         {data.hat_anschluss && (
-          <g>
+          <g transform={`translate(0 ${sy(200) - 200})`}>
             <line x1="104" y1="192" x2="132" y2="192" stroke="#ef4444" strokeWidth="2.2" />
             <polygon points="132,188 139,192 132,196" fill="#ef4444" />
             <line x1="132" y1="208" x2="104" y2="208" stroke="#3b82f6" strokeWidth="2.2" />
@@ -613,19 +656,19 @@ export function GruppeNode({ data, selected: sel }) {
           </g>
         )}
         {/* Absperrventil oben */}
-        <Absperr cyMid={30} />
+        <Absperr cyMid={sy(30)} />
         {/* Pumpe — identisch zum einzeln platzierbaren Symbol. */}
-        {hatPumpe && <g transform={`translate(${cx - 12} 52)`}><SymPump /></g>}
+        {hatPumpe && <g transform={`translate(${cx - 12} ${sy(64) - 12})`}><SymPump /></g>}
         {/* Thermometer */}
-        <circle cx={cx} cy="98" r="6" fill="white" stroke="#1e293b" strokeWidth="1.4" />
-        <text x={cx} y="101" textAnchor="middle" fontSize="7" fontWeight="700" fill="#1e293b">T</text>
+        <circle cx={cx} cy={sy(98)} r="6" fill="white" stroke="#1e293b" strokeWidth="1.4" />
+        <text x={cx} y={sy(98) + 3} textAnchor="middle" fontSize="7" fontWeight="700" fill="#1e293b">T</text>
         {/* Wärmezähler (SIA 410): Rechteck mit Diagonale, halb schwarz —
             plus je ein Fühler im VL und RL ausserhalb der Bypass-Schleife */}
         {data.hat_wz && (
           <>
-            <rect x={cx - 8} y="104" width="16" height="12" fill="white" stroke="#1e293b" strokeWidth="1.6" />
-            <polygon points={`${cx - 8},116 ${cx + 8},116 ${cx + 8},104`} fill="#1e293b" />
-            {[16, 352].map(fy => (
+            <rect x={cx - 8} y={sy(110) - 6} width="16" height="12" fill="white" stroke="#1e293b" strokeWidth="1.6" />
+            <polygon points={`${cx - 8},${sy(110) + 6} ${cx + 8},${sy(110) + 6} ${cx + 8},${sy(110) - 6}`} fill="#1e293b" />
+            {[sy(16), sy(352)].map(fy => (
               <g key={fy}>
                 <line x1={cx} y1={fy} x2={cx + 9} y2={fy} stroke="#1e293b" strokeWidth="1.4" />
                 <circle cx={cx + 12.5} cy={fy} r="3.5" fill="white" stroke="#1e293b" strokeWidth="1.4" />
@@ -634,45 +677,47 @@ export function GruppeNode({ data, selected: sel }) {
           </>
         )}
         {/* Rotes Rechteck mit gedrehtem Text (wie im CAD) */}
-        <rect x="52" y="120" width="46" height="165" fill="white" stroke="#ef4444" strokeWidth="2" />
-        <text transform="translate(63 202) rotate(-90)" textAnchor="middle" fontSize="9" fontWeight="700" fill="#ef4444" fontFamily="monospace">
+        <rect x="52" y={sy(120)} width="46" height={sy(285) - sy(120)} fill="white" stroke="#ef4444" strokeWidth="2" />
+        <text transform={`translate(63 ${sy(202)}) rotate(-90)`} textAnchor="middle" fontSize="9" fontWeight="700" fill="#ef4444" fontFamily="monospace">
           {data.label || 'Verbrauchergruppe'}
         </text>
-        <text transform="translate(75 202) rotate(-90)" textAnchor="middle" fontSize="8.5" fill="#ef4444" fontFamily="monospace">
+        <text transform={`translate(75 ${sy(202)}) rotate(-90)`} textAnchor="middle" fontSize="8.5" fill="#ef4444" fontFamily="monospace">
           {`${data.q_kw ?? '—'} kW · VL/RL ${data.vl_temp ?? '—'}/${data.rl_temp ?? '—'} °C`}
         </text>
-        <text transform="translate(87 202) rotate(-90)" textAnchor="middle" fontSize="8.5" fill="#ef4444" fontFamily="monospace">
+        <text transform={`translate(87 ${sy(202)}) rotate(-90)`} textAnchor="middle" fontSize="8.5" fill="#ef4444" fontFamily="monospace">
           {`m': ${kg(c.m_sek)}`}
         </text>
         {/* STAD — identisch zum einzeln platzierbaren Symbol. */}
-        <g transform={`translate(${cx - 6} 289)`}><SymSTAD /></g>
+        <g transform={`translate(${cx - 6} ${sy(303) - 14})`}><SymSTAD /></g>
         {/* Thermometer */}
-        <circle cx={cx + 24} cy="320" r="6" fill="white" stroke="#1e293b" strokeWidth="1.4" />
-        <text x={cx + 24} y="323" textAnchor="middle" fontSize="7" fontWeight="700" fill="#1e293b">T</text>
+        <circle cx={cx + 24} cy={sy(320)} r="6" fill="white" stroke="#1e293b" strokeWidth="1.4" />
+        <text x={cx + 24} y={sy(320) + 3} textAnchor="middle" fontSize="7" fontWeight="700" fill="#1e293b">T</text>
         {/* Ventil unten — identisch zu den einzeln platzierbaren Symbolen. */}
         {hatVentil && (
           <>
             {schaltung === 'beimisch'
-              ? <g transform={`translate(${cx + 19} 326) scale(-1 1)`}><SymValve3 /></g>
-              : <g transform={`translate(${cx - 17} 326)`}><SymValve2V /></g>}
+              ? <g transform={`translate(${cx + 23} ${sy(338) - 17}) scale(-1 1)`}><SymValve3 /></g>
+              : <g transform={`translate(${cx - 21} ${sy(338) - 17})`}><SymValve2V /></g>}
             {c.ventil && (
-              <text x={cx + 30} y="341" fontSize="8" fill="#1e293b" fontFamily="monospace">kvs {c.ventil.kvs_eff}</text>
+              <text x={cx + 34} y={sy(338) + 4} fontSize="8" fill="#1e293b" fontFamily="monospace">kvs {c.ventil.kvs_eff}</text>
             )}
           </>
         )}
         {/* Absperrventil unten */}
-        <Absperr cyMid={368} />
+        <Absperr cyMid={sy(368)} />
         {/* Bypass gehört zur Schaltung (Drossel hat keinen):
             Einspritz → mündet ÜBER dem 2WV · Beimisch → in den 3WV-Anschluss */}
         {schaltung !== 'drossel' && (
           <>
             <path
-              d={schaltung === 'einspritz' ? `M ${cx} 44 H 22 V 320 H ${cx}` : `M ${cx} 44 H 22 V 338 H ${cx - 18}`}
+              d={schaltung === 'einspritz'
+                ? `M ${cx} ${sy(44)} H 22 V ${sy(320)} H ${cx}`
+                : `M ${cx} ${sy(44)} H 22 V ${sy(338)} H ${cx - 23}`}
               fill="none" stroke="#3b82f6" strokeWidth="1.8" strokeDasharray="6,4" />
-            <circle cx={cx} cy="44" r="3.5" fill="#3b82f6" />
-            {schaltung === 'einspritz' && <circle cx={cx} cy="320" r="3.5" fill="#3b82f6" />}
+            <circle cx={cx} cy={sy(44)} r="3.5" fill="#3b82f6" />
+            {schaltung === 'einspritz' && <circle cx={cx} cy={sy(320)} r="3.5" fill="#3b82f6" />}
             {c.m_bypass > 0 && (
-              <text x="16" y="210" transform="rotate(-90 16 210)" textAnchor="middle" fontSize="8" fill="#3b82f6" fontFamily="monospace">
+              <text x="16" y={sy(210)} transform={`rotate(-90 16 ${sy(210)})`} textAnchor="middle" fontSize="8" fill="#3b82f6" fontFamily="monospace">
                 {`Bypass ${Number(c.m_bypass).toFixed(3)} m³/h`}
               </text>
             )}
@@ -921,10 +966,11 @@ export function InterfaceLineNode({ id, data, selected: sel }) {
 // ── Bauteil-Nummern (Pflichtenheft §10: Nummerierung + Legende) ──────
 // Jedes nummerierbare Bauteil bekommt ein rotes Badge (data.nr) oben rechts.
 // eslint-disable-next-line react-refresh/only-export-components
-export const NUMMERIERT = ['gruppe', 'heizkreis', 'pump', 'valve2', 'valve3', 'checkvalve', 'shutoff', 'erzeuger', 'speicher', 'erdsonden', 'verteiler', 'waermezaehler', 'expansion', 'bww', 'stad', 'sicherheitsventil', 'pwt', 'lufterhitzer', 'lufterhitzer_gruppe'];
+export const NUMMERIERT = ['gruppe', 'heizkreis', 'pump', 'valve2', 'valve3', 'checkvalve', 'shutoff', 'erzeuger', 'speicher', 'erdsonden', 'verteiler', 'waermezaehler', 'expansion', 'bww', 'stad', 'sicherheitsventil', 'pwt', 'lufterhitzer', 'lufterhitzer_gruppe', 'waermezaehler_cad'];
 const KOMPAKTE_BAUTEILE = new Set([
   'pump', 'valve2', 'valve3', 'checkvalve', 'shutoff', 'stad',
   'waermezaehler', 'expansion', 'sicherheitsventil', 'pwt', 'lufterhitzer',
+  'waermezaehler_cad',
 ]);
 
 // eslint-disable-next-line no-unused-vars
@@ -951,6 +997,7 @@ function mitNr(Comp) {
       stad:'STAD', waermezaehler:'Wärmezähler', expansion:'Expansionsgefäss',
       sicherheitsventil:'Sicherheitsventil', pwt:'Plattentauscher',
       lufterhitzer:'Lufterhitzer', lufterhitzer_gruppe:'Lufterhitzer-Gruppe',
+      waermezaehler_cad:'Wärmezähler',
     }[props.type] || 'Bauteil';
     const captionPointerDown = (event) => {
       if (event.button !== 0) return;
@@ -1045,6 +1092,7 @@ const BASIS_TYPES = {
   anschluss:   AnschlussNode,
   verteiler:   VerteilerNode,
   waermezaehler: WaermezaehlerNode,
+  waermezaehler_cad: WaermezaehlerCadNode,
   expansion:   ExpansionNode,
   bww:         BwwNode,
   label:       LabelNode,
@@ -1056,7 +1104,7 @@ const BASIS_TYPES = {
 export const ROTATABLE = new Set([
   'pump', 'valve2', 'valve3', 'checkvalve', 'shutoff',
   'stad', 'temperatur', 'sicherheitsventil', 'pwt', 'lufterhitzer',
-  'waermezaehler', 'erzeuger', 'verbraucher', 'speicher', 'bww',
+  'waermezaehler', 'waermezaehler_cad', 'erzeuger', 'verbraucher', 'speicher', 'bww',
   'expansion', 'anschluss',
 ]);
 

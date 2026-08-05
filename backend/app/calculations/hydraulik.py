@@ -817,7 +817,7 @@ def _uebertrage_gruppen_anschluss(nodes, gruppe_results, edges, node_flows, edge
             if b and m:
                 quelle[b] = {"m": round(m, 4), "q_kw": _zahl(d.get("q_kw")),
                              "vl": _zahl(d.get("vl_temp")), "rl": _zahl(d.get("rl_temp")),
-                             "quelle": d.get("label") or "Gruppe"}
+                             "quelle": d.get("label") or "Gruppe", "buchstabe": b}
     anschluss_results = {}
     if not quelle:
         return anschluss_results
@@ -836,6 +836,112 @@ def _uebertrage_gruppen_anschluss(nodes, gruppe_results, edges, node_flows, edge
             if (e["source"] == n["id"] or e["target"] == n["id"]) and not edge_flows.get(e["id"]):
                 edge_flows[e["id"]] = q["m"]
     return anschluss_results
+
+
+def _lufterhitzer_kennwerte(node, quelle, gruppe_results, node_flows) -> None:
+    """Kennwerte einer einzelnen Lufterhitzeranlage.
+
+    VL/RL kommen von der Hauptgruppe, die Leistung gibt die Anlage selbst an.
+    Das Regelventil wird aus Δpvar und dem eigenen V' ausgelegt — gleiche
+    Formel wie im Strang einer Verbrauchergruppe (_strang_ausruestung).
+    """
+    d = node.get("data") or {}
+    vl, rl = quelle.get("vl"), quelle.get("rl")
+    q = _zahl(d.get("q_kw"))
+    res = {
+        "vl": vl, "rl": rl, "quelle": quelle.get("quelle"),
+        "anschluss": quelle.get("buchstabe"), "q_kw": q,
+        "hat_pumpe": False, "hat_ventil": True, "pumpe": None, "ventil": None,
+    }
+    if q and vl is not None and rl is not None and vl > rl:
+        dt = vl - rl
+        m = q / (1.163 * dt)
+        res.update({
+            "m_sek": round(m, 4), "m_prim": round(m, 4), "m_bypass": 0.0,
+            "einspritz": False, "dt_sek": round(dt, 2), "dt_prim": round(dt, 2),
+        })
+        node_flows[node["id"]] = round(m, 4)
+        dp_var = _zahl(d.get("ventil_dp_var"))
+        if dp_var and dp_var > 0:
+            kv = berechne_kvs(m, dp_var, _zahl(d.get("ventil_kvs_eff")))
+            if "fehler" not in kv:
+                res["ventil"] = {
+                    "v": round(m, 4), "kvs_theor": kv["kvs_theor"],
+                    "kvs_vorschlag": kv["kvs_vorschlag"], "kvs_eff": kv["kvs_eff"],
+                    "dp_v_eff_kpa": kv["dp_v_eff_kpa"], "pv": kv["ventilautoritaet_pct"],
+                    "warnings": kv["warnings"],
+                }
+    gruppe_results[node["id"]] = res
+
+
+def _lufterhitzer_gruppen(nodes, edges, anschluss_results, gruppe_results, node_flows) -> None:
+    """Serielle Lufterhitzer-Untergruppen hinter einem Anschlussmarker.
+
+    Aufbau (Dominic 2026-08-05): eine Verbrauchergruppe «Lufterhitzer» reicht
+    ihre Kennwerte über «Anschluss für separate Gruppe» an einen Marker weiter.
+    Ab dort hängen die einzelnen Anlagen seriell an der Leitung. Die Traversierung
+    stoppt an Verbrauchergruppen und Verteilern, damit sie nicht in fremde
+    Kreise überläuft (gleiche Regel wie bfs_verbraucher, §2).
+    """
+    if not anschluss_results:
+        return
+    if not any(n.get("type") == "lufterhitzer_gruppe" for n in nodes):
+        return
+    node_by_id = {n["id"]: n for n in nodes}
+    nachbarn: dict = {}
+    for e in edges:
+        if str(e.get("id", "")).startswith("virt_"):
+            continue
+        nachbarn.setdefault(e["source"], set()).add(e["target"])
+        nachbarn.setdefault(e["target"], set()).add(e["source"])
+
+    for marker_id, kennwerte in anschluss_results.items():
+        besucht = {marker_id}
+        queue = [marker_id]
+        while queue:
+            for other in nachbarn.get(queue.pop(0), ()):
+                if other in besucht:
+                    continue
+                besucht.add(other)
+                typ = node_by_id.get(other, {}).get("type")
+                if typ in VERBRAUCHER_TYPEN or typ == "verteiler":
+                    continue
+                if typ == "lufterhitzer_gruppe":
+                    _lufterhitzer_kennwerte(node_by_id[other], kennwerte,
+                                            gruppe_results, node_flows)
+                queue.append(other)
+
+
+def _lufterhitzer_summe_warnungen(nodes, gruppe_results) -> List[str]:
+    """Die Summe der seriellen Anlagen muss der Hauptgruppe entsprechen.
+
+    Genau dafür ist der Aufbau gedacht: die Verbrauchergruppe trägt die
+    Gesamtleistung, die einzelnen Lufterhitzer teilen sie unter sich auf.
+    """
+    soll = {}
+    for n in nodes:
+        d = n.get("data") or {}
+        if n.get("type") == "gruppe" and d.get("hat_anschluss"):
+            b = str(d.get("anschluss_buchstabe") or "A").upper()
+            soll[b] = (_zahl(d.get("q_kw")), d.get("label") or "Gruppe")
+
+    ist: dict = {}
+    for res in gruppe_results.values():
+        b = res.get("anschluss")
+        if b:
+            ist[b] = ist.get(b, 0.0) + (res.get("q_kw") or 0.0)
+
+    warnungen = []
+    for b, (q_soll, label) in sorted(soll.items()):
+        if b not in ist or not q_soll:
+            continue
+        q_ist = round(ist[b], 2)
+        diff = round(q_ist - q_soll, 2)
+        if abs(diff) > 0.05:
+            warnungen.append(
+                f"Anschluss {b}: Lufterhitzer summieren auf {q_ist} kW, "
+                f"«{label}» ist auf {q_soll} kW ausgelegt (Differenz {diff:+} kW)")
+    return warnungen
 
 
 def _anschluss_warnungen(nodes: List[dict]) -> List[str]:
@@ -1303,6 +1409,10 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
     # Anschluss «für separate Gruppe»: Fluss der Gruppe an ihren Marker geben,
     # bevor die Knoten-Flüsse verdichtet werden.
     anschluss_results = _uebertrage_gruppen_anschluss(nodes, gruppe_results, edges, node_flows, edge_flows)
+    # Serielle Lufterhitzeranlagen ab dem Marker: eigene Leistung, VL/RL von
+    # der Hauptgruppe. Muss vor der Knoten-Fluss-Verdichtung laufen.
+    _lufterhitzer_gruppen(nodes, edges, anschluss_results, gruppe_results, node_flows)
+    anschluss_warnungen = anschluss_warnungen + _lufterhitzer_summe_warnungen(nodes, gruppe_results)
     pwt_results = _pwt_transfer(nodes, edges, gruppe_results, node_flows, edge_flows)
 
     # ── 5. Knoten-Flüsse ──

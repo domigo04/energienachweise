@@ -388,6 +388,8 @@ const PALETTE_GRUPPEN = [
   { titel: 'Verteilung', items: [
     { type: 'verteiler',  label: 'Verteiler',           desc: 'VL/RL-Balken, wählbare Abgänge' },
     { type: 'gruppe',     label: 'Verbrauchergruppe',   desc: 'CAD-Strang: Pumpe, Einspritz, Q/VL/RL' },
+    { type: 'lufterhitzer', label: 'Lufterhitzer',      desc: 'Register mit Luftstrom quer hindurch' },
+    { type: 'lufterhitzer_gruppe', label: 'Lufterhitzer-Gruppe', desc: 'CAD-Strang: Klappe, Regelventil, Register, STAD' },
   ]},
   { titel: 'Förderung & Armaturen', items: [
     { type: 'pump',       label: 'Pumpe',               desc: 'V\' aus Topologie' },

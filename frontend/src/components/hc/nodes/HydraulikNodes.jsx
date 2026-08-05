@@ -4,6 +4,7 @@ import {
   SymPump, SymValve2V, SymValve3, SymCheckValve,
   SymShutoff, SymWE, SymVerbraucher, SymSpeicher, SymBwwSpeicher, SymBypass,
   SymSTAD, SymTemperatur, SymSicherheitsventil, SymPWT,
+  SymLufterhitzer, SymAbsperrklappe, SymEntleerung, SymEntleerhahn,
 } from './symbols';
 
 // Alle Handles als "source" + ConnectionMode.Loose → jeder mit jedem verbindbar
@@ -180,6 +181,94 @@ export function PwtNode({ selected: sel }) {
       {H(Position.Top,    'top',    { left: '59%', top: '35%', background: '#ef4444' })}
       {H(Position.Right,  'right',  { left: '59%', top: '77%', background: '#3b82f6' })}
       <SymPWT />
+    </div>
+  );
+}
+
+// ── Lufterhitzer: Register mit Luftstrom quer hindurch ───────
+// Wasser tritt oben ein und unten aus; beide Anschlüsse liegen auf der
+// Registerachse bei 45 % der Symbolbreite (der Luftpfeil ragt rechts weiter
+// hinaus als links, deshalb nicht 50 %).
+export function LufterhitzerNode({ data, selected: sel }) {
+  return (
+    <div style={wrap(sel)}>
+      {H(Position.Top,    'top',    { top: -3,    left: '45%', background: '#ef4444' })}
+      {H(Position.Bottom, 'bottom', { bottom: -3, left: '45%', background: '#3b82f6' })}
+      <SymLufterhitzer />
+      <Label text={data.label || 'Lufterhitzer'} />
+    </div>
+  );
+}
+
+// ── Lufterhitzer-Gruppe: senkrechter CAD-Strang ──────────────
+// Absperrklappe → Entleerhahn → 2-Weg-Regelventil → Fühler → Entleerung →
+// Register → Temperaturanzeige → Entleerung → Fühler → Entleerhahn → STAD.
+// Im Rücklauf steht bewusst keine Absperrklappe: dort übernimmt das STAD die
+// Absperrung (Dominic 2026-08-05). Die Armaturen sind Teil des Gruppensymbols
+// und decken die Leitung ab — die Strangleitung läuft hinter ihnen durch.
+// Geometrie muss mit backend/app/export/schema_svg.py übereinstimmen!
+export function LufterhitzerGruppeNode({ data, selected: sel }) {
+  const W = 150, H = 560, cx = 75;
+  // Registerbreite so gewählt, dass der Luftpfeil rechts noch in die Node-Box
+  // passt; die Registerachse (45 % der Symbolbreite) liegt dabei auf cx.
+  const REG_W = 136, REG_X = cx - REG_W * 0.45;
+  const REGISTER_OBEN = 280, REGISTER_UNTEN = REGISTER_OBEN + REG_W * 152 / 366;
+
+  const hSt = (top, bg) => ({
+    position: 'absolute', top, left: cx,
+    width: 12, height: 12, borderRadius: 2,
+    background: bg, border: '2px solid white',
+    boxShadow: `0 0 0 1px ${bg}`,
+    transform: 'translate(-50%, -50%)',
+  });
+
+  // Dieselben Symbolkomponenten wie bei einzeln platzierten Bauteilen — damit
+  // bleiben Proportionen und spätere Symbolkorrekturen an genau einer Stelle.
+  const Fuehler = ({ cy }) => (
+    <g transform={`translate(${cx - 8} ${cy - 9})`}><SymTemperatur /></g>
+  );
+  const Entleerung = ({ cy }) => (
+    <g transform={`translate(${cx - 1} ${cy - 6})`}><SymEntleerung /></g>
+  );
+  const Entleerhahn = ({ cy }) => (
+    <g transform={`translate(${cx - 1} ${cy - 5.5})`}><SymEntleerhahn /></g>
+  );
+
+  return (
+    <div style={{ width: W, height: H, position: 'relative', cursor: 'grab' }}>
+      <Handle type="source" position={Position.Top} id="vl" style={hSt(0, '#ef4444')} />
+      <Handle type="source" position={Position.Bottom} id="rl" style={hSt(H, '#3b82f6')} />
+
+      <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H}>
+        {sel && <rect x="1" y="1" width={W - 2} height={H - 2} rx="8" fill="none" stroke="#3b82f6" strokeWidth="2" strokeDasharray="6,4" />}
+
+        {/* Strangleitung zuerst — die Bauteile decken sie danach ab. */}
+        <line x1={cx} y1="0" x2={cx} y2={REGISTER_OBEN} stroke="#ef4444" strokeWidth="2.5" />
+        <line x1={cx} y1={REGISTER_UNTEN} x2={cx} y2={H} stroke="#3b82f6" strokeWidth="2.5" strokeDasharray="9,6" />
+
+        <g transform={`translate(${cx - 8} 20)`}><SymAbsperrklappe /></g>
+        <Entleerhahn cy={88} />
+        {/* Antrieb rechts wie in der Vorlage → Symbol gespiegelt. */}
+        <g transform={`translate(${cx + 17} 128) scale(-1 1)`}><SymValve2V /></g>
+        <Fuehler cy={196} />
+        <Entleerung cy={244} />
+
+        <g transform={`translate(${REG_X} ${REGISTER_OBEN})`}><SymLufterhitzer width={REG_W} /></g>
+
+        {/* Temperaturanzeige MSR: oranger Kreis mit T am Registeraustritt. */}
+        <g stroke="#f08c2e" strokeWidth="2" strokeLinecap="round" fill="none">
+          <line x1={cx - 10} y1="362" x2={cx + 25} y2="362" />
+          <circle cx={cx + 34} cy="362" r="9" fill="white" />
+        </g>
+        <text x={cx + 34} y="366" textAnchor="middle" fontSize="11" fill="#f08c2e"
+          fontFamily="Arial, sans-serif">T</text>
+
+        <Entleerung cy={388} />
+        <Fuehler cy={432} />
+        <Entleerhahn cy={478} />
+        <g transform={`translate(${cx - 6} 508)`}><SymSTAD /></g>
+      </svg>
+      <Label text={data.label} />
     </div>
   );
 }
@@ -822,10 +911,10 @@ export function InterfaceLineNode({ id, data, selected: sel }) {
 // ── Bauteil-Nummern (Pflichtenheft §10: Nummerierung + Legende) ──────
 // Jedes nummerierbare Bauteil bekommt ein rotes Badge (data.nr) oben rechts.
 // eslint-disable-next-line react-refresh/only-export-components
-export const NUMMERIERT = ['gruppe', 'heizkreis', 'pump', 'valve2', 'valve3', 'checkvalve', 'shutoff', 'erzeuger', 'speicher', 'erdsonden', 'verteiler', 'waermezaehler', 'expansion', 'bww', 'stad', 'sicherheitsventil', 'pwt'];
+export const NUMMERIERT = ['gruppe', 'heizkreis', 'pump', 'valve2', 'valve3', 'checkvalve', 'shutoff', 'erzeuger', 'speicher', 'erdsonden', 'verteiler', 'waermezaehler', 'expansion', 'bww', 'stad', 'sicherheitsventil', 'pwt', 'lufterhitzer', 'lufterhitzer_gruppe'];
 const KOMPAKTE_BAUTEILE = new Set([
   'pump', 'valve2', 'valve3', 'checkvalve', 'shutoff', 'stad',
-  'waermezaehler', 'expansion', 'sicherheitsventil', 'pwt',
+  'waermezaehler', 'expansion', 'sicherheitsventil', 'pwt', 'lufterhitzer',
 ]);
 
 // eslint-disable-next-line no-unused-vars
@@ -851,6 +940,7 @@ function mitNr(Comp) {
       valve3:'3-Weg-Ventil', checkvalve:'Rückschlagventil', shutoff:'Absperrventil',
       stad:'STAD', waermezaehler:'Wärmezähler', expansion:'Expansionsgefäss',
       sicherheitsventil:'Sicherheitsventil', pwt:'Plattentauscher',
+      lufterhitzer:'Lufterhitzer', lufterhitzer_gruppe:'Lufterhitzer-Gruppe',
     }[props.type] || 'Bauteil';
     const captionPointerDown = (event) => {
       if (event.button !== 0) return;
@@ -925,6 +1015,8 @@ function mitNr(Comp) {
 
 const BASIS_TYPES = {
   gruppe:      GruppeNode,
+  lufterhitzer:        LufterhitzerNode,
+  lufterhitzer_gruppe: LufterhitzerGruppeNode,
   heizkreis:   HeizkreisNode,
   pump:        PumpNode,
   valve2:      Valve2Node,
@@ -953,7 +1045,7 @@ const BASIS_TYPES = {
 // ── Drehung um 90° (data.rotation) ───────────────────────────────────────────
 export const ROTATABLE = new Set([
   'pump', 'valve2', 'valve3', 'checkvalve', 'shutoff',
-  'stad', 'temperatur', 'sicherheitsventil', 'pwt',
+  'stad', 'temperatur', 'sicherheitsventil', 'pwt', 'lufterhitzer',
   'waermezaehler', 'erzeuger', 'verbraucher', 'speicher', 'bww',
   'expansion', 'anschluss',
 ]);

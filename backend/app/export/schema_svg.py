@@ -28,6 +28,14 @@ VT_LUECKE_STD = 560 # Standard-Abstand zwischen den Balken (data.hoehe überschr
 # Verbrauchergruppen-Strang
 GR_W, GR_H, GR_CX = 150, 400, 75
 
+# Lufterhitzer-Gruppen-Strang — Geometrie identisch zu
+# frontend/src/components/hc/nodes/HydraulikNodes.jsx::LufterhitzerGruppeNode
+LH_W, LH_H, LH_CX = 150, 560, 75
+LH_REG_W = 136                          # Registerbreite im Strang
+LH_REG_X = LH_CX - LH_REG_W * 0.45      # Registerachse liegt auf LH_CX
+LH_REG_OBEN = 280
+LH_REG_UNTEN = LH_REG_OBEN + LH_REG_W * 152 / 366
+
 # Dynamisches Erdsondenfeld: zwei U-Rohre je Duplexsonde. Die Länge ist eine
 # Beschriftung und verändert die Symbolhöhe nicht.
 EWS_S, EWS_X0, EWS_H = 58, 52, 286
@@ -40,7 +48,7 @@ GROESSEN = {
     "junction": (46, 46), "label": (120, 16),
     "waermezaehler": (48, 48), "expansion": (76, 105), "bww": (72, 149),
     "anschluss": (60, 40), "stad": (18, 41), "temperatur": (52, 38),
-    "sicherheitsventil": (80, 67), "pwt": (94, 68),
+    "sicherheitsventil": (80, 67), "pwt": (94, 68), "lufterhitzer": (104, 43),
     "concrete_area": (180, 120), "interface_line": (180, 40),
 }
 
@@ -101,6 +109,8 @@ def node_groesse(node):
         return (vt_breite(node), vt_hoehe(node))
     if node.get("type") == "gruppe":
         return (GR_W, GR_H)
+    if node.get("type") == "lufterhitzer_gruppe":
+        return (LH_W, LH_H)
     if node.get("type") == "erdsonden":
         return (ews_breite(node), EWS_H)
     if node.get("type") in ("concrete_area", "interface_line"):
@@ -150,6 +160,13 @@ def _handle_pos_base(node, handle: Optional[str]):
             return (sx, y + VT_BAR) if m.group(1) == "vl" else (sx, y + vh - VT_BAR)
     if t == "gruppe":
         return (x + GR_CX, y) if handle == "vl" else (x + GR_CX, y + GR_H)
+    if t == "lufterhitzer_gruppe":
+        return (x + LH_CX, y) if handle == "vl" else (x + LH_CX, y + LH_H)
+    if t == "lufterhitzer":
+        # Wasseranschlüsse auf der Registerachse (45 % der Symbolbreite) — der
+        # Luftpfeil ragt rechts weiter hinaus als links, deshalb nicht 50 %.
+        return {"top": (x + w * 0.45, y), "bottom": (x + w * 0.45, y + h)}.get(
+            handle, (x + w * 0.45, y + h / 2))
     if t == "erdsonden":
         return {
             "sole-vl": (x + w, y + 55),
@@ -343,6 +360,8 @@ SYM_VIEWBOX = {
     "valve2": (8, 6, 128), "valve3": (8, 6, 152), "shutoff": (78, 10, 52),
     "stad": (0, 0, 60), "temperatur": (10, 6, 90),
     "sicherheitsventil": (0, 0, 199), "pwt": (0, 0, 472),
+    "lufterhitzer": (0, 0, 366), "absperrklappe": (0, 0, 44),
+    "entleerung": (0, 0, 40), "entleerhahn": (0, 0, 46),
 }
 
 
@@ -380,6 +399,9 @@ SYM_INNER = {
         '<circle cx="104" cy="65" r="13" fill="#000"/>',
     ],
     "stad": [
+        # Deckt die Leitung ab: Bauteile liegen auf dem Strang, nicht darunter.
+        '<polygon points="12,11 50,11 31,58" fill="white"/>',
+        '<polygon points="12,105 50,105 31,58" fill="white"/>',
         '<g fill="none" stroke="#1e293b" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">',
         '<line x1="12" y1="11" x2="50" y2="11"/><path d="M12 11 L50 105"/><path d="M50 11 L12 105"/>',
         '<line x1="12" y1="105" x2="50" y2="105"/><circle cx="31" cy="91" r="6"/>',
@@ -387,7 +409,7 @@ SYM_INNER = {
     ],
     "temperatur": [
         '<g fill="none" stroke="#1e293b" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">',
-        '<circle cx="38" cy="36" r="12"/><line x1="18" y1="56" x2="56" y2="18"/></g>',
+        '<circle cx="38" cy="36" r="12" fill="white"/><line x1="18" y1="56" x2="56" y2="18"/></g>',
         '<polygon points="56,18 48,20 54,26" fill="#1e293b"/>',
         '<text x="60" y="51" font-family="Arial" font-size="18" fill="#1e293b">T</text>',
     ],
@@ -414,6 +436,38 @@ SYM_INNER = {
         '<text x="164" y="135">+</text><text x="220" y="135">-</text>',
         '<text x="8" y="98">EIN</text><text x="350" y="98">AUS</text>',
         '<text x="6" y="302">AUS</text><text x="352" y="302">EIN</text></g>',
+    ],
+    # Register mit Kreuz und Pluszeichen; der Luftstrom läuft als roter Pfeil
+    # quer hindurch (Kerbe links = Eintritt, Spitze rechts = Austritt).
+    "lufterhitzer": [
+        '<g fill="none" stroke="#ff0000" stroke-width="3" stroke-linejoin="miter">',
+        '<path d="M126 29 L5 29 L49 76 L5 124 L126 124"/>',
+        '<path d="M204 29 L316 29 L366 76 L316 124 L204 124"/></g>',
+        '<rect x="126" y="2" width="78" height="148" fill="white" stroke="#000" stroke-width="3"/>',
+        '<g stroke="#000" stroke-width="2.6">',
+        '<line x1="126" y1="2" x2="204" y2="150"/><line x1="126" y1="150" x2="204" y2="2"/>',
+        '<line x1="158.5" y1="130" x2="171.5" y2="130" stroke-width="2"/>',
+        '<line x1="165" y1="123.5" x2="165" y2="136.5" stroke-width="2"/></g>',
+    ],
+    "absperrklappe": [
+        '<line x1="22" y1="0" x2="22" y2="8" stroke="#1e293b" stroke-width="3"/>',
+        '<line x1="22" y1="68" x2="22" y2="76" stroke="#1e293b" stroke-width="3"/>',
+        '<rect x="4" y="8" width="36" height="60" fill="white" stroke="#000" stroke-width="3"/>',
+        '<line x1="4" y1="68" x2="40" y2="8" stroke="#000" stroke-width="2.6"/>',
+        '<circle cx="22" cy="38" r="7" fill="#000"/>',
+    ],
+    "entleerung": [
+        '<g stroke="#000" stroke-width="2.6" stroke-linecap="round">',
+        '<line x1="3" y1="5" x2="3" y2="19"/><line x1="3" y1="12" x2="20" y2="12"/>',
+        '<line x1="20" y1="3" x2="34" y2="21"/><line x1="20" y1="21" x2="34" y2="3"/></g>',
+    ],
+    "entleerhahn": [
+        '<g stroke="#000" stroke-width="2.6" stroke-linejoin="round">',
+        '<line x1="3" y1="4" x2="3" y2="18"/><line x1="3" y1="11" x2="8" y2="11"/>',
+        '<polygon points="8,2 8,20 21,11" fill="white"/>',
+        '<polygon points="34,2 34,20 21,11" fill="white"/>',
+        '<line x1="34" y1="11" x2="39" y2="11"/>',
+        '<path d="M35 2 L41 2 L41 20 L35 20" fill="none"/></g>',
     ],
 }
 
@@ -530,6 +584,57 @@ def zeichne_gruppe(parts, node, results):
     _nr_badge(parts, x + GR_W - 14, y + 64, d.get("nr"))
 
 
+def zeichne_lufterhitzer_gruppe(parts, node, results):
+    """Senkrechter CAD-Strang des Lufterhitzers.
+
+    Absperrklappe → Entleerhahn → 2-Weg-Regelventil → Fühler → Entleerung →
+    Register → Temperaturanzeige → Entleerung → Fühler → Entleerhahn → STAD.
+    Im Rücklauf steht bewusst keine Absperrklappe: dort übernimmt das STAD die
+    Absperrung (Dominic 2026-08-05). Geometrie muss mit
+    frontend/src/components/hc/nodes/HydraulikNodes.jsx übereinstimmen!
+    """
+    d = node.get("data") or {}
+    x = (node.get("position") or {}).get("x", 0)
+    y = (node.get("position") or {}).get("y", 0)
+    cx = x + LH_CX
+
+    # Strangleitung zuerst — die Bauteile decken sie danach ab.
+    parts.append(f'<line x1="{cx}" y1="{y}" x2="{cx}" y2="{y + LH_REG_OBEN}" '
+                 f'stroke="#ef4444" stroke-width="2.5"/>')
+    parts.append(f'<line x1="{cx}" y1="{y + LH_REG_UNTEN}" x2="{cx}" y2="{y + LH_H}" '
+                 f'stroke="#3b82f6" stroke-width="2.5" stroke-dasharray="9,6"/>')
+
+    _sym(parts, cx - 8, y + 20, 16, "absperrklappe", SYM_INNER["absperrklappe"])
+    for cy in (88, 478):
+        _sym(parts, cx - 1, y + cy - 5.5, 23, "entleerhahn", SYM_INNER["entleerhahn"])
+
+    # Antrieb rechts wie in der Vorlage → um die Flussachse gespiegelt. Die
+    # Achse der Ventil-Vorlage liegt bei x=104 im eigenen Koordinatensystem.
+    minx, _, vbw = SYM_VIEWBOX["valve2"]
+    achse = (104 - minx) / vbw * 34
+    parts.append(f'<g transform="translate({2 * cx},0) scale(-1,1)">')
+    _sym(parts, cx - achse, y + 128, 34, "valve2", SYM_INNER["valve2"])
+    parts.append("</g>")
+
+    for cy in (196, 432):
+        _sym(parts, cx - 8, y + cy - 9, 26, "temperatur", SYM_INNER["temperatur"])
+    for cy in (244, 388):
+        _sym(parts, cx - 1, y + cy - 6, 20, "entleerung", SYM_INNER["entleerung"])
+
+    _sym(parts, x + LH_REG_X, y + LH_REG_OBEN, LH_REG_W, "lufterhitzer",
+         SYM_INNER["lufterhitzer"])
+
+    # Temperaturanzeige MSR: oranger Kreis mit T am Registeraustritt.
+    parts.append(f'<g stroke="#f08c2e" stroke-width="2" stroke-linecap="round" fill="none">'
+                 f'<line x1="{cx - 10}" y1="{y + 362}" x2="{cx + 25}" y2="{y + 362}"/>'
+                 f'<circle cx="{cx + 34}" cy="{y + 362}" r="9" fill="white"/></g>')
+    parts.append(f'<text x="{cx + 34}" y="{y + 366}" text-anchor="middle" font-size="11" '
+                 f'fill="#f08c2e" font-family="Arial">T</text>')
+
+    _sym(parts, cx - 6, y + 508, 12, "stad", SYM_INNER["stad"])
+    _nr_badge(parts, x + LH_W, y, d.get("nr"))
+
+
 def zeichne_erdsonden(parts, node, results):
     """Schlichter Soleverteiler mit zwei U-Rohren je Duplexsonde."""
     d = node.get("data") or {}
@@ -614,7 +719,8 @@ def zeichne_standard(parts, node, results):
             parts.append(f'<text x="{cx}" y="{cy + 12}" text-anchor="middle" font-size="8" fill="#166534" font-family="monospace">{v:.3f} m³/h</text>')
     elif t == "pump":
         _pumpe(parts, cx, cy, 17, nach_unten=True)  # gleiche Flussrichtung wie im Editor (Dreieck nach unten)
-    elif t in ("valve2", "valve3", "shutoff", "stad", "temperatur", "sicherheitsventil", "pwt"):
+    elif t in ("valve2", "valve3", "shutoff", "stad", "temperatur", "sicherheitsventil",
+               "pwt", "lufterhitzer"):
         _sym(parts, x, y, w, t, SYM_INNER[t])
     elif t == "checkvalve":
         _absperr(parts, cx, cy)
@@ -921,6 +1027,8 @@ def erzeuge_svg(nodes: list, edges: list, results: dict) -> str:
             zeichne_verteiler(parts, n, results)
         elif n.get("type") == "gruppe":
             zeichne_gruppe(parts, n, results)
+        elif n.get("type") == "lufterhitzer_gruppe":
+            zeichne_lufterhitzer_gruppe(parts, n, results)
         else:
             zeichne_standard(parts, n, results)
     parts.append("</svg>")

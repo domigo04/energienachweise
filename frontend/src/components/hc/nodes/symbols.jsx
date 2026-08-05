@@ -60,6 +60,9 @@ export function SymValve3() {
 export function SymSTAD() {
   return (
     <svg viewBox="0 0 60 135" width="12" height="28">
+      {/* Deckt die Leitung ab: Bauteile liegen auf dem Strang, nicht darunter. */}
+      <polygon points="12,11 50,11 31,58" fill="white" />
+      <polygon points="12,105 50,105 31,58" fill="white" />
       <g fill="none" stroke="#1e293b" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
         <line x1="12" y1="11" x2="50" y2="11" />
         <path d="M12 11 L50 105" />
@@ -79,7 +82,7 @@ export function SymTemperatur() {
   return (
     <svg viewBox="10 6 90 66" width="26" height="19">
       <g fill="none" stroke="#1e293b" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="38" cy="36" r="12" />
+        <circle cx="38" cy="36" r="12" fill="white" />
         <line x1="18" y1="56" x2="56" y2="18" />
         <polygon points="56,18 48,20 54,26" fill="#1e293b" stroke="none" />
       </g>
@@ -163,6 +166,76 @@ export function SymShutoff() {
       <polygon points="79,116 130,116 104,65" fill="white" stroke="#000" strokeWidth="3.2" strokeLinejoin="round" />
       <circle cx="104" cy="65" r="13" fill="#000" />
       <line x1="104" y1="116" x2="104" y2="124" stroke="#1e293b" strokeWidth="3" />
+    </svg>
+  );
+}
+
+// ── Absperrklappe (Vorlage Lufterhitzer-Gruppe) ───────────────
+// Rechteck mit Diagonale und Knoten. Im Rücklauf braucht es sie nicht: dort
+// übernimmt das STAD die Absperrung (Dominic 2026-08-05).
+export function SymAbsperrklappe() {
+  return (
+    <svg viewBox="0 0 44 76" width="16" height="28">
+      <line x1="22" y1="0" x2="22" y2="8" stroke="#1e293b" strokeWidth="3" />
+      <line x1="22" y1="68" x2="22" y2="76" stroke="#1e293b" strokeWidth="3" />
+      <rect x="4" y="8" width="36" height="60" fill="white" stroke="#000" strokeWidth="3" />
+      <line x1="4" y1="68" x2="40" y2="8" stroke="#000" strokeWidth="2.6" />
+      <circle cx="22" cy="38" r="7" fill="#000" />
+    </svg>
+  );
+}
+
+// ── Entleerung ────────────────────────────────────────────────
+// Stutzen mit Kreuz. Sitzt seitlich an der Leitung; der Ursprung des Symbols
+// liegt auf der Rohrachse.
+export function SymEntleerung() {
+  return (
+    <svg viewBox="0 0 40 24" width="20" height="12">
+      <g stroke="#000" strokeWidth="2.6" strokeLinecap="round">
+        <line x1="3" y1="5" x2="3" y2="19" />
+        <line x1="3" y1="12" x2="20" y2="12" />
+        <line x1="20" y1="3" x2="34" y2="21" />
+        <line x1="20" y1="21" x2="34" y2="3" />
+      </g>
+    </svg>
+  );
+}
+
+// ── Entleerhahn ───────────────────────────────────────────────
+// Stutzen, Doppeldreieck und Kappe — ebenfalls seitlich an der Leitung.
+export function SymEntleerhahn() {
+  return (
+    <svg viewBox="0 0 46 22" width="23" height="11">
+      <g stroke="#000" strokeWidth="2.6" strokeLinejoin="round">
+        <line x1="3" y1="4" x2="3" y2="18" />
+        <line x1="3" y1="11" x2="8" y2="11" />
+        <polygon points="8,2 8,20 21,11" fill="white" />
+        <polygon points="34,2 34,20 21,11" fill="white" />
+        <line x1="34" y1="11" x2="39" y2="11" />
+        <path d="M35 2 L41 2 L41 20 L35 20" fill="none" />
+      </g>
+    </svg>
+  );
+}
+
+// ── Lufterhitzer (Vorlage «Lufterhitzer.svg») ─────────────────
+// Register mit Kreuz und Pluszeichen; der Luftstrom läuft als roter Pfeil quer
+// hindurch (Kerbe links = Eintritt, Spitze rechts = Austritt). Die
+// Wasseranschlüsse liegen auf der Registerachse (45 % der Symbolbreite).
+export function SymLufterhitzer({ width = 104 }) {
+  return (
+    <svg viewBox="0 0 366 152" width={width} height={width * 152 / 366}>
+      <g fill="none" stroke="#ff0000" strokeWidth="3" strokeLinejoin="miter">
+        <path d="M126 29 L5 29 L49 76 L5 124 L126 124" />
+        <path d="M204 29 L316 29 L366 76 L316 124 L204 124" />
+      </g>
+      <rect x="126" y="2" width="78" height="148" fill="white" stroke="#000" strokeWidth="3" />
+      <g stroke="#000" strokeWidth="2.6">
+        <line x1="126" y1="2" x2="204" y2="150" />
+        <line x1="126" y1="150" x2="204" y2="2" />
+        <line x1="158.5" y1="130" x2="171.5" y2="130" strokeWidth="2" />
+        <line x1="165" y1="123.5" x2="165" y2="136.5" strokeWidth="2" />
+      </g>
     </svg>
   );
 }

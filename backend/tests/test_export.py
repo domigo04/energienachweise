@@ -449,3 +449,52 @@ def test_gruppen_anschluss_uebertraegt_fluss():
     assert r["node_flows"]["m"] == pytest.approx(m_sek, abs=0.001)   # Marker trägt den Fluss
     assert r["edge_flows"]["e_lh"] == pytest.approx(m_sek, abs=0.001)  # Leitung ab Marker auch
     assert not any("kein Gegenstück" in w for w in r["anschluss_warnings"])
+
+
+# ── Lufterhitzer + Lufterhitzer-Gruppe (Dominic-Vorlage 2026-08-05) ──────────
+def test_lufterhitzer_anschluesse_liegen_auf_der_registerachse():
+    from app.export.schema_svg import node_groesse
+
+    node = {"id": "lh", "type": "lufterhitzer", "position": {"x": 100, "y": 200}, "data": {}}
+    w, h = node_groesse(node)
+
+    # Der Luftpfeil ragt rechts weiter hinaus als links — die Wasseranschlüsse
+    # sitzen deshalb auf 45 % der Symbolbreite, nicht mittig.
+    assert handle_pos(node, "top") == (100 + w * 0.45, 200)
+    assert handle_pos(node, "bottom") == (100 + w * 0.45, 200 + h)
+
+    svg = erzeuge_svg([node], [], {})
+    assert "M126 29 L5 29 L49 76 L5 124 L126 124" in svg   # Kerbe links (Lufteintritt)
+    assert "M204 29 L316 29 L366 76 L316 124 L204 124" in svg  # Spitze rechts (Austritt)
+
+
+def test_lufterhitzer_gruppe_zeichnet_vollstaendigen_strang():
+    from app.export.schema_svg import LH_CX, LH_H, node_groesse
+
+    node = {"id": "lhg", "type": "lufterhitzer_gruppe",
+            "position": {"x": 0, "y": 0}, "data": {"nr": 7}}
+
+    # Node-Grösse und Anschlüsse müssen zu HydraulikNodes.jsx passen.
+    assert node_groesse(node) == (150, 560)
+    assert handle_pos(node, "vl") == (LH_CX, 0)
+    assert handle_pos(node, "rl") == (LH_CX, LH_H)
+
+    svg = erzeuge_svg([node], [], {})
+    # Register, STAD, Absperrklappe, beide Fühler, beide Entleerungen und die
+    # orange Temperaturanzeige gehören alle in den Strang.
+    assert svg.count('<circle cx="22" cy="38" r="7" fill="#000"/>') == 1   # Absperrklappe
+    assert svg.count('<line x1="20" y1="3" x2="34" y2="21"/>') == 2        # Entleerungen
+    assert svg.count('<polygon points="8,2 8,20 21,11" fill="white"/>') == 2  # Entleerhähne
+    assert svg.count('<circle cx="38" cy="36" r="12" fill="white"/>') == 2  # Temperaturfühler
+    assert '<path d="M18 125 L31 112 L44 125"/>' in svg                    # STAD
+    assert 'fill="#f08c2e"' in svg                                         # Temperaturanzeige
+    assert 'stroke-dasharray="9,6"' in svg                                 # Rücklauf gestrichelt
+    assert ">7<" in svg                                                    # Nummern-Badge
+
+
+def test_lufterhitzer_gruppe_hat_keine_absperrklappe_im_ruecklauf():
+    # Im Rücklauf übernimmt das STAD die Absperrung (Dominic 2026-08-05).
+    node = {"id": "lhg", "type": "lufterhitzer_gruppe",
+            "position": {"x": 0, "y": 0}, "data": {}}
+    svg = erzeuge_svg([node], [], {})
+    assert svg.count('<rect x="4" y="8" width="36" height="60"') == 1

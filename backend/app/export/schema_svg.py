@@ -114,6 +114,32 @@ def ews_breite(node) -> float:
     return 52 + ews_anzahl(node) * EWS_S
 
 
+def export_box(node):
+    """Im Browser gemessene Bauteilbox (`data.export_box`), falls vorhanden.
+
+    Der Editor misst jedes Bauteil im DOM. Diese Messung ist die Wahrheit —
+    hergeleitete Standardmasse gelten nur, wenn keine Messung mitgeschickt wird
+    (zum Beispiel beim Export eines gespeicherten Schemas ohne offenen Editor).
+    """
+    box = (node.get("data") or {}).get("export_box")
+    if not isinstance(box, dict):
+        return None
+    w, h = _f(box.get("width")), _f(box.get("height"))
+    return box if w and h and w > 0 and h > 0 else None
+
+
+def gezogene_groesse(node):
+    """Von Hand gezogene Grösse: React Flow 12 schreibt sie an den Knoten.
+
+    Ältere Stände (und der Vorlagen-Import) tragen sie in `style`; beide Wege
+    müssen gelten, sonst exportiert eine skalierte Betonfläche in Standardmass.
+    """
+    style = node.get("style") or {}
+    w = _f(node.get("width")) or _f(style.get("width"))
+    h = _f(node.get("height")) or _f(style.get("height"))
+    return (w, h)
+
+
 def node_groesse(node):
     if node.get("type") == "junction" and (node.get("data") or {}).get("cad_anchor"):
         return (1, 1)
@@ -125,24 +151,47 @@ def node_groesse(node):
         return (LH_W, LH_H)
     if node.get("type") == "erdsonden":
         return (ews_breite(node), EWS_H)
-    if node.get("type") in ("concrete_area", "interface_line"):
-        style = node.get("style") or {}
-        w = _f(style.get("width"))
-        h = _f(style.get("height"))
-        fallback = GROESSEN[node.get("type")]
-        return (w or fallback[0], h or fallback[1])
-    return GROESSEN.get(node.get("type"), (60, 60))
+    box = export_box(node)
+    if box:
+        return (_f(box["width"]), _f(box["height"]))
+    w, h = gezogene_groesse(node)
+    fallback = GROESSEN.get(node.get("type"), (60, 60))
+    return (w or fallback[0], h or fallback[1])
+
+
+def export_handle_pos(node, handle: Optional[str]):
+    """Im Browser gemessener Anschlusspunkt (`data.export_handles`)."""
+    punkte = (node.get("data") or {}).get("export_handles")
+    punkt = punkte.get(handle) if isinstance(punkte, dict) and handle else None
+    if not isinstance(punkt, dict):
+        return None
+    x, y = _f(punkt.get("x")), _f(punkt.get("y"))
+    return (x, y) if x is not None and y is not None else None
 
 
 def handle_pos(node, handle: Optional[str]):
-    """Anschluss-Position inkl. optionaler Drehung (data.rotation) um die Bauteil-Mitte."""
+    """Absolute Anschluss-Position eines Bauteils.
+
+    Zuerst gilt die Messung aus dem Editor: sie enthält Drehung, Spiegelung und
+    die tatsächliche Bauteilgrösse bereits. Nur ohne Messung wird die Position
+    aus den Standardmassen hergeleitet und die Transformation nachgerechnet —
+    in derselben Reihenfolge wie im Editor (`rotate() scaleX(-1)`: erst
+    spiegeln, dann drehen).
+    """
+    gemessen = export_handle_pos(node, handle)
+    if gemessen:
+        return gemessen
     px, py = _handle_pos_base(node, handle)
-    rot = int(_f((node.get("data") or {}).get("rotation")) or 0) % 360
-    if rot:
+    d = node.get("data") or {}
+    rot = int(_f(d.get("rotation")) or 0) % 360
+    mirrored = bool(d.get("mirrored"))
+    if rot or mirrored:
         x = (node.get("position") or {}).get("x", 0)
         y = (node.get("position") or {}).get("y", 0)
         w, h = node_groesse(node)
         cx, cy = x + w / 2, y + h / 2
+        if mirrored:
+            px = 2 * cx - px
         for _ in range(rot // 90):
             px, py = cx - (py - cy), cy + (px - cx)  # 90° im Uhrzeigersinn (wie CSS rotate)
     return (px, py)
@@ -244,6 +293,48 @@ def _handle_pos_base(node, handle: Optional[str]):
     # pump, stad, checkvalve, shutoff, default
     return {"top": (x + w / 2, y), "bottom": (x + w / 2, y + h),
             "left": (x, y + h / 2), "right": (x + w, y + h / 2)}.get(handle, (x + w / 2, y + h / 2))
+
+
+def _schraffur(x: float, y: float, w: float, h: float, abstand: float) -> list:
+    """Kreuzschraffur als echte Linien.
+
+    Ein SVG-`pattern` wäre kürzer, überlebt aber die Wandlung nach PDF nicht —
+    die Fläche käme leer heraus. Die Linien werden am Rechteck abgeschnitten.
+    """
+    linien = []
+    schritt = max(2.0, float(abstand))
+    d = 0.0
+    while d <= w + h:
+        # Richtung «\»: (x+d, y) → (x+d+h, y+h)
+        t0, t1 = max(0.0, -(d - h)), min(h, w - (d - h))
+        if t1 > t0:
+            ax, ay = x + (d - h) + t0, y + t0
+            linien.append((ax, ay, x + (d - h) + t1, y + t1))
+        # Richtung «/»: (x+d, y) → (x+d-h, y+h)
+        t0, t1 = max(0.0, d - w), min(h, d)
+        if t1 > t0:
+            linien.append((x + d - t0, y + t0, x + d - t1, y + t1))
+        d += schritt
+    return linien
+
+
+def bauteil_transform(d: dict, cx: float, cy: float) -> str:
+    """Drehung und Spiegelung eines Bauteils um seine Mitte.
+
+    Gleiche Reihenfolge wie die CSS-Transformation im Editor
+    (`rotate(x) scaleX(-1)`): erst spiegeln, dann drehen.
+    """
+    rot = int(_f(d.get("rotation")) or 0) % 360
+    mirrored = bool(d.get("mirrored"))
+    if not rot and not mirrored:
+        return ""
+    teile = [f"translate({cx:.2f},{cy:.2f})"]
+    if rot:
+        teile.append(f"rotate({rot})")
+    if mirrored:
+        teile.append("scale(-1,1)")
+    teile.append(f"translate({-cx:.2f},{-cy:.2f})")
+    return " ".join(teile)
 
 
 # ── Bauteil-Zeichner (liefern SVG-Fragmente, Koordinaten absolut) ───────────
@@ -897,27 +988,25 @@ def zeichne_standard(parts, node, results):
         parts.append(f'<polygon points="{x + 26},{y + 25} {x + 19},{y + 29} {x + 26},{y + 33}" fill="{RL_FARBE}"/>')
         return
     elif t == "junction":
-        if d.get("cad_anchor"):
-            return
-        parts.append(f'<line x1="{x}" y1="{y + 30}" x2="{x + 46}" y2="{y + 30}" stroke="#1e293b" stroke-width="6" stroke-linecap="round"/>')
-        parts.append(f'<line x1="{x + 23}" y1="{y + 30}" x2="{x + 23}" y2="{y + 4}" stroke="#1e293b" stroke-width="6" stroke-linecap="round"/>')
+        # Leitungsknoten sind reine Fangpunkte und im Editor unsichtbar; alte
+        # Knoten werden beim Laden zu `cad_anchor` migriert. Ein T-Symbol im PDF
+        # hätte auf dem Bildschirm keine Entsprechung.
+        return
     elif t == "label":
         parts.append(f'<text x="{x}" y="{y + 11}" font-size="10" fill="#64748b">{_esc(label)}</text>')
         return
     elif t == "concrete_area":
         scale = max(3, min(60, _f(d.get("hatch_scale")) or 8))
-        pattern_id = "hatch-" + re.sub(r"[^a-zA-Z0-9_-]", "-", str(node.get("id") or "area"))
-        parts.append(
-            f'<defs><pattern id="{pattern_id}" width="{scale}" height="{scale}" '
-            'patternUnits="userSpaceOnUse">'
-            f'<path d="M0 0 L{scale} {scale} M{scale} 0 L0 {scale}" '
-            'stroke="#94a3b8" stroke-width="0.6" opacity="0.55"/>'
-            '</pattern></defs>'
-        )
         parts.append(
             f'<rect x="{x}" y="{y}" width="{w}" height="{h}" '
-            f'fill="url(#{pattern_id})" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4,3"/>'
+            'fill="none" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4,3"/>'
         )
+        for x1, y1, x2, y2 in _schraffur(x, y, w, h, scale):
+            parts.append(
+                f'<line x1="{_svg_num(x1)}" y1="{_svg_num(y1)}" '
+                f'x2="{_svg_num(x2)}" y2="{_svg_num(y2)}" '
+                'stroke="#94a3b8" stroke-width="0.6" opacity="0.55"/>'
+            )
         return
     elif t == "interface_line":
         dash = ' stroke-dasharray="8,5"' if d.get("dashed") else ""
@@ -932,11 +1021,15 @@ def zeichne_standard(parts, node, results):
             f'stroke="#0f172a" stroke-width="2"{dash}/>'
         )
         return
-    # Drehung um 90° (data.rotation): nur das Symbol dreht — Nr-Badge bleibt aufrecht.
-    rot = int(_f(d.get("rotation")) or 0) % 360
-    if rot:
-        parts.insert(sym_start, f'<g transform="rotate({rot} {cx:.2f} {cy:.2f})">')
+    # Drehung und Spiegelung wie im Editor: nur das Symbol wird transformiert,
+    # Nummer und Beschriftung bleiben aufrecht und seitenrichtig.
+    transform = bauteil_transform(d, cx, cy)
+    if transform:
+        parts.insert(sym_start, f'<g transform="{transform}">')
         parts.append("</g>")
+    # Nummer und Beschriftung drehen NICHT mit: sie sollen bei jeder
+    # Bauteillage an derselben Stelle und lesbar bleiben (Dominic 2026-08-05).
+    # Der Editor rendert sie aus demselben Grund ausserhalb der Drehung.
     _nr_badge(parts, x + w, y, d.get("nr"))
     if d.get("nr") is not None:
         caption = label or {
@@ -1115,8 +1208,15 @@ def erzeuge_svg(nodes: list, edges: list, results: dict) -> str:
         w, h = node_groesse(n)
         px = (n.get("position") or {}).get("x", 0)
         py = (n.get("position") or {}).get("y", 0)
-        xs += [px, px + w]
-        ys += [py, py + h]
+        # Ein quer gedrehtes Bauteil braucht in der anderen Achse mehr Platz;
+        # sonst schneidet der Ausschnitt es an.
+        if int(_f((n.get("data") or {}).get("rotation")) or 0) % 180 == 90:
+            mx, my = px + w / 2, py + h / 2
+            xs += [mx - h / 2, mx + h / 2]
+            ys += [my - w / 2, my + w / 2]
+        else:
+            xs += [px, px + w]
+            ys += [py, py + h]
         if (n.get("data") or {}).get("nr") is not None:
             d = n.get("data") or {}
             cap_x = px + w / 2 + (_f(d.get("caption_offset_x")) or 0)

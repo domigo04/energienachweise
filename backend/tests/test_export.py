@@ -10,6 +10,7 @@ from app.export.schema_svg import (
     erzeuge_svg,
     ews_breite,
     handle_pos,
+    node_groesse,
     vt_hoehe,
     vt_stutzen_x,
 )
@@ -312,9 +313,71 @@ def test_svg_exportiert_beton_skalierung_und_bauteilbeschriftung():
          "data": {"nr": 1, "label": "Pumpe Heizkreis", "caption_offset_x": 12}},
     ]
     svg = erzeuge_svg(nodes, [], {})
-    assert 'width="17.0" height="17.0"' in svg
     assert "Pumpe Heizkreis" in svg
     assert 'width="210.0" height="120.0"' in svg
+    # Die Schraffur muss aus echten Linien bestehen: ein SVG-`pattern` überlebt
+    # die Wandlung nach PDF nicht und die Fläche käme leer heraus.
+    assert "<pattern" not in svg
+    schraffur = [zeile for zeile in svg.splitlines()
+                 if "<line" in zeile and 'stroke="#94a3b8"' in zeile]
+    # Rasterweite 17 auf 210×120 → (210+120)/17 Durchläufe, je zwei Richtungen.
+    assert len(schraffur) == 38
+
+
+def test_gezogene_flaeche_behaelt_ihre_groesse_im_export():
+    """React Flow 12 schreibt die gezogene Grösse an den Knoten, nicht in style."""
+    beton = {"id": "beton", "type": "concrete_area", "position": {"x": 0, "y": 0},
+             "width": 420, "height": 260, "data": {}}
+    assert node_groesse(beton) == (420, 260)
+    assert 'width="420.0" height="260.0"' in erzeuge_svg([beton], [], {})
+
+    # Ohne jede Angabe bleibt es beim Standardmass.
+    assert node_groesse({"id": "b2", "type": "concrete_area",
+                         "position": {"x": 0, "y": 0}, "data": {}}) == (180, 120)
+
+
+def test_gemessene_geometrie_aus_dem_editor_hat_vorrang():
+    """Box und Anschlusspunkte kommen aus dem Browser — nicht aus Standardmassen."""
+    pumpe = {
+        "id": "p", "type": "pump", "position": {"x": 100, "y": 50},
+        "data": {
+            "rotation": 180,
+            "export_box": {"x": 100, "y": 50, "width": 34, "height": 34},
+            "export_handles": {"top": {"x": 117, "y": 50}, "bottom": {"x": 117, "y": 84}},
+        },
+    }
+    assert node_groesse(pumpe) == (34, 34)
+    # Der gemessene Punkt gilt unverändert: er enthält die Drehung bereits.
+    assert handle_pos(pumpe, "top") == (117, 50)
+    assert handle_pos(pumpe, "bottom") == (117, 84)
+
+    anker = {"id": "a", "type": "junction", "position": {"x": 300, "y": 50},
+             "data": {"cad_anchor": True}}
+    kante = {"id": "e", "source": "p", "sourceHandle": "bottom",
+             "target": "a", "targetHandle": "center-target",
+             "data": {"layer_id": "heizung_vl"}}
+    assert "M 117.0 84.0" in erzeuge_svg([pumpe, anker], [kante], {})
+
+    # Leitungsknoten sind reine Fangpunkte und bleiben unsichtbar wie im Editor
+    # — auch ein Altbestand ohne `cad_anchor` zeichnet kein T-Stück mehr.
+    for knoten in (anker, {**anker, "data": {}}):
+        assert "<line" not in erzeuge_svg([knoten], [], {})
+
+
+def test_gespiegeltes_bauteil_wird_gespiegelt_exportiert():
+    ventil = {"id": "v", "type": "valve2", "position": {"x": 0, "y": 0},
+              "data": {"mirrored": True}}
+    breite, hoehe = node_groesse(ventil)
+
+    # Die Flussachse liegt bei 75 % der Breite; gespiegelt bei 25 %.
+    assert handle_pos(ventil, "top") == (breite * 0.25, 0)
+    assert 'scale(-1,1)' in erzeuge_svg([ventil], [], {})
+
+    gedreht = {**ventil, "data": {"rotation": 90, "mirrored": True}}
+    # Erst spiegeln, dann drehen — wie die CSS-Transformation im Editor.
+    cx, cy = breite / 2, hoehe / 2
+    px, py = breite * 0.25, 0
+    assert handle_pos(gedreht, "top") == (cx - (py - cy), cy + (px - cx))
 
 
 # ── Legende + Berechnungen ──────────────────────────────────────────────────

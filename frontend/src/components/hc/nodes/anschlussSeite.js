@@ -46,6 +46,20 @@ export function anfahrtsSeite(punkt, nachbar) {
   return dy > 0 ? Position.Bottom : Position.Top;
 }
 
+// Bauteile, deren Anschlüsse hydraulisch gleichwertig sind: eine Pumpe fördert
+// von einem Stutzen zum anderen, ein Absperrventil sperrt in beide Richtungen.
+// Bei ihnen darf die Leitung jederzeit auf den geometrisch passenden Anschluss
+// wechseln — auch auf einen bisher freien.
+//
+// Nicht enthalten sind Bauteile, an deren Anschluss die Hydraulik hängt:
+// Erzeuger (Heizung/Quelle), Verteiler (Abgang 1..n), Speicher und BWW
+// (Vorlauf/Rücklauf, Warm-/Kaltwasser) sowie das 3-Weg-Ventil (Mischtor).
+// Dort würde ein automatischer Wechsel die Berechnung verändern.
+export const GLEICHWERTIGE_ANSCHLUESSE = new Set([
+  'pump', 'shutoff', 'checkvalve', 'stad', 'valve2',
+  'waermezaehler', 'waermezaehler_cad',
+]);
+
 /**
  * Welche Leitung hängt nach einer Drehung an welchem Anschluss?
  *
@@ -67,9 +81,31 @@ export function anfahrtsSeite(punkt, nachbar) {
  * @returns nur die Anschlüsse, die wechseln — [{ edgeId, ende, handleId }]
  */
 export function anschluesseNachDrehung(handles = [], anschluesse = [], rotation = 0, mirrored = false) {
-  const seiteVon = new Map(handles.map(h => [h.id, gedrehteSeite(h.position, rotation, mirrored)]));
   // Nur Anschlüsse, die wirklich eine Leitung tragen, kommen als Ziel in Frage.
-  const benutzt = anschluesse.map(a => a.handleId).filter(id => seiteVon.has(id));
+  const benutzt = new Set(anschluesse.map(a => a.handleId));
+  return _zuordnen(handles, anschluesse, rotation, mirrored,
+                   id => benutzt.has(id));
+}
+
+/**
+ * Der geometrisch passende Anschluss für jede Leitung eines gleichwertigen
+ * Bauteils (`GLEICHWERTIGE_ANSCHLUESSE`).
+ *
+ * Anders als beim reinen Tausch nach einer Drehung darf die Leitung hier auch
+ * an einen bisher freien Anschluss wechseln: bei einer Pumpe ist jeder Stutzen
+ * derselbe Stutzen, es zählt allein, wo die Leitung ankommt. Damit läuft keine
+ * Leitung mehr hinter dem Bauteil durch, egal wie oft gedreht oder verschoben
+ * wurde.
+ *
+ * Gleiche Signatur und gleiche Rückgabe wie `anschluesseNachDrehung`.
+ */
+export function besteAnschluesse(handles = [], anschluesse = [], rotation = 0, mirrored = false) {
+  return _zuordnen(handles, anschluesse, rotation, mirrored, () => true);
+}
+
+function _zuordnen(handles, anschluesse, rotation, mirrored, istZiel) {
+  const seiteVon = new Map(handles.map(h => [h.id, gedrehteSeite(h.position, rotation, mirrored)]));
+  const kandidaten = handles.map(h => h.id).filter(istZiel);
 
   const belegt = new Set();
   const offen = [];
@@ -81,7 +117,7 @@ export function anschluesseNachDrehung(handles = [], anschluesse = [], rotation 
 
   const wechsel = [];
   for (const a of offen) {
-    const ziel = benutzt.find(id => !belegt.has(id) && seiteVon.get(id) === a.anfahrt);
+    const ziel = kandidaten.find(id => !belegt.has(id) && seiteVon.get(id) === a.anfahrt);
     if (!ziel) {
       // Kein Anschluss liegt auf dieser Seite — das Bauteil hat sich wirklich
       // weggedreht. Dann bleibt die Leitung, wo sie ist, statt zu raten.

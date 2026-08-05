@@ -485,15 +485,15 @@ def test_lufterhitzer_gruppe_zeichnet_vollstaendigen_strang():
     assert handle_pos(node, "rl") == (LH_CX, LH_H)
 
     svg = erzeuge_svg([node], [], {})
-    # Register, STAD, Absperrklappe, beide Fühler, beide Entleerungen und die
+    # Register, STAD, Absperrklappe, beide Thermometer, Entleerungen und die
     # orange Temperaturanzeige gehören alle in den Strang.
     assert svg.count('<circle cx="22" cy="38" r="7" fill="#000"/>') == 1   # Absperrklappe
-    assert svg.count('<line x1="20" y1="3" x2="34" y2="21"/>') == 2        # Entleerungen
+    assert svg.count('<line x1="20" y1="3" x2="34" y2="21"/>') == 1        # Entleerung
     assert svg.count('<polygon points="8,2 8,20 21,11" fill="white"/>') == 2  # Entleerhähne
     assert svg.count('<circle cx="38" cy="36" r="12" fill="white"/>') == 2  # Temperaturfühler
     assert '<path d="M18 125 L31 112 L44 125"/>' in svg                    # STAD
     assert 'fill="#f08c2e"' in svg                                         # Temperaturanzeige
-    assert 'stroke-dasharray="9,6"' in svg                                 # Rücklauf gestrichelt
+    assert 'stroke-dasharray="8,5"' in svg                                 # Rücklauf gestrichelt
     assert ">7<" in svg                                                    # Nummern-Badge
 
 
@@ -503,6 +503,31 @@ def test_lufterhitzer_gruppe_hat_keine_absperrklappe_im_ruecklauf():
             "position": {"x": 0, "y": 0}, "data": {}}
     svg = erzeuge_svg([node], [], {})
     assert svg.count('<rect x="4" y="8" width="36" height="60"') == 1
+
+
+def test_lufterhitzer_einspritz_zeichnet_pumpe_bypass_und_ventil_im_ruecklauf():
+    node = {"id": "lhg", "type": "lufterhitzer_gruppe",
+            "position": {"x": 0, "y": 0},
+            "data": {"schaltung": "einspritz", "hat_wz": True}}
+    svg = erzeuge_svg([node], [], {})
+
+    assert '<circle cx="75" cy="112" r="17"' in svg
+    assert 'M 75 76 H 24 V 365 H 75' in svg
+    assert 'stroke-width="1.2" stroke-dasharray="6,4"' in svg
+    assert '<polygon points="32,14 68,14 50,50"' in svg  # 2-Wege-Motorventil
+    assert '<polygon points="36,76 84,76 36,180" fill="#000"/>' in svg  # Wärmezähler
+
+
+def test_lufterhitzer_beimisch_zeichnet_dreiwegeventil_und_bypass():
+    node = {"id": "lhg", "type": "lufterhitzer_gruppe",
+            "position": {"x": 0, "y": 0}, "data": {"schaltung": "beimisch"}}
+    svg = erzeuge_svg([node], [], {})
+
+    assert 'M 58 72 H 24 V 370 H 75' in svg
+    assert '<polygon points="50,50 95,34 95,66"' in svg  # dritter Anschluss
+    assert '<circle cx="75" cy="116" r="17"' in svg
+    # Top-Absperrklappe plus drei Kugelhähne rund um Gruppe/Bypass.
+    assert svg.count('<circle cx="75"') >= 4
 
 
 # ── Serielle Lufterhitzer-Untergruppen (Dominic 2026-08-05) ──────────────────
@@ -541,6 +566,35 @@ def test_lufterhitzer_uebernimmt_vl_rl_und_legt_das_ventil_aus():
     assert lh1["ventil"]["kvs_eff"] == pytest.approx(2.5, abs=0.1)
     # Auch die zweite, seriell dahinterliegende Anlage wird erreicht.
     assert r["gruppe_results"]["lh2"]["m_sek"] == pytest.approx(0.6879, abs=0.001)
+
+
+def test_lufterhitzer_schaltung_steuert_pumpe_und_verwendet_ast_druckverlust():
+    nodes, edges = _lufterhitzer_anlage([18])
+    nodes[-1]["data"].update({
+        "schaltung": "einspritz",
+        "dp_kpa": "20",
+        "pumpe_rohr_m": "40",
+        "pumpe_apparate_kpa": "15",
+    })
+    r = berechne_schema(nodes, edges)
+    lh = r["gruppe_results"]["lh1"]
+
+    assert lh["schaltung"] == "einspritz"
+    assert lh["hat_pumpe"] is True
+    assert lh["pumpe"]["v"] == lh["m_sek"]
+    assert lh["pumpe"]["dp_kpa"] == pytest.approx(17.8, abs=0.01)
+    assert lh["ventil"]["v"] == lh["m_prim"]
+    assert lh["ventil"]["kvs_theor"] == pytest.approx(lh["m_prim"] / (0.2 ** 0.5), abs=0.001)
+
+
+def test_lufterhitzer_ohne_schaltungsangabe_bleibt_drossel_ohne_pumpe():
+    nodes, edges = _lufterhitzer_anlage([18])
+    r = berechne_schema(nodes, edges)
+    lh = r["gruppe_results"]["lh1"]
+
+    assert lh["schaltung"] == "drossel"
+    assert lh["hat_pumpe"] is False
+    assert lh["pumpe"] is None
 
 
 def test_lufterhitzer_summe_stimmt_mit_der_hauptgruppe_ueberein():

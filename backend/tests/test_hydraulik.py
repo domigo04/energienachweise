@@ -166,7 +166,7 @@ def test_strang_pumpe_und_ventil():
     ohne die bestehenden Flüsse zu verändern."""
     nodes, edges = _graph_3_kreise()
     # G2 bekommt Ausrüstungs-Eingaben, G3 hat keine Pumpe
-    nodes[3]["data"].update({"ventil_dp_var": "26", "pumpe_rohr_m": "40", "pumpe_apparate_kpa": "15"})
+    nodes[3]["data"].update({"pumpe_rohr_m": "40", "pumpe_apparate_kpa": "15"})
     nodes[4]["data"]["hat_pumpe"] = False
     r = berechne_schema(nodes, edges)
 
@@ -176,18 +176,20 @@ def test_strang_pumpe_und_ventil():
     # Pumpe: 40 m · 70 Pa/m / 1000 + 15 = 17.8 kPa, V' = m_sek
     assert g2["pumpe"]["dp_kpa"] == pytest.approx(17.8, abs=0.01)
     assert g2["pumpe"]["v"] == g2["m_sek"]
-    # Ventil: V' = m_prim 0.4586 · kvs_theor = 0.4586/√0.26 = 0.899 → Vorschlag 1.0
+    # Ventil: der bereits vorhandene Ast-Druckverlust 20 kPa wird ohne zweites
+    # Δpvar-Feld verwendet: kvs_theor = 0.4586/√0.20 = 1.025 → Vorschlag 1.6
     assert g2["ventil"]["v"] == g2["m_prim"]
-    assert g2["ventil"]["kvs_theor"] == pytest.approx(0.899, abs=0.001)
-    assert g2["ventil"]["kvs_vorschlag"] == 1.0
-    # Δpv = (0.4586/1.0)² = 0.2103 bar = 21.03 kPa → Pv = 21.03/(21.03+26) = 44.7 %
-    assert g2["ventil"]["dp_v_eff_kpa"] == pytest.approx(21.03, abs=0.05)
-    assert g2["ventil"]["pv"] == pytest.approx(44.7, abs=0.2)
+    assert g2["ventil"]["kvs_theor"] == pytest.approx(1.0255, abs=0.001)
+    assert g2["ventil"]["kvs_vorschlag"] == 1.6
+    # Δpv = (0.4586/1.6)² = 8.215 kPa → Pv = 8.215/(8.215+20) = 29.1 %
+    assert g2["ventil"]["dp_v_eff_kpa"] == pytest.approx(8.215, abs=0.05)
+    assert g2["ventil"]["pv"] == pytest.approx(29.12, abs=0.2)
 
-    # G3 ohne Pumpe, G1 ohne Eingaben → Ventil None, Pumpe ohne Förderhöhe
+    # G3 ohne Pumpe; G1 erhält das Ventil nun ebenfalls aus seinem Ast-
+    # Druckverlust, die Pumpe bleibt ohne Förderhöhe.
     assert r["gruppe_results"]["g3"]["hat_pumpe"] is False
     assert r["gruppe_results"]["g3"]["pumpe"] is None
-    assert r["gruppe_results"]["g1"]["ventil"] is None
+    assert r["gruppe_results"]["g1"]["ventil"] is not None
     assert r["gruppe_results"]["g1"]["pumpe"]["dp_kpa"] is None
 
 

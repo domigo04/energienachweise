@@ -40,7 +40,7 @@ def _gy(v: float) -> float:
 LH_W, LH_H, LH_CX = 150, 560, 75
 LH_REG_W = 136                          # Registerbreite im Strang
 LH_REG_X = LH_CX - LH_REG_W * 0.45      # Registerachse liegt auf LH_CX
-LH_REG_OBEN = 280
+LH_REG_OBEN = 210
 LH_REG_UNTEN = LH_REG_OBEN + LH_REG_W * 152 / 366
 
 # Dynamisches Erdsondenfeld: zwei U-Rohre je Duplexsonde. Die Länge ist eine
@@ -53,12 +53,12 @@ GROESSEN = {
     # Kugelhahn, Regelventile und STAD. Nur die Pumpe ist groesser, Entleerung
     # und Temperaturfuehler sind kleiner. Die Breiten sind so gewaehlt, dass
     # _sym (skaliert ueber die Breite) genau auf diese Hoehe kommt.
-    "heizkreis": (74, 74), "pump": (34, 34), "valve2": (30, 28),
-    "valve3": (36, 28), "checkvalve": (48, 48), "shutoff": (12, 28),
+    "heizkreis": (74, 74), "pump": (34, 34), "valve2": (35, 28),
+    "valve3": (38, 28), "checkvalve": (48, 48), "shutoff": (35, 28),
     "erzeuger": (125, 137), "verbraucher": (68, 50), "speicher": (72, 149),
     "junction": (46, 46), "label": (120, 16),
     "waermezaehler": (48, 48), "expansion": (76, 105), "bww": (72, 149),
-    "anschluss": (60, 40), "stad": (14, 28), "temperatur": (22, 16),
+    "anschluss": (60, 40), "stad": (14, 28), "temperatur": (26, 19),
     "sicherheitsventil": (80, 67), "pwt": (94, 68), "lufterhitzer": (104, 43),
     "waermezaehler_cad": (32, 42),
     "concrete_area": (180, 120), "interface_line": (180, 40),
@@ -257,9 +257,9 @@ def _nr_badge(parts, x, y, nr):
 def _absperr(parts, cx, cy, farbe="#1e293b"):
     """Absperrventil / Kugelhahn: weiss gefüllte Dreiecke + Kreis am Treffpunkt
     (Vorlage «Kugelhahn.svg», Dominic-Feedback — nicht mehr schwarz gefüllt)."""
-    parts.append(f'<polygon points="{cx - 9},{cy - 9} {cx + 9},{cy - 9} {cx},{cy}" fill="white" stroke="{farbe}" stroke-width="1.6"/>')
-    parts.append(f'<polygon points="{cx - 9},{cy + 9} {cx + 9},{cy + 9} {cx},{cy}" fill="white" stroke="{farbe}" stroke-width="1.6"/>')
-    parts.append(f'<circle cx="{cx}" cy="{cy}" r="3" fill="{farbe}"/>')
+    parts.append(f'<polygon points="{cx - 6.3},{cy - 10.1} {cx + 6.3},{cy - 10.1} {cx},{cy}" fill="white" stroke="{farbe}" stroke-width="1.2"/>')
+    parts.append(f'<polygon points="{cx - 6.3},{cy + 10.1} {cx + 6.3},{cy + 10.1} {cx},{cy}" fill="white" stroke="{farbe}" stroke-width="1.2"/>')
+    parts.append(f'<circle cx="{cx}" cy="{cy}" r="1.9" fill="{farbe}"/>')
 
 
 def _pumpe(parts, cx, cy, r=15, nach_unten=False):
@@ -274,8 +274,7 @@ def _pumpe(parts, cx, cy, r=15, nach_unten=False):
 
 
 def _thermometer(parts, cx, cy):
-    parts.append(f'<circle cx="{cx}" cy="{cy}" r="6" fill="white" stroke="#1e293b" stroke-width="1.4"/>')
-    parts.append(f'<text x="{cx}" y="{cy + 3}" text-anchor="middle" font-size="7" font-weight="700" fill="#1e293b">T</text>')
+    _sym(parts, cx - 8.1, cy - 8.6, 26, "temperatur", SYM_INNER["temperatur"])
 
 
 def _waermepumpen_symbol(parts, code):
@@ -373,7 +372,7 @@ def _zeichne_erzeuger(parts, node):
 # Innere SVG-Fragmente je Bauteil, gezeichnet im Original-Koordinatensystem
 # der Vorlage-SVG. `SYM_VIEWBOX` = (minX, minY, vbBreite) je Typ.
 SYM_VIEWBOX = {
-    "valve2": (8, 6, 128), "valve3": (8, 6, 152), "shutoff": (78, 10, 52),
+    "valve2": (0, 0, 100), "valve3": (0, 0, 100), "shutoff": (0, 0, 100),
     "stad": (0, 0, 60), "temperatur": (10, 6, 90),
     "sicherheitsventil": (0, 0, 199), "pwt": (0, 0, 472),
     "lufterhitzer": (0, 0, 366), "absperrklappe": (0, 0, 44),
@@ -391,29 +390,38 @@ def _sym(parts, x, y, w, typ, inner):
     parts.append("</g>")
 
 
-_VENTIL_BASIS = [
-    '<line x1="65" y1="65" x2="90" y2="65" stroke="#ff9f00" stroke-width="4" stroke-linecap="round"/>',
-    '<polygon points="79,14 130,14 104,65" fill="white" stroke="#000" stroke-width="3.2" stroke-linejoin="round"/>',
-    '<polygon points="79,116 130,116 104,65" fill="white" stroke="#000" stroke-width="3.2" stroke-linejoin="round"/>',
-    '<circle cx="104" cy="65" r="12" fill="#000"/>',
-]
+def _sym_wh(parts, x, y, w, h, typ, inner):
+    """Bettet kompakte Ventilsymbole mit derselben Breite/Höhe wie React ein."""
+    minx, miny, vbw = SYM_VIEWBOX[typ]
+    vbh = 100
+    sx, sy = w / vbw, h / vbh
+    parts.append(f'<g transform="translate({x - minx * sx:.3f},{y - miny * sy:.3f}) scale({sx:.4f},{sy:.4f})">')
+    parts.extend(inner)
+    parts.append("</g>")
+
+
 SYM_INNER = {
     "valve2": [
-        '<rect x="15" y="40" width="50" height="50" fill="#ffd34d" stroke="#ff9f00" stroke-width="3" stroke-linejoin="round"/>',
-        '<path d="M29 54 H50 L37 65 L50 76 H29" fill="none" stroke="#ff9f00" stroke-width="3" stroke-linejoin="round"/>',
-    ] + _VENTIL_BASIS,
+        '<rect x="4" y="38" width="24" height="24" fill="#ffd34d" stroke="#ff9f00" stroke-width="2.4" stroke-linejoin="round"/>',
+        '<path d="M9 44 H22 L14 50 L22 56 H9" fill="none" stroke="#ff9f00" stroke-width="2.4" stroke-linejoin="round"/>',
+        '<line x1="28" y1="50" x2="34" y2="50" stroke="#ff9f00" stroke-width="2.4" stroke-linecap="round"/>',
+        '<polygon points="32,14 68,14 50,50" fill="white" stroke="#1e293b" stroke-width="2.4" stroke-linejoin="round"/>',
+        '<polygon points="32,86 68,86 50,50" fill="white" stroke="#1e293b" stroke-width="2.4" stroke-linejoin="round"/>',
+        '<circle cx="50" cy="50" r="5.5" fill="#1e293b"/>',
+    ],
     "valve3": [
-        '<rect x="15" y="40" width="50" height="50" fill="#ffd34d" stroke="#ff9f00" stroke-width="3" stroke-linejoin="round"/>',
-        '<path d="M15 40 L65 90" stroke="#ff9f00" stroke-width="3"/>',
-        '<path d="M65 40 L15 90" stroke="#ff9f00" stroke-width="3"/>',
-        '<path d="M29 54 H50 L37 65 L50 76 H29" fill="none" stroke="#ff9f00" stroke-width="3" stroke-linejoin="round"/>',
-    ] + _VENTIL_BASIS + [
-        '<polygon points="116,65 156,41 156,89" fill="white" stroke="#000" stroke-width="3.2" stroke-linejoin="round"/>',
+        '<rect x="4" y="36" width="26" height="28" fill="#ffd34d" stroke="#ff9f00" stroke-width="2.4" stroke-linejoin="round"/>',
+        '<path d="M4 36 L30 64 M30 36 L4 64" stroke="#ff9f00" stroke-width="2"/>',
+        '<line x1="30" y1="50" x2="39" y2="50" stroke="#ff9f00" stroke-width="2.4" stroke-linecap="round"/>',
+        '<polygon points="36,14 64,14 50,50" fill="white" stroke="#1e293b" stroke-width="2.4" stroke-linejoin="round"/>',
+        '<polygon points="36,86 64,86 50,50" fill="white" stroke="#1e293b" stroke-width="2.4" stroke-linejoin="round"/>',
+        '<polygon points="50,50 95,34 95,66" fill="white" stroke="#1e293b" stroke-width="2.4" stroke-linejoin="round"/>',
+        '<circle cx="50" cy="50" r="6" fill="#1e293b"/>',
     ],
     "shutoff": [
-        '<polygon points="79,14 130,14 104,65" fill="white" stroke="#000" stroke-width="3.2" stroke-linejoin="round"/>',
-        '<polygon points="79,116 130,116 104,65" fill="white" stroke="#000" stroke-width="3.2" stroke-linejoin="round"/>',
-        '<circle cx="104" cy="65" r="13" fill="#000"/>',
+        '<polygon points="32,14 68,14 50,50" fill="white" stroke="#1e293b" stroke-width="2.4" stroke-linejoin="round"/>',
+        '<polygon points="32,86 68,86 50,50" fill="white" stroke="#1e293b" stroke-width="2.4" stroke-linejoin="round"/>',
+        '<circle cx="50" cy="50" r="5.5" fill="#1e293b"/>',
     ],
     "stad": [
         # Deckt die Leitung ab: Bauteile liegen auf dem Strang, nicht darunter.
@@ -457,9 +465,9 @@ SYM_INNER = {
     # Register mit Kreuz und Pluszeichen; der Luftstrom läuft als roter Pfeil
     # quer hindurch (Kerbe links = Eintritt, Spitze rechts = Austritt).
     "lufterhitzer": [
-        '<g fill="none" stroke="#ff0000" stroke-width="3" stroke-linejoin="miter">',
-        '<path d="M126 29 L5 29 L49 76 L5 124 L126 124"/>',
-        '<path d="M204 29 L316 29 L366 76 L316 124 L204 124"/></g>',
+        '<g fill="white" stroke="#ff0000" stroke-width="3" stroke-linejoin="miter">',
+        '<path d="M126 29 L5 29 L49 76 L5 124 L126 124 Z"/>',
+        '<path d="M204 29 L316 29 L366 76 L316 124 L204 124 Z"/></g>',
         '<rect x="126" y="2" width="78" height="148" fill="white" stroke="#000" stroke-width="3"/>',
         '<g stroke="#000" stroke-width="2.6">',
         '<line x1="126" y1="2" x2="204" y2="150"/><line x1="126" y1="150" x2="204" y2="2"/>',
@@ -547,8 +555,8 @@ def zeichne_gruppe(parts, node, results):
     hat_ventil = d.get("hat_ventil") is not False
 
     # Strangleitung: oben VL (primär), unten RL
-    parts.append(f'<line x1="{cx}" y1="{y}" x2="{cx}" y2="{y + _gy(120)}" stroke="{VL_FARBE}" stroke-width="2.5"/>')
-    parts.append(f'<line x1="{cx}" y1="{y + _gy(285)}" x2="{cx}" y2="{y + GR_H}" stroke="{RL_FARBE}" stroke-width="2.5"/>')
+    parts.append(f'<line x1="{cx}" y1="{y}" x2="{cx}" y2="{y + _gy(128)}" stroke="{VL_FARBE}" stroke-width="2"/>')
+    parts.append(f'<line x1="{cx}" y1="{y + _gy(278)}" x2="{cx}" y2="{y + GR_H}" stroke="{RL_FARBE}" stroke-width="2"/>')
     # Primär-Fluss oben
     if c.get("m_prim") is not None:
         parts.append(f'<text x="{cx + 8}" y="{y + 12}" font-size="9" fill="#1e293b" font-family="monospace">m\': {_kg_h(c.get("m_prim"))} kg/h</text>')
@@ -576,7 +584,7 @@ def zeichne_gruppe(parts, node, results):
             parts.append(f'<line x1="{cx}" y1="{fy}" x2="{cx + 9}" y2="{fy}" stroke="#1e293b" stroke-width="1.4"/>')
             parts.append(f'<circle cx="{cx + 12.5}" cy="{fy}" r="3.5" fill="white" stroke="#1e293b" stroke-width="1.4"/>')
     # Rotes Rechteck mit gedrehtem Text
-    parts.append(f'<rect x="{x + 52}" y="{y + _gy(120)}" width="46" height="{_gy(285) - _gy(120)}" fill="white" stroke="{VL_FARBE}" stroke-width="2"/>')
+    parts.append(f'<rect x="{x + 55}" y="{y + _gy(128)}" width="40" height="{_gy(278) - _gy(128)}" fill="white" stroke="{VL_FARBE}" stroke-width="1.8"/>')
     zeilen = [
         d.get("label") or "Verbrauchergruppe",
         f'{_esc(d.get("q_kw") or "—")} kW · VL/RL {_esc(d.get("vl_temp") or "—")}/{_esc(d.get("rl_temp") or "—")} °C',
@@ -588,17 +596,16 @@ def zeichne_gruppe(parts, node, results):
     # STAD + Thermometer + Mischventil + Absperr
     _absperr(parts, cx, y + _gy(303), "#1e293b")
     parts.append(f'<line x1="{cx + 9}" y1="{y + _gy(303) - 9}" x2="{cx + 20}" y2="{y + _gy(303) - 15}" stroke="#1e293b" stroke-width="1.6"/>')  # STAD-Griff
-    _thermometer(parts, cx + 24, y + _gy(320))
+    _thermometer(parts, cx, y + _gy(320))
     # Ventil unten: 2-Weg (Einspritz/Drossel) oder 3-Weg (Beimisch)
     mv_y = y + _gy(338)
     if hat_ventil:
-        parts.append(f'<polygon points="{cx - 9},{mv_y - 8} {cx + 9},{mv_y - 8} {cx},{mv_y}" fill="#1e293b"/>')
-        parts.append(f'<polygon points="{cx - 9},{mv_y + 8} {cx + 9},{mv_y + 8} {cx},{mv_y}" fill="#1e293b"/>')
-        if schaltung == "beimisch":  # drittes Tor links — dort mündet der Bypass
-            parts.append(f'<polygon points="{cx - 18},{mv_y - 8} {cx - 18},{mv_y + 8} {cx},{mv_y}" fill="#1e293b"/>')
-        m_farbe = "#f97316" if einspritz else "#94a3b8"
-        parts.append(f'<rect x="{cx + 12}" y="{mv_y - 7}" width="14" height="14" rx="2" fill="{m_farbe}"/>')
-        parts.append(f'<text x="{cx + 19}" y="{mv_y + 3.5}" text-anchor="middle" font-size="8" font-weight="700" fill="white">M</text>')
+        if schaltung == "beimisch":
+            parts.append(f'<g transform="translate({2 * cx},0) scale(-1,1)">')
+            _sym_wh(parts, cx - 19, mv_y - 14, 38, 28, "valve3", SYM_INNER["valve3"])
+            parts.append('</g>')
+        else:
+            _sym_wh(parts, cx - 17.5, mv_y - 14, 35, 28, "valve2", SYM_INNER["valve2"])
         if c.get("ventil"):
             parts.append(f'<text x="{cx + 30}" y="{mv_y + 3.5}" font-size="8" fill="#1e293b" font-family="monospace">kvs {c["ventil"].get("kvs_eff")}</text>')
     _absperr(parts, cx, y + _gy(368))
@@ -608,7 +615,7 @@ def zeichne_gruppe(parts, node, results):
     if schaltung != "drossel":
         bx = x + 22
         muendung_y = mv_y - 18 if schaltung == "einspritz" else mv_y
-        muendung_x = cx if schaltung == "einspritz" else cx - 18
+        muendung_x = cx if schaltung == "einspritz" else cx - 19
         parts.append(f'<path d="M {cx} {y + _gy(44)} H {bx} V {muendung_y} H {muendung_x}" fill="none" stroke="{RL_FARBE}" stroke-width="1.8" stroke-dasharray="6,4"/>')
         parts.append(f'<circle cx="{cx}" cy="{y + _gy(44)}" r="3.5" fill="{RL_FARBE}"/>')
         if schaltung == "einspritz":
@@ -620,30 +627,45 @@ def zeichne_gruppe(parts, node, results):
 
 
 def zeichne_lufterhitzer_gruppe(parts, node, results):
-    """Senkrechter CAD-Strang des Lufterhitzers.
-
-    Absperrklappe → Entleerhahn → 2-Weg-Regelventil → Fühler → Entleerung →
-    Register → Temperaturanzeige → Entleerung → Fühler → Entleerhahn → STAD.
-    Im Rücklauf steht bewusst keine Absperrklappe: dort übernimmt das STAD die
-    Absperrung (Dominic 2026-08-05). Geometrie muss mit
-    frontend/src/components/hc/nodes/HydraulikNodes.jsx übereinstimmen!
-    """
+    """Drossel-, Einspritz- oder Beimischstrang eines Lufterhitzers."""
     d = node.get("data") or {}
     x = (node.get("position") or {}).get("x", 0)
     y = (node.get("position") or {}).get("y", 0)
     cx = x + LH_CX
+    schaltung = str(d.get("schaltung") or "drossel").lower()
+    if schaltung not in ("einspritz", "beimisch", "drossel"):
+        schaltung = "drossel"
+    res = (results.get("gruppe_results") or {}).get(node.get("id")) or {}
+    wz_y = {"einspritz": 460, "beimisch": 445, "drossel": 425}[schaltung]
+    bypass_oben = 72 if schaltung == "beimisch" else 76
+    bypass_unten = 370 if schaltung == "beimisch" else 365
 
-    # Strangleitung zuerst — die Bauteile decken sie danach ab.
+    # Dünne Signal- und Bypasslinien zuerst: Vordergrundelemente decken sie ab.
+    if d.get("hat_wz"):
+        parts.append(f'<path d="M {cx + 12} {y + 54} H {x + 116} V {y + wz_y + 21} H {cx + 23}" '
+                     'fill="none" stroke="#f08c2e" stroke-width="0.85" '
+                     'stroke-dasharray="4 2 1 2" stroke-linecap="round"/>')
+    if schaltung != "drossel":
+        start_x = cx - 17 if schaltung == "beimisch" else cx
+        parts.append(f'<path d="M {start_x} {y + bypass_oben} H {x + 24} V {y + bypass_unten} H {cx}" '
+                     f'fill="none" stroke="{RL_FARBE}" stroke-width="1.2" stroke-dasharray="6,4"/>')
+        parts.append(f'<circle cx="{start_x}" cy="{y + bypass_oben}" r="2.8" fill="{RL_FARBE}"/>')
+        parts.append(f'<circle cx="{cx}" cy="{y + bypass_unten}" r="2.8" fill="{RL_FARBE}"/>')
+        if res.get("m_bypass"):
+            my = y + (bypass_oben + bypass_unten) / 2
+            parts.append(f'<text x="{x + 18}" y="{my}" transform="rotate(-90 {x + 18} {my})" '
+                         f'text-anchor="middle" font-size="7.5" fill="{RL_FARBE}" font-family="monospace">'
+                         f'Bypass {res["m_bypass"]:.3f} m³/h</text>')
+
+    # Dünne hydraulische Strangleitung.
     parts.append(f'<line x1="{cx}" y1="{y}" x2="{cx}" y2="{y + LH_REG_OBEN}" '
-                 f'stroke="#ef4444" stroke-width="2.5"/>')
+                 f'stroke="#ef4444" stroke-width="1.8"/>')
     parts.append(f'<line x1="{cx}" y1="{y + LH_REG_UNTEN}" x2="{cx}" y2="{y + LH_H}" '
-                 f'stroke="#3b82f6" stroke-width="2.5" stroke-dasharray="9,6"/>')
+                 f'stroke="#3b82f6" stroke-width="1.8" stroke-dasharray="8,5"/>')
 
     # Anlagennummer und Kennwerte — rechts oben, wo der Strang frei ist.
-    res = (results.get("gruppe_results") or {}).get(node.get("id")) or {}
-    # Nur der Benutzertext wird escaped; die Zahlenzeilen erzeugen wir selbst.
     zeilen = [t for t in (
-        _esc(d.get("anlage_nr") or d.get("label") or "") or None,
+        _esc(d.get("anlage_nr") or "") or None,
         f'{_esc(d.get("q_kw"))} kW' if d.get("q_kw") not in (None, "") else None,
         f'V\' {res["m_sek"]:.3f} m³/h' if res.get("m_sek") is not None else None,
         f'kvs {res["ventil"]["kvs_eff"]}' if (res.get("ventil") or {}).get("kvs_eff") is not None else None,
@@ -652,42 +674,72 @@ def zeichne_lufterhitzer_gruppe(parts, node, results):
         parts.append(f'<text x="{x + 98}" y="{y + 12 + i * 12}" font-size="8.5" '
                      f'fill="#1e293b" font-family="monospace">{text}</text>')
 
-    _sym(parts, cx - 8, y + 20, 16, "absperrklappe", SYM_INNER["absperrklappe"])
-    for cy in (88, 500):
+    def thermometer(cy):
+        _sym(parts, cx - 8.1, y + cy - 8.6, 26, "temperatur", SYM_INNER["temperatur"])
+
+    def entleerung(cy):
+        _sym(parts, cx - 1.2, y + cy - 4.8, 16, "entleerung", SYM_INNER["entleerung"])
+
+    def entleerhahn(cy):
         _sym(parts, cx - 1.2, y + cy - 4.5, 19, "entleerhahn", SYM_INNER["entleerhahn"])
 
-    # Antrieb rechts wie in der Vorlage → um die Flussachse gespiegelt. Die
-    # Achse der Ventil-Vorlage liegt bei x=104 im eigenen Koordinatensystem.
-    minx, _, vbw = SYM_VIEWBOX["valve2"]
-    achse = (104 - minx) / vbw * 30
-    parts.append(f'<g transform="translate({2 * cx},0) scale(-1,1)">')
-    _sym(parts, cx - achse, y + 126, 30, "valve2", SYM_INNER["valve2"])
-    parts.append("</g>")
+    def ventil2(cy):
+        parts.append(f'<g transform="translate({2 * cx},0) scale(-1,1)">')
+        _sym_wh(parts, cx - 17.5, y + cy - 14, 35, 28, "valve2", SYM_INNER["valve2"])
+        parts.append('</g>')
 
-    for cy in (196, 462):
-        _sym(parts, cx - 6.8, y + cy - 7.3, 22, "temperatur", SYM_INNER["temperatur"])
-    for cy in (244, 388):
-        _sym(parts, cx - 1.2, y + cy - 4.8, 16, "entleerung", SYM_INNER["entleerung"])
+    def ventil3(cy):
+        parts.append(f'<g transform="translate({2 * cx},0) scale(-1,1)">')
+        _sym_wh(parts, cx - 19, y + cy - 14, 38, 28, "valve3", SYM_INNER["valve3"])
+        parts.append('</g>')
+
+    _sym(parts, cx - 8, y + 14, 16, "absperrklappe", SYM_INNER["absperrklappe"])
+    if schaltung == "drossel":
+        entleerhahn(58)
+        ventil2(92)
+        thermometer(145)
+        _absperr(parts, cx, y + 184)
+    elif schaltung == "einspritz":
+        _pumpe(parts, cx, y + 112, r=17, nach_unten=True)
+        thermometer(157)
+        _absperr(parts, cx, y + 184)
+    else:
+        ventil3(72)
+        _pumpe(parts, cx, y + 116, r=17, nach_unten=True)
+        thermometer(154)
+        _absperr(parts, cx, y + 184)
 
     _sym(parts, x + LH_REG_X, y + LH_REG_OBEN, LH_REG_W, "lufterhitzer",
          SYM_INNER["lufterhitzer"])
 
-    if d.get("hat_wz"):
-        # Zweiter Fühler des Wärmezählers: der Vorlauffühler, per oranger
-        # Signalleitung ans Rechenwerk im Rücklauf angebunden.
-        parts.append(f'<path d="M {cx + 16} {y + 196} H {cx + 34} V {y + 421} H {cx + 22.4}" '
-                     f'fill="none" stroke="#f08c2e" stroke-width="1.6" '
-                     f'stroke-dasharray="6 3 1.5 3" stroke-linecap="round"/>')
-        _sym(parts, cx - 9.6, y + 401, 32, "waermezaehler_cad", SYM_INNER["waermezaehler_cad"])
-
-    # Temperaturanzeige MSR: oranger Kreis mit T am Registeraustritt.
-    parts.append(f'<g stroke="#f08c2e" stroke-width="2" stroke-linecap="round" fill="none">'
-                 f'<line x1="{cx - 10}" y1="{y + 362}" x2="{cx + 25}" y2="{y + 362}"/>'
-                 f'<circle cx="{cx + 34}" cy="{y + 362}" r="9" fill="white"/></g>')
-    parts.append(f'<text x="{cx + 34}" y="{y + 366}" text-anchor="middle" font-size="11" '
+    # Direkt nach dem Register: Absperrung, kleiner MSR-Fühler, Thermometer.
+    _absperr(parts, cx, y + 292)
+    parts.append(f'<g stroke="#f08c2e" stroke-width="1" stroke-linecap="round" fill="none">'
+                 f'<line x1="{cx - 5}" y1="{y + 318}" x2="{cx + 10}" y2="{y + 318}"/>'
+                 f'<circle cx="{cx + 14}" cy="{y + 318}" r="4" fill="white"/></g>')
+    parts.append(f'<text x="{cx + 14}" y="{y + 320.5}" text-anchor="middle" font-size="6" '
                  f'fill="#f08c2e" font-family="Arial">T</text>')
+    thermometer(342)
 
-    _sym(parts, cx - 6, y + 520, 12, "stad", SYM_INNER["stad"])
+    if schaltung == "drossel":
+        entleerung(380)
+    elif schaltung == "einspritz":
+        entleerung(bypass_unten)
+        _absperr(parts, cx, y + 395)
+        ventil2(430)
+    else:
+        entleerung(bypass_unten)
+        _absperr(parts, cx, y + 400)
+
+    if d.get("hat_wz"):
+        parts.append(f'<line x1="{cx}" y1="{y + 54}" x2="{cx + 8}" y2="{y + 54}" stroke="#1e293b" stroke-width="1"/>')
+        parts.append(f'<circle cx="{cx + 12}" cy="{y + 54}" r="3" fill="white" stroke="#1e293b" stroke-width="1"/>')
+        _sym(parts, cx - 9.6, y + wz_y, 32, "waermezaehler_cad", SYM_INNER["waermezaehler_cad"])
+
+    stad_y = 500 if schaltung == "drossel" else 510 if schaltung == "beimisch" else 520
+    _sym(parts, cx - 6, y + stad_y, 12, "stad", SYM_INNER["stad"])
+    if schaltung == "drossel":
+        entleerhahn(540)
     _nr_badge(parts, x + LH_W, y, d.get("nr"))
 
 

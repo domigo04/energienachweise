@@ -454,6 +454,7 @@ const SCHALTUNGSARTEN = [
   { wert: 'drossel',   name: 'Drosselschaltung',   hinweis: 'Nur Ventil, keine Gruppenpumpe · kann nicht mischen' },
 ];
 const schaltungVon = (d) => (['einspritz', 'beimisch', 'drossel'].includes(d?.schaltung) ? d.schaltung : 'einspritz');
+const lufterhitzerSchaltungVon = (d) => (['einspritz', 'beimisch', 'drossel'].includes(d?.schaltung) ? d.schaltung : 'drossel');
 
 // ── Leitungs-Panel (Klick auf eine Leitung, PHYSIK §10) ───────
 // Zeigt die automatisch gewählte Dimension (DN + Pa/m aus Dominics Tabelle)
@@ -768,6 +769,38 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         ) : (
           <div style={warnSt}>Q, VL und RL eingeben — das Backend rechnet automatisch.</div>
         )}
+        <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
+      </div>
+    );
+  }
+
+  // ── LUFTERHITZERGRUPPE ──
+  if (node.type === 'lufterhitzer_gruppe') {
+    const gr = gruppeResults?.[node.id];
+    const schaltung = lufterhitzerSchaltungVon(d);
+    return (
+      <div style={panelSt}>
+        <PT>Lufterhitzergruppe</PT>
+        {fld('Anlagennummer / Bezeichnung','anlage_nr','z.B. LE 3 — Halle Nord','','text')}
+        {fld('Leistung Q','q_kw','z.B. 12','kW')}
+        {fld('Druckverlust geregelter Ast ohne Regelventil','dp_kpa','z.B. 20','kPa')}
+        <label style={lbl}>Schaltung</label>
+        <select style={{...inp,cursor:'pointer'}} value={schaltung} onChange={e=>set('schaltung',e.target.value)}>
+          {SCHALTUNGSARTEN.map(s=><option key={s.wert} value={s.wert}>{s.name}</option>)}
+        </select>
+        <div style={{ fontSize:9, color:'#94a3b8', marginTop:2 }}>
+          {SCHALTUNGSARTEN.find(s=>s.wert===schaltung)?.hinweis}
+        </div>
+        <label style={{ display:'flex', gap:5, alignItems:'center', cursor:'pointer', fontSize:11, color:'#374151', marginTop:8 }}>
+          <input type="checkbox" checked={!!d.hat_wz} onChange={e=>set('hat_wz',e.target.checked)}/>
+          Wärmezähler im Rücklauf mit VL-/RL-Fühler
+        </label>
+        {gr?.vl != null && ro('Übernommene Temperaturen', `${gr.vl} / ${gr.rl} °C`, '')}
+        {gr?.m_sek != null && <ResultBox v={gr.m_sek} label="V' Lufterhitzer" unit="m³/h" />}
+        {gr?.pumpe?.dp_kpa != null && ro('Pumpe Förderhöhe', `${gr.pumpe.dp_kpa.toFixed(1)} kPa = ${gr.pumpe.mws.toFixed(2)} mWS`, '')}
+        {gr?.ventil?.pv != null && ro('Ventil kvs / Autorität', `${gr.ventil.kvs_eff} / ${gr.ventil.pv.toFixed(1)} %`, '')}
+        {!gr?.m_sek && <div style={warnSt}>Hauptgruppe verbinden und Leistung eingeben.</div>}
+        <div style={{ fontSize:9, color:'#94a3b8', marginTop:4 }}>Detaillierte Auslegung: <b>Doppelklick</b> auf die Gruppe.</div>
         <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
     );
@@ -1133,7 +1166,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         <select style={{...inp,cursor:'pointer'}} value={parseInt(d.abgaenge)||4} onChange={e=>onSetAbgaenge(node.id, parseInt(e.target.value))}>
           {[2,3,4,5,6,7,8].map(k=><option key={k} value={k}>{k}</option>)}
         </select>
-        {fld('Abstand VL–RL Balken','hoehe','560 (Standard)','px')}
+        {fld('Abstand VL–RL Balken','hoehe','700 (Standard für neue Verteiler)','px')}
         {vr ? (
           <>
             <div style={{ fontSize:10, fontWeight:700, color:'#475569', marginTop:10, marginBottom:4, textTransform:'uppercase', letterSpacing:'0.05em' }}>Verteiler-Hydraulik (Primärseite)</div>
@@ -1401,8 +1434,8 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
         {aktTab === 'ventil' && (
           <>
             <div style={{ fontSize:12, fontWeight:700, color:'#1e293b' }}>{d.label ? `${d.label} — ` : ''}{ventilTitel} · Primärseite, V' = {gr?.m_prim!=null?Number(gr.m_prim).toFixed(3):'—'} m³/h</div>
-            <div><label style={lbl}>Δpvar — Druckabfall variabler Anlagenteil [kPa]</label>
-              <input type="number" style={inp} value={d.ventil_dp_var??''} onChange={e=>set('ventil_dp_var',e.target.value)} placeholder="26"/></div>
+            <div><label style={lbl}>Druckverlust geregelter Ast ohne Regelventil [kPa]</label>
+              <input type="number" style={inp} value={d.dp_kpa??''} onChange={e=>set('dp_kpa',e.target.value)} placeholder="20"/></div>
             {gr?.ventil ? (
               <>
                 <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
@@ -1416,7 +1449,7 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
                 <PvBox pv={gr.ventil.pv} v={gr.ventil.v} kvs_eff={gr.ventil.kvs_eff}/>
               </>
             ) : (
-              <div style={warnSt}>Δpvar eingeben — dann rechnet das Backend kvs + Ventilautorität automatisch aus dem Gruppen-Volumenstrom.</div>
+              <div style={warnSt}>Druckverlust Ast eingeben — dann rechnet das Backend kvs + Ventilautorität automatisch aus dem Gruppen-Volumenstrom.</div>
             )}
           </>
         )}
@@ -1427,16 +1460,18 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
     // Leistung und Druckverlust werden hier eingegeben (Dominic 2026-08-05).
     body = (
       <div style={{ display:'grid', gap:12 }}>
+        <div><label style={lbl}>Schaltung</label>
+          <select style={{...inp,cursor:'pointer'}} value={lufterhitzerSchaltungVon(d)} onChange={e=>set('schaltung',e.target.value)}>
+            {SCHALTUNGSARTEN.map(s=><option key={s.wert} value={s.wert}>{s.name}</option>)}
+          </select></div>
         <div><label style={lbl}>Anlagennummer / Bezeichnung</label>
           <input type="text" style={inp} value={d.anlage_nr??''} onChange={e=>set('anlage_nr',e.target.value)} placeholder="z.B. LE 3 — Halle Nord"/></div>
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
           <div><label style={lbl}>Leistung Q [kW]</label>
             <input type="number" style={inp} value={d.q_kw??''} onChange={e=>set('q_kw',e.target.value)} placeholder="12"/></div>
-          <div><label style={lbl}>Druckverlust Ast [kPa]</label>
+          <div><label style={lbl}>Druckverlust geregelter Ast ohne Regelventil [kPa]</label>
             <input type="number" style={inp} value={d.dp_kpa??''} onChange={e=>set('dp_kpa',e.target.value)} placeholder="20"/></div>
         </div>
-        <div><label style={lbl}>Δpvar — Druckabfall variabler Anlagenteil [kPa]</label>
-          <input type="number" style={inp} value={d.ventil_dp_var??''} onChange={e=>set('ventil_dp_var',e.target.value)} placeholder="26"/></div>
 
         {gr?.vl != null
           ? <div style={{ fontSize:11, color:'#475569', background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:8, padding:'8px 10px' }}>
@@ -1448,8 +1483,11 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
           <BigVal label="V' Lufterhitzer" value={gr?.m_sek!=null?Number(gr.m_sek).toFixed(3):null} unit="m³/h" color="#15803d"
             sub={gr?.dt_sek!=null?`ΔT = ${gr.dt_sek} K`:''}/>
           <BigVal label="Ventil kvs" value={gr?.ventil?.kvs_eff??null} unit=""
-            sub={gr?.ventil?.pv!=null?`Ventilautorität Pv = ${gr.ventil.pv.toFixed(1)} %`:'Δpvar eingeben'}/>
+            sub={gr?.ventil?.pv!=null?`Ventilautorität Pv = ${gr.ventil.pv.toFixed(1)} %`:'Druckverlust Ast eingeben'}/>
         </div>
+
+        {gr?.pumpe && <BigVal label="Umwälzpumpe" value={gr.pumpe.dp_kpa!=null?gr.pumpe.dp_kpa.toFixed(1):null} unit="kPa"
+          sub={gr.pumpe.dp_kpa!=null?`${gr.pumpe.mws.toFixed(2)} mWS · V' ${Number(gr.pumpe.v??0).toFixed(3)} m³/h`:'Rohrlänge/Apparate bei der Verbrauchergruppe ergänzen'}/>}
 
         <label style={{ display:'flex', gap:6, alignItems:'center', cursor:'pointer', fontSize:12, color:'#374151' }}>
           <input type="checkbox" checked={!!d.hat_wz} onChange={e=>set('hat_wz',e.target.checked)}/>
@@ -5132,9 +5170,10 @@ function EditorInner() {
     }
 
     setNodes(ns => {
-      const extra = nodeType === 'verteiler' ? { abgaenge: 4 }
+      const extra = nodeType === 'verteiler' ? { abgaenge: 4, hoehe: 700 }
         : nodeType === 'erdsonden' ? { sonden_anzahl: 5, sonden_laenge_m: 180 }
         : nodeType === 'gruppe' ? { schaltung: 'einspritz' }
+        : nodeType === 'lufterhitzer_gruppe' ? { schaltung: 'drossel' }
         : nodeType === 'anschluss' ? { buchstabe: naechsterBuchstabe(ns) }
         : nodeType === 'label' ? { label: 'Text', fontSize: 12 }
         : nodeType === 'concrete_area' ? { label: '', hatch_scale:8 }
@@ -5221,8 +5260,10 @@ function EditorInner() {
         return [...cleaned, first, second];
       });
     }
-    // Verbrauchergruppe: direkt nach dem Setzen die Schaltung wählen
-    if (nodeType === 'gruppe' && screenPunkt) setSchaltungswahl({ nodeId: id, x: screenPunkt.x, y: screenPunkt.y });
+    // Verbraucher- und Lufterhitzergruppe: direkt nach dem Setzen die Schaltung wählen
+    if ((nodeType === 'gruppe' || nodeType === 'lufterhitzer_gruppe') && screenPunkt) {
+      setSchaltungswahl({ nodeId: id, nodeType, x: screenPunkt.x, y: screenPunkt.y });
+    }
     return id;
   }, [cadAnker, drawingConfig.corner_radius, getZoom, leitungTeilen, naechsteSichtbareLeitung, screenToFlowPosition, setEdges, setNodes, snap]);
 
@@ -6937,7 +6978,7 @@ function EditorInner() {
         />
       )}
 
-      {/* Schaltungswahl direkt nach dem Ablegen einer Verbrauchergruppe */}
+      {/* Schaltungswahl direkt nach dem Ablegen einer Verbraucher- oder Lufterhitzergruppe */}
       {schaltungswahl && (
         <div onClick={() => setSchaltungswahl(null)} style={{ position:'fixed', inset:0, zIndex:3000 }}>
           <div onClick={e=>e.stopPropagation()}

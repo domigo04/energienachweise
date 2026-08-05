@@ -50,15 +50,15 @@ describe('Kompakte Armaturen und Feldgeräte', () => {
 
   it('zeichnet die Pumpe grösser und Fühler/Entleerung kleiner als die Armaturen', () => {
     expect(renderToStaticMarkup(<SymPump/>)).toContain('height="34"');
-    expect(renderToStaticMarkup(<SymTemperatur/>)).toContain('height="16"');
+    expect(renderToStaticMarkup(<SymTemperatur/>)).toContain('height="19"');
     expect(renderToStaticMarkup(<SymEntleerung/>)).toContain('height="9.6"');
   });
 
-  it('zeichnet Kugelhahn und Rückschlagventil mit vollständigen Leitungsstutzen', () => {
+  it('zeichnet Kugelhahn in Ventiloptik ohne Motor und das Rückschlagventil mit Leitungsstutzen', () => {
     const kugelhahn = renderToStaticMarkup(<SymShutoff/>);
     const rueckschlag = renderToStaticMarkup(<SymCheckValve/>);
-    expect(kugelhahn).toContain('y1="6"');
-    expect(kugelhahn).toContain('y2="124"');
+    expect(kugelhahn).toContain('points="32,14 68,14 50,50"');
+    expect(kugelhahn).not.toContain('ffd34d');
     expect(rueckschlag).toContain('y1="0"');
     expect(rueckschlag).toContain('y2="80"');
   });

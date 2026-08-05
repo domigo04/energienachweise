@@ -386,7 +386,10 @@ def _strang_ausruestung(d: dict, res: dict) -> None:
         }
 
     if hat_ventil:
-        dp_var = _zahl(d.get("ventil_dp_var"))
+        # Neue Schemata verwenden einen einzigen, fachlich eindeutigen Wert:
+        # Druckverlust des geregelten Astes ohne Regelventil. Der alte Schlüssel
+        # bleibt nur als Lesefallback für bestehende Projekte erhalten.
+        dp_var = _zahl(d.get("dp_kpa")) or _zahl(d.get("ventil_dp_var"))
         v = res.get("m_prim")
         if dp_var and dp_var > 0 and v:
             kv = berechne_kvs(v, dp_var, _zahl(d.get("ventil_kvs_eff")))
@@ -842,35 +845,31 @@ def _lufterhitzer_kennwerte(node, quelle, gruppe_results, node_flows) -> None:
     """Kennwerte einer einzelnen Lufterhitzeranlage.
 
     VL/RL kommen von der Hauptgruppe, die Leistung gibt die Anlage selbst an.
-    Das Regelventil wird aus Δpvar und dem eigenen V' ausgelegt — gleiche
-    Formel wie im Strang einer Verbrauchergruppe (_strang_ausruestung).
+    Schaltung, Pumpe und Regelventil verwenden dieselbe Ausrüstungslogik wie
+    eine Verbrauchergruppe. Alte Schemata ohne Schaltungsangabe bleiben eine
+    Drosselschaltung.
     """
     d = node.get("data") or {}
     vl, rl = quelle.get("vl"), quelle.get("rl")
     q = _zahl(d.get("q_kw"))
+    schaltung = str(d.get("schaltung") or "drossel").lower()
+    if schaltung not in ("einspritz", "beimisch", "drossel"):
+        schaltung = "drossel"
+    ausruestung = dict(d, schaltung=schaltung)
     res = {
         "vl": vl, "rl": rl, "quelle": quelle.get("quelle"),
         "anschluss": quelle.get("buchstabe"), "q_kw": q,
-        "hat_pumpe": False, "hat_ventil": True, "pumpe": None, "ventil": None,
+        "schaltung": schaltung,
     }
     if q and vl is not None and rl is not None and vl > rl:
         dt = vl - rl
         m = q / (1.163 * dt)
         res.update({
             "m_sek": round(m, 4), "m_prim": round(m, 4), "m_bypass": 0.0,
-            "einspritz": False, "dt_sek": round(dt, 2), "dt_prim": round(dt, 2),
+            "einspritz": schaltung == "einspritz", "dt_sek": round(dt, 2), "dt_prim": round(dt, 2),
         })
         node_flows[node["id"]] = round(m, 4)
-        dp_var = _zahl(d.get("ventil_dp_var"))
-        if dp_var and dp_var > 0:
-            kv = berechne_kvs(m, dp_var, _zahl(d.get("ventil_kvs_eff")))
-            if "fehler" not in kv:
-                res["ventil"] = {
-                    "v": round(m, 4), "kvs_theor": kv["kvs_theor"],
-                    "kvs_vorschlag": kv["kvs_vorschlag"], "kvs_eff": kv["kvs_eff"],
-                    "dp_v_eff_kpa": kv["dp_v_eff_kpa"], "pv": kv["ventilautoritaet_pct"],
-                    "warnings": kv["warnings"],
-                }
+    _strang_ausruestung(ausruestung, res)
     gruppe_results[node["id"]] = res
 
 

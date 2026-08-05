@@ -209,7 +209,7 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
                               ("Pumpe: Förderhöhe", _fmt(pu.get("mws"), 2), "mWS")]
             ve = c.get("ventil")
             if ve:
-                eingaben += [("Ventil: Δpvar", d.get("ventil_dp_var"), "kPa")]
+                eingaben += [("Ventil: Druckverlust geregelter Ast ohne Regelventil", d.get("dp_kpa"), "kPa")]
                 resultate += [("Ventil: V' (primär)", _fmt(ve.get("v")), "m³/h"),
                               ("Ventil: kvs theoretisch", _fmt(ve.get("kvs_theor")), ""),
                               ("Ventil: kvs gewählt", ve.get("kvs_eff"), ""),

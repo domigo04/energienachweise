@@ -28,13 +28,11 @@ export function SymValve2V() {
       {/* Dominic 2026-07-31: die Doppelkegel waren fast so hoch wie das ganze
           Symbol und wirkten dadurch in die Länge gezogen. Sie sind jetzt
           gestaucht und etwas breiter — dasselbe Zeichen, ruhigere Proportion. */}
-      <line x1="50" y1="0" x2="50" y2="22" stroke="#1e293b" strokeWidth="2.6" />
-      <line x1="50" y1="78" x2="50" y2="100" stroke="#1e293b" strokeWidth="2.6" />
       <rect x="4" y="38" width="24" height="24" fill="#ffd34d" stroke="#ff9f00" strokeWidth="2.4" strokeLinejoin="round" />
       <path d="M9 44 H22 L14 50 L22 56 H9" fill="none" stroke="#ff9f00" strokeWidth="2.4" strokeLinejoin="round" />
       <line x1="28" y1="50" x2="34" y2="50" stroke="#ff9f00" strokeWidth="2.4" strokeLinecap="round" />
-      <polygon points="32,22 68,22 50,50" fill="white" stroke="#1e293b" strokeWidth="2.4" strokeLinejoin="round" />
-      <polygon points="32,78 68,78 50,50" fill="white" stroke="#1e293b" strokeWidth="2.4" strokeLinejoin="round" />
+      <polygon points="32,14 68,14 50,50" fill="white" stroke="#1e293b" strokeWidth="2.4" strokeLinejoin="round" />
+      <polygon points="32,86 68,86 50,50" fill="white" stroke="#1e293b" strokeWidth="2.4" strokeLinejoin="round" />
       <circle cx="50" cy="50" r="5.5" fill="#1e293b" />
     </svg>
   );
@@ -46,15 +44,12 @@ export function SymValve2V() {
 export function SymValve3() {
   return (
     <svg viewBox="0 0 100 100" width="38" height={ARMATUR_H}>
-      <line x1="50" y1="0" x2="50" y2="8" stroke="#1e293b" strokeWidth="2.6" />
-      <line x1="50" y1="92" x2="50" y2="100" stroke="#1e293b" strokeWidth="2.6" />
-      <line x1="92" y1="50" x2="100" y2="50" stroke="#1e293b" strokeWidth="2.6" />
       <rect x="4" y="36" width="26" height="28" fill="#ffd34d" stroke="#ff9f00" strokeWidth="2.4" strokeLinejoin="round" />
       <path d="M4 36 L30 64 M30 36 L4 64" stroke="#ff9f00" strokeWidth="2" />
       <line x1="30" y1="50" x2="39" y2="50" stroke="#ff9f00" strokeWidth="2.4" strokeLinecap="round" />
-      <polygon points="36,8 64,8 50,50" fill="white" stroke="#1e293b" strokeWidth="2.4" strokeLinejoin="round" />
-      <polygon points="36,92 64,92 50,50" fill="white" stroke="#1e293b" strokeWidth="2.4" strokeLinejoin="round" />
-      <polygon points="50,50 92,34 92,66" fill="white" stroke="#1e293b" strokeWidth="2.4" strokeLinejoin="round" />
+      <polygon points="36,14 64,14 50,50" fill="white" stroke="#1e293b" strokeWidth="2.4" strokeLinejoin="round" />
+      <polygon points="36,86 64,86 50,50" fill="white" stroke="#1e293b" strokeWidth="2.4" strokeLinejoin="round" />
+      <polygon points="50,50 95,34 95,66" fill="white" stroke="#1e293b" strokeWidth="2.4" strokeLinejoin="round" />
       <circle cx="50" cy="50" r="6" fill="#1e293b" />
     </svg>
   );
@@ -85,7 +80,7 @@ export function SymSTAD() {
 // Kreis + Diagonalpfeil + T. (Blaue RL-Leitung zeichnet der Strang selbst.)
 export function SymTemperatur() {
   return (
-    <svg viewBox="10 6 90 66" width="22" height="16">
+    <svg viewBox="10 6 90 66" width="26" height="19">
       <g fill="none" stroke="#1e293b" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="38" cy="36" r="12" fill="white" />
         <line x1="18" y1="56" x2="56" y2="18" />
@@ -165,12 +160,10 @@ export function SymCheckValve() {
 // Antriebskasten. Flussachse senkrecht durch x=104 (mittig).
 export function SymShutoff() {
   return (
-    <svg viewBox="78 6 52 118" width="14" height={ARMATUR_H}>
-      <line x1="104" y1="6" x2="104" y2="14" stroke="#1e293b" strokeWidth="3" />
-      <polygon points="79,14 130,14 104,65" fill="white" stroke="#000" strokeWidth="3.2" strokeLinejoin="round" />
-      <polygon points="79,116 130,116 104,65" fill="white" stroke="#000" strokeWidth="3.2" strokeLinejoin="round" />
-      <circle cx="104" cy="65" r="13" fill="#000" />
-      <line x1="104" y1="116" x2="104" y2="124" stroke="#1e293b" strokeWidth="3" />
+    <svg viewBox="0 0 100 100" width="35" height={ARMATUR_H}>
+      <polygon points="32,14 68,14 50,50" fill="white" stroke="#1e293b" strokeWidth="2.4" strokeLinejoin="round" />
+      <polygon points="32,86 68,86 50,50" fill="white" stroke="#1e293b" strokeWidth="2.4" strokeLinejoin="round" />
+      <circle cx="50" cy="50" r="5.5" fill="#1e293b" />
     </svg>
   );
 }
@@ -262,9 +255,9 @@ export function SymWaermezaehlerCad({ width = 32 }) {
 export function SymLufterhitzer({ width = 104 }) {
   return (
     <svg viewBox="0 0 366 152" width={width} height={width * 152 / 366}>
-      <g fill="none" stroke="#ff0000" strokeWidth="3" strokeLinejoin="miter">
-        <path d="M126 29 L5 29 L49 76 L5 124 L126 124" />
-        <path d="M204 29 L316 29 L366 76 L316 124 L204 124" />
+      <g fill="white" stroke="#ff0000" strokeWidth="3" strokeLinejoin="miter">
+        <path d="M126 29 L5 29 L49 76 L5 124 L126 124 Z" />
+        <path d="M204 29 L316 29 L366 76 L316 124 L204 124 Z" />
       </g>
       <rect x="126" y="2" width="78" height="148" fill="white" stroke="#000" strokeWidth="3" />
       <g stroke="#000" strokeWidth="2.6">

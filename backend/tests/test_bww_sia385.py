@@ -1,7 +1,8 @@
 """Brauchwarmwasser nach SIA 385/2, geprüft gegen `Warmwasser-Berechnung_SIA385.xlsm`.
 
-Referenzfall des Blattes `Speichervolumen`: 1 Person, Bezugseinheit 1850 l/(d·P),
-Zirkulation, 2 Ladezyklen à 2 h, gewählter Speicher 1000 l, ΔΘ 50 K, η 0.95.
+Referenzfall des Blattes `Speichervolumen`: eine Wohnung mit 200 m²,
+EFH gehobener Standard, Warmhalteband, aussenliegender Wärmetauscher,
+2 Ladezyklen à 2 h, ΔΘ 50 K und η 0.95.
 """
 
 import pytest
@@ -16,21 +17,25 @@ from app.calculations.bww_sia385 import (
 from app.calculations.hydraulik import berechne_schema
 
 REFERENZ = dict(
-    personen=1, bezugseinheit_key="efh_gehoben", bezugseinheit_durchschnitt=1850,
-    warmhaltesystem="zirkulation", speicherkonfiguration="aussen",
+    personen=None,
+    wohnungen=[{"id": "001", "name": "001", "flaeche_m2": 200}],
+    bezugseinheit_key="efh_gehoben",
+    warmhaltesystem="warmhalteband", speicherkonfiguration="aussen",
     ladezyklen_pro_tag=2, ladezeit_h=2, temperaturerhoehung_k=50,
-    wirkungsgrad=0.95, gewaehltes_speichervolumen_l=1000,
+    wirkungsgrad=0.95,
 )
 
 
 def test_volumen_und_leistung_entsprechen_der_vorlage():
     r = bww_auslegung(**REFERENZ)
 
-    assert r["nutzwarmwasserbedarf_l_d"] == 2775          # B20
-    assert r["steuervolumen_l"] == pytest.approx(1388, abs=1)   # B23 = 1387.5
-    assert r["spitzendeckungsvolumen_l"] == 105           # B26
-    assert r["bereitschaftsvolumen_l"] == pytest.approx(1492, abs=1)  # B29
-    assert r["anschlussleistung_kw"] == 15.5             # B46
+    assert r["personen"] == pytest.approx(3.08, abs=0.01)             # B10
+    assert r["nutzwarmwasserbedarf_l_d"] == 229                       # B20 = 228.525
+    assert r["steuervolumen_l"] == pytest.approx(114, abs=1)          # B23
+    assert r["spitzendeckungsvolumen_l"] == pytest.approx(144, abs=1) # B26
+    assert r["bereitschaftsvolumen_l"] == pytest.approx(259, abs=1)   # B29
+    assert r["speichervolumen_l"] == pytest.approx(284, abs=1)        # B32
+    assert r["anschlussleistung_kw"] == 4.5                           # B46
 
 
 def test_personen_folgen_der_nutzflaeche():
@@ -40,7 +45,7 @@ def test_personen_folgen_der_nutzflaeche():
     with pytest.raises(ValueError):
         personen_aus_nutzflaeche(0)
 
-    r = bww_auslegung(**{**REFERENZ, "personen": None,
+    r = bww_auslegung(**{**REFERENZ, "wohnungen": None, "personen": None,
                          "nutzflaechen_m2": [200, 100, 100]})
     assert r["personen"] == pytest.approx(3.0778 + 2.3 + 2.3, abs=0.01)
 
@@ -82,30 +87,31 @@ def test_bezugseinheiten_stammen_aus_der_tabelle():
     assert r["nutzwarmwasserbedarf_l_d"] == 525
 
 
-def test_unstimmigkeiten_der_vorlage_werden_benannt():
+def test_speicherkonfiguration_wird_in_das_endvolumen_eingerechnet():
     r = bww_auslegung(**REFERENZ)
 
-    # Der Faktor Speicherkonfiguration wird in der Vorlage nicht verwendet.
     assert r["faktor_speicherkonfiguration"] == 1.1
-    assert any("in keiner Formel verwendet" in w for w in r["warnungen"])
-    # Q_A teilt durch n_z · t_z; die Ladung in einem Zyklus wäre doppelt so hoch.
-    assert r["anschlussleistung_je_zyklus_kw"] == pytest.approx(2 * 15.5, abs=0.5)
-    assert any("Bezug von t_z" in w for w in r["warnungen"])
+    assert r["speichervolumen_l"] == 284
+    assert not r["warnungen"]
+    assert any(s["groesse"] == "V_{W,sto,1}" for s in r["rechenweg"])
+    assert all(s.get("formel_latex") and s.get("eingesetzt_latex")
+               for s in r["rechenweg"])
 
 
 def test_zu_kleiner_speicher_wird_gemeldet():
-    r = bww_auslegung(**{**REFERENZ, "gewaehltes_speichervolumen_l": 500})
+    r = bww_auslegung(**{**REFERENZ, "gewaehltes_speichervolumen_l": 200})
 
-    assert r["massgebendes_volumen_l"] == 500
-    assert any("kleiner als das Bereitschaftsvolumen" in w for w in r["warnungen"])
+    assert r["massgebendes_volumen_l"] == 284
+    assert any("kleiner als das berechnete Speichervolumen" in w
+               for w in r["warnungen"])
 
 
 def test_zu_kleine_waermepumpe_liefert_konkrete_ladeoptionen():
     r = bww_auslegung(**REFERENZ)
-    leistungsabgleich(r, 10, "BWW-Leistung am Betriebspunkt")
+    leistungsabgleich(r, 2, "BWW-Leistung am Betriebspunkt")
 
     assert r["leistung_ausreichend"] is False
-    assert r["leistungsreserve_kw"] == -5.5
+    assert r["leistungsreserve_kw"] == -2.5
     assert r["ladezeit_min_fuer_wp_h"] > 2
     assert r["ladezyklen_min_fuer_wp"] > 2
     assert any("höher als die verfügbare Wärmepumpenleistung" in w
@@ -114,10 +120,10 @@ def test_zu_kleine_waermepumpe_liefert_konkrete_ladeoptionen():
 
 def test_ausreichende_waermepumpe_hat_positive_reserve():
     r = bww_auslegung(**REFERENZ)
-    leistungsabgleich(r, 20)
+    leistungsabgleich(r, 10)
 
     assert r["leistung_ausreichend"] is True
-    assert r["leistungsreserve_kw"] == 4.5
+    assert r["leistungsreserve_kw"] == 5.5
     assert "ladezeit_min_fuer_wp_h" not in r
 
 
@@ -125,6 +131,20 @@ def test_ohne_personen_gibt_es_keine_auslegung():
     r = bww_auslegung(personen=None)
     assert any("Personenzahl oder Nutzflächen fehlen" in w for w in r["warnungen"])
     assert "anschlussleistung_kw" not in r
+
+
+def test_diagramme_entsprechen_den_stundenprofilen_der_vorlage():
+    r = bww_auslegung(**REFERENZ)
+
+    werktag = r["diagramme"]["werktag"]
+    wochenende = r["diagramme"]["wochenende"]
+    ladefunktion = r["diagramme"]["ladefunktion"]
+    assert len(werktag) == len(wochenende) == len(ladefunktion) == 24
+    assert sum(p["anteil_prozent"] for p in werktag) == 100
+    assert sum(p["anteil_prozent"] for p in wochenende) == 100
+    assert werktag[-1]["kumuliert_l"] == pytest.approx(284.47, abs=0.02)
+    assert wochenende[-1]["kumuliert_l"] == pytest.approx(284.47, abs=0.02)
+    assert ladefunktion[0]["ladekurve_l"] == pytest.approx(29.87, abs=0.02)
 
 
 def test_ungueltige_eingaben_werden_abgewiesen():

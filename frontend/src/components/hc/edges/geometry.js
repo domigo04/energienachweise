@@ -54,6 +54,25 @@ export function vereinfachteRoute(points) {
   });
 }
 
+// Letztes Teilstück zu einem Anschluss immer rechtwinklig führen. Wenn keine
+// Handle-Seite bekannt ist (z. B. freies Leitungsende), wählen wir den Knick
+// mit der längeren ersten Achse. Fluchten die Punkte bereits, bleibt die
+// Leitung ohne zusätzlichen Eckpunkt exakt gerade.
+export function orthogonalerAnschlussEckpunkt(origin, target, side = null) {
+  if (!origin || !target) return null;
+  let corner = null;
+  if (side === 'left' || side === 'right') corner = { x:origin.x, y:target.y };
+  if (side === 'top' || side === 'bottom') corner = { x:target.x, y:origin.y };
+  if (!corner) {
+    corner = Math.abs(target.x - origin.x) >= Math.abs(target.y - origin.y)
+      ? { x:target.x, y:origin.y }
+      : { x:origin.x, y:target.y };
+  }
+  const sameAsOrigin = Math.hypot(corner.x - origin.x, corner.y - origin.y) < 1;
+  const sameAsTarget = Math.hypot(corner.x - target.x, corner.y - target.y) < 1;
+  return sameAsOrigin || sameAsTarget ? null : corner;
+}
+
 // CAD-Grundsatz: die vom Nutzer gezeichnete Geometrie hat Vorrang. Keine
 // künstlichen Lead-Segmente, keine Richtungsänderung nur wegen der Handle-Seite.
 //

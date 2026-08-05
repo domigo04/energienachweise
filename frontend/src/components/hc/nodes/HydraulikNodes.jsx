@@ -682,6 +682,7 @@ export function VerteilerNode({ data, selected: sel }) {
 // Geometrie muss mit backend/app/export/schema_svg.py übereinstimmen!
 export function GruppeNode({ data, selected: sel }) {
   const c = data._calc || {};
+  const effektiveLeistung = c.q_kw ?? data.q_kw;
   const einspritz = !!c.einspritz;
   // Schaltungsart (PHYSIK §6): einspritz = 2WV + Bypass ÜBER dem Ventil ·
   // beimisch = 3WV + Bypass in den dritten Anschluss · drossel = nur Ventil
@@ -720,8 +721,8 @@ export function GruppeNode({ data, selected: sel }) {
       <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H}>
         {sel && <rect x="1" y="1" width={W - 2} height={H - 2} rx="8" fill="none" stroke="#3b82f6" strokeWidth="2" strokeDasharray="6,4" />}
         {/* Strangleitung: oben VL (primär), unten RL */}
-        <line x1={cx} y1="0" x2={cx} y2={sy(128)} stroke="#ef4444" strokeWidth="2" />
-        <line x1={cx} y1={sy(278)} x2={cx} y2={H} stroke="#3b82f6" strokeWidth="2" />
+        <line x1={cx} y1="0" x2={cx} y2={sy(145)} stroke="#ef4444" strokeWidth="2" />
+        <line x1={cx} y1={sy(255)} x2={cx} y2={H} stroke="#3b82f6" strokeWidth="2" />
         {/* Primär-Fluss am Strangkopf */}
         <text x={cx + 8} y="12" fontSize="9" fill="#1e293b" fontFamily="monospace">{`m': ${kg(c.m_prim)}`}</text>
         {/* Anschluss-Marker für separate Gruppe — beim roten Rechteck, auf Höhe
@@ -756,12 +757,12 @@ export function GruppeNode({ data, selected: sel }) {
           </>
         )}
         {/* Rotes Rechteck mit gedrehtem Text (wie im CAD) */}
-        <rect x="55" y={sy(128)} width="40" height={sy(278) - sy(128)} fill="white" stroke="#ef4444" strokeWidth="1.8" />
+        <rect x="55" y={sy(145)} width="40" height={sy(255) - sy(145)} fill="white" stroke="#ef4444" strokeWidth="1.8" />
         <text transform={`translate(63 ${sy(202)}) rotate(-90)`} textAnchor="middle" fontSize="9" fontWeight="700" fill="#ef4444" fontFamily="monospace">
           {data.label || 'Verbrauchergruppe'}
         </text>
         <text transform={`translate(75 ${sy(202)}) rotate(-90)`} textAnchor="middle" fontSize="8.5" fill="#ef4444" fontFamily="monospace">
-          {`${data.q_kw ?? '—'} kW · VL/RL ${data.vl_temp ?? '—'}/${data.rl_temp ?? '—'} °C`}
+          {`${effektiveLeistung ?? '—'} kW · VL/RL ${data.vl_temp ?? '—'}/${data.rl_temp ?? '—'} °C`}
         </text>
         <text transform={`translate(87 ${sy(202)}) rotate(-90)`} textAnchor="middle" fontSize="8.5" fill="#ef4444" fontFamily="monospace">
           {`m': ${kg(c.m_sek)}`}
@@ -858,8 +859,9 @@ export function ExpansionNode({ data, selected: sel }) {
 export function BwwNode({ data, selected: sel }) {
   const c = data._calc || {};
   const liter = c.speichervolumen_l ?? c.bereitschaftsvolumen_l ?? data.speicher_liter;
+  const aussenregister = (c.register_bauart || data.bww_speicherkonfiguration || 'aussen') === 'aussen';
   return (
-    <div style={wrap(sel)}>
+    <div style={{ ...wrap(sel), overflow:'visible' }}>
       <ZoneHandles prefix="sz" />
       {H(Position.Top,    'top-l',  { top: -6,    left: '30%', background:'#ef4444' })}
       {H(Position.Top,    'top-r',  { top: -6,    left: '70%', background:'#ef4444' })}
@@ -869,6 +871,17 @@ export function BwwNode({ data, selected: sel }) {
       {H(Position.Right,  'right',  { right: -6 })}
       {H(Position.Top, 'warmwasser', { top:-6, left:'50%', background:'#ef4444' })}
       {H(Position.Bottom, 'kaltwasser', { bottom:-6, left:'50%', background:'#16a34a' })}
+      {aussenregister && (
+        <div title="Aussenliegendes Register mit Plattentauscher" style={{
+          position:'absolute', left:-54, top:51, width:47, height:34, zIndex:2,
+          background:'white', borderRadius:3,
+        }}>
+          <div style={{ position:'absolute', left:41, top:7, width:16, borderTop:'2px solid #ef4444' }}/>
+          <div style={{ position:'absolute', left:41, top:25, width:16, borderTop:'2px dashed #3b82f6' }}/>
+          <SymPWT />
+          <div style={{ position:'absolute', left:8, top:34, fontSize:7, fontWeight:700, color:'#475569' }}>PWT</div>
+        </div>
+      )}
       <SymBwwSpeicher liter={liter} />
       {c.leistung_ausreichend === false && (
         <div title="BWW-Ladeleistung höher als Wärmepumpenleistung"

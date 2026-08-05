@@ -545,7 +545,8 @@ def _bww_sia385(d: dict) -> Optional[dict]:
     if not wohnungen and not flaechen and not personen:
         return None
     try:
-        return bww_auslegung(
+        register_bauart = d.get("bww_speicherkonfiguration") or "aussen"
+        resultat = bww_auslegung(
             personen=personen,
             nutzflaechen_m2=flaechen or None,
             wohnungen=wohnungen or None,
@@ -553,13 +554,29 @@ def _bww_sia385(d: dict) -> Optional[dict]:
             bezugseinheit_durchschnitt=_zahl(d.get("bww_bezugseinheit_durchschnitt")),
             bezugseinheit_spitze=_zahl(d.get("bww_bezugseinheit_spitze")),
             warmhaltesystem=d.get("bww_warmhaltesystem") or "zirkulation",
-            speicherkonfiguration=d.get("bww_speicherkonfiguration") or "aussen",
+            speicherkonfiguration=register_bauart,
             ladezyklen_pro_tag=_zahl(d.get("bww_ladezyklen")) or 2,
             ladezeit_h=_zahl(d.get("bww_ladezeit_h")) or 2,
             temperaturerhoehung_k=_zahl(d.get("bww_delta_theta_k")) or 50,
             wirkungsgrad=_zahl(d.get("bww_wirkungsgrad")) or 0.95,
             gewaehltes_speichervolumen_l=_zahl(d.get("speicher_liter")),
         )
+        anschlussleistung = _zahl(resultat.get("anschlussleistung_kw"))
+        vorschlag = "aussen" if anschlussleistung is not None and anschlussleistung > 10 else "innen"
+        resultat.update({
+            "register_bauart": register_bauart,
+            "register_vorschlag": vorschlag,
+            "register_grenze_kw": 10.0,
+            "register_vorschlag_text": (
+                "Aussenliegendes Register mit Plattentauscher empfohlen, "
+                "weil die Anschlussleistung 10 kW überschreitet."
+                if vorschlag == "aussen" else
+                "Innenliegendes Register ist bei höchstens 10 kW Anschlussleistung ausreichend."
+            ),
+        })
+        if vorschlag == "aussen" and register_bauart != "aussen":
+            resultat.setdefault("warnungen", []).append(resultat["register_vorschlag_text"])
+        return resultat
     except ValueError as exc:
         return {"warnungen": [str(exc)]}
 
@@ -816,9 +833,10 @@ def _uebertrage_gruppen_anschluss(nodes, gruppe_results, edges, node_flows, edge
         d = n.get("data") or {}
         if n.get("type") == "gruppe" and d.get("hat_anschluss"):
             b = str(d.get("anschluss_buchstabe") or "A").upper()  # UI-Default 'A'
-            m = (gruppe_results.get(n["id"]) or {}).get("m_sek")
+            gruppe = gruppe_results.get(n["id"]) or {}
+            m = gruppe.get("m_sek")
             if b and m:
-                quelle[b] = {"m": round(m, 4), "q_kw": _zahl(d.get("q_kw")),
+                quelle[b] = {"m": round(m, 4), "q_kw": gruppe.get("q_kw") or _zahl(d.get("q_kw")),
                              "vl": _zahl(d.get("vl_temp")), "rl": _zahl(d.get("rl_temp")),
                              "quelle": d.get("label") or "Gruppe", "buchstabe": b}
     anschluss_results = {}
@@ -839,6 +857,57 @@ def _uebertrage_gruppen_anschluss(nodes, gruppe_results, edges, node_flows, edge
             if (e["source"] == n["id"] or e["target"] == n["id"]) and not edge_flows.get(e["id"]):
                 edge_flows[e["id"]] = q["m"]
     return anschluss_results
+
+
+def _lufterhitzer_summen_nach_anschluss(nodes, edges) -> dict:
+    """Leistung der Lufterhitzer-Untergruppen je Anschlussbuchstabe.
+
+    Die Haupt-Verbrauchergruppe ist der hydraulische Sammelkreis. Sobald an
+    ihrem Anschlussmarker einzelne ``lufterhitzer_gruppe``-Knoten hängen,
+    bestimmt deren Summe die Leistung des Sammelkreises. Ohne Untergruppen
+    bleibt die manuelle Leistung der Hauptgruppe massgebend.
+    """
+    node_by_id = {n["id"]: n for n in nodes}
+    nachbarn: dict = {}
+    for e in edges:
+        if str(e.get("id", "")).startswith("virt_"):
+            continue
+        nachbarn.setdefault(e["source"], set()).add(e["target"])
+        nachbarn.setdefault(e["target"], set()).add(e["source"])
+
+    gruppen: dict = {}
+    marker = [n for n in nodes if n.get("type") == "anschluss"]
+    for start in marker:
+        buchstabe = str((start.get("data") or {}).get("buchstabe") or "").upper()
+        if not buchstabe:
+            continue
+        besucht = {start["id"]}
+        queue = [start["id"]]
+        gefunden = set()
+        while queue:
+            for other in nachbarn.get(queue.pop(0), ()):
+                if other in besucht:
+                    continue
+                besucht.add(other)
+                knoten = node_by_id.get(other, {})
+                typ = knoten.get("type")
+                if typ in VERBRAUCHER_TYPEN or typ == "verteiler":
+                    continue
+                if typ == "lufterhitzer_gruppe":
+                    gefunden.add(other)
+                queue.append(other)
+        if not gefunden:
+            continue
+        eintrag = gruppen.setdefault(buchstabe, {"ids": set()})
+        eintrag["ids"].update(gefunden)
+
+    for eintrag in gruppen.values():
+        werte = [_zahl((node_by_id[nid].get("data") or {}).get("q_kw")) for nid in eintrag["ids"]]
+        eintrag["anzahl"] = len(werte)
+        eintrag["fehlend"] = sum(wert is None or wert <= 0 for wert in werte)
+        eintrag["q_kw"] = round(sum(wert for wert in werte if wert and wert > 0), 3)
+        eintrag["ids"] = sorted(eintrag["ids"])
+    return gruppen
 
 
 def _lufterhitzer_kennwerte(node, quelle, gruppe_results, node_flows) -> None:
@@ -911,38 +980,6 @@ def _lufterhitzer_gruppen(nodes, edges, anschluss_results, gruppe_results, node_
                 queue.append(other)
 
 
-def _lufterhitzer_summe_warnungen(nodes, gruppe_results) -> List[str]:
-    """Die Summe der seriellen Anlagen muss der Hauptgruppe entsprechen.
-
-    Genau dafür ist der Aufbau gedacht: die Verbrauchergruppe trägt die
-    Gesamtleistung, die einzelnen Lufterhitzer teilen sie unter sich auf.
-    """
-    soll = {}
-    for n in nodes:
-        d = n.get("data") or {}
-        if n.get("type") == "gruppe" and d.get("hat_anschluss"):
-            b = str(d.get("anschluss_buchstabe") or "A").upper()
-            soll[b] = (_zahl(d.get("q_kw")), d.get("label") or "Gruppe")
-
-    ist: dict = {}
-    for res in gruppe_results.values():
-        b = res.get("anschluss")
-        if b:
-            ist[b] = ist.get(b, 0.0) + (res.get("q_kw") or 0.0)
-
-    warnungen = []
-    for b, (q_soll, label) in sorted(soll.items()):
-        if b not in ist or not q_soll:
-            continue
-        q_ist = round(ist[b], 2)
-        diff = round(q_ist - q_soll, 2)
-        if abs(diff) > 0.05:
-            warnungen.append(
-                f"Anschluss {b}: Lufterhitzer summieren auf {q_ist} kW, "
-                f"«{label}» ist auf {q_soll} kW ausgelegt (Differenz {diff:+} kW)")
-    return warnungen
-
-
 def _anschluss_warnungen(nodes: List[dict]) -> List[str]:
     warnungen = []
     for buchstabe, ids in _anschluss_gruppen(nodes).items():
@@ -1001,7 +1038,7 @@ def _leitungsdimensionen(edges, edge_flows) -> dict:
     return leitung_results
 
 
-def _expansion_auto(nodes):
+def _expansion_auto(nodes, gruppen_q: Optional[dict] = None):
     """Automatik fürs Expansionsgefäss: höchste Verbraucher-VL (→ t_mittel) und
     die Leistung aus dem Schema (Erzeuger-Nennleistung, sonst Summe Verbraucher-Q)."""
     vls, q_sum, erz = [], 0.0, None
@@ -1012,7 +1049,7 @@ def _expansion_auto(nodes):
             vl = _zahl(d.get("vl_temp"))
             if vl is not None:
                 vls.append(vl)
-            q = _zahl(d.get("q_kw"))
+            q = (gruppen_q or {}).get(n["id"], _zahl(d.get("q_kw")))
             if q:
                 q_sum += q
         elif t == "erzeuger":
@@ -1096,9 +1133,27 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
     edges = _mit_virtuellen_anschluss_kanten(nodes, edges)
     anschluss_warnungen = _anschluss_warnungen(nodes)
     node_by_id = {n["id"]: n for n in nodes}
+    lufterhitzer_summen = _lufterhitzer_summen_nach_anschluss(nodes, edges)
+
+    gruppen_q = {}
+    for n in nodes:
+        d = n.get("data") or {}
+        if n.get("type") != "gruppe" or not d.get("hat_anschluss"):
+            continue
+        buchstabe = str(d.get("anschluss_buchstabe") or "A").upper()
+        untergruppen = lufterhitzer_summen.get(buchstabe)
+        if untergruppen and untergruppen["q_kw"] > 0:
+            gruppen_q[n["id"]] = untergruppen["q_kw"]
+            if untergruppen["fehlend"]:
+                anschluss_warnungen.append(
+                    f"Anschluss {buchstabe}: {untergruppen['fehlend']} Lufterhitzergruppe(n) "
+                    "ohne Leistung — die automatische Summe ist unvollständig"
+                )
 
     def data(n):
-        return n.get("data") or {}
+        original = n.get("data") or {}
+        q_auto = gruppen_q.get(n.get("id"))
+        return {**original, "q_kw": q_auto} if q_auto is not None else original
 
     # ── 1. Sekundär-Fluss je Verbraucher ──
     sek = {}
@@ -1133,7 +1188,7 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
         for n in nodes:
             if n.get("type") == "expansion":
                 r = berechne_expansion(
-                    n.get("data") or {}, *_expansion_auto(nodes), auto_ews_inhalt
+                    n.get("data") or {}, *_expansion_auto(nodes, gruppen_q), auto_ews_inhalt
                 )
                 if r is not None:
                     leer["expansion_results"][n["id"]] = r
@@ -1407,11 +1462,28 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
 
     # Anschluss «für separate Gruppe»: Fluss der Gruppe an ihren Marker geben,
     # bevor die Knoten-Flüsse verdichtet werden.
+    for n in nodes:
+        if n.get("type") != "gruppe" or n["id"] not in gruppe_results:
+            continue
+        d = n.get("data") or {}
+        res = gruppe_results[n["id"]]
+        q_effektiv = gruppen_q.get(n["id"], _zahl(d.get("q_kw")))
+        res["q_kw"] = q_effektiv
+        if n["id"] in gruppen_q:
+            buchstabe = str(d.get("anschluss_buchstabe") or "A").upper()
+            untergruppen = lufterhitzer_summen[buchstabe]
+            res.update({
+                "q_kw_quelle": "lufterhitzer_untergruppen",
+                "q_kw_untergruppen": q_effektiv,
+                "untergruppen_anzahl": untergruppen["anzahl"],
+                "untergruppen_leistung_fehlend": untergruppen["fehlend"],
+            })
+        else:
+            res["q_kw_quelle"] = "manuell"
     anschluss_results = _uebertrage_gruppen_anschluss(nodes, gruppe_results, edges, node_flows, edge_flows)
     # Serielle Lufterhitzeranlagen ab dem Marker: eigene Leistung, VL/RL von
     # der Hauptgruppe. Muss vor der Knoten-Fluss-Verdichtung laufen.
     _lufterhitzer_gruppen(nodes, edges, anschluss_results, gruppe_results, node_flows)
-    anschluss_warnungen = anschluss_warnungen + _lufterhitzer_summe_warnungen(nodes, gruppe_results)
     pwt_results = _pwt_transfer(nodes, edges, gruppe_results, node_flows, edge_flows)
 
     # ── 5. Knoten-Flüsse ──
@@ -1528,7 +1600,7 @@ def berechne_schema(nodes: List[dict], edges: List[dict]) -> dict:
                 "mws": round(gesamt / 10, 2) if gesamt > 0 else None,
             }
         elif t == "expansion":
-            r = berechne_expansion(d, *_expansion_auto(nodes), auto_ews_inhalt)
+            r = berechne_expansion(d, *_expansion_auto(nodes, gruppen_q), auto_ews_inhalt)
             if r is not None:
                 expansion_results[n["id"]] = r
         # Wärmezähler braucht keine eigene Rechnung: er übernimmt den

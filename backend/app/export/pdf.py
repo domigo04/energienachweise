@@ -63,6 +63,7 @@ def legende_zeilen(nodes: list, results: dict) -> list:
     vr = results.get("verteiler_results") or {}
     nf = results.get("node_flows") or {}
     ergebnisse_erzeuger = results.get("heatpump_results") or {}
+    bww_results = results.get("bww_results") or {}
     for n in _sortiert(nodes):
         d = n.get("data") or {}
         t = n.get("type")
@@ -70,8 +71,10 @@ def legende_zeilen(nodes: list, results: dict) -> list:
         if t == "gruppe":
             c = gr.get(n["id"], {})
             sn = {"einspritz": "Einspritz", "beimisch": "Beimisch", "drossel": "Drossel"}.get(c.get("schaltung"), "Einspritz")
-            werte = (f"{sn} · {d.get('q_kw', '—')} kW · {d.get('vl_temp', '—')}/{d.get('rl_temp', '—')} °C · "
+            werte = (f"{sn} · {c.get('q_kw', d.get('q_kw', '—'))} kW · {d.get('vl_temp', '—')}/{d.get('rl_temp', '—')} °C · "
                      f"sek {_fmt(c.get('m_sek'))} / prim {_fmt(c.get('m_prim'))} m³/h")
+            if c.get("q_kw_quelle") == "lufterhitzer_untergruppen":
+                werte += f" · Summe aus {c.get('untergruppen_anzahl')} Lufterhitzern"
             if c.get("einspritz"):
                 werte += f" · mischt (Bypass {_fmt(c.get('m_bypass'))})"
             if _f(d.get("dp_kpa")):
@@ -85,6 +88,12 @@ def legende_zeilen(nodes: list, results: dict) -> list:
                 werte += " · WZ"
         elif t == "heizkreis":
             werte = f"{d.get('q_kw', '—')} kW · {d.get('vl_temp', '—')}/{d.get('rl_temp', '—')} °C · V' {_fmt(nf.get(n['id']))} m³/h"
+        elif t == "lufterhitzer_gruppe":
+            c = gr.get(n["id"], {})
+            werte = (f"{d.get('q_kw', '—')} kW · VL/RL {c.get('vl', '—')}/{c.get('rl', '—')} °C · "
+                     f"V' {_fmt(c.get('m_sek'))} m³/h")
+            if c.get("ventil"):
+                werte += f" · kvs {c['ventil'].get('kvs_eff')}"
         elif t == "verteiler":
             c = vr.get(n["id"], {})
             werte = (f"VL {_fmt(c.get('vl_vt'), 1)} / RL {_fmt(c.get('rl_misch'), 1)} °C · "
@@ -127,38 +136,11 @@ def legende_zeilen(nodes: list, results: dict) -> list:
             ] if x) or "—"
         elif t == "bww":
             b = bww_results.get(n["id"]) or {}
-            eingaben = [("Gewählter Speicherinhalt", d.get("speicher_liter"), "l")]
+            werte = f"{b.get('speichervolumen_l') or d.get('speicher_liter') or '—'} L"
             if b.get("anschlussleistung_kw") is not None:
-                for wohnung in b.get("wohnungen") or []:
-                    eingaben.append((
-                        wohnung.get("name") or "Wohnung",
-                        wohnung.get("flaeche_m2"),
-                        f"m² → {wohnung.get('personen')} P",
-                    ))
-                eingaben += [
-                    ("Personen", b.get("personen"), "P"),
-                    ("Gebäudeart", b.get("bezugseinheit"), ""),
-                    ("Bezugseinheit Durchschnitt", b.get("bezugseinheit_durchschnitt_l_p_d"), "l/(d·P)"),
-                    ("Bezugseinheit Spitze", b.get("bezugseinheit_spitze_l_p_d"), "l/(d·P)"),
-                    ("Warmhaltesystem", b.get("warmhaltesystem"), ""),
-                    ("Ladezyklen pro Tag", b.get("ladezyklen_pro_tag"), ""),
-                    ("Zeit eines Ladezyklus", b.get("ladezeit_h"), "h"),
-                    ("Temperaturerhöhung ΔΘ", b.get("temperaturerhoehung_k"), "K"),
-                    ("Wirkungsgrad Wärmeübertragung", b.get("wirkungsgrad"), ""),
-                ]
-                resultate = [
-                    ("Nutzwarmwasserbedarf", b.get("nutzwarmwasserbedarf_l_d"), "l/d"),
-                    ("Steuervolumen", b.get("steuervolumen_l"), "l"),
-                    ("Spitzendeckungsvolumen", b.get("spitzendeckungsvolumen_l"), "l"),
-                    ("Bereitschaftsvolumen", b.get("bereitschaftsvolumen_l"), "l"),
-                    ("Speichervolumen inkl. Konfigurationsfaktor", b.get("speichervolumen_l"), "l"),
-                    ("Anschlussleistung", b.get("anschlussleistung_kw"), "kW"),
-                    ("Wärmepumpenleistung verfügbar", b.get("waermepumpenleistung_kw"), "kW"),
-                    ("Leistungsreserve", b.get("leistungsreserve_kw"), "kW"),
-                    ("Norm", "SIA 385/2", ""),
-                ]
-                rechenweg = b.get("rechenweg") or []
-                hinweise = b.get("warnungen") or []
+                werte += f" · {b['anschlussleistung_kw']} kW"
+            if b.get("register_bauart") == "aussen":
+                werte += " · aussenliegendes Register/PWT"
         elif t == "erdsonden":
             anzahl = max(1, min(24, int(_f(d.get("sonden_anzahl")) or 5)))
             laenge = _f(d.get("sonden_laenge_m"))
@@ -190,9 +172,11 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
             schaltung = {"einspritz": "Einspritzschaltung (2WV)", "beimisch": "Beimischschaltung (3WV)",
                          "drossel": "Drosselschaltung (ohne Pumpe)"}.get(c.get("schaltung"), "Einspritzschaltung (2WV)")
             eingaben = [("Schaltung", schaltung, ""),
-                        ("Leistung Q", d.get("q_kw"), "kW"), ("Vorlauf VL", d.get("vl_temp"), "°C"),
+                        ("Leistung Q", c.get("q_kw", d.get("q_kw")), "kW"), ("Vorlauf VL", d.get("vl_temp"), "°C"),
                         ("Rücklauf RL", d.get("rl_temp"), "°C"), ("Druckverlust Ast", d.get("dp_kpa"), "kPa"),
                         ("Wärmezähler (mit VL-/RL-Fühler)", "ja" if d.get("hat_wz") else "nein", "")]
+            if c.get("q_kw_quelle") == "lufterhitzer_untergruppen":
+                eingaben.append(("Leistungsquelle", f"Summe aus {c.get('untergruppen_anzahl')} Lufterhitzergruppen", ""))
             resultate = [("V' sekundär (Gruppenseite)", _fmt(c.get("m_sek")), "m³/h"),
                          ("V' primär (Verteilerseite)", _fmt(c.get("m_prim")), "m³/h"),
                          ("ΔT sekundär", _fmt(c.get("dt_sek"), 1), "K"),
@@ -215,6 +199,27 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
                               ("Ventil: kvs gewählt", ve.get("kvs_eff"), ""),
                               ("Ventil: Δp Ventil", _fmt(ve.get("dp_v_eff_kpa"), 2), "kPa"),
                               ("Ventil: Autorität Pv", _fmt(ve.get("pv"), 1), "%")]
+        elif t == "lufterhitzer_gruppe":
+            c = gr.get(n["id"], {})
+            schaltung = {"einspritz": "Einspritzschaltung", "beimisch": "Beimischschaltung",
+                         "drossel": "Drosselschaltung"}.get(c.get("schaltung"), "Drosselschaltung")
+            eingaben = [
+                ("Schaltung", schaltung, ""),
+                ("Leistung Q", d.get("q_kw"), "kW"),
+                ("Übernommener Vorlauf", c.get("vl"), "°C"),
+                ("Übernommener Rücklauf", c.get("rl"), "°C"),
+                ("Druckverlust Ast", d.get("dp_kpa"), "kPa"),
+            ]
+            resultate = [
+                ("Volumenstrom V'", _fmt(c.get("m_sek")), "m³/h"),
+                ("Massenstrom m'", round(c["m_sek"] * 1000) if c.get("m_sek") is not None else None, "kg/h"),
+                ("ΔT", _fmt(c.get("dt_sek"), 1), "K"),
+            ]
+            if c.get("ventil"):
+                resultate += [
+                    ("Ventil: kvs gewählt", c["ventil"].get("kvs_eff"), ""),
+                    ("Ventil: Autorität Pv", _fmt(c["ventil"].get("pv"), 1), "%"),
+                ]
         elif t == "heizkreis":
             eingaben = [("Leistung Q", d.get("q_kw"), "kW"), ("Vorlauf VL", d.get("vl_temp"), "°C"),
                         ("Rücklauf RL", d.get("rl_temp"), "°C")]
@@ -358,6 +363,44 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
                         (f"{fall['titel']}: V' Sole", _fmt(fall.get("solevolumenstrom_m3h")), "m³/h"),
                     ])
                 hinweise = bf.get("warnungen") or []
+        elif t == "bww":
+            b = bww_results.get(n["id"]) or {}
+            eingaben = [("Gewählter Speicherinhalt", d.get("speicher_liter"), "l")]
+            for wohnung in b.get("wohnungen") or []:
+                eingaben.append((
+                    wohnung.get("name") or "Wohnung",
+                    wohnung.get("flaeche_m2"),
+                    f"m² → {wohnung.get('personen')} P",
+                ))
+            if b.get("anschlussleistung_kw") is not None:
+                eingaben += [
+                    ("Personen", b.get("personen"), "P"),
+                    ("Gebäudeart", b.get("bezugseinheit"), ""),
+                    ("Bezugseinheit Durchschnitt", b.get("bezugseinheit_durchschnitt_l_p_d"), "l/(d·P)"),
+                    ("Bezugseinheit Spitze", b.get("bezugseinheit_spitze_l_p_d"), "l/(d·P)"),
+                    ("Warmhaltesystem", b.get("warmhaltesystem"), ""),
+                    ("Ladezyklen pro Tag", b.get("ladezyklen_pro_tag"), ""),
+                    ("Zeit eines Ladezyklus", b.get("ladezeit_h"), "h"),
+                    ("Temperaturerhöhung ΔΘ", b.get("temperaturerhoehung_k"), "K"),
+                    ("Wirkungsgrad Wärmeübertragung", b.get("wirkungsgrad"), ""),
+                    ("Gewähltes Register", "aussenliegend mit PWT" if b.get("register_bauart") == "aussen" else "innenliegend", ""),
+                ]
+                resultate = [
+                    ("Nutzwarmwasserbedarf", b.get("nutzwarmwasserbedarf_l_d"), "l/d"),
+                    ("Steuervolumen", b.get("steuervolumen_l"), "l"),
+                    ("Spitzendeckungsvolumen", b.get("spitzendeckungsvolumen_l"), "l"),
+                    ("Bereitschaftsvolumen", b.get("bereitschaftsvolumen_l"), "l"),
+                    ("Speichervolumen inkl. Konfigurationsfaktor", b.get("speichervolumen_l"), "l"),
+                    ("Anschlussleistung", b.get("anschlussleistung_kw"), "kW"),
+                    ("Registervorschlag", "aussenliegend mit PWT" if b.get("register_vorschlag") == "aussen" else "innenliegend", ""),
+                    ("Wärmepumpenleistung verfügbar", b.get("waermepumpenleistung_kw"), "kW"),
+                    ("Leistungsreserve", b.get("leistungsreserve_kw"), "kW"),
+                    ("Norm", "SIA 385/2", ""),
+                ]
+                rechenweg = b.get("rechenweg") or []
+                hinweise = list(b.get("warnungen") or [])
+                if b.get("register_vorschlag_text"):
+                    hinweise.append(b["register_vorschlag_text"])
         elif t == "speicher":
             c = speicher_results.get(n["id"], {})
             eingaben = [

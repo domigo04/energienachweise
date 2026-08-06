@@ -26,7 +26,7 @@ export function createHydraulicEdge(params, existingEdges = []) {
   const {
     id, source, sourceHandle = null, target, targetHandle = null,
     layerId, layerColor = "#334155", points = [], cornerRadius = 8,
-    startPoint = null, endPoint = null,
+    startPoint = null, endPoint = null, cadDiagonal = false,
   } = params || {};
 
   if (!id) return null;
@@ -50,7 +50,14 @@ export function createHydraulicEdge(params, existingEdges = []) {
   return {
     id, source, sourceHandle, target, targetHandle,
     type: "flow", selected: false,
-    data: { layer_id: layerId, cad_polyline: true, polyline_version: 1, corner_radius: cornerRadius, points },
+    data: {
+      layer_id: layerId,
+      cad_polyline: true,
+      polyline_version:1,
+      corner_radius:cornerRadius,
+      points,
+      ...(cadDiagonal ? { cad_diagonal:true } : {}),
+    },
     style: { stroke: layerColor, strokeWidth: 2.5 },
   };
 }

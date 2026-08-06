@@ -4,7 +4,7 @@ import {
   AlertTriangle, AlignHorizontalJustifyCenter, ArrowLeft, Check, ChevronDown, Copy, Download, Eye,
   FlipHorizontal2, History,
   Image as ImageIcon, Layers3, LayoutTemplate, Lock, Unlock, MapPin, Move, MoveHorizontal,
-  PanelLeftClose, PanelLeftOpen, RotateCcw, RotateCw, Scissors, Spline, Eraser,
+  CornerDownRight, PanelLeftClose, PanelLeftOpen, RotateCcw, RotateCw, Scissors, Spline,
   PanelRightClose, PanelRightOpen, Redo2, Save as SaveIcon, Settings, Settings2, Trash2, Undo2, X,
 } from 'lucide-react';
 import {
@@ -27,14 +27,14 @@ import { EDGE_TYPES } from '../../components/hc/edges/FlowEdge';
 import { pairedHandleId, parallelWaypoints, roundedPolylinePath, splitRouteAtCorner, splitRouteAtPoint, reconnectThroughNode, adaptivePolyline, orthogonalerAnschlussEckpunkt, segmentAchse, mitgezogeneWaypoints } from '../../components/hc/edges/geometry';
 import { createHydraulicEdge, canStartHydraulicLine } from './schema/edgeFactory';
 import {
-  ALIGN, BREAK, DRAW_PIPE, HOME, MOVE, PLACE, STRETCH, TRIM,
+  ALIGN, BREAK, CONNECT_CORNER, DRAW_PIPE, HOME, MOVE, PLACE, STRETCH,
   escape as escapeMode, finishCommand, initialMode,
   istBefehl, istModify, modeLabel, startCommand, toggleCommand, zeichnetLeitung,
 } from './schema/editorMode';
 import {
-  constrainPoint, laengeAusBuffer, laengeTaste, massAnker, massLabel,
+  constrainPoint, istBewussteDiagonale, laengeAusBuffer, laengeTaste, massAnker,
   rasterPunkt as rasterAufGitter,
-  punktAusLaenge,
+  punktAusLaenge, segmentMassLabel,
 } from './schema/cadConstraints';
 import { CORNER, ENDPOINT, GRID, MIDPOINT, NEAREST, PORT, fangStil } from './schema/cadSnap';
 import { SOLE_ROHRE, SOLE_TRAEGER } from './schema/soleTabellen';
@@ -45,8 +45,8 @@ import { eingefuegterKnoten, kopierbarerKnoten } from './schema/nodeClipboard';
 import { nodesMitExportGeometrie } from './schema/exportGeometrie';
 import {
   abzweigPunkt, fensterAus, labelVerschoben, labelVersatz,
-  leitungMitLueckeTrennen, leitungTrimmen, leitungsSystem, leitungVerschieben, routeBereinigen, routeDehnen,
-  routeSegmenteEntfernen, trimGrenzen,
+  leitungMitLueckeTrennen, leitungenMitEckeVerbinden, leitungsSystem, leitungVerschieben,
+  routeBereinigen, routeDehnen, routeSegmenteEntfernen,
   segmentAusrichten, segmentVerschieben,
   entwurfFuerAbschluss, segmentZumVerschieben, verschiebungLabel,
 } from './schema/cadEdit';
@@ -160,13 +160,6 @@ const layerVonEdge = (edge) => {
   if (edge.style?.stroke === '#3b82f6') return LEITUNGS_LAYER[1];
   return LEITUNGS_LAYER.find(layer => layer.id === 'neutral');
 };
-
-function erlaubterLeitungswinkel(a, b) {
-  const dx = Math.abs(b.x - a.x);
-  const dy = Math.abs(b.y - a.y);
-  return dx < 0.5 || dy < 0.5 || Math.abs(dx - dy) < 0.5;
-}
-
 
 function guidesAmPunkt(guides, point) {
   return (guides || []).flatMap(guide => {
@@ -3082,7 +3075,14 @@ function EditorInner() {
     const targetNode = nodesRef.current.find(node => node.id === edge.target);
     const sourceSide = sourceNode?.type === 'junction' ? null : handleAusrichtung(edge.source, edge.sourceHandle);
     const targetSide = targetNode?.type === 'junction' ? null : handleAusrichtung(edge.target, edge.targetHandle);
-    return adaptivePolyline(start, end, edge.data?.points || [], sourceSide, targetSide);
+    return adaptivePolyline(
+      start,
+      end,
+      edge.data?.points || [],
+      sourceSide,
+      targetSide,
+      edge.data?.cad_diagonal === true,
+    );
   }, [handleAusrichtung, handlePosition]);
 
   // Bauteil per Pfeiltaste verschieben (Shift = grosser Schritt). Das ist
@@ -3134,7 +3134,7 @@ function EditorInner() {
   // Orthogonales Mitziehen (§ Editor #1). Der Leitungsendpunkt folgt dem Anschluss
   // bereits live (nodeGeometryVersion); damit das endpunktnahe Segment nicht
   // diagonal abknickt, merken wir uns beim Anfassen dessen Achse und führen den
-  // Stützpunkt beim Loslassen orthogonal nach. Bewusst diagonale (45°) Segmente
+  // Stützpunkt beim Loslassen orthogonal nach. Bewusst diagonale Segmente
   // bleiben unangetastet. Nur Leitungen MIT Stützpunkten sind betroffen — ohne
   // Stützpunkt wird der Knick ohnehin bei jedem Frame frisch orthogonal berechnet.
   const nodeDragAchsen = useRef({});
@@ -3555,10 +3555,16 @@ function EditorInner() {
       : constrainPoint(anchor, rawPoint, { ortho:orthoAnRef.current, shift, grid:drawingConfig.grid_size });
     if (!startPoint || Math.hypot(endPoint.x - startPoint.x, endPoint.y - startPoint.y) < 2) return;
     const finalPoints = [...(draft.points || [])];
-    const connectionCorner = snapHit?.type === 'port'
+    // Ein exakter Fangpunkt darf keine zufällige leichte Schräge erzeugen.
+    // Deshalb erhält jeder Fangtyp eine orthogonale Ecke; nur eine bewusst
+    // gezeichnete Schräge (mindestens 30° zur nächsten Achse) bleibt direkt.
+    const connectionCorner = snapHit && !istBewussteDiagonale(anchor, endPoint)
       ? orthogonalerAnschlussEckpunkt(anchor, endPoint, snapHit.handlePosition)
       : null;
     if (connectionCorner) finalPoints.push(connectionCorner);
+    const direkteDiagonale = finalPoints.length === 0
+      && !connectionCorner
+      && istBewussteDiagonale(startPoint, endPoint);
 
     snap();
 
@@ -3647,7 +3653,9 @@ function EditorInner() {
       ? handleAusrichtung(draft.startEndpoint.nodeId, draft.startEndpoint.handleId)
       : null;
     const targetSide = snapHit?.type === 'port' ? snapHit.handlePosition : null;
-    const polylinePoints = adaptivePolyline(startPoint, endPoint, finalPoints, sourceSide, targetSide).slice(1, -1);
+    const polylinePoints = adaptivePolyline(
+      startPoint, endPoint, finalPoints, sourceSide, targetSide, direkteDiagonale,
+    ).slice(1, -1);
     // EINZIGE Edge-Quelle: validiert Selbstanschluss/Null-Länge/Duplikat/Layer.
     let edge = createHydraulicEdge({
       id: edgeId,
@@ -3658,6 +3666,7 @@ function EditorInner() {
       layerId: layer.id, layerColor: layer.color,
       points: polylinePoints, cornerRadius: drawingConfig.corner_radius,
       startPoint, endPoint,
+      cadDiagonal:direkteDiagonale,
     }, edgesRef.current);
     if (!edge) {
       // Ungültige Leitung (z. B. Selbstanschluss) → Zeichnen sauber beenden.
@@ -3934,20 +3943,24 @@ function EditorInner() {
       : leitungsCursor
         ? leitungsCursor
         : null;
-    const connectionCorner = leitungsSnap?.type === 'port'
+    if (!start || !preview) return [];
+    const connectionCorner = leitungsSnap && !istBewussteDiagonale(previous, preview)
       ? orthogonalerAnschlussEckpunkt(previous, preview, leitungsSnap.handlePosition)
       : null;
-    if (!start || !preview) return [];
     const sourceSide = leitungsEntwurf.startEndpoint
       ? handleAusrichtung(leitungsEntwurf.startEndpoint.nodeId, leitungsEntwurf.startEndpoint.handleId)
       : null;
     const targetSide = leitungsSnap?.type === 'port' ? leitungsSnap.handlePosition : null;
+    const direkteDiagonale = !(leitungsEntwurf.points || []).length
+      && !connectionCorner
+      && istBewussteDiagonale(start, preview);
     return adaptivePolyline(
       start,
       preview,
       [...leitungsEntwurf.points, ...(connectionCorner ? [connectionCorner] : [])],
       sourceSide,
       targetSide,
+      direkteDiagonale,
     );
   })();
 
@@ -3963,7 +3976,7 @@ function EditorInner() {
     const abstand = 22 / Math.max(zoomAnzeige, 0.05);
     const anker = massAnker(a, b, abstand);
     if (!anker?.laenge) return null;
-    return { ...anker, a, b, label:massLabel(anker.laenge) };
+    return { ...anker, a, b, label:segmentMassLabel(a, b) };
   }, [cadEntwurfRoute, zoomAnzeige]);
 
   // Punkt 5 — den intern gefundenen Fang auf einen CAD-Fangtyp abbilden. Das ist
@@ -4039,10 +4052,11 @@ function EditorInner() {
     setSelected(null);
     const basePoints = route.slice(1, -1);
     const origin = route[best.segmentIndex];
-    const raster = rasterPunkt(best, drawingConfig.grid_size);
-    const point = (!event.shiftKey && erlaubterLeitungswinkel(origin, raster))
-      ? raster
-      : constrainPoint(origin, best, { ortho:orthoAnRef.current, shift:event.shiftKey, grid:drawingConfig.grid_size });
+    const point = constrainPoint(origin, best, {
+      ortho:orthoAnRef.current,
+      shift:event.shiftKey,
+      grid:drawingConfig.grid_size,
+    });
     basePoints.splice(best.segmentIndex, 0, point);
     setSelectedEdgePoint({ edgeId, pointIndex:best.segmentIndex });
     setEdges(items => items.map(item => item.id === edgeId
@@ -4257,7 +4271,7 @@ function EditorInner() {
 
   // ── Verschieben (CAD-MOVE, Dominic 2026-07-31) ───────────────────────────
   // Auswahl treffen, Taste drücken, Basispunkt klicken, Zielpunkt klicken. Die
-  // Richtung fängt orthogonal (bzw. 45°), Shift kehrt den Fang um — dieselbe
+  // Richtung fängt achsnah orthogonal; Shift gibt sie frei — dieselbe
   // Regel wie beim Zeichnen. Verschoben wird, was beim Start ausgewählt war.
   // ── Stecknadeln: laden, setzen, verschieben, öffnen ─────────────────────
   const notizenLaden = useCallback(async () => {
@@ -4421,12 +4435,6 @@ function EditorInner() {
     setEditorMode(startCommand(BREAK));
   }, []);
 
-  const trimmenStarten = useCallback(() => {
-    setBefehlHinweis('TR · Zu entfernenden Leitungsabschnitt anklicken · ESC beendet.');
-    setLuecke(null);
-    setEditorMode(startCommand(TRIM, { persistent:true }));
-  }, []);
-
   const dehnenStarten = useCallback(() => {
     setBefehlHinweis(null);
     setDehnen({ ecke1:null, ecke2:null, basis:null, cursor:null });
@@ -4560,8 +4568,131 @@ function EditorInner() {
     return { nodes:naechsteNodes, edges:naechsteEdges };
   }, [cadAnker, drawingConfig.corner_radius, routePunkte]);
 
-  const trimmenKlick = useCallback((event) => {
-    if (!istBefehl(editorModeRef.current, TRIM)) return false;
+  const eckeVerbindenAnwenden = useCallback((ersteAuswahl, zweiteAuswahl) => {
+    if (!ersteAuswahl || !zweiteAuswahl) return { fehler:'Zwei Teilstücke erforderlich.' };
+    if (ersteAuswahl.edgeId === zweiteAuswahl.edgeId) {
+      return { fehler:'TR braucht zwei verschiedene Leitungen.' };
+    }
+    const ersteEdge = edgesRef.current.find(edge => edge.id === ersteAuswahl.edgeId);
+    const zweiteEdge = edgesRef.current.find(edge => edge.id === zweiteAuswahl.edgeId);
+    if (!ersteEdge || !zweiteEdge) return { fehler:'Eine gewählte Leitung existiert nicht mehr.' };
+    if (layerVonEdge(ersteEdge).id !== layerVonEdge(zweiteEdge).id) {
+      return { fehler:'TR verbindet nur Leitungen auf demselben Layer.' };
+    }
+
+    const freieSeiten = (edge) => {
+      const frei = [];
+      const pruefen = (nodeId, seite) => {
+        const node = nodesRef.current.find(item => item.id === nodeId);
+        const grad = edgesRef.current.filter(item => item.source === nodeId || item.target === nodeId).length;
+        if (node?.type === 'junction' && grad === 1) frei.push(seite);
+      };
+      pruefen(edge.source, 'start');
+      pruefen(edge.target, 'end');
+      return frei;
+    };
+
+    const routeA = routePunkte(ersteEdge);
+    const routeB = routePunkte(zweiteEdge);
+    const ergebnis = leitungenMitEckeVerbinden(
+      routeA, ersteAuswahl.segmentIndex, routeB, zweiteAuswahl.segmentIndex,
+      { erlaubteSeitenA:freieSeiten(ersteEdge), erlaubteSeitenB:freieSeiten(zweiteEdge) },
+    );
+    if (ergebnis.fehler) return ergebnis;
+
+    const endNode = (edge, seite) => (seite === 'start' ? edge.source : edge.target);
+    const gemeinsamerNodeId = endNode(ersteEdge, ergebnis.erste.seite);
+    const entfallenderNodeId = endNode(zweiteEdge, ergebnis.zweite.seite);
+    if (gemeinsamerNodeId === entfallenderNodeId) {
+      return { fehler:'Die Leitungen sind an diesem Ende bereits verbunden.' };
+    }
+
+    const geaenderteIds = new Set([ersteEdge.id, zweiteEdge.id]);
+    const datenFuerRoute = (edge, route) => {
+      const points = routeBereinigen(route.slice(1, -1), {
+        start:route[0],
+        end:route.at(-1),
+      });
+      const data = {
+        ...(edge.data || {}),
+        cad_polyline:true,
+        polyline_version:1,
+        points,
+      };
+      delete data.laenge_m;
+      delete data.paired_edge_id;
+      delete data.auto_paired;
+      delete data.auto_pair_open;
+      delete data._routePoints;
+      delete data._routeStart;
+      delete data._routeEnd;
+      if (route.length === 2 && istBewussteDiagonale(route[0], route[1])) data.cad_diagonal = true;
+      else delete data.cad_diagonal;
+      return data;
+    };
+    const anEcke = (edge, seite, route) => ({
+      ...edge,
+      ...(seite === 'start'
+        ? { source:gemeinsamerNodeId, sourceHandle:'center-source' }
+        : { target:gemeinsamerNodeId, targetHandle:'center-target' }),
+      selected:false,
+      data:datenFuerRoute(edge, route),
+    });
+
+    snap();
+    setNodes(items => items
+      .filter(node => node.id !== entfallenderNodeId)
+      .map(node => node.id === gemeinsamerNodeId
+        ? { ...node, position:{ x:ergebnis.ecke.x, y:ergebnis.ecke.y } }
+        : node));
+    setEdges(items => items.map(edge => {
+      if (edge.id === ersteEdge.id) return anEcke(edge, ergebnis.erste.seite, ergebnis.erste.route);
+      if (edge.id === zweiteEdge.id) return anEcke(edge, ergebnis.zweite.seite, ergebnis.zweite.route);
+      if (!geaenderteIds.has(edge.data?.paired_edge_id)) return edge;
+      const data = { ...(edge.data || {}) };
+      delete data.paired_edge_id;
+      delete data.auto_paired;
+      delete data.auto_pair_open;
+      return { ...edge, data };
+    }));
+    setSelectedEdgeId(null);
+    setSelectedEdgeSegment(null);
+    setSelectedSegments([]);
+    setEditorMode(startCommand(CONNECT_CORNER, { persistent:true }));
+    setBefehlHinweis('TR · Ecke verbunden · erste Leitung für die nächste Ecke wählen · ESC beendet.');
+    return { ...ergebnis, ok:true };
+  }, [routePunkte, setEdges, setNodes, snap]);
+
+  const eckeVerbindenStarten = useCallback(() => {
+    setLuecke(null);
+    const auswahl = selectedSegments.filter((item, index, alle) =>
+      alle.findIndex(candidate => candidate.edgeId === item.edgeId
+        && candidate.segmentIndex === item.segmentIndex) === index);
+    if (auswahl.length > 2) {
+      setBefehlHinweis('TR · Bitte genau zwei Teilstücke wählen.');
+      return;
+    }
+    if (auswahl.length === 2) {
+      const ergebnis = eckeVerbindenAnwenden(auswahl[0], auswahl[1]);
+      if (ergebnis.fehler) {
+        setEditorMode(startCommand(CONNECT_CORNER, { persistent:true, payload:{ erste:auswahl[0] } }));
+        setSelectedSegments([auswahl[0]]);
+        setBefehlHinweis(`TR · ${ergebnis.fehler} Zweite Leitung erneut wählen.`);
+      }
+      return;
+    }
+    const erste = auswahl[0] || null;
+    setEditorMode(startCommand(CONNECT_CORNER, {
+      persistent:true,
+      payload:erste ? { erste } : null,
+    }));
+    setBefehlHinweis(erste
+      ? 'TR · Erste Leitung gewählt · zweite Leitung anklicken · ESC beendet.'
+      : 'TR · Erste Leitung anklicken · danach zweite Leitung · ESC beendet.');
+  }, [eckeVerbindenAnwenden, selectedSegments]);
+
+  const eckeVerbindenKlick = useCallback((event) => {
+    if (!istBefehl(editorModeRef.current, CONNECT_CORNER)) return false;
     if (event.button != null && event.button !== 0) return true;
     event.preventDefault();
     event.stopPropagation();
@@ -4571,29 +4702,27 @@ function EditorInner() {
       setBefehlHinweis('TR · Kein Teilstück getroffen — direkt auf eine Leitung klicken.');
       return true;
     }
-    const schneidSegmente = [];
-    edgesRef.current.forEach(andere => {
-      if (andere.id === treffer.edge.id) return;
-      const route = routePunkte(andere);
-      for (let i = 0; i < route.length - 1; i += 1) schneidSegmente.push([route[i], route[i + 1]]);
-    });
-    const grenzen = trimGrenzen(treffer.route, treffer.segmentIndex, welt, schneidSegmente);
-    const ergebnis = grenzen && leitungTrimmen(treffer.route, grenzen.a, grenzen.b);
-    if (!ergebnis || ergebnis.fehler) {
-      setBefehlHinweis(ergebnis?.fehler || 'TR · Teilstück kann nicht getrimmt werden.');
+    const auswahl = { edgeId:treffer.edge.id, segmentIndex:treffer.segmentIndex };
+    const erste = editorModeRef.current?.payload?.erste;
+    if (!erste) {
+      setSelectedEdgeId(treffer.edge.id);
+      setSelectedEdgeSegment(auswahl);
+      setSelectedSegments([auswahl]);
+      setEditorMode(startCommand(CONNECT_CORNER, { persistent:true, payload:{ erste:auswahl } }));
+      setBefehlHinweis('TR · Erste Leitung gewählt · zweite Leitung anklicken · ESC beendet.');
       return true;
     }
-    snap();
-    const rest = [ergebnis.erste, ergebnis.zweite].filter(Boolean);
-    const next = leitungDurchRoutenErsetzen(treffer.edge, rest, edgesRef.current, nodesRef.current);
-    setNodes(next.nodes);
-    setEdges(next.edges);
-    setSelectedEdgeId(null);
-    setSelectedEdgeSegment(null);
-    setSelectedSegments([]);
-    setBefehlHinweis('TR · Abschnitt entfernt · nächsten Abschnitt anklicken · ESC beendet.');
+    if (erste.edgeId === auswahl.edgeId && erste.segmentIndex === auswahl.segmentIndex) {
+      setBefehlHinweis('TR · Zweite Leitung muss ein anderes Teilstück sein.');
+      return true;
+    }
+    const ergebnis = eckeVerbindenAnwenden(erste, auswahl);
+    if (ergebnis.fehler) {
+      setBefehlHinweis(`TR · ${ergebnis.fehler} Zweite Leitung erneut wählen.`);
+      setSelectedSegments([erste]);
+    }
     return true;
-  }, [getZoom, leitungDurchRoutenErsetzen, naechsteSichtbareLeitung, routePunkte, screenToFlowPosition, setEdges, setNodes, snap]);
+  }, [eckeVerbindenAnwenden, getZoom, naechsteSichtbareLeitung, screenToFlowPosition]);
 
   const auswahlKopieren = useCallback(() => {
     const knoten = nodesRef.current.filter(node => node.selected && node.type !== 'junction');
@@ -5023,13 +5152,13 @@ function EditorInner() {
           ev.preventDefault();
           befehlsfolge.current = '';
           if (befehlsfolgeTimer.current) clearTimeout(befehlsfolgeTimer.current);
-          trimmenStarten();
+          eckeVerbindenStarten();
           return;
         }
         if (key === 't' && !ev.repeat) {
           ev.preventDefault();
           befehlsfolge.current = 't';
-          setBefehlHinweis('T … R für Trimmen');
+          setBefehlHinweis('T … R für Ecke verbinden');
           if (befehlsfolgeTimer.current) clearTimeout(befehlsfolgeTimer.current);
           befehlsfolgeTimer.current = setTimeout(() => {
             befehlsfolge.current = '';
@@ -5166,7 +5295,7 @@ function EditorInner() {
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [undo, redo, selected, selectedEdgeId, selectedEdgePoint, selectedLabelEdgeId, markierteEdgeIds, beschriftungSetzen, punktEntfernen, snap, rotateNode, mirrorNode, alignNode, nudgeNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, spiegelAchse, drawingConfig, setNodes, laengeAnwenden, entwurfVerwerfen, verschiebenStarten, ausrichtenUmschalten, trennenStarten, trimmenStarten, dehnenStarten, auswahlKopieren, auswahlEinfuegen, auswahlLoeschen]);
+  }, [undo, redo, selected, selectedEdgeId, selectedEdgePoint, selectedLabelEdgeId, markierteEdgeIds, beschriftungSetzen, punktEntfernen, snap, rotateNode, mirrorNode, alignNode, nudgeNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, spiegelAchse, drawingConfig, setNodes, laengeAnwenden, entwurfVerwerfen, verschiebenStarten, ausrichtenUmschalten, trennenStarten, eckeVerbindenStarten, dehnenStarten, auswahlKopieren, auswahlEinfuegen, auswahlLoeschen]);
 
   // Berechnete Werte (Backend) in die Node-Daten spiegeln — nur für die Anzeige.
   // Verteiler-Rahmen: nur die Balken sind greifbar (dragHandle), die Lücke
@@ -5684,7 +5813,7 @@ function EditorInner() {
       nadelSetzen(screenToFlowPosition({ x:event.clientX, y:event.clientY }), node.id);
       return;
     }
-    if (trimmenKlick(event)) return;
+    if (eckeVerbindenKlick(event)) return;
     // Im Verschieben-Befehl setzt jeder Klick einen Punkt — auch auf einem
     // Bauteil. Sonst liesse sich der Basispunkt nie an ein Bauteil legen.
     if (dehnenKlick(event)) return;
@@ -5714,7 +5843,7 @@ function EditorInner() {
     }
     setSelectedLabelEdgeId(null);
     setInspectorOpen(true);
-  }, [cadKlick, platzierenKlick, verschiebenKlick, nadelSetzen, screenToFlowPosition, dehnenKlick, setEdges, setNodes]);
+  }, [cadKlick, platzierenKlick, verschiebenKlick, nadelSetzen, screenToFlowPosition, dehnenKlick, eckeVerbindenKlick, setEdges, setNodes]);
   const onNodeDoubleClick = useCallback((_, node) => {
     if (node.type === 'label') return; // Textblock: Doppelklick editiert inline
     if (!leitungsEntwurfRef.current) setAuslegung(node);
@@ -5782,7 +5911,7 @@ function EditorInner() {
   }, [getZoom, naechsteSichtbareLeitung, routePunkte, screenToFlowPosition, setEdges, setNodes, snap]);
 
   const onEdgeClick = useCallback((event, edge) => {
-    if (trimmenKlick(event)) return;
+    if (eckeVerbindenKlick(event)) return;
     if (istBefehl(editorModeRef.current, ALIGN)) { ausrichtenKlick(event); return; }
     // Der Trennbefehl braucht die Punkte AUF der Leitung — der Klick darf
     // deshalb nicht bei der Auswahl hängen bleiben.
@@ -5830,7 +5959,7 @@ function EditorInner() {
     }
     setSelectedLabelEdgeId(null);
     setInspectorOpen(true);
-  }, [ausrichtenKlick, cadKlick, platzierenKlick, routePunkte, screenToFlowPosition, verschiebenKlick, lueckeKlick, dehnenKlick, trimmenKlick, selectedSegments, setEdges, setNodes]);
+  }, [ausrichtenKlick, cadKlick, platzierenKlick, routePunkte, screenToFlowPosition, verschiebenKlick, lueckeKlick, dehnenKlick, eckeVerbindenKlick, selectedSegments, setEdges, setNodes]);
 
   const spiegelKopieErstellen = useCallback((edgeId, axisStart, axisEnd) => {
     const edge = edgesRef.current.find(item => item.id === edgeId);
@@ -5885,6 +6014,7 @@ function EditorInner() {
     if (dehnenKlick(event)) return;
     if (lueckeKlick(event)) return;
     if (verschiebenKlick(event)) return;
+    if (eckeVerbindenKlick(event)) return;
     if (spiegelAchse) {
       event.preventDefault();
       const point = rasterPunkt(screenToFlowPosition({ x:event.clientX, y:event.clientY }), drawingConfig.grid_size);
@@ -5914,7 +6044,7 @@ function EditorInner() {
     setEdges(items => items.map(item => item.selected ? { ...item, selected:false } : item));
     setSelectedLabelEdgeId(null);
     setMarkierteEdgeIds([]);
-  }, [cadKlick, drawingConfig.grid_size, screenToFlowPosition, selected, selectedEdgeId, spiegelAchse, spiegelKopieErstellen, platzierenKlick, verschiebenKlick, nadelSetzen, dehnenKlick, lueckeKlick, trimmenKlick, setEdges, setNodes]);
+  }, [cadKlick, drawingConfig.grid_size, screenToFlowPosition, selected, selectedEdgeId, spiegelAchse, spiegelKopieErstellen, platzierenKlick, verschiebenKlick, nadelSetzen, dehnenKlick, lueckeKlick, eckeVerbindenKlick, setEdges, setNodes]);
 
   const canvasMouseMove = useCallback((event) => {
     // Platzierungsvorschau folgt dem Cursor — mit Raster und Ausrichtungslinien.
@@ -6428,9 +6558,9 @@ function EditorInner() {
                 taste:drawingConfig.shortcut_break,
                 hinweis:'Zwei Punkte auf der Leitung; das Stück dazwischen fällt weg. Trennt auch die hydraulische Verbindung.',
                 aktiv:Boolean(luecke), gesperrt:!selectedEdgeId && !luecke, aktion:trennenStarten },
-              { id:'trimmen', Icon:Eraser, name:'Trimmen', taste:'TR',
-                hinweis:'Entfernt den angeklickten Abschnitt bis zu den nächsten Schnittkanten; ohne Schnittkante das Teilstück von Ecke zu Ecke.',
-                aktiv:istBefehl(editorMode, TRIM), dauer:true, aktion:trimmenStarten },
+              { id:'ecke-verbinden', Icon:CornerDownRight, name:'Ecke verbinden', taste:'TR',
+                hinweis:'Zwei Leitungs-Teilstücke wählen; ihre freien Enden werden bis zur gemeinsamen Ecke verlängert oder gekürzt.',
+                aktiv:istBefehl(editorMode, CONNECT_CORNER), dauer:true, aktion:eckeVerbindenStarten },
               { id:'kopieren', Icon:Copy, name:'Auswahl kopieren', taste:'⌘C',
                 hinweis:'Kopiert alle gewählten Bauteile, Leitungen und Teilstücke.',
                 gesperrt:!selected && !selectedEdgeId && !selectedSegments.length
@@ -6938,7 +7068,7 @@ function EditorInner() {
             <button type="button"
               onClick={() => setOrthoAn(v => { setDrawingConfig(c => ({ ...c, ortho:!v })); return !v; })}
               className={`hc-statusbar__toggle${orthoAn ? ' is-on' : ''}`}
-              title="Orthogonal zeichnen (Shift kehrt es kurz um)">ORTHO</button>
+              title="Achsnah orthogonal; bewusste Schräge ab 30° (Shift gibt frei)">ORTHO</button>
             <button type="button"
               onClick={() => setSnapAn(v => { setDrawingConfig(c => ({ ...c, object_snap:!v })); return !v; })}
               className={`hc-statusbar__toggle${snapAn ? ' is-on' : ''}`}

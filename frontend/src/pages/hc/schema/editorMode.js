@@ -21,15 +21,15 @@ export const ALIGN = 'align';
 export const MOVE = 'move';
 // Mit Lücke trennen (AutoCAD BREAK): zwei Punkte auf derselben Leitung.
 export const BREAK = 'break';
-// Trimmen: bleibt bis ESC aktiv; Schnittkanten sind alle übrigen Leitungen.
-export const TRIM = 'trim';
+// Ecke verbinden: zwei Teilstücke wählen; bleibt bis ESC aktiv.
+export const CONNECT_CORNER = 'connect-corner';
 // Dehnen (AutoCAD STRETCH): Fenster aufziehen, dann Basis- und Zielpunkt.
 export const STRETCH = 'stretch';
 
 // Der Grundzustand. Nach dem Laden und nach jedem ESC gilt genau das.
 export const HOME = Object.freeze({ type: MODIFY, persistent: false, payload: null });
 
-const BEFEHLE = new Set([MODIFY, DRAW_PIPE, PLACE, MIRROR, ALIGN, MOVE, BREAK, TRIM, STRETCH]);
+const BEFEHLE = new Set([MODIFY, DRAW_PIPE, PLACE, MIRROR, ALIGN, MOVE, BREAK, CONNECT_CORNER, STRETCH]);
 
 /** Grundzustand. Absichtlich eine Funktion — nie eine gemeinsame Referenz teilen. */
 export function initialMode() {
@@ -91,7 +91,7 @@ export const MODE_LABEL = {
   [ALIGN]: 'Ausrichten',
   [MOVE]: 'Verschieben',
   [BREAK]: 'Mit Lücke trennen',
-  [TRIM]: 'Trimmen',
+  [CONNECT_CORNER]: 'Ecke verbinden',
   [STRETCH]: 'Dehnen',
 };
 

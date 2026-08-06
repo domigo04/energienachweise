@@ -18,7 +18,7 @@ und funktionsfähig:
 | Polyline-Mathematik | `components/hc/edges/geometry.js` | wird weiterverwendet |
 | Rasterfang | `rasterPunkt`, `GRID_OPTIONEN` | wird weiterverwendet |
 | Orthogonaler Segmentfang | `orthogonalerSegmentfang` | wird Constraint-System |
-| 45°-Fang über Shift | `auf45GradFangen` | wird Constraint-System |
+| Freie Schräge über Shift | `constrainPoint` | wird Constraint-System |
 | Objektfang + Hilfslinien | `objektAusrichtung`, `guidesAmPunkt` | wird weiterverwendet |
 | Fangpunktliste | `objektFangpunkte` (Ports + Leitungsendpunkte) | wird weiterverwendet |
 | Fang auf Leitung / T-Stück | `naechsteLeitung`, `leitungTeilen` | wird weiterverwendet |
@@ -34,8 +34,8 @@ Damit ist der Kern des CAD-Verhaltens vorhanden. Nicht vorhanden waren:
 1. **Ein zentraler Modus.** Der Zustand lag in zwei Booleans (`zeichenModus`,
    `dauerLeitung`) plus dem impliziten „läuft ein Entwurf?". Genau daraus
    entsteht die Frage „bin ich noch im Leitungsmodus?".
-2. **ORTHO als umschaltbarer Zustand.** Orthogonal war fest verdrahtet, 45° nur
-   über Shift, ohne sichtbaren Zustand.
+2. **ORTHO als umschaltbarer Zustand.** Orthogonal war fest verdrahtet, eine
+   freie Schräge nur über Shift möglich, ohne sichtbaren Zustand.
 3. **Temporäre Masse beim Zeichnen.** Die Länge des laufenden Segments war
    nirgends sichtbar.
 4. **Numerische Direkteingabe.** Es gab keine Möglichkeit, eine Länge zu tippen.
@@ -72,7 +72,7 @@ modify      neutraler Grundzustand, Auswahl und Bearbeitung
 draw-pipe   Leitung zeichnen
 place       Bauteil aus der Bibliothek setzen
 mirror      Spiegelachse angeben
-trim        Abschnitt bis zur nächsten Schnittkante entfernen
+connect-corner zwei Leitungsenden bis zur gemeinsamen Ecke verbinden
 ```
 
 Regeln:
@@ -102,7 +102,7 @@ Alle Zeichenbefehle stehen senkrecht am linken Rand der Zeichenfläche
 | Bauteil spiegeln | waagrechte Spiegelung |
 | Ausrichten | `align` |
 | Mit Lücke trennen | `break` |
-| Trimmen | `trim`, Befehl `TR`, bleibt bis ESC aktiv |
+| Ecke verbinden | `connect-corner`, Befehl `TR`, bleibt bis ESC aktiv |
 | Dehnen | `stretch` |
 | Auswahl kopieren | Bauteile, Leitungen und einzelne Teilstücke gemeinsam |
 | Auswahl löschen | dieselbe gemeinsame Auswahl in einer Undo-Aktion |
@@ -150,14 +150,26 @@ Teilstücke; beim Einfügen erhalten freie Segmentenden echte CAD-Anker und kön
 wie gezeichnete Leitungsenden wieder an einen Port oder eine Leitung gefangen
 werden. `Delete` entfernt dieselbe gemeinsame Auswahl.
 
-## Trimmen (`TR`)
+## Ecke verbinden (`TR`)
 
-`T`, danach `R`, startet den dauerhaften Trimmbefehl. Alle übrigen sichtbaren
-Leitungssegmente gelten als Schnittkanten. Ein Klick entfernt den Bereich des
-getroffenen geraden Teilstücks zwischen den beiden nächsten Schnittkanten. Gibt
-es auf diesem Teilstück keine Schnittkante, wird das ganze Teilstück von Ecke zu
-Ecke entfernt. Die hydraulische Verbindung wird an der Lücke wirklich getrennt;
-offene Enden sind Junctions. `ESC` beendet den Befehl.
+`T`, danach `R`, startet den dauerhaften Befehl **Ecke verbinden**. Zwei
+Leitungs-Teilstücke werden nacheinander angeklickt; alternativ können genau zwei
+Teilstücke zuerst mit `Cmd/Ctrl` gewählt und danach mit `TR` verbunden werden.
+Die beiden Geraden werden verlängert oder gekürzt, bis ihre freien Enden einen
+gemeinsamen Eckpunkt bilden. Der Eckpunkt ist hydraulisch ein gemeinsamer
+Junction-Knoten. Parallele Leitungen, verschiedene Layer, Innensegmente oder an
+Bauteile gebundene Enden werden mit einer klaren Meldung abgewiesen. `ESC`
+beendet den Befehl.
+
+## Orthogonales Zeichnen und bewusste Schrägen
+
+ORTHO ist standardmässig aktiv. Eine Cursorbewegung nahe einer horizontalen
+oder vertikalen Achse erzeugt immer ein exakt waagrechtes beziehungsweise
+senkrechtes Teilstück — auch beim Fang auf einen Anschluss, Eckpunkt oder eine
+bestehende Leitung. Erst wenn die gezeichnete Richtung mindestens 30° von der
+nächsten Achse abweicht, bleibt sie bewusst schräg. In diesem Fall zeigt das
+temporäre Mass neben der Länge auch den tatsächlichen Winkel an. Shift gibt die
+freie, gerasterte Richtung ausdrücklich frei.
 
 ## Ruhe im Grundzustand
 

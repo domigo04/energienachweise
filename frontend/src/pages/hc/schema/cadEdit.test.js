@@ -4,9 +4,9 @@ import {
   entwurfFuerAbschluss,
   eckpunktEntfernen, eckpunktSetzen, gripsFuerRoute,
   fensterAus, imFenster, istKollinear, labelSichtbar, labelVerschoben, labelVersatz,
-  leitungMitLueckeTrennen, leitungTrimmen, leitungsSystem, leitungVerschieben,
+  geradenSchnittpunkt, leitungMitLueckeTrennen, leitungenMitEckeVerbinden,
+  leitungsSystem, leitungVerschieben,
   routeBereinigen, routeDehnen, routeIstGueltig, routeSegmenteEntfernen,
-  segmentSchnittpunkt, trimGrenzen,
   segmentAusrichten, segmentOrientierung, segmentVerschieben,
   segmentZumVerschieben, verschiebungLabel,
 } from './cadEdit';
@@ -419,33 +419,59 @@ describe('Mit Lücke trennen (BREAK)', () => {
   });
 });
 
-describe('Trimmen (TR)', () => {
-  const route = [{ x:0, y:0 }, { x:600, y:0 }, { x:600, y:400 }];
-
-  it('findet die Schnittkanten beidseits des Klicks', () => {
-    const grenzen = trimGrenzen(route, 0, { x:320, y:0 }, [
-      [{ x:100, y:-50 }, { x:100, y:50 }],
-      [{ x:500, y:-50 }, { x:500, y:50 }],
-    ]);
-    expect(grenzen.a.segmentIndex).toBe(0);
-    expect(grenzen.b.segmentIndex).toBe(0);
-    expect(grenzen.a.x).toBeCloseTo(100, 4);
-    expect(grenzen.b.x).toBeCloseTo(500, 4);
-  });
-
-  it('nimmt ohne Schnittkante genau das gerade Teilstück von Ecke zu Ecke', () => {
-    expect(trimGrenzen(route, 1, { x:600, y:200 }, [])).toEqual({
-      a:{ segmentIndex:1, x:600, y:0 },
-      b:{ segmentIndex:1, x:600, y:400 },
+describe('Ecke verbinden (TR)', () => {
+  it('verlängert zwei getrennte Teilstücke bis zur gemeinsamen Ecke', () => {
+    const waagrecht = [{ x:0, y:0 }, { x:400, y:0 }];
+    const senkrecht = [{ x:600, y:200 }, { x:600, y:500 }];
+    const result = leitungenMitEckeVerbinden(waagrecht, 0, senkrecht, 0, {
+      erlaubteSeitenA:['end'], erlaubteSeitenB:['start'],
     });
+    expect(result.ecke).toEqual({ x:600, y:0 });
+    expect(result.erste).toEqual({ seite:'end', route:[{ x:0, y:0 }, { x:600, y:0 }] });
+    expect(result.zweite).toEqual({ seite:'start', route:[{ x:600, y:0 }, { x:600, y:500 }] });
   });
 
-  it('darf beim Trimmen ein Leitungsende verschlucken', () => {
-    const result = leitungTrimmen(route,
-      { segmentIndex:0, x:0, y:0 }, { segmentIndex:0, x:200, y:0 });
-    expect(result.erste).toBeNull();
-    expect(result.zweite).toEqual([{ x:200, y:0 }, { x:600, y:0 }, { x:600, y:400 }]);
+  it('kürzt überstehende Leitungen auf denselben Eckpunkt', () => {
+    const result = leitungenMitEckeVerbinden(
+      [{ x:0, y:0 }, { x:800, y:0 }], 0,
+      [{ x:600, y:-200 }, { x:600, y:500 }], 0,
+      { erlaubteSeitenA:['end'], erlaubteSeitenB:['start'] },
+    );
+    expect(result.erste.route.at(-1)).toEqual({ x:600, y:0 });
+    expect(result.zweite.route[0]).toEqual({ x:600, y:0 });
   });
+
+  it('verweigert parallele Leitungen und Innensegmente', () => {
+    expect(leitungenMitEckeVerbinden(
+      [{ x:0,y:0 }, { x:100,y:0 }], 0,
+      [{ x:0,y:50 }, { x:100,y:50 }], 0,
+    ).fehler).toMatch(/Parallele/);
+    expect(leitungenMitEckeVerbinden(
+      [{ x:0,y:0 }, { x:100,y:0 }, { x:100,y:100 }, { x:200,y:100 }], 1,
+      [{ x:150,y:50 }, { x:150,y:150 }], 0,
+    ).fehler).toMatch(/Leitungsenden/);
+  });
+
+  it('beachtet die freigegebenen Enden und mutiert keine Eingabe', () => {
+    const a = [{ x:0,y:0 }, { x:400,y:0 }];
+    const b = [{ x:600,y:200 }, { x:600,y:500 }];
+    const kopieA = a.map(p => ({ ...p }));
+    const result = leitungenMitEckeVerbinden(a, 0, b, 0, {
+      erlaubteSeitenA:['start'], erlaubteSeitenB:['end'],
+    });
+    expect(result.erste.seite).toBe('start');
+    expect(result.zweite.seite).toBe('end');
+    expect(a).toEqual(kopieA);
+  });
+
+  it('schneidet unendlich verlängerte Geraden', () => {
+    expect(geradenSchnittpunkt(
+      { x:0,y:0 }, { x:10,y:0 }, { x:50,y:-10 }, { x:50,y:10 },
+    )).toEqual({ x:50, y:0 });
+  });
+});
+
+describe('Ausgewählte Teilstücke löschen', () => {
 
   it('entfernt mehrere ausgewählte Teilstücke als getrennte Lücken', () => {
     const teile = routeSegmenteEntfernen([
@@ -457,11 +483,6 @@ describe('Trimmen (TR)', () => {
     ]);
   });
 
-  it('schneidet nur endliche Segmente', () => {
-    expect(segmentSchnittpunkt({ x:0,y:0 }, { x:100,y:0 }, { x:50,y:-10 }, { x:50,y:10 }))
-      .toMatchObject({ x:50, y:0, t:0.5 });
-    expect(segmentSchnittpunkt({ x:0,y:0 }, { x:10,y:0 }, { x:50,y:-10 }, { x:50,y:10 })).toBeNull();
-  });
 });
 
 describe('Dehnen (STRETCH)', () => {

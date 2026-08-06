@@ -54,6 +54,11 @@ describe("createHydraulicEdge", () => {
     void startPoint; void endPoint;
     expect(createHydraulicEdge(ohnePos, [])).not.toBeNull();
   });
+
+  it("persistiert eine ausdrücklich diagonal gezeichnete Direktverbindung", () => {
+    const e = createHydraulicEdge({ ...gueltig, cadDiagonal:true }, []);
+    expect(e.data.cad_diagonal).toBe(true);
+  });
 });
 
 describe("canStartHydraulicLine — Zeichnen nur im expliziten Modus", () => {

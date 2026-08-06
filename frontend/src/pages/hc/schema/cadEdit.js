@@ -184,73 +184,79 @@ export function leitungMitLueckeTrennen(route, a, b) {
   return { erste, zweite };
 }
 
-// ── Trimmen (AutoCAD TR) und Teilstücke löschen ────────────────────────────
+// ── Ecke verbinden (TR) und Teilstücke löschen ─────────────────────────────
 
-const TRIM_TOLERANZ = 1e-6;
+const ECKE_TOLERANZ = 1e-6;
 
-/** Schnitt zweier endlicher Segmente, inklusive ihrer Endpunkte. */
-export function segmentSchnittpunkt(a, b, c, d) {
+/** Schnittpunkt der unendlich verlängerten Geraden zweier Segmente. */
+export function geradenSchnittpunkt(a, b, c, d) {
   if (![a, b, c, d].every(p => Number.isFinite(p?.x) && Number.isFinite(p?.y))) return null;
   const rx = b.x - a.x, ry = b.y - a.y;
   const sx = d.x - c.x, sy = d.y - c.y;
   const kreuz = rx * sy - ry * sx;
-  if (Math.abs(kreuz) <= TRIM_TOLERANZ) return null;
+  if (Math.hypot(rx, ry) <= ECKE_TOLERANZ || Math.hypot(sx, sy) <= ECKE_TOLERANZ
+      || Math.abs(kreuz) <= ECKE_TOLERANZ) return null;
   const qx = c.x - a.x, qy = c.y - a.y;
   const t = (qx * sy - qy * sx) / kreuz;
-  const u = (qx * ry - qy * rx) / kreuz;
-  if (t < -TRIM_TOLERANZ || t > 1 + TRIM_TOLERANZ
-      || u < -TRIM_TOLERANZ || u > 1 + TRIM_TOLERANZ) return null;
-  const tc = Math.max(0, Math.min(1, t));
-  return { x:a.x + tc * rx, y:a.y + tc * ry, t:tc };
+  return { x:a.x + t * rx, y:a.y + t * ry };
 }
+
+const erlaubteEnden = (route, segmentIndex, freigegeben) => {
+  const moeglich = [];
+  if (segmentIndex === 0) moeglich.push('start');
+  if (segmentIndex === route.length - 2) moeglich.push('end');
+  return freigegeben ? moeglich.filter(seite => freigegeben.includes(seite)) : moeglich;
+};
+
+const endeWaehlen = (route, seiten, ecke) => [...seiten].sort((links, rechts) => {
+  const punkt = seite => (seite === 'start' ? route[0] : route.at(-1));
+  const distanz = seite => Math.hypot(punkt(seite).x - ecke.x, punkt(seite).y - ecke.y);
+  return distanz(links) - distanz(rechts);
+})[0] || null;
+
+const routeBisEcke = (route, seite, ecke) => (seite === 'start'
+  ? [{ ...ecke }, ...route.slice(1).map(p => ({ ...p }))]
+  : [...route.slice(0, -1).map(p => ({ ...p })), { ...ecke }]);
 
 /**
- * Grenzen des zu entfernenden Bereichs auf einem angeklickten Teilstück.
- * Alle übrigen sichtbaren Leitungssegmente sind Schnittkanten. Gibt es keine
- * Schnittkante innerhalb des Teilstücks, ist das ganze Teilstück von Ecke zu
- * Ecke gemeint — das ist zugleich die Delete-Semantik einer Segmentauswahl.
+ * Zwei gewählte, endständige Teilstücke bis zu ihrer gemeinsamen Ecke
+ * verlängern oder kürzen. Die Geometrie arbeitet auf unendlichen Geraden; das
+ * ist der CAD-Fall, in dem zwei noch getrennte Leitungen mit TR zusammentreffen.
+ *
+ * `erlaubteSeitenA/B` begrenzen die beweglichen Enden (z. B. auf freie
+ * Anschlussknoten). Innensegmente und parallele Geraden werden nicht geraten.
  */
-export function trimGrenzen(route, segmentIndex, klick, schneidSegmente = []) {
-  if (!Array.isArray(route) || segmentIndex < 0 || segmentIndex >= route.length - 1) return null;
-  const a = route[segmentIndex], b = route[segmentIndex + 1];
-  const vx = b.x - a.x, vy = b.y - a.y;
-  const l2 = vx * vx + vy * vy;
-  if (l2 <= TRIM_TOLERANZ) return null;
-  const klickT = Math.max(0, Math.min(1,
-    (((klick?.x ?? a.x) - a.x) * vx + ((klick?.y ?? a.y) - a.y) * vy) / l2));
-  const ts = [0, 1];
-  schneidSegmente.forEach(([c, d]) => {
-    const hit = segmentSchnittpunkt(a, b, c, d);
-    if (hit && hit.t > TRIM_TOLERANZ && hit.t < 1 - TRIM_TOLERANZ) ts.push(hit.t);
-  });
-  const sortiert = [...new Set(ts.map(t => Math.round(t * 1e8) / 1e8))].sort((x, y) => x - y);
-  let links = sortiert[0], rechts = sortiert.at(-1);
-  for (let i = 0; i < sortiert.length - 1; i += 1) {
-    if (klickT >= sortiert[i] - TRIM_TOLERANZ && klickT <= sortiert[i + 1] + TRIM_TOLERANZ) {
-      links = sortiert[i]; rechts = sortiert[i + 1]; break;
-    }
+export function leitungenMitEckeVerbinden(routeA, segmentIndexA, routeB, segmentIndexB, {
+  erlaubteSeitenA = null,
+  erlaubteSeitenB = null,
+} = {}) {
+  const gueltigeRoute = route => Array.isArray(route) && route.length >= 2;
+  if (!gueltigeRoute(routeA) || !gueltigeRoute(routeB)) return { fehler:'Zwei Leitungen erforderlich.' };
+  if (!Number.isInteger(segmentIndexA) || !Number.isInteger(segmentIndexB)
+      || segmentIndexA < 0 || segmentIndexA >= routeA.length - 1
+      || segmentIndexB < 0 || segmentIndexB >= routeB.length - 1) {
+    return { fehler:'Ungültiges Teilstück.' };
   }
-  const punkt = t => ({ segmentIndex, x:a.x + t * vx, y:a.y + t * vy });
-  return { a:punkt(links), b:punkt(rechts) };
-}
 
-/** Wie BREAK, aber Endstücke dürfen vollständig verschwinden (TRIM). */
-export function leitungTrimmen(route, a, b) {
-  if (!Array.isArray(route) || route.length < 2) return { fehler:'Keine Leitung.' };
-  const gueltig = h => h && Number.isInteger(h.segmentIndex)
-    && h.segmentIndex >= 0 && h.segmentIndex < route.length - 1
-    && Number.isFinite(h.x) && Number.isFinite(h.y);
-  if (!gueltig(a) || !gueltig(b)) return { fehler:'Ungültiger Trimmbereich.' };
-  const mass = h => h.segmentIndex + Math.hypot(h.x - route[h.segmentIndex].x, h.y - route[h.segmentIndex].y)
-    / (Math.hypot(route[h.segmentIndex + 1].x - route[h.segmentIndex].x,
-      route[h.segmentIndex + 1].y - route[h.segmentIndex].y) || 1);
-  const [vorn, hinten] = mass(a) <= mass(b) ? [a, b] : [b, a];
-  if (Math.hypot(hinten.x - vorn.x, hinten.y - vorn.y) < 0.5) return { fehler:'Kein trimmbarer Bereich.' };
-  const erste = [...route.slice(0, vorn.segmentIndex + 1), { x:vorn.x, y:vorn.y }];
-  const zweite = [{ x:hinten.x, y:hinten.y }, ...route.slice(hinten.segmentIndex + 1)];
-  const brauchbar = punkte => punkte.length >= 2
-    && punkte.some((p, i) => i && Math.hypot(p.x - punkte[i - 1].x, p.y - punkte[i - 1].y) >= 0.5);
-  return { erste:brauchbar(erste) ? erste : null, zweite:brauchbar(zweite) ? zweite : null };
+  const seitenA = erlaubteEnden(routeA, segmentIndexA, erlaubteSeitenA);
+  const seitenB = erlaubteEnden(routeB, segmentIndexB, erlaubteSeitenB);
+  if (!seitenA.length || !seitenB.length) {
+    return { fehler:'TR kann nur freie Leitungsenden zu einer Ecke verbinden.' };
+  }
+
+  const ecke = geradenSchnittpunkt(
+    routeA[segmentIndexA], routeA[segmentIndexA + 1],
+    routeB[segmentIndexB], routeB[segmentIndexB + 1],
+  );
+  if (!ecke) return { fehler:'Parallele Leitungen bilden keine eindeutige Ecke.' };
+
+  const seiteA = endeWaehlen(routeA, seitenA, ecke);
+  const seiteB = endeWaehlen(routeB, seitenB, ecke);
+  return {
+    ecke,
+    erste:{ seite:seiteA, route:routeBisEcke(routeA, seiteA, ecke) },
+    zweite:{ seite:seiteB, route:routeBisEcke(routeB, seiteB, ecke) },
+  };
 }
 
 /** Mehrere gewählte, gerade Teilstücke aus einer Route entfernen. */

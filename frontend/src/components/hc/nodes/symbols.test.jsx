@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ARMATUR_H, SymAbsperrklappe, SymCheckValve, SymEntleerung, SymPump, SymShutoff,
-  SymSTAD, SymTemperatur, SymValve2V, SymValve3, SymWE,
+  SymLuftheizapparat, SymSTAD, SymTemperatur, SymValve2V, SymValve3, SymWE,
 } from './symbols';
 
 describe('Wärmeerzeugersymbole', () => {
@@ -61,5 +61,14 @@ describe('Kompakte Armaturen und Feldgeräte', () => {
     expect(kugelhahn).not.toContain('ffd34d');
     expect(rueckschlag).toContain('y1="0"');
     expect(rueckschlag).toContain('y2="80"');
+  });
+});
+
+describe('Luftheizapparat', () => {
+  it('kennzeichnet ihn nur mit einem kleinen schematischen Ventilator und ohne Luftstrompfeil', () => {
+    const markup = renderToStaticMarkup(<SymLuftheizapparat/>);
+    expect(markup).toContain('scale(.58)');
+    expect(markup).toContain('Luftheizapparat mit Ventilator');
+    expect(markup).not.toContain('marker-end');
   });
 });

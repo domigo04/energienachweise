@@ -171,6 +171,26 @@ nächsten Achse abweicht, bleibt sie bewusst schräg. In diesem Fall zeigt das
 temporäre Mass neben der Länge auch den tatsächlichen Winkel an. Shift gibt die
 freie, gerasterte Richtung ausdrücklich frei.
 
+Dieselbe 30°-Regel gilt beim Ziehen bestehender Grips. Ein freier Endpunkt wird
+dabei wie in Revit **weitergezogen**: Das vorhandene Randstück bleibt erhalten,
+der bisherige Endpunkt wird bei einem Richtungswechsel zur 90°-Ecke. Beim
+Verschieben eines inneren Eckpunkts ergänzt der Editor nötigenfalls eine zweite
+orthogonale Ecke, damit das feste Nachbarstück nicht unabsichtlich schräg wird.
+
+Ein orthogonaler Fang auf ein gerades Bestandsteilstück endet direkt am
+tatsächlichen Schnittpunkt. Die neue Leitung läuft nie erst bis zu einem
+Nearest-Punkt und danach auf der Bestandsleitung zurück; dadurch gibt es am
+T-Stück nur den gemeinsamen Verbindungspunkt und kein überlappendes Zusatzstück
+mit zweitem Griff.
+
+Wird ein einzelnes Teilstück gewählt, erscheinen zu höchstens drei Bauteilen im
+Umkreis von 500 mm temporäre Direktmasse zur nächstliegenden Bauteilkante. Die
+Anzeige verwendet dieselbe Massformatierung wie der Zeichenbefehl und bleibt
+damit in der aktuellen Zeicheneinheit.
+
+Beim Spiegeln wird nur die Bauteilgeometrie gespiegelt. Symboltext, Nummer und
+Datenblock bleiben im Editor und im SVG/PDF-Export seitenrichtig lesbar.
+
 ## Ruhe im Grundzustand
 
 Die Anschlusszone (`.hc-zone-frame` an Speicher, Wärmeerzeuger, BWW) erscheint

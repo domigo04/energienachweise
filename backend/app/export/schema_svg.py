@@ -487,6 +487,27 @@ def bauteil_transform(d: dict, cx: float, cy: float) -> str:
     return " ".join(teile)
 
 
+_TEXT_OHNE_TRANSFORM = re.compile(
+    r'<text\b(?![^>]*\btransform=)([^>]*?)\bx="(-?\d+(?:\.\d+)?)"([^>]*)>',
+)
+
+
+def _text_gegen_spiegeln(fragment: str) -> str:
+    """Text innerhalb eines gespiegelten Symbols seitenrichtig halten.
+
+    Die Position wird mit dem Symbol gespiegelt, die Glyphe selbst erhält um
+    ihre x-Ankerachse eine zweite Spiegelung. Zwei Spiegelungen heben sich für
+    die Schrift auf; die Geometrie bleibt unverändert gespiegelt.
+    """
+    def ersetzen(treffer):
+        x = float(treffer.group(2))
+        gegen = _svg_num(2 * x)
+        return (f'<text transform="translate({gegen},0) scale(-1,1)"'
+                f'{treffer.group(1)}x="{treffer.group(2)}"{treffer.group(3)}>')
+
+    return _TEXT_OHNE_TRANSFORM.sub(ersetzen, fragment)
+
+
 # ── Bauteil-Zeichner (liefern SVG-Fragmente, Koordinaten absolut) ───────────
 def _nr_badge(parts, x, y, nr):
     if nr is None:
@@ -1089,7 +1110,9 @@ def zeichne_standard(parts, node, results):
     elif t == "luftheizapparat":
         parts.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="2" fill="white" stroke="#111827" stroke-width="2"/>')
         parts.append(f'<path d="M {x + 3} {y + 3} L {x + w - 3} {y + h - 3} M {x + w - 3} {y + 3} L {x + 3} {y + h - 3}" fill="none" stroke="#111827" stroke-width="1.5"/>')
-        r = min(w, h) * .22
+        # Kleine, zurückhaltende Kennzeichnung wie im Editor — der Ventilator
+        # bezeichnet das Gerät, ist aber nicht das Hauptsymbol.
+        r = min(w, h) * .13
         parts.append(f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="white" stroke="#111827" stroke-width="1.7"/>')
         parts.append(f'<circle cx="{cx}" cy="{cy}" r="2" fill="#111827"/>')
         for winkel in (0, 120, 240):
@@ -1200,6 +1223,9 @@ def zeichne_standard(parts, node, results):
         return
     # Drehung und Spiegelung wie im Editor: nur das Symbol wird transformiert,
     # Nummer und Beschriftung bleiben aufrecht und seitenrichtig.
+    if d.get("mirrored"):
+        for index in range(sym_start, len(parts)):
+            parts[index] = _text_gegen_spiegeln(parts[index])
     transform = bauteil_transform(d, cx, cy)
     if transform:
         parts.insert(sym_start, f'<g transform="{transform}">')

@@ -137,3 +137,25 @@ export function segmentSchnittpunkt(a1, a2, b1, b2) {
   }
   return null;   // parallel oder schräg — hier bewusst kein Schnittpunktfang
 }
+
+/**
+ * Echter orthogonaler T-Stück-Punkt auf einem bestehenden Teilstück.
+ *
+ * Der normale Nearest-Fang projiziert den Cursor auf die Bestandsleitung. Wenn
+ * die neue Leitung bereits horizontal/vertikal auf diese zuläuft, darf daraus
+ * aber kein zusätzliches Stück längs auf der Bestandsleitung entstehen. Der
+ * Fangpunkt ist dann direkt der Schnitt der Achse durch `origin` mit dem
+ * vorhandenen, endlichen Segment.
+ */
+export function orthogonalerTStueckPunkt(origin, a, b, toleranz = 0.5) {
+  if (![origin, a, b].every(p => Number.isFinite(p?.x) && Number.isFinite(p?.y))) return null;
+  const zwischen = (wert, p, q) => wert >= Math.min(p, q) - toleranz
+    && wert <= Math.max(p, q) + toleranz;
+  if (Math.abs(a.x - b.x) <= toleranz && Math.abs(a.y - b.y) > toleranz) {
+    return zwischen(origin.y, a.y, b.y) ? { x:a.x, y:origin.y } : null;
+  }
+  if (Math.abs(a.y - b.y) <= toleranz && Math.abs(a.x - b.x) > toleranz) {
+    return zwischen(origin.x, a.x, b.x) ? { x:origin.x, y:a.y } : null;
+  }
+  return null;
+}

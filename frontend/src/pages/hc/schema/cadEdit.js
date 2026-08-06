@@ -1,6 +1,8 @@
 // Direkte Geometriebearbeitung an einer bestehenden Leitung (Grips).
 // Rein, ohne React, ohne Hydraulik.
 
+import { constrainPoint } from './cadConstraints';
+
 /**
  * Grips einer Leitung: Endpunkte und Eckpunkte.
  *
@@ -19,6 +21,119 @@ export function gripsFuerRoute(route = []) {
     // enthält — daher der versetzte Index für die Bearbeitung.
     pointIndex: index - 1,
   }));
+}
+
+/**
+ * Einen freien Leitungsendpunkt weiterziehen, ohne das bestehende Randsegment
+ * schräg zu verbiegen. Der bisherige Endpunkt bleibt als Ecke erhalten; nur
+ * beim Verlängern auf derselben Achse wird er als überflüssiger Stützpunkt
+ * weggelassen. Die Richtungsfreigabe entspricht dem normalen Zeichenbefehl:
+ * achsnah orthogonal, bewusst schräg ab 30°.
+ */
+export function endpunktWeiterziehen(route, side, raw, { grid = 10, shift = false } = {}) {
+  if (!Array.isArray(route) || route.length < 2 || !['source', 'target'].includes(side)) return null;
+  const basis = side === 'source' ? route[0] : route.at(-1);
+  const nachbar = side === 'source' ? route[1] : route.at(-2);
+  const endpoint = constrainPoint(basis, raw, { ortho:true, shift, grid });
+  if (Math.hypot(endpoint.x - basis.x, endpoint.y - basis.y) <= 0.5) {
+    const routeNeu = route.map(p => ({ ...p }));
+    return { endpoint:{ ...basis }, basis:{ ...basis }, points:routeNeu.slice(1, -1), route:routeNeu };
+  }
+  const altHorizontal = segmentOrientierung(nachbar, basis) === 'horizontal';
+  const altVertikal = segmentOrientierung(nachbar, basis) === 'vertical';
+  const neuHorizontal = segmentOrientierung(basis, endpoint) === 'horizontal';
+  const neuVertikal = segmentOrientierung(basis, endpoint) === 'vertical';
+  const gleicheAchse = (altHorizontal && neuHorizontal) || (altVertikal && neuVertikal);
+  const routeNeu = side === 'source'
+    ? [endpoint, ...(gleicheAchse ? route.slice(1) : route)]
+    : [...(gleicheAchse ? route.slice(0, -1) : route), endpoint];
+  return { endpoint, basis, points:routeNeu.slice(1, -1), route:routeNeu };
+}
+
+/**
+ * Einen bestehenden Eckpunkt verschieben, ohne das nachfolgende Teilstück
+ * unabsichtlich schräg zu ziehen. Zum vorherigen Punkt gilt der 30°-Fang. Wo
+ * der feste nächste Punkt danach nicht auf derselben Achse liegt, wird eine
+ * zweite 90°-Ecke ergänzt. So bleibt die ganze Route orthogonal; nur die
+ * ausdrücklich gezeichnete Strecke darf diagonal sein.
+ */
+export function eckpunktWeiterziehen(route, routeIndex, raw, { grid = 10 } = {}) {
+  if (!Array.isArray(route) || routeIndex <= 0 || routeIndex >= route.length - 1) return null;
+  const previous = route[routeIndex - 1];
+  const next = route[routeIndex + 1];
+  const point = constrainPoint(previous, raw, { ortho:true, shift:false, grid });
+  const routeNeu = route.map(p => ({ ...p }));
+  routeNeu[routeIndex] = point;
+  if (!segmentOrientierung(point, next)) {
+    const dx = Math.abs(next.x - point.x);
+    const dy = Math.abs(next.y - point.y);
+    if (dx > 0.5 && dy > 0.5) {
+      const bridge = dx >= dy ? { x:next.x, y:point.y } : { x:point.x, y:next.y };
+      routeNeu.splice(routeIndex + 1, 0, bridge);
+    }
+  }
+  return { point, previous, next, route:routeNeu, points:routeNeu.slice(1, -1) };
+}
+
+const punktImRechteck = (punkt, rect) => punkt.x >= rect.x && punkt.x <= rect.x + rect.width
+  && punkt.y >= rect.y && punkt.y <= rect.y + rect.height;
+
+const naechsterPunktImRechteck = (punkt, rect) => ({
+  x:Math.max(rect.x, Math.min(rect.x + rect.width, punkt.x)),
+  y:Math.max(rect.y, Math.min(rect.y + rect.height, punkt.y)),
+});
+
+const projektion = (punkt, a, b) => {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const quadrat = dx * dx + dy * dy;
+  const t = quadrat ? Math.max(0, Math.min(1, ((punkt.x - a.x) * dx + (punkt.y - a.y) * dy) / quadrat)) : 0;
+  return { x:a.x + t * dx, y:a.y + t * dy };
+};
+
+const segmentRechteckSchnitt = (a, b, rect) => {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  let von = 0;
+  let bis = 1;
+  const grenzen = [
+    [-dx, a.x - rect.x], [dx, rect.x + rect.width - a.x],
+    [-dy, a.y - rect.y], [dy, rect.y + rect.height - a.y],
+  ];
+  for (const [richtung, abstand] of grenzen) {
+    if (Math.abs(richtung) < 1e-9) {
+      if (abstand < 0) return null;
+      continue;
+    }
+    const t = abstand / richtung;
+    if (richtung < 0) von = Math.max(von, t);
+    else bis = Math.min(bis, t);
+    if (von > bis) return null;
+  }
+  return { x:a.x + von * dx, y:a.y + von * dy };
+};
+
+/** Kürzeste sichtbare Distanz eines Teilstücks zu einem Bauteil-Rechteck. */
+export function abstandSegmentZuRechteck(a, b, rect) {
+  if (![a, b].every(p => Number.isFinite(p?.x) && Number.isFinite(p?.y))
+      || !Number.isFinite(rect?.x) || !Number.isFinite(rect?.y)
+      || !(rect.width > 0) || !(rect.height > 0)) return null;
+  if (punktImRechteck(a, rect) || punktImRechteck(b, rect)) return { a:{ ...a }, b:{ ...a }, distance:0 };
+  const schnitt = segmentRechteckSchnitt(a, b, rect);
+  if (schnitt) return { a:schnitt, b:{ ...schnitt }, distance:0 };
+  const ecken = [
+    { x:rect.x, y:rect.y }, { x:rect.x + rect.width, y:rect.y },
+    { x:rect.x + rect.width, y:rect.y + rect.height }, { x:rect.x, y:rect.y + rect.height },
+  ];
+  const kandidaten = [a, b].map(punkt => {
+    const box = naechsterPunktImRechteck(punkt, rect);
+    return { a:{ ...punkt }, b:box, distance:Math.hypot(box.x - punkt.x, box.y - punkt.y) };
+  });
+  ecken.forEach(ecke => {
+    const linie = projektion(ecke, a, b);
+    kandidaten.push({ a:linie, b:ecke, distance:Math.hypot(ecke.x - linie.x, ecke.y - linie.y) });
+  });
+  return kandidaten.reduce((beste, kandidat) => (!beste || kandidat.distance < beste.distance ? kandidat : beste), null);
 }
 
 /** Achse eines Segments: 'vertical', 'horizontal' oder null (diagonal). */

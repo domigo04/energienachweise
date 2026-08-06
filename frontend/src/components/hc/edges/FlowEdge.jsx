@@ -66,6 +66,7 @@ export function FlowEdge({
   const zoom = Math.max(useStore((state) => state.transform[2]) || 1, 0.05);
   const gripR = 5.5 / zoom;          // Eckpunkt
   const endR = 6.5 / zoom;           // Endpunkt (etwas grösser, trägt die Hydraulik)
+  const endHitR = 12 / zoom;          // Revit-artig leicht zu greifen, ohne optisch grösser zu werden
   const gripStroke = 1.8 / zoom;
   const endStroke = 2.4 / zoom;
   const cornerRadius = Math.max(0, Number(data.corner_radius ?? data._cornerRadius ?? 8) || 0);
@@ -130,27 +131,30 @@ export function FlowEdge({
       {/* Wie im React-Flow-Probeeditor: freie/verbundene Enden werden direkt
           an der Leitung gegriffen. Die internen Junction-Nodes bleiben unsichtbar. */}
       {selected && [
-        ['source', sourceX, sourceY],
-        ['target', targetX, targetY],
+        ['source', start.x, start.y],
+        ['target', end.x, end.y],
       ].map(([side, x, y]) => (
-        <circle key={`${id}-${side}`} cx={x} cy={y} r={endR}
-          fill="white" stroke={color} strokeWidth={endStroke}
-          style={{ pointerEvents: 'all', cursor: 'crosshair' }}
-          onPointerDown={(event) => {
-            event.stopPropagation();
-            if (event.button === 0) data._onEndpointPointerDown?.(event, id, side);
-          }}
-          onContextMenu={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            data._onEndpointContextMenu?.(event, id, side);
-          }} />
+        <g key={`${id}-${side}`}>
+          <circle cx={x} cy={y} r={endHitR} fill="transparent"
+            style={{ pointerEvents:'all', cursor:'crosshair' }}
+            onPointerDown={(event) => {
+              event.stopPropagation();
+              if (event.button === 0) data._onEndpointPointerDown?.(event, id, side);
+            }}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              data._onEndpointContextMenu?.(event, id, side);
+            }} />
+          <circle cx={x} cy={y} r={endR} fill="white" stroke={color}
+            strokeWidth={endStroke} pointerEvents="none" />
+        </g>
       ))}
 
       {/* Nur echte T-Verbindungen erhalten einen kleinen Verbindungspunkt.
           Freie Enden erzeugen keine dauerhaft sichtbaren Junction-Symbole. */}
-      {data._sourceJunctionDegree >= 3 && <circle cx={sourceX} cy={sourceY} r={3.5 / zoom} fill={color} pointerEvents="none" />}
-      {data._targetJunctionDegree >= 3 && <circle cx={targetX} cy={targetY} r={3.5 / zoom} fill={color} pointerEvents="none" />}
+      {data._sourceJunctionDegree >= 3 && <circle cx={start.x} cy={start.y} r={3.5 / zoom} fill={color} pointerEvents="none" />}
+      {data._targetJunctionDegree >= 3 && <circle cx={end.x} cy={end.y} r={3.5 / zoom} fill={color} pointerEvents="none" />}
 
       {/* Leitungs-Label (DN + Massenstrom). Sitzt in der Streckenmitte, lässt
           sich aber mit der Maus an eine freie Stelle ziehen und ausblenden —

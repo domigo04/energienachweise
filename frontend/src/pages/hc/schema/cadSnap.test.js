@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   ENDPOINT, GRID, INTERSECTION, NEAREST, PORT,
-  fangErgebnis, fangMitHysterese, fangStil, pruefeFangTreue, segmentSchnittpunkt,
+  fangErgebnis, fangMitHysterese, fangStil, orthogonalerTStueckPunkt,
+  pruefeFangTreue, segmentSchnittpunkt,
 } from './cadSnap';
 
 describe('Fangtypen', () => {
@@ -133,6 +134,29 @@ describe('Schnittpunkt', () => {
   it('liefert für parallele Segmente keinen Schnittpunkt', () => {
     expect(segmentSchnittpunkt({ x: 0, y: 0 }, { x: 100, y: 0 },
                                { x: 0, y: 50 }, { x: 100, y: 50 })).toBeNull();
+  });
+});
+
+describe('orthogonaler T-Stück-Fang', () => {
+  it('trifft eine senkrechte Bestandsleitung auf Höhe des neuen Astes', () => {
+    expect(orthogonalerTStueckPunkt(
+      { x:100, y:350 }, { x:500, y:0 }, { x:500, y:800 },
+    )).toEqual({ x:500, y:350 });
+  });
+
+  it('trifft eine waagrechte Bestandsleitung senkrecht', () => {
+    expect(orthogonalerTStueckPunkt(
+      { x:420, y:900 }, { x:0, y:300 }, { x:800, y:300 },
+    )).toEqual({ x:420, y:300 });
+  });
+
+  it('erzeugt keinen Fang auf der Verlängerung oder auf einer Schräge', () => {
+    expect(orthogonalerTStueckPunkt(
+      { x:100, y:900 }, { x:500, y:0 }, { x:500, y:800 },
+    )).toBeNull();
+    expect(orthogonalerTStueckPunkt(
+      { x:100, y:300 }, { x:0, y:0 }, { x:500, y:500 },
+    )).toBeNull();
   });
 });
 

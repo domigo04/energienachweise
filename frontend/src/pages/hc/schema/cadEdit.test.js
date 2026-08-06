@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   abzweigPunkt,
+  abstandSegmentZuRechteck,
+  eckpunktWeiterziehen,
+  endpunktWeiterziehen,
   entwurfFuerAbschluss,
   eckpunktEntfernen, eckpunktSetzen, gripsFuerRoute,
   fensterAus, imFenster, istKollinear, labelSichtbar, labelVerschoben, labelVersatz,
@@ -32,6 +35,70 @@ describe('Grips', () => {
   it('liefert für eine unvollständige Route keine Grips', () => {
     expect(gripsFuerRoute([{ x: 0, y: 0 }])).toEqual([]);
     expect(gripsFuerRoute([])).toEqual([]);
+  });
+});
+
+describe('freien Endpunkt wie in Revit weiterziehen', () => {
+  const horizontal = [{ x:0, y:0 }, { x:500, y:0 }];
+
+  it('behält die bestehende Gerade und fügt bei 90° eine Ecke ein', () => {
+    expect(endpunktWeiterziehen(horizontal, 'target', { x:520, y:700 }, { grid:10 }).route)
+      .toEqual([{ x:0, y:0 }, { x:500, y:0 }, { x:500, y:700 }]);
+  });
+
+  it('verlängert auf derselben Achse ohne unnötigen Stützpunkt', () => {
+    expect(endpunktWeiterziehen(horizontal, 'target', { x:900, y:20 }, { grid:10 }).route)
+      .toEqual([{ x:0, y:0 }, { x:900, y:0 }]);
+  });
+
+  it('erzeugt bei einem Klick ohne Bewegung keinen doppelten Punkt', () => {
+    expect(endpunktWeiterziehen(horizontal, 'target', { x:500, y:0 }, { grid:10 }).route)
+      .toEqual(horizontal);
+  });
+
+  it('lässt eine bewusste Schräge ab 30° als neue Verlängerung zu', () => {
+    expect(endpunktWeiterziehen(horizontal, 'target', { x:800, y:400 }, { grid:10 }).route)
+      .toEqual([{ x:0, y:0 }, { x:500, y:0 }, { x:800, y:400 }]);
+  });
+
+  it('funktioniert spiegelbildlich am Leitungsanfang', () => {
+    expect(endpunktWeiterziehen(horizontal, 'source', { x:0, y:500 }, { grid:10 }).route)
+      .toEqual([{ x:0, y:500 }, { x:0, y:0 }, { x:500, y:0 }]);
+  });
+});
+
+describe('bestehenden Eckpunkt orthogonal weiterziehen', () => {
+  const route = [{ x:0, y:0 }, { x:500, y:0 }, { x:500, y:600 }];
+
+  it('verhindert eine zufällige Schräge auch im nachfolgenden Teilstück', () => {
+    expect(eckpunktWeiterziehen(route, 1, { x:700, y:180 }, { grid:10 }).route)
+      .toEqual([
+        { x:0, y:0 }, { x:700, y:0 }, { x:700, y:600 }, { x:500, y:600 },
+      ]);
+  });
+
+  it('lässt die bewusst über 30° gezogene Strecke zu und schliesst orthogonal an', () => {
+    expect(eckpunktWeiterziehen(route, 1, { x:400, y:400 }, { grid:10 }).route)
+      .toEqual([
+        { x:0, y:0 }, { x:400, y:400 }, { x:400, y:600 }, { x:500, y:600 },
+      ]);
+  });
+});
+
+describe('Abstand Teilstück zu Bauteil', () => {
+  it('misst den kürzesten Abstand zur Bauteilkante', () => {
+    const mass = abstandSegmentZuRechteck(
+      { x:0, y:0 }, { x:500, y:0 }, { x:200, y:300, width:100, height:80 },
+    );
+    expect(mass.distance).toBe(300);
+    expect(mass.a).toEqual({ x:200, y:0 });
+    expect(mass.b).toEqual({ x:200, y:300 });
+  });
+
+  it('meldet keinen Abstand, wenn das Teilstück die Bauteilbox schneidet', () => {
+    expect(abstandSegmentZuRechteck(
+      { x:0, y:350 }, { x:500, y:350 }, { x:200, y:300, width:100, height:80 },
+    ).distance).toBe(0);
   });
 });
 

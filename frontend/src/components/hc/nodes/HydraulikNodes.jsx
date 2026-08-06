@@ -572,7 +572,7 @@ export function HeizkoerperNode({ data, selected: sel }) {
           </g>
         </svg>
       ) : (
-        <div style={{ width:'100%', height:'100%', display:'flex', alignItems:'center', justifyContent:'center',
+        <div data-mirror-safe style={{ width:'100%', height:'100%', display:'flex', alignItems:'center', justifyContent:'center',
           color:'#166534', fontSize:10, fontWeight:700, userSelect:'none' }}>
           {data.label || 'Heizkörper'}
         </div>
@@ -1422,7 +1422,8 @@ function mitRotation(Comp) {
     // Reihenfolge rotate() scaleX(-1): erst spiegeln, dann drehen — passend zur
     // Seiten-Korrektur in anschlussSeite (spiegelSeite vor rotiereSeite).
     return (
-      <div style={{ transform:`rotate(${rot}deg) scaleX(${mirrored ? -1 : 1})`, transformOrigin:'center center',
+      <div className={`hc-node-symbol-transform${mirrored ? ' hc-node-symbol-transform--mirrored' : ''}`}
+        style={{ transform:`rotate(${rot}deg) scaleX(${mirrored ? -1 : 1})`, transformOrigin:'center center',
         display:skaliert ? 'block' : 'inline-block', ...(skaliert ? { width:'100%', height:'100%' } : {}) }}>
         <Comp {...props} />
       </div>

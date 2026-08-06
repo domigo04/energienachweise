@@ -33,10 +33,12 @@ import {
 } from './schema/editorMode';
 import {
   constrainPoint, istBewussteDiagonale, laengeAusBuffer, laengeTaste, massAnker,
-  rasterPunkt as rasterAufGitter,
+  massLabel, rasterPunkt as rasterAufGitter,
   punktAusLaenge, segmentMassLabel,
 } from './schema/cadConstraints';
-import { CORNER, ENDPOINT, GRID, MIDPOINT, NEAREST, PORT, fangStil } from './schema/cadSnap';
+import {
+  CORNER, ENDPOINT, GRID, MIDPOINT, NEAREST, PORT, fangStil, orthogonalerTStueckPunkt,
+} from './schema/cadSnap';
 import { SOLE_ROHRE, SOLE_TRAEGER } from './schema/soleTabellen';
 import {
   wohnungAendern, wohnungEntfernen, wohnungHinzufuegen, wohnungenAusDaten,
@@ -44,7 +46,7 @@ import {
 import { eingefuegterKnoten, kopierbarerKnoten } from './schema/nodeClipboard';
 import { nodesMitExportGeometrie } from './schema/exportGeometrie';
 import {
-  abzweigPunkt, fensterAus, labelVerschoben, labelVersatz,
+  abstandSegmentZuRechteck, abzweigPunkt, eckpunktWeiterziehen, endpunktWeiterziehen, fensterAus, labelVerschoben, labelVersatz,
   leitungMitLueckeTrennen, leitungenMitEckeVerbinden, leitungsSystem, leitungVerschieben,
   routeBereinigen, routeDehnen, routeSegmenteEntfernen,
   segmentAusrichten, segmentVerschieben,
@@ -169,6 +171,20 @@ function guidesAmPunkt(guides, point) {
     if (horizontal && Math.abs(point.y - guide.y1) < 0.5) return [{ ...guide, x2:point.x, y2:point.y }];
     return [];
   });
+}
+
+// Beim Fang auf ein gerades Bestandsteilstück liegt das T-Stück dort, wo die
+// orthogonale Achse des neuen Astes die Bestandsleitung wirklich berührt. So
+// entsteht weder ein überlappendes Stück auf der Bestandsleitung noch ein
+// zweiter Griff. Eine bewusst gezeichnete Schräge ab 30° behält den Nearest-
+// Fangpunkt des Cursors.
+function tStueckHit(origin, raw, hit) {
+  if (!origin || !hit?.route || !Number.isInteger(hit.segmentIndex)
+      || istBewussteDiagonale(origin, raw)) return hit;
+  const punkt = orthogonalerTStueckPunkt(
+    origin, hit.route[hit.segmentIndex], hit.route[hit.segmentIndex + 1],
+  );
+  return punkt ? { ...hit, ...punkt, position:punkt, type:'line', cornerIndex:undefined } : hit;
 }
 
 // Objektfang über alle bekannten Bauteil-Handles und Leitungsendpunkte. X und
@@ -317,6 +333,38 @@ function CadMass({ mass, zoom }) {
         stroke="#ffffff" strokeWidth={3.5 / z} strokeLinejoin="round" paintOrder="stroke"
         fill="#0f172a" fontSize={12 / z} fontWeight="700"
         fontFamily="ui-monospace, SFMono-Regular, monospace">
+        {mass.label}
+      </text>
+    </g>
+  );
+}
+
+// Direktmass zwischen einem gewählten Teilstück und einer nahen Bauteilkante.
+// Anders als CadMass wird es nicht parallel versetzt: Die beiden Endpunkte sind
+// bereits die geometrisch kürzeste Verbindung und damit selbst die Masslinie.
+function CadDirektMass({ mass, zoom }) {
+  if (!mass?.a || !mass?.b || !(mass.distance > 0)) return null;
+  const z = Math.max(zoom || 1, 0.05);
+  const dx = mass.b.x - mass.a.x;
+  const dy = mass.b.y - mass.a.y;
+  const laenge = Math.hypot(dx, dy) || 1;
+  const tx = dx / laenge;
+  const ty = dy / laenge;
+  const nx = -ty;
+  const ny = tx;
+  const tick = 5 / z;
+  const mitte = { x:(mass.a.x + mass.b.x) / 2, y:(mass.a.y + mass.b.y) / 2 };
+  return (
+    <g pointerEvents="none" stroke="#475569" strokeWidth={1 / z} opacity="0.82">
+      <line x1={mass.a.x} y1={mass.a.y} x2={mass.b.x} y2={mass.b.y} strokeDasharray={`${4 / z} ${3 / z}`} />
+      {[mass.a, mass.b].map((punkt, index) => (
+        <line key={index} x1={punkt.x - nx * tick} y1={punkt.y - ny * tick}
+          x2={punkt.x + nx * tick} y2={punkt.y + ny * tick} />
+      ))}
+      <text x={mitte.x + nx * 8 / z} y={mitte.y + ny * 8 / z}
+        textAnchor="middle" dominantBaseline="middle" fill="#334155"
+        stroke="#ffffff" strokeWidth={3.5 / z} paintOrder="stroke"
+        fontSize={11 / z} fontWeight="700" fontFamily="ui-monospace, SFMono-Regular, monospace">
         {mass.label}
       </text>
     </g>
@@ -2424,6 +2472,7 @@ function EditorInner() {
   const [leitungsSnap, setLeitungsSnap] = useState(null);
   const [leitungsGuides, setLeitungsGuides] = useState([]);
   const [segmentVerschiebung, setSegmentVerschiebung] = useState(null);
+  const [griffMass, setGriffMass] = useState(null); // Mass beim Ziehen eines Eck-/Endpunkts
   const [endpointMenu, setEndpointMenu] = useState(null); // { x, y, edgeId, side }
   const [edgeMenu, setEdgeMenu] = useState(null); // { x, y, edgeId, point }
   const [markierteEdgeIds, setMarkierteEdgeIds] = useState([]);
@@ -3759,7 +3808,9 @@ function EditorInner() {
     }
     const lineHit = fangAktiv ? naechsteLeitung(raw, layer.id, 22 / zoom, excludedEdges) : null;
     if (lineHit) {
-      leitungsEntwurfAbschliessen(lineHit, { ...lineHit, type:'line' }, event.shiftKey || shiftPressed);
+      const previous = letzterEntwurfsPunkt(draft);
+      const hit = tStueckHit(previous, raw, { ...lineHit, type:'line' });
+      leitungsEntwurfAbschliessen(hit, hit, event.shiftKey || shiftPressed);
       return true;
     }
     const previous = letzterEntwurfsPunkt(draft);
@@ -3907,11 +3958,14 @@ function EditorInner() {
       }
       const lineHit = fangAktiv ? naechsteLeitung(raw, layer.id, 22 / zoom, excludedEdges) : null;
       if (lineHit) {
-        leitungsCursorRef.current = { x:lineHit.x, y:lineHit.y };
-        setLeitungsCursor({ x:lineHit.x, y:lineHit.y });
-        setLeitungsSnap({ ...lineHit, type:'line' });
+        const previous = letzterEntwurfsPunkt(draft);
+        const hit = tStueckHit(previous, raw, { ...lineHit, type:'line' });
+        const point = { x:hit.x, y:hit.y };
+        leitungsCursorRef.current = point;
+        setLeitungsCursor(point);
+        setLeitungsSnap(hit);
         setLeitungsGuides([]);
-        fangProtokoll('cursor', 'nearest', { x:lineHit.x, y:lineHit.y }, { edgeId:lineHit.edge?.id });
+        fangProtokoll('cursor', 'nearest', point, { edgeId:hit.edge?.id });
         return;
       }
       const previous = letzterEntwurfsPunkt(draft);
@@ -4080,8 +4134,16 @@ function EditorInner() {
     setSelectedEdgePoint({ edgeId, pointIndex });
     const edge = edgesRef.current.find(item => item.id === edgeId);
     if (!edge) return;
-    const points = routePunkte(edge).slice(1, -1);
-    edgePointDrag.current = { edgeId, pointIndex, points };
+    const route = routePunkte(edge);
+    const points = route.slice(1, -1);
+    const routeIndex = pointIndex + 1;
+    edgePointDrag.current = {
+      edgeId,
+      pointIndex,
+      route,
+      origin:route[routeIndex - 1],
+    };
+    setGriffMass(null);
     setEdges(items => items.map(item => item.id === edgeId
       ? { ...item, data:{ ...(item.data || {}), cad_polyline:true, points } }
       : item));
@@ -4178,30 +4240,35 @@ function EditorInner() {
     const move = (event) => {
       const drag = edgePointDrag.current;
       if (!drag) return;
-      const edge = edgesRef.current.find(item => item.id === drag.edgeId);
-      if (!edge) return;
-      const points = drag.points || [];
-      const origin = drag.pointIndex > 0
-        ? points[drag.pointIndex - 1]
-        : handlePosition(edge.source, edge.sourceHandle);
       const raw = screenToFlowPosition({ x:event.clientX, y:event.clientY });
-      const point = event.shiftKey
-        ? constrainPoint(origin, raw, { ortho:true, shift:true, grid:drawingConfig.grid_size })
-        : rasterPunkt(raw, drawingConfig.grid_size);
+      // Dieselbe Regel wie beim Zeichnen: achsnah exakt 0/90°, erst eine
+      // bewusste Abweichung ab 30° bleibt schräg. Der Bezugspunkt bleibt für
+      // den ganzen Drag stabil und wandert nicht mit dem bereits gesetzten
+      // Zwischenzustand mit.
+      const ergebnis = eckpunktWeiterziehen(
+        drag.route, drag.pointIndex + 1, raw, { grid:drawingConfig.grid_size },
+      );
+      if (!ergebnis) return;
+      const point = ergebnis.point;
+      const massA = istBewussteDiagonale(drag.origin, point) ? drag.origin : null;
+      const massB = massA ? point : null;
+      setGriffMass(massA && massB ? {
+        a:massA, b:massB,
+        laenge:Math.hypot(massB.x - massA.x, massB.y - massA.y),
+        label:segmentMassLabel(massA, massB),
+      } : null);
       if (edgePointFrame.current) cancelAnimationFrame(edgePointFrame.current);
       edgePointFrame.current = requestAnimationFrame(() => {
         setEdges(items => items.map(item => {
           if (item.id !== drag.edgeId) return item;
-          const next = [...points];
-          next[drag.pointIndex] = point;
-          drag.points = next;
-          return { ...item, data:{ ...(item.data || {}), points:next } };
+          return { ...item, data:{ ...(item.data || {}), points:ergebnis.points } };
         }));
       });
     };
     const up = () => {
       const beendet = edgePointDrag.current;
       edgePointDrag.current = null;
+      setGriffMass(null);
       if (beendet?.edgeId) leitungNormalisieren(beendet.edgeId);
     };
     window.addEventListener('pointermove', move, { passive:true });
@@ -4211,7 +4278,7 @@ function EditorInner() {
       window.removeEventListener('pointerup', up);
       if (edgePointFrame.current) cancelAnimationFrame(edgePointFrame.current);
     };
-  }, [drawingConfig.grid_size, handlePosition, leitungNormalisieren, screenToFlowPosition, setEdges]);
+  }, [drawingConfig.grid_size, leitungNormalisieren, screenToFlowPosition, setEdges]);
 
   // ── Leitungsbeschriftung (DN / m') ──────────────────────────────────────
   // Sie gehört zur Leitung, steht im Plan aber oft im Weg. Darum: greifen und
@@ -4967,7 +5034,6 @@ function EditorInner() {
     const endpointNode = nodesRef.current.find(node => node.id === endpointNodeId);
     const incidentCount = edgesRef.current.filter(item => item.source === endpointNodeId || item.target === endpointNodeId).length;
     const point = side === 'source' ? route[0] : route.at(-1);
-    const otherPoint = side === 'source' ? route.at(-1) : route[0];
     const layer = layerVonEdge(edge);
     let anchorId = endpointNode?.type === 'junction' && endpointNode.data?.cad_anchor && incidentCount === 1
       ? endpointNode.id
@@ -4983,7 +5049,11 @@ function EditorInner() {
           : { ...item, target:anchorId, targetHandle:'center-target' };
       }));
     }
-    edgeEndpointDrag.current = { edgeId, side, anchorId, layerId:layer.id, role:layer.role, otherPoint };
+    edgeEndpointDrag.current = {
+      edgeId, side, anchorId, layerId:layer.id, role:layer.role,
+      route, basis:point,
+    };
+    setGriffMass(null);
     setSelectedEdgeId(edgeId);
     setSelected(null);
   }, [cadAnker, routePunkte, setEdges, setNodes, snap]);
@@ -5010,24 +5080,42 @@ function EditorInner() {
   useEffect(() => {
     const punktFuerEvent = (event, drag) => {
       const raw = screenToFlowPosition({ x:event.clientX, y:event.clientY });
-      return constrainPoint(drag.otherPoint, raw, {
-        ortho:orthoAnRef.current, shift:event.shiftKey, grid:drawingConfig.grid_size,
+      const ergebnis = endpunktWeiterziehen(drag.route, drag.side, raw, {
+        grid:drawingConfig.grid_size,
+        // Der 30°-Schwellwert ist hier die ausdrückliche Freigabe. Ein
+        // versehentlich gedrücktes Shift darf das Randsegment nicht verbiegen.
+        shift:false,
       });
+      return ergebnis ? { ...ergebnis, raw } : null;
     };
     const move = (event) => {
       const drag = edgeEndpointDrag.current;
       if (!drag) return;
-      const point = punktFuerEvent(event, drag);
+      const ergebnis = punktFuerEvent(event, drag);
+      if (!ergebnis) return;
+      const point = ergebnis.endpoint;
+      setGriffMass({
+        a:ergebnis.basis, b:point,
+        laenge:Math.hypot(point.x - ergebnis.basis.x, point.y - ergebnis.basis.y),
+        label:segmentMassLabel(ergebnis.basis, point),
+      });
       if (edgePointFrame.current) cancelAnimationFrame(edgePointFrame.current);
       edgePointFrame.current = requestAnimationFrame(() => {
         setNodes(items => items.map(node => node.id === drag.anchorId ? { ...node, position:point } : node));
+        setEdges(items => items.map(edge => edge.id === drag.edgeId
+          ? { ...edge, data:{ ...(edge.data || {}), cad_polyline:true, points:ergebnis.points } }
+          : edge));
       });
     };
     const up = (event) => {
       const drag = edgeEndpointDrag.current;
       if (!drag) return;
       edgeEndpointDrag.current = null;
-      const point = punktFuerEvent(event, drag);
+      setGriffMass(null);
+      const ergebnis = punktFuerEvent(event, drag);
+      if (!ergebnis) return;
+      let point = ergebnis.endpoint;
+      let finalPoints = ergebnis.points;
       const zoom = Math.max(getZoom(), 0.2);
       const portHit = naechsterBauteilAnschluss(point, drag.anchorId, drag.role, 28 / zoom);
       if (portHit) {
@@ -5039,18 +5127,24 @@ function EditorInner() {
           const nextEdge = drag.side === 'source'
             ? { ...edge, source:portHit.nodeId, sourceHandle:portHit.handleId }
             : { ...edge, target:portHit.nodeId, targetHandle:portHit.handleId };
-          return edge.data?.auto_paired
-            ? { ...nextEdge, data:{ ...(nextEdge.data || {}), auto_pair_open:otherNode?.type === 'junction' && otherDegree <= 1 } }
-            : nextEdge;
+          const data = { ...(nextEdge.data || {}), cad_polyline:true, points:finalPoints };
+          if (edge.data?.auto_paired) data.auto_pair_open = otherNode?.type === 'junction' && otherDegree <= 1;
+          return { ...nextEdge, data };
         }));
         setNodes(items => items.filter(node => node.id !== drag.anchorId));
         return;
       }
-      const lineHit = naechsteLeitung(point, drag.layerId, 22 / zoom, new Set([drag.edgeId]));
+      const rawLineHit = naechsteLeitung(point, drag.layerId, 22 / zoom, new Set([drag.edgeId]));
+      const lineHit = rawLineHit ? tStueckHit(drag.basis, ergebnis.raw, { ...rawLineHit, type:'line' }) : null;
       if (lineHit) {
+        const korrigiert = endpunktWeiterziehen(drag.route, drag.side, lineHit, { grid:1, shift:false });
+        if (korrigiert) {
+          point = korrigiert.endpoint;
+          finalPoints = korrigiert.points;
+        }
         const [first, second] = leitungTeilen(lineHit, drag.anchorId, drag.layerId);
         setNodes(items => items.map(node => node.id === drag.anchorId
-          ? { ...node, position:{ x:lineHit.x, y:lineHit.y } }
+          ? { ...node, position:point }
           : node));
         setEdges(items => {
           const draggedEdge = items.find(edge => edge.id === drag.edgeId);
@@ -5059,14 +5153,20 @@ function EditorInner() {
           const otherDegree = items.filter(edge => edge.source === otherNodeId || edge.target === otherNodeId).length;
           const base = items
             .filter(edge => edge.id !== lineHit.edge.id)
-            .map(edge => edge.id === drag.edgeId && edge.data?.auto_paired
-              ? { ...edge, data:{ ...(edge.data || {}), auto_pair_open:otherNode?.type === 'junction' && otherDegree <= 1 } }
-              : edge);
+            .map(edge => {
+              if (edge.id !== drag.edgeId) return edge;
+              const data = { ...(edge.data || {}), cad_polyline:true, points:finalPoints };
+              if (edge.data?.auto_paired) data.auto_pair_open = otherNode?.type === 'junction' && otherDegree <= 1;
+              return { ...edge, data };
+            });
           return [...base, first, second];
         });
         return;
       }
       setNodes(items => items.map(node => node.id === drag.anchorId ? { ...node, position:point } : node));
+      setEdges(items => items.map(edge => edge.id === drag.edgeId
+        ? { ...edge, data:{ ...(edge.data || {}), cad_polyline:true, points:finalPoints } }
+        : edge));
     };
     window.addEventListener('pointermove', move, { passive:true });
     window.addEventListener('pointerup', up);
@@ -5410,6 +5510,36 @@ function EditorInner() {
     });
     return degrees;
   }, [edges]);
+
+  // Beim Klick auf ein einzelnes Teilstück werden nur nahe Bauteile vermasst.
+  // 500 mm hält die Anzeige lokal; die drei nächsten Treffer vermeiden einen
+  // Zahlenwald in dichten Schemata. Gemessen wird zur echten, von React Flow
+  // ermittelten Bauteilbox und nicht zur Node-Position oben links.
+  const segmentAbstandsMasse = useMemo(() => {
+    void nodeGeometryVersion;
+    if (!selectedEdgeSegment) return [];
+    const edge = edges.find(item => item.id === selectedEdgeSegment.edgeId);
+    if (!edge) return [];
+    const route = routePunkte(edge);
+    const a = route[selectedEdgeSegment.segmentIndex];
+    const b = route[selectedEdgeSegment.segmentIndex + 1];
+    if (!a || !b) return [];
+    return nodes
+      .filter(node => !node.hidden && !['junction', 'label', 'concrete_area', 'interface_line'].includes(node.type))
+      .map(node => {
+        const internal = getInternalNode(node.id);
+        const position = internal?.internals?.positionAbsolute || node.position;
+        const width = internal?.measured?.width || Number(node.style?.width) || 0;
+        const height = internal?.measured?.height || Number(node.style?.height) || 0;
+        const mass = abstandSegmentZuRechteck(a, b, { x:position?.x, y:position?.y, width, height });
+        return mass && mass.distance > 1 && mass.distance <= 500
+          ? { ...mass, nodeId:node.id, label:massLabel(mass.distance) }
+          : null;
+      })
+      .filter(Boolean)
+      .sort((links, rechts) => links.distance - rechts.distance)
+      .slice(0, 3);
+  }, [edges, getInternalNode, nodeGeometryVersion, nodes, routePunkte, selectedEdgeSegment]);
 
   // Edges: VL durchgezogen, RL gestrichelt, V' als Label
   const displayEdges = useMemo(() => {
@@ -6810,6 +6940,11 @@ function EditorInner() {
                 )}
                 {/* Punkt 7 — temporäres Mass des laufenden Segments. */}
                 {cadMass && <CadMass mass={cadMass} zoom={zoomAnzeige} />}
+                {griffMass && <CadMass mass={griffMass} zoom={zoomAnzeige} />}
+                {segmentAbstandsMasse.map(mass => (
+                  <CadDirektMass key={`${selectedEdgeSegment?.edgeId}-${selectedEdgeSegment?.segmentIndex}-${mass.nodeId}`}
+                    mass={mass} zoom={zoomAnzeige} />
+                ))}
                 {/* Punkt 6 — getippte Länge direkt am Segmentende. Bewusst im
                     Viewport und nicht am Bildschirmrand: beim Zeichnen schaut
                     niemand nach unten in eine Leiste. */}

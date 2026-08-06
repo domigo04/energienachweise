@@ -412,6 +412,18 @@ def test_gespiegeltes_bauteil_wird_gespiegelt_exportiert():
     assert handle_pos(gedreht, "top") == (cx - (py - cy), cy + (px - cx))
 
 
+def test_gespiegeltes_bauteil_spiegelt_seinen_text_nicht():
+    heizkoerper = {
+        "id": "hk", "type": "heizkoerper", "position": {"x": 100, "y": 40},
+        "style": {"width": 160, "height": 64},
+        "data": {"mirrored": True, "label": "Radiator Ost"},
+    }
+    svg = erzeuge_svg([heizkoerper], [], {})
+    assert 'scale(-1,1)' in svg  # Bauteilgeometrie bleibt gespiegelt.
+    assert 'transform="translate(360,0) scale(-1,1)" x="180.0"' in svg
+    assert "Radiator Ost" in svg
+
+
 # ── Legende + Berechnungen ──────────────────────────────────────────────────
 def test_legende(daten):
     nodes, edges, results = daten

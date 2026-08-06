@@ -728,7 +728,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         <PT>Verbrauchergruppe</PT>
         {fld('Bezeichnung','label','z.B. Gruppe 1 — FBH EG','','text')}
         <label style={lbl}>Typ (Wärmeabgabe)</label>
-        <select style={{...inp,cursor:'pointer'}} value={d.typ||''} onChange={e=>{
+        <select style={sel} value={d.typ||''} onChange={e=>{
           const s=WAERMEABGABE.find(x=>x.label===e.target.value);
           set('typ',e.target.value); if(s){set('vl_temp',s.vl);set('rl_temp',s.rl);}
         }}>
@@ -737,9 +737,9 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         </select>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:5,marginTop:6}}>
           <div><label style={{...lbl,color:'#ef4444'}}>VL [°C]</label>
-            <input type="number" style={{...inp,borderColor:'#fca5a5'}} value={d.vl_temp??''} onChange={e=>set('vl_temp',e.target.value)} placeholder="35"/></div>
+            <input type="number" style={inpVl} value={d.vl_temp??''} onChange={e=>set('vl_temp',e.target.value)} placeholder="35"/></div>
           <div><label style={{...lbl,color:'#3b82f6'}}>RL [°C]</label>
-            <input type="number" style={{...inp,borderColor:'#93c5fd'}} value={d.rl_temp??''} onChange={e=>set('rl_temp',e.target.value)} placeholder="28"/></div>
+            <input type="number" style={inpRl} value={d.rl_temp??''} onChange={e=>set('rl_temp',e.target.value)} placeholder="28"/></div>
         </div>
         {gr?.q_kw_quelle === 'lufterhitzer_untergruppen' ? (
           <>
@@ -753,7 +753,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         {fld('Druckverlust Ast','dp_kpa','z.B. 20','kPa')}
         {vl>0&&rl>0&&dt<=0&&<div style={warnSt}>⚠ VL muss grösser als RL sein</div>}
         <label style={lbl}>Schaltung</label>
-        <select style={{...inp,cursor:'pointer'}} value={schaltungVon(d)} onChange={e=>set('schaltung',e.target.value)}>
+        <select style={sel} value={schaltungVon(d)} onChange={e=>set('schaltung',e.target.value)}>
           {SCHALTUNGSARTEN.map(s=><option key={s.wert} value={s.wert}>{s.name}</option>)}
         </select>
         <div style={{ fontSize:9, color:'#94a3b8', marginTop:2 }}>
@@ -785,11 +785,11 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
                 <b>Einspritzung aktiv</b> — Bypass {Number(gr.m_bypass).toFixed(3)} m³/h · ΔT prim {gr.dt_prim} K
               </div>
             ) : (
-              <div style={{ fontSize:9, color:'#94a3b8', marginTop:4 }}>Keine Einspritzung — primär = sekundär.</div>
+              <div style={miniSt}>Keine Einspritzung — primär = sekundär.</div>
             )}
             {gr.pumpe?.dp_kpa != null && ro('Pumpe Förderhöhe', `${gr.pumpe.dp_kpa.toFixed(1)} kPa = ${gr.pumpe.mws.toFixed(2)} mWS`, '')}
             {gr.ventil?.pv != null && ro('Ventil kvs / Autorität', `${gr.ventil.kvs_eff} / ${gr.ventil.pv.toFixed(1)} %`, '')}
-            <div style={{ fontSize:9, color:'#94a3b8', marginTop:4 }}>Pumpe + Ventil auslegen: <b>Doppelklick</b> auf den Strang.</div>
+            <div style={miniSt}>Pumpe + Ventil auslegen: <b>Doppelklick</b> auf den Strang.</div>
           </>
         ) : (
           <div style={warnSt}>Q, VL und RL eingeben — das Backend rechnet automatisch.</div>
@@ -810,7 +810,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         {fld('Leistung Q','q_kw','z.B. 12','kW')}
         {fld('Druckverlust geregelter Ast ohne Regelventil','dp_kpa','z.B. 20','kPa')}
         <label style={lbl}>Schaltung</label>
-        <select style={{...inp,cursor:'pointer'}} value={schaltung} onChange={e=>set('schaltung',e.target.value)}>
+        <select style={sel} value={schaltung} onChange={e=>set('schaltung',e.target.value)}>
           {SCHALTUNGSARTEN.map(s=><option key={s.wert} value={s.wert}>{s.name}</option>)}
         </select>
         <div style={{ fontSize:9, color:'#94a3b8', marginTop:2 }}>
@@ -825,7 +825,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         {gr?.pumpe?.dp_kpa != null && ro('Pumpe Förderhöhe', `${gr.pumpe.dp_kpa.toFixed(1)} kPa = ${gr.pumpe.mws.toFixed(2)} mWS`, '')}
         {gr?.ventil?.pv != null && ro('Ventil kvs / Autorität', `${gr.ventil.kvs_eff} / ${gr.ventil.pv.toFixed(1)} %`, '')}
         {!gr?.m_sek && <div style={warnSt}>Hauptgruppe verbinden und Leistung eingeben.</div>}
-        <div style={{ fontSize:9, color:'#94a3b8', marginTop:4 }}>Detaillierte Auslegung: <b>Doppelklick</b> auf die Gruppe.</div>
+        <div style={miniSt}>Detaillierte Auslegung: <b>Doppelklick</b> auf die Gruppe.</div>
         <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
     );
@@ -840,7 +840,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         <PT>Heizkreis</PT>
         {fld('Bezeichnung','label','z.B. OG Büro','','text')}
         <label style={lbl}>Wärmeabgabesystem</label>
-        <select style={{...inp,cursor:'pointer'}} value={d.system||''} onChange={e=>{
+        <select style={sel} value={d.system||''} onChange={e=>{
           const s=WAERMEABGABE.find(x=>x.label===e.target.value);
           set('system',e.target.value); if(s){set('vl_temp',s.vl);set('rl_temp',s.rl);}
         }}>
@@ -849,9 +849,9 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         </select>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:5,marginTop:6}}>
           <div><label style={{...lbl,color:'#ef4444'}}>VL [°C]</label>
-            <input type="number" style={{...inp,borderColor:'#fca5a5'}} value={d.vl_temp??''} onChange={e=>set('vl_temp',e.target.value)} placeholder="35"/></div>
+            <input type="number" style={inpVl} value={d.vl_temp??''} onChange={e=>set('vl_temp',e.target.value)} placeholder="35"/></div>
           <div><label style={{...lbl,color:'#3b82f6'}}>RL [°C]</label>
-            <input type="number" style={{...inp,borderColor:'#93c5fd'}} value={d.rl_temp??''} onChange={e=>set('rl_temp',e.target.value)} placeholder="28"/></div>
+            <input type="number" style={inpRl} value={d.rl_temp??''} onChange={e=>set('rl_temp',e.target.value)} placeholder="28"/></div>
         </div>
         {fld('Leistung Q','q_kw','z.B. 8.5','kW')}
         {vl>0&&rl>0&&dt<=0&&<div style={warnSt}>⚠ VL muss grösser als RL sein</div>}
@@ -873,7 +873,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         <Typenschild d={d} set={set}/>
         {node.type === 'valve3' && <>
           <label style={lbl}>Funktion</label>
-          <select style={{...inp,cursor:'pointer'}} value={d.funktion||'mischend'}
+          <select style={sel} value={d.funktion||'mischend'}
             onChange={e=>set('funktion',e.target.value)}>
             <option value="mischend">Mischend — regelt eine Temperatur</option>
             <option value="umschaltend">Umschaltend — zwei Stellungen (BWW-Vorrang)</option>
@@ -895,11 +895,11 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
           {ver?.kvs_theor != null ? <>
             {ro('KVS theoretisch', ver.kvs_theor, 'm³/h·bar½')}
             <label style={lbl}>KVS gewählt (Norm-Reihe)</label>
-            <select style={{...inp,cursor:'pointer'}} value={d.kvs_eff||ver.kvs_vorschlag||''} onChange={e=>set('kvs_eff',e.target.value)}>
+            <select style={sel} value={d.kvs_eff||ver.kvs_vorschlag||''} onChange={e=>set('kvs_eff',e.target.value)}>
               {KVS_REIHE.map(k=><option key={k} value={k}>{k}{k===ver.kvs_vorschlag?' ← Vorschlag':''}</option>)}
             </select>
             <PvBox pv={ver.pv} v={ver.v} kvs_eff={ver.kvs_eff}/>
-          </> : <div style={{ fontSize:9, color:'#94a3b8', marginTop:4 }}>Δpvar eingeben — das Backend rechnet kvs + Autorität.</div>}
+          </> : <div style={miniSt}>Δpvar eingeben — das Backend rechnet kvs + Autorität.</div>}
         </>}
         <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
@@ -994,7 +994,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
           </>
         )}
         {xr?.fehler && <div style={{ ...warnSt, background:'#fef2f2', border:'1px solid #fca5a5', color:'#b91c1c' }}>⚠ {xr.fehler}</div>}
-        {!xr && <div style={{ fontSize:9, color:'#94a3b8', marginTop:4 }}>Alle vier Werte eingeben — das Backend rechnet nach EN 12828 (PHYSIK §8).</div>}
+        {!xr && <div style={miniSt}>Alle vier Werte eingeben — das Backend rechnet nach EN 12828 (PHYSIK §8).</div>}
         <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
     );
@@ -1161,7 +1161,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         <PT>Erdsondenfeld</PT>
         {fld('Bezeichnung','label','Erdsondenfeld','','text')}
         <label style={lbl}>Anzahl Duplexsonden</label>
-        <select style={{...inp,cursor:'pointer'}} value={anzahl}
+        <select style={sel} value={anzahl}
           onChange={e=>onUpdate(node.id, 'sonden_anzahl', parseInt(e.target.value))}>
           {Array.from({ length:24 }, (_, i) => i + 1).map(k=><option key={k} value={k}>{k}</option>)}
         </select>
@@ -1196,7 +1196,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         <PT>Verteiler</PT>
         {fld('Bezeichnung','label','','','text')}
         <label style={lbl}>Anzahl Abgänge</label>
-        <select style={{...inp,cursor:'pointer'}} value={parseInt(d.abgaenge)||4} onChange={e=>onSetAbgaenge(node.id, parseInt(e.target.value))}>
+        <select style={sel} value={parseInt(d.abgaenge)||4} onChange={e=>onSetAbgaenge(node.id, parseInt(e.target.value))}>
           {[2,3,4,5,6,7,8].map(k=><option key={k} value={k}>{k}</option>)}
         </select>
         {fld('Abstand VL–RL Balken','hoehe','700 (Standard für neue Verteiler)','px')}
@@ -1262,7 +1262,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         <label style={lbl}>Buchstabe</label>
         <input maxLength={1} style={{...inp, textTransform:'uppercase', fontWeight:700}} value={d.buchstabe||''}
           onChange={e=>set('buchstabe', e.target.value.slice(0,1).toUpperCase())}/>
-        <div style={{ fontSize:9, color:'#94a3b8', marginTop:4 }}>
+        <div style={miniSt}>
           Ein zweiter Marker mit demselben Buchstaben wird virtuell verbunden — Fluss und Temperatur werden durchgereicht.
         </div>
         {eigeneWarnung
@@ -1350,7 +1350,7 @@ const TITLES = {
 function BigVal({ label, value, unit = '', sub = '', color = '#1d4ed8' }) {
   return (
     <div style={{ background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:8, padding:'12px 14px' }}>
-      <div style={{ fontSize:11, color:'#64748b' }}>{label}</div>
+      <div style={hinweisSt}>{label}</div>
       <div style={{ fontSize:22, fontWeight:700, color, fontFamily:'monospace' }}>
         {value != null && value !== '' ? `${value}${unit ? ' ' + unit : ''}` : '—'}
       </div>
@@ -1403,7 +1403,7 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
     const aktTab = tabs.some(([k]) => k === tab) ? tab : 'gruppe';
     const ventilTitel = schaltung === 'beimisch' ? 'Beimischventil (3-Weg)' : schaltung === 'drossel' ? 'Drosselventil (2-Weg)' : 'Einspritzventil (2-Weg)';
     body = (
-      <div style={{ display:'grid', gap:12 }}>
+      <div style={stapel}>
         <div style={{ display:'flex', gap:2, borderBottom:'2px solid #f1f5f9' }}>
           {tabs.map(([k,t]) => (
             <button key={k} onClick={()=>setTab(k)}
@@ -1418,26 +1418,26 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
         {aktTab === 'gruppe' && (
           <>
             <div><label style={lbl}>Schaltung</label>
-              <select style={{...inp,cursor:'pointer'}} value={schaltung} onChange={e=>set('schaltung',e.target.value)}>
+              <select style={sel} value={schaltung} onChange={e=>set('schaltung',e.target.value)}>
                 {SCHALTUNGSARTEN.map(s=><option key={s.wert} value={s.wert}>{s.name}</option>)}
               </select>
               <div style={{ fontSize:10, color:'#94a3b8', marginTop:3 }}>{SCHALTUNGSARTEN.find(s=>s.wert===schaltung)?.hinweis}</div></div>
             <div><label style={lbl}>Typ (Wärmeabgabe)</label>
-              <select style={{...inp,cursor:'pointer'}} value={d.typ||''} onChange={e=>{
+              <select style={sel} value={d.typ||''} onChange={e=>{
                 const s=WAERMEABGABE.find(x=>x.label===e.target.value);
                 set('typ',e.target.value); if(s){set('vl_temp',s.vl);set('rl_temp',s.rl);}
               }}>
                 <option value="">— wählen —</option>
                 {WAERMEABGABE.map(x=><option key={x.label}>{x.label}</option>)}
               </select></div>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
-              <div><label style={lbl}>VL [°C]</label><input type="number" style={{...inp,borderColor:'#fca5a5'}} value={d.vl_temp??''} onChange={e=>set('vl_temp',e.target.value)} placeholder="35"/></div>
-              <div><label style={lbl}>RL [°C]</label><input type="number" style={{...inp,borderColor:'#93c5fd'}} value={d.rl_temp??''} onChange={e=>set('rl_temp',e.target.value)} placeholder="28"/></div>
+            <div style={gitter3eng}>
+              <div><label style={lbl}>VL [°C]</label><input type="number" style={inpVl} value={d.vl_temp??''} onChange={e=>set('vl_temp',e.target.value)} placeholder="35"/></div>
+              <div><label style={lbl}>RL [°C]</label><input type="number" style={inpRl} value={d.rl_temp??''} onChange={e=>set('rl_temp',e.target.value)} placeholder="28"/></div>
               <div><label style={lbl}>Q [kW]</label><input type="number" style={inp} value={d.q_kw??''} onChange={e=>set('q_kw',e.target.value)} placeholder="8.5"/></div>
             </div>
             <div><label style={lbl}>Druckverlust Ast [kPa] — für den ungünstigsten Ast am Verteiler</label>
               <input type="number" style={inp} value={d.dp_kpa??''} onChange={e=>set('dp_kpa',e.target.value)} placeholder="20"/></div>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+            <div style={gitter2}>
               <BigVal label="V' sekundär (Gruppenseite)" value={gr?.m_sek!=null?Number(gr.m_sek).toFixed(3):null} unit="m³/h" color="#15803d"
                 sub={gr?.dt_sek!=null?`ΔT sek = ${gr.dt_sek} K`:''}/>
               <BigVal label="V' primär (Verteilerseite)" value={gr?.m_prim!=null?Number(gr.m_prim).toFixed(3):null} unit="m³/h" color="#1d4ed8"
@@ -1461,7 +1461,7 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
           <>
             <div style={{ fontSize:12, fontWeight:700, color:'#1e293b' }}>{d.label ? `${d.label} — ` : ''}Pumpe (Sekundärkreis, V' = {gr?.m_sek!=null?Number(gr.m_sek).toFixed(3):'—'} m³/h)</div>
             <Typenschild d={d} set={set} praefix="pumpe_"/>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
+            <div style={gitter3eng}>
               <div><label style={lbl}>Rohr VL+RL [m]</label><input type="number" style={inp} value={d.pumpe_rohr_m??''} onChange={e=>set('pumpe_rohr_m',e.target.value)} placeholder="40"/></div>
               <div><label style={lbl}>Auf [Pa/m]</label><input type="number" style={inp} value={d.pumpe_pam??''} onChange={e=>set('pumpe_pam',e.target.value)} placeholder="70"/></div>
               <div><label style={lbl}>Apparate [kPa]</label><input type="number" style={inp} value={d.pumpe_apparate_kpa??''} onChange={e=>set('pumpe_apparate_kpa',e.target.value)} placeholder="15"/></div>
@@ -1480,12 +1480,12 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
               <input type="number" style={inp} value={d.dp_kpa??''} onChange={e=>set('dp_kpa',e.target.value)} placeholder="20"/></div>
             {gr?.ventil ? (
               <>
-                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+                <div style={gitter2}>
                   <BigVal label="kvs theoretisch" value={Number(gr.ventil.kvs_theor).toFixed(3)} color="#1e293b"/>
                   <BigVal label="kvs Vorschlag" value={gr.ventil.kvs_vorschlag} color="#1d4ed8" sub="nächstgrösser, Norm-Reihe"/>
                 </div>
                 <div><label style={lbl}>kvs gewählt</label>
-                  <select style={{...inp,cursor:'pointer'}} value={d.ventil_kvs_eff||gr.ventil.kvs_vorschlag||''} onChange={e=>set('ventil_kvs_eff',e.target.value)}>
+                  <select style={sel} value={d.ventil_kvs_eff||gr.ventil.kvs_vorschlag||''} onChange={e=>set('ventil_kvs_eff',e.target.value)}>
                     {KVS_REIHE.map(k=><option key={k} value={k}>{k}{k===gr.ventil.kvs_vorschlag?'  ← Vorschlag':''}</option>)}
                   </select></div>
                 <PvBox pv={gr.ventil.pv} v={gr.ventil.v} kvs_eff={gr.ventil.kvs_eff}/>
@@ -1501,14 +1501,14 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
     // Untergruppe am Anschlussmarker: VL/RL kommen von der Hauptgruppe, nur
     // Leistung und Druckverlust werden hier eingegeben (Dominic 2026-08-05).
     body = (
-      <div style={{ display:'grid', gap:12 }}>
+      <div style={stapel}>
         <div><label style={lbl}>Schaltung</label>
-          <select style={{...inp,cursor:'pointer'}} value={lufterhitzerSchaltungVon(d)} onChange={e=>set('schaltung',e.target.value)}>
+          <select style={sel} value={lufterhitzerSchaltungVon(d)} onChange={e=>set('schaltung',e.target.value)}>
             {SCHALTUNGSARTEN.map(s=><option key={s.wert} value={s.wert}>{s.name}</option>)}
           </select></div>
         <div><label style={lbl}>Anlagennummer / Bezeichnung</label>
           <input type="text" style={inp} value={d.anlage_nr??''} onChange={e=>set('anlage_nr',e.target.value)} placeholder="z.B. LE 3 — Halle Nord"/></div>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+        <div style={gitter2eng}>
           <div><label style={lbl}>Leistung Q [kW]</label>
             <input type="number" style={inp} value={d.q_kw??''} onChange={e=>set('q_kw',e.target.value)} placeholder="12"/></div>
           <div><label style={lbl}>Druckverlust geregelter Ast ohne Regelventil [kPa]</label>
@@ -1521,7 +1521,7 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
             </div>
           : <div style={warnSt}>Noch keine Hauptgruppe verbunden. Anschlussmarker setzen und mit der Lufterhitzer-Verbrauchergruppe koppeln — dann kommen VL/RL von dort.</div>}
 
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+        <div style={gitter2}>
           <BigVal label="V' Lufterhitzer" value={gr?.m_sek!=null?Number(gr.m_sek).toFixed(3):null} unit="m³/h" color="#15803d"
             sub={gr?.dt_sek!=null?`ΔT = ${gr.dt_sek} K`:''}/>
           <BigVal label="Ventil kvs" value={gr?.ventil?.kvs_eff??null} unit=""
@@ -1546,12 +1546,12 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
     );
   } else if (node.type === 'verteiler') {
     body = vr ? (
-      <div style={{ display:'grid', gap:12 }}>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+      <div style={stapel}>
+        <div style={gitter2}>
           <BigVal label="VL Verteiler" value={vr.vl_vt!=null?vr.vl_vt.toFixed(1):null} unit="°C" color="#dc2626" sub="höchste Gruppen-VL (PHYSIK §4)"/>
           <BigVal label="RL Misch" value={vr.rl_misch!=null?vr.rl_misch.toFixed(1):null} unit="°C" color="#2563eb" sub="mengengewichtet über Primär-Flüsse"/>
         </div>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+        <div style={gitter2}>
           <BigVal label="Σ Leistung" value={vr.q_total!=null?vr.q_total.toFixed(2):null} unit="kW" color="#15803d"/>
           <BigVal label="Σ V' primär" value={vr.m_prim_total!=null?vr.m_prim_total.toFixed(4):null} unit="m³/h" color="#15803d"/>
         </div>
@@ -1566,12 +1566,12 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
     const vl=parseFloat(d.vl_temp), rl=parseFloat(d.rl_temp);
     const dt=vl-rl, calc = v ?? null; // V' kommt vom Backend
     body = (
-      <div style={{ display:'grid', gap:12 }}>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+      <div style={stapel}>
+        <div style={gitter2}>
           <div><label style={lbl}>Vorlauf [°C]</label>
-            <input type="number" style={{...inp,borderColor:'#fca5a5'}} value={d.vl_temp??''} onChange={e=>set('vl_temp',e.target.value)} placeholder="35"/></div>
+            <input type="number" style={inpVl} value={d.vl_temp??''} onChange={e=>set('vl_temp',e.target.value)} placeholder="35"/></div>
           <div><label style={lbl}>Rücklauf [°C]</label>
-            <input type="number" style={{...inp,borderColor:'#93c5fd'}} value={d.rl_temp??''} onChange={e=>set('rl_temp',e.target.value)} placeholder="28"/></div>
+            <input type="number" style={inpRl} value={d.rl_temp??''} onChange={e=>set('rl_temp',e.target.value)} placeholder="28"/></div>
         </div>
         <div><label style={lbl}>Leistung Q [kW]</label>
           <input type="number" style={inp} value={d.q_kw??''} onChange={e=>set('q_kw',e.target.value)} placeholder="8.5"/></div>
@@ -1582,9 +1582,9 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
   } else if (node.type === 'valve2' || node.type === 'valve3') {
     const umschaltend = node.type === 'valve3' && (d.funktion || 'mischend') === 'umschaltend';
     body = umschaltend ? (
-      <div style={{ display:'grid', gap:12 }}>
+      <div style={stapel}>
         <div><label style={lbl}>Funktion</label>
-          <select style={{...inp,cursor:'pointer'}} value={d.funktion||'mischend'} onChange={e=>set('funktion',e.target.value)}>
+          <select style={sel} value={d.funktion||'mischend'} onChange={e=>set('funktion',e.target.value)}>
             <option value="mischend">Mischend — regelt eine Temperatur</option>
             <option value="umschaltend">Umschaltend — zwei Stellungen (BWW-Vorrang)</option>
           </select></div>
@@ -1597,10 +1597,10 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
         </div>
       </div>
     ) : (
-      <div style={{ display:'grid', gap:12 }}>
+      <div style={stapel}>
         {node.type === 'valve3' && (
           <div><label style={lbl}>Funktion</label>
-            <select style={{...inp,cursor:'pointer'}} value={d.funktion||'mischend'} onChange={e=>set('funktion',e.target.value)}>
+            <select style={sel} value={d.funktion||'mischend'} onChange={e=>set('funktion',e.target.value)}>
               <option value="mischend">Mischend — regelt eine Temperatur</option>
               <option value="umschaltend">Umschaltend — zwei Stellungen (BWW-Vorrang)</option>
             </select></div>
@@ -1610,12 +1610,12 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
         <div><label style={lbl}>Δpvar — Druckabfall variabler Anlagenteil [kPa]</label>
           <input type="number" style={inp} value={d.dp_var??''} onChange={e=>set('dp_var',e.target.value)} placeholder="26"/></div>
         {ver?.kvs_theor != null ? <>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+          <div style={gitter2}>
             <BigVal label="kvs theoretisch" value={Number(ver.kvs_theor).toFixed(3)} color="#1e293b"/>
             <BigVal label="kvs Vorschlag" value={ver.kvs_vorschlag} color="#1d4ed8" sub="nächstgrösser, Norm-Reihe"/>
           </div>
           <div><label style={lbl}>kvs gewählt</label>
-            <select style={{...inp,cursor:'pointer'}} value={d.kvs_eff||ver.kvs_vorschlag||''} onChange={e=>set('kvs_eff',e.target.value)}>
+            <select style={sel} value={d.kvs_eff||ver.kvs_vorschlag||''} onChange={e=>set('kvs_eff',e.target.value)}>
               {KVS_REIHE.map(k=><option key={k} value={k}>{k}{k===ver.kvs_vorschlag?'  ← Vorschlag':''}</option>)}
             </select></div>
           <PvBox pv={ver.pv} v={ver.v} kvs_eff={ver.kvs_eff}/>
@@ -1624,8 +1624,8 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
     );
   } else if (node.type === 'pump') {
     body = pr?.ist_solepumpe ? (
-      <div style={{ display:'grid', gap:12 }}>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+      <div style={stapel}>
+        <div style={gitter2}>
           <BigVal label="Fördervolumen" value={pr.v!=null?pr.v.toFixed(3):null} unit="m³/h" color="#15803d"
             sub="aus dem Solevolumenstrom der Wärmepumpe"/>
           <BigVal label="Förderhöhe" value={pr.foerderhoehe_mws!=null?pr.foerderhoehe_mws.toFixed(2):null} unit="mWs" color="#7c3aed"
@@ -1635,7 +1635,7 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
           Zusammensetzung: Leitungen <b>{pr.dp_leitungen_mws ?? '—'}</b> + Verteiler <b>{pr.dp_verteiler_mws ?? '—'}</b>
           {' '}+ Wärmepumpe <b>{pr.dp_wp_mws ?? '—'}</b> mWs.
         </div>
-        <div style={{ fontSize:11, color:'#64748b' }}>
+        <div style={hinweisSt}>
           Beides kommt aus dem Erdsondenfeld im Quellenkreis; dort sind Rohre, Längen und
           Wärmeträger hinterlegt. Mit Fördervolumen und Förderhöhe lässt sich die Umwälzpumpe
           direkt im Fabrikatskatalog auswählen.
@@ -1643,10 +1643,10 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
         {pr.warnings?.map((w,i)=><div key={i} style={warnSt}>⚠ {w}</div>)}
       </div>
     ) : (
-      <div style={{ display:'grid', gap:12 }}>
+      <div style={stapel}>
         <BigVal label="Förder-Volumenstrom V' (aus der Leitung)" value={v?v.toFixed(4):null} unit="m³/h" color="#15803d"/>
         <div style={{ fontSize:11, fontWeight:700, color:'#1e293b' }}>Δp gemeinsamer Teil (Rohr + Apparate)</div>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
+        <div style={gitter3eng}>
           <div><label style={lbl}>Rohr VL+RL [m]</label><input type="number" style={inp} value={d.rohr_m??''} onChange={e=>set('rohr_m',e.target.value)} placeholder="60"/></div>
           <div><label style={lbl}>Auf [Pa/m]</label><input type="number" style={inp} value={d.pam??''} onChange={e=>set('pam',e.target.value)} placeholder="70"/></div>
           <div><label style={lbl}>Apparate [kPa]</label><input type="number" style={inp} value={d.apparate_kpa??''} onChange={e=>set('apparate_kpa',e.target.value)} placeholder="10"/></div>
@@ -1659,10 +1659,10 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
     );
   } else if (node.type === 'waermezaehler') {
     body = (
-      <div style={{ display:'grid', gap:12 }}>
+      <div style={stapel}>
         <BigVal label="Durchfluss (aus der Leitung übernommen)" value={v?v.toFixed(4):null} unit="m³/h" color="#0f766e"
           sub="Der Wärmezähler übernimmt automatisch den Durchfluss der Leitung, in der er sitzt."/>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+        <div style={gitter2eng}>
           <div><label style={lbl}>Typ</label><input style={inp} value={d.typ??''} onChange={e=>set('typ',e.target.value)} placeholder="z.B. Ultraschall"/></div>
           <div><label style={lbl}>Fabrikat</label><input style={inp} value={d.fabrikat??''} onChange={e=>set('fabrikat',e.target.value)} placeholder=""/></div>
         </div>
@@ -1671,7 +1671,7 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
   } else if (node.type === 'expansion') {
     const ews = d.medium === 'ews';
     body = (
-      <div style={{ display:'grid', gap:12 }}>
+      <div style={stapel}>
         {/* Rohrinhalt-Tabelle (l/m aus Dominics Excel) → Vsys automatisch */}
         <div>
           <label style={lbl}>Rohrinhalt — Meter pro Dimension (l/m aus deinem Excel)</label>
@@ -1707,11 +1707,11 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
           </div>
         </div>
         {xr?.vsys_l!=null && <div style={{ fontSize:12, color:'#0c4a6e', background:'#f0f9ff', border:'1px solid #bae6fd', borderRadius:6, padding:'6px 8px' }}>Vsys = <b>{xr.vsys_l} l</b>{d.anlageinhalt_l?' (bekannt, überschreibt Tabelle)':' (aus Rohrinhalt-Tabelle)'}</div>}
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+        <div style={gitter2eng}>
           <div><label style={lbl}>Vsys bekannt? (überschreibt Tabelle) [l]</label><input type="number" style={inp} value={d.anlageinhalt_l??''} onChange={e=>set('anlageinhalt_l',e.target.value)} placeholder="optional"/></div>
           <div><label style={lbl}>Speicherinhalt Vsto [l]</label><input type="number" style={inp} value={d.speicher_l??''} onChange={e=>set('speicher_l',e.target.value)} placeholder="optional"/></div>
           <div><label style={lbl}>Medium</label>
-            <select style={{...inp,cursor:'pointer'}} value={d.medium||'heizungswasser'} onChange={e=>set('medium',e.target.value)}>
+            <select style={sel} value={d.medium||'heizungswasser'} onChange={e=>set('medium',e.target.value)}>
               <option value="heizungswasser">Heizungswasser</option>
               <option value="frostschutz30">Frostschutz 30 %</option>
               <option value="frostschutz40">Frostschutz 40 %</option>
@@ -1725,11 +1725,11 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
         {parseFloat(d.hoehe_m) > 12 && <div style={warnSt}>⚠ Über 12 m Höhe: Expansionsgefäss mit Kompressor nötig (noch nicht als eigene Auslegung hinterlegt).</div>}
         {xr && !xr.fehler ? (
           <>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+            <div style={gitter2}>
               <BigVal label="Nennvolumen VN,min" value={xr.vn_l.toFixed(1)} unit="l" color="#15803d"/>
               <BigVal label="Vorschlag Norm-Grösse" value={xr.vorschlag_l} unit="l" color="#1d4ed8" sub="nächstgrösser"/>
             </div>
-            <div style={{ fontSize:11, color:'#64748b' }}>
+            <div style={hinweisSt}>
               e = {xr.e} · X = {xr.x} → Vex,tot = {xr.vex_tot_l} l · Vordruck p0 = {xr.p0_bar} bar · Enddruck pfin = {xr.pfin_bar} bar (Dominics Excel-Methode, PHYSIK §8)
             </div>
           </>
@@ -1747,7 +1747,7 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
       <div style={{ display:'grid', gap:10 }}>
         <ErzeugerTypFelder data={d} onSet={set}/>
         <div><label style={lbl}>Fabrikat / Typ (frei)</label><input style={inp} value={d.typ??''} onChange={e=>set('typ',e.target.value)} placeholder="optional"/></div>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
+        <div style={gitter3eng}>
           <div><label style={lbl}>Leistung [kW]</label><input type="number" style={inp} value={d.leistung_kw??''} onChange={e=>set('leistung_kw',e.target.value)}/></div>
           <div><label style={lbl}>VL [°C]</label><input type="number" style={inp} value={d.vl_temp??''} onChange={e=>set('vl_temp',e.target.value)}/></div>
           <div><label style={lbl}>RL [°C]</label><input type="number" style={inp} value={d.rl_temp??''} onChange={e=>set('rl_temp',e.target.value)}/></div>
@@ -1755,11 +1755,11 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
         {/* Quellenseite — nur bei Wärmepumpen. Q_source = Q_heat − P_el; ohne
             COP/P_el bleibt sie leer statt der Heizleistung gleichgesetzt. */}
         {wp && <>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+          <div style={gitter2eng}>
             <div><label style={lbl}>COP</label><input type="number" style={inp} value={d.cop??''} onChange={e=>set('cop',e.target.value)} placeholder="z.B. 4.0"/></div>
             <div><label style={lbl}>P_el [kW]</label><input type="number" style={inp} value={d.p_el_kw??''} onChange={e=>set('p_el_kw',e.target.value)} placeholder="hat Vorrang"/></div>
           </div>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+          <div style={gitter2eng}>
             <div><label style={lbl}>BWW-Leistung am Betriebspunkt [kW]</label><input type="number" min="0" style={inp} value={d.bww_leistung_kw??''} onChange={e=>set('bww_leistung_kw',e.target.value)} placeholder="leer = Nennleistung"/></div>
             <div style={{ fontSize:10, color:'#64748b', alignSelf:'end', paddingBottom:6 }}>
               Wird beim BWW-Speicher gegen die erforderliche Anschlussleistung geprüft.
@@ -1767,7 +1767,7 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
           </div>
         </>}
         {quelleMitMedium && <>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
+          <div style={gitter3eng}>
             <div><label style={lbl}>Sole-VL [°C]</label><input type="number" style={inp} value={d.sole_vl??''} onChange={e=>set('sole_vl',e.target.value)}/></div>
             <div><label style={lbl}>Sole-RL [°C]</label><input type="number" style={inp} value={d.sole_rl??''} onChange={e=>set('sole_rl',e.target.value)}/></div>
             <div><label style={lbl}>c·ρ Sole</label><input type="number" style={inp} value={d.sole_ce??''} onChange={e=>set('sole_ce',e.target.value)} placeholder="1.163"/></div>
@@ -1781,20 +1781,20 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
       <div style={{ display:'grid', gap:10 }}>
         <div><label style={lbl}>Gewählter Speicherinhalt [L]</label>
           <input type="number" min="0" style={inp} value={d.speicher_liter??''} onChange={e=>set('speicher_liter',e.target.value)} placeholder="z.B. 800"/></div>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+        <div style={gitter2}>
           <div><label style={lbl}>Überbrückungszeit [min]</label><input type="number" min="1" style={inp} value={d.ueberbrueckung_min??15} onChange={e=>set('ueberbrueckung_min',e.target.value)}/></div>
           <div><label style={lbl}>Überdeckung [K]</label><input type="number" min="0" style={inp} value={d.speicher_ueberdeckung_k??2} onChange={e=>set('speicher_ueberdeckung_k',e.target.value)}/></div>
           <div><label style={lbl}>Leistung manuell [kW]</label><input type="number" min="0" style={inp} value={d.auslegung_leistung_kw??''} onChange={e=>set('auslegung_leistung_kw',e.target.value)} placeholder="leer = automatisch"/></div>
           <div><label style={lbl}>Max. VL manuell [°C]</label><input type="number" style={inp} value={d.auslegung_vorlauf_c??''} onChange={e=>set('auslegung_vorlauf_c',e.target.value)} placeholder="leer = automatisch"/></div>
           <div><label style={lbl}>RL manuell [°C]</label><input type="number" style={inp} value={d.auslegung_ruecklauf_c??''} onChange={e=>set('auslegung_ruecklauf_c',e.target.value)} placeholder="leer = automatisch"/></div>
         </div>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10 }}>
+        <div style={gitter3}>
           <BigVal label="Vorschlag" value={sr?.speichervolumen_l} unit="L" color="#15803d" sub={`${sr?.leistung_kw ?? '—'} kW · ${sr?.leistungsquelle ?? '—'}`}/>
           <BigVal label="Oben" value={sr?.speicher_oben_c} unit="°C" color="#dc2626" sub="max. VL + Überdeckung"/>
           <BigVal label="Unten" value={sr?.speicher_unten_c} unit="°C" color="#2563eb" sub="Misch-Rücklauf"/>
         </div>
         {sr?.warnings?.map((w,i)=><div key={i} style={warnSt}>⚠ {w}</div>)}
-        <div style={{ fontSize:11, color:'#64748b' }}>
+        <div style={hinweisSt}>
           Der Vorschlag überschreibt den gewählten Speicher nicht automatisch. Berechnet wird im Backend aus Leistung × Zeit / (c × ΔT × ρ).
         </div>
       </div>
@@ -1806,7 +1806,7 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
     const bwwTab = bwwTabs.some(([k]) => k === tab) ? tab : 'wohnungen';
     const rechenweg = br?.rechenweg || [];
     body = (
-      <div style={{ display:'grid', gap:12 }}>
+      <div style={stapel}>
         <div style={{ display:'flex', gap:2, borderBottom:'2px solid #f1f5f9' }}>
           {bwwTabs.map(([k,t]) => (
             <button key={k} onClick={()=>setTab(k)}
@@ -1854,7 +1854,7 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
             style={{ ...btnBlue, width:'auto', justifySelf:'start', padding:'7px 14px', marginTop:0 }}>
             + Wohnung hinzufügen
           </button>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10 }}>
+          <div style={gitter3}>
             <BigVal label="Wohnungen" value={br?.wohnungen?.length || 0} color="#475569"/>
             <BigVal label="Personen total" value={br?.personen} unit="P" color="#1d4ed8"/>
             <BigVal label="Nutzwarmwasser" value={br?.nutzwarmwasserbedarf_l_d} unit="L/d" color="#0f766e"/>
@@ -1867,7 +1867,7 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
         </>}
 
         {bwwTab === 'auslegung' && <>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10 }}>
+          <div style={gitter3}>
             <div><label style={lbl}>Gebäudeart / Bezugseinheit</label>
               <select style={inp} value={d.bww_bezugseinheit||'mfh_allgemein'} onChange={e=>set('bww_bezugseinheit',e.target.value)}>
                 {BWW_BEZUGSEINHEITEN.map(b=><option key={b.key} value={b.key}>{b.label}</option>)}
@@ -1906,7 +1906,7 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
           </div>
 
           <SubTitel>Abgleich Wärmepumpe</SubTitel>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10 }}>
+          <div style={gitter3}>
             <BigVal label="BWW benötigt" value={br?.anschlussleistung_kw} unit="kW" color="#dc2626"/>
             <BigVal label="Wärmepumpe verfügbar" value={br?.waermepumpenleistung_kw} unit="kW"
               color={br?.leistung_ausreichend===false?'#dc2626':'#15803d'} sub={br?.waermepumpenleistung_quelle}/>
@@ -1938,7 +1938,7 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
 
         {bwwTab === 'rechenweg' && (
           rechenweg.length ? (
-            <div style={{ display:'grid', gap:12 }}>
+            <div style={stapel}>
               {gruppiert(rechenweg).map(([gruppe, schritte])=><div key={gruppe}>
                 <SubTitel>{gruppe}</SubTitel>
                 <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11, marginTop:4 }}><tbody>
@@ -1954,7 +1954,7 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
                   </tr>)}
                 </tbody></table>
               </div>)}
-              <div style={{ fontSize:11, color:'#64748b' }}>
+              <div style={hinweisSt}>
                 Grundlage: bereitgestellte Excel-Berechnung. Ergebnisse und derselbe Rechenweg werden im Export ausgegeben.
               </div>
             </div>
@@ -1989,9 +1989,9 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
         </div>
 
         {ewsTab === 'bohrmeter' && <>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10 }}>
+          <div style={gitter3}>
             <div><label style={lbl}>Anzahl Duplexsonden</label>
-              <select style={{...inp,cursor:'pointer'}} value={anzahl}
+              <select style={sel} value={anzahl}
                 onChange={e=>set('sonden_anzahl', parseInt(e.target.value))}>
                 {Array.from({ length:24 }, (_, i) => i + 1).map(k=><option key={k} value={k}>{k}</option>)}
               </select></div>
@@ -2007,18 +2007,18 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
             <div><label style={lbl}>Spezifische Entzugsleistung [W/m]</label><input type="number" min="1" style={inp} value={d.entzugsleistung_w_m??''} onChange={e=>set('entzugsleistung_w_m',e.target.value)} placeholder="standortbezogen"/></div>
             <div><label style={lbl}>Sicherheitsfaktor</label><input type="number" min="1" step="0.01" style={inp} value={d.sonden_sicherheitsfaktor??1.1} onChange={e=>set('sonden_sicherheitsfaktor',e.target.value)}/></div>
           </div>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+          <div style={gitter2}>
             <BigVal label="Duplexsonden" value={anzahl} color="#4f46e5" sub="je zwei U-Rohre"/>
             <BigVal label="Gesamtbohrmeter"
               value={Number.isFinite(laenge) && laenge > 0 ? Math.round(anzahl * laenge).toLocaleString('de-CH') : null}
               unit="m" color="#7c3aed" sub="Anzahl × Sondenlänge"/>
           </div>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10 }}>
+          <div style={gitter3}>
             <BigVal label="Erforderlich" value={er?.erforderlich_gesamt_m} unit="m" color={er?.ausreichend===false?'#dc2626':'#15803d'} sub={`${er?.quellenleistung_kw ?? '—'} kW · ${er?.leistungsquelle ?? 'keine Quelle'}`}/>
             <BigVal label="Soleinhalt" value={er?.gesamtinhalt_l} unit="L" color="#0369a1" sub="Duplexrohre + Zusatz"/>
             <BigVal label="Glykol" value={er?.glykolbedarf_kg} unit="kg" color="#a16207" sub={`${er?.glykol_konzentration_pct ?? '—'} %`}/>
           </div>
-          <div style={{ fontSize:11, color:'#64748b' }}>
+          <div style={hinweisSt}>
             Die Bohrmeterberechnung ist eine transparente Planungshilfe. Standort-, Bewilligungsdaten und EED-Nachweis bleiben extern zu prüfen.
           </div>
         </>}
@@ -2126,7 +2126,7 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
 
         {ewsTab === 'rechenweg' && (
           ewsRechenweg.length > 0 ? (
-            <div style={{ display:'grid', gap:12 }}>
+            <div style={stapel}>
               {gruppiert(ewsRechenweg).map(([gruppe, schritte])=>(
                 <div key={gruppe}>
                   <SubTitel>{gruppe.replace(/^\d+\s/, '')}</SubTitel>
@@ -2151,7 +2151,7 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
                   </table>
                 </div>
               ))}
-              <div style={{ fontSize:11, color:'#64748b' }}>
+              <div style={hinweisSt}>
                 Derselbe Rechenweg erscheint im PDF-Export. Die Berechnung ist eine Planungshilfe und ersetzt
                 die Prüfung durch den verantwortlichen Fachplaner nicht.
               </div>
@@ -2209,6 +2209,18 @@ const panelSt = { padding: 12, overflowY: 'auto', flex: 1 };
 const lbl = { display:'block', fontSize:10, color:'#6b7280', marginBottom:3, marginTop:6 };
 const inp = { width:'100%', fontSize:12, border:'1px solid #e2e8f0', borderRadius:5, padding:'5px 8px', boxSizing:'border-box', background:'white' };
 const warnSt = { fontSize:10, color:'#92400e', background:'#fef3c7', border:'1px solid #fde68a', borderRadius:5, padding:'5px 8px', marginTop:4 };
+// Wiederkehrende Layouts als Konstanten: ein Stil-Objekt im JSX wird bei jedem
+// Render neu erzeugt und macht jeden Vergleich der Kindkomponente wertlos.
+const sel = { ...inp, cursor:'pointer' };
+const inpVl = { ...inp, borderColor:'#fca5a5' };
+const inpRl = { ...inp, borderColor:'#93c5fd' };
+const stapel = { display:'grid', gap:12 };
+const gitter2 = { display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 };
+const gitter3 = { display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10 };
+const gitter2eng = { display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 };
+const gitter3eng = { display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 };
+const hinweisSt = { fontSize:11, color:'#64748b' };
+const miniSt = { fontSize:9, color:'#94a3b8', marginTop:4 };
 // Gebäudearten SIA 385/2. Spiegel von backend/app/calculations/bww_sia385.py;
 // gerechnet wird im Backend, hier stehen nur die Beschriftungen.
 const BWW_BEZUGSEINHEITEN = [

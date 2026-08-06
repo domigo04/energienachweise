@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { memo, useRef, useState } from 'react';
 import { Handle, Position, useReactFlow, NodeResizer } from '@xyflow/react';
 import {
   SymPump, SymValve2V, SymValve3, SymCheckValve,
@@ -1240,6 +1240,11 @@ export const NODE_TYPES = Object.fromEntries(
     // derselben Stelle und aufrecht lesbar — im Editor wie im PDF-Export.
     let W = ROTATABLE.has(k) ? mitRotation(C) : C;
     if (NUMMERIERT.includes(k)) W = mitNr(W);
-    return [k, W];
+    // React Flow gibt jedem Bauteil bei jeder Änderung am Graphen neue Props.
+    // Ohne memo zeichnet sich beim Verschieben eines Bauteils das ganze Schema
+    // neu, ebenso beim Öffnen eines Menüs. Die Bauteile rendern ausschliesslich
+    // aus ihren Props (Node-Daten werden nie in place geändert, sondern immer
+    // ersetzt), der flache Vergleich ist deshalb vollständig.
+    return [k, memo(W)];
   })
 );

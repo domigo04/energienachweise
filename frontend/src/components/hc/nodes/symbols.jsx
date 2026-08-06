@@ -123,9 +123,14 @@ export function SymSicherheitsventil() {
 
 // ── Plattenwärmetauscher PWT (Vorlage «PWT.svg») ──────────────
 // Raute mit innerer Trennlinie + parallele Kontur, +/− und EIN/AUS.
-export function SymPWT() {
+// Grundmass 94×68 — dasselbe, mit dem der PDF-Export rechnet
+// (schema_svg.py::node_groesse). Der Editor zeigte den Tauscher bisher halb so
+// gross; die vier Anschlüsse deckten das Zeichen dadurch fast vollständig zu.
+// `width` bleibt einstellbar, weil das Symbol auch als Beiwerk in anderen
+// Bauteilen steckt.
+export function SymPWT({ width = 94 }) {
   return (
-    <svg viewBox="0 0 472 342" width="47" height="34">
+    <svg viewBox="0 0 472 342" width={width} height={width * 342 / 472}>
       <g fill="none" stroke="#000" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
         <path d="M205 48 L356 191 L205 334 L54 191 Z" />
         <line x1="205" y1="48" x2="205" y2="334" />

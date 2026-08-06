@@ -45,18 +45,74 @@ const zoneDot = {
   width: 12, height: 12, borderRadius: 2,
   background: 'transparent', border: 'none', opacity: 0,
   zIndex: 4,
+  // Der Punkt liegt MIT SEINER MITTE auf der angegebenen Stelle. React Flow
+  // zentriert von sich aus nur eine Achse (`translate(-50%, 0)` bzw.
+  // `translate(0, -50%)`); die Leitung endete dadurch eine halbe Punktbreite
+  // neben der gezeichneten Linie.
+  transform: 'translate(-50%, -50%)',
 };
-function ZoneHandles({ prefix }) {
+
+// Die Anschlusszone liegt auf der gezeichneten Aussenkante des Bauteils, nicht
+// auf dem unsichtbaren Node-Rechteck (Dominic 2026-08-06: der Anschluss gehört
+// auf die schwarze Linie). `rahmen` gibt diese Kante in Prozent der Node-Fläche
+// an; ohne Angabe ist es das Node-Rechteck selbst.
+const VOLLE_FLAECHE = { links: 0, rechts: 100, oben: 0, unten: 100 };
+const aufKante = (rahmen, achse, prozent) => (achse === 'x'
+  ? rahmen.links + (prozent / 100) * (rahmen.rechts - rahmen.links)
+  : rahmen.oben + (prozent / 100) * (rahmen.unten - rahmen.oben));
+
+function ZoneHandles({ prefix, rahmen = VOLLE_FLAECHE }) {
+  const x = (p) => `${aufKante(rahmen, 'x', p)}%`;
+  const y = (p) => `${aufKante(rahmen, 'y', p)}%`;
+  const kante = {
+    position: 'absolute',
+    left: `${rahmen.links}%`, top: `${rahmen.oben}%`,
+    width: `${rahmen.rechts - rahmen.links}%`, height: `${rahmen.unten - rahmen.oben}%`,
+  };
   return (
     <>
-      <div className="hc-zone-frame" aria-hidden="true" />
-      {ZONE_PCT.map(p => <Handle key={`${prefix}-t-${p}`} type="source" position={Position.Top}    id={`${prefix}-t-${p}`} style={{ ...zoneDot, top: -5, left: `${p}%` }} />)}
-      {ZONE_PCT.map(p => <Handle key={`${prefix}-b-${p}`} type="source" position={Position.Bottom} id={`${prefix}-b-${p}`} style={{ ...zoneDot, bottom: -5, left: `${p}%` }} />)}
-      {ZONE_PCT.map(p => <Handle key={`${prefix}-l-${p}`} type="source" position={Position.Left}   id={`${prefix}-l-${p}`} style={{ ...zoneDot, left: -5, top: `${p}%` }} />)}
-      {ZONE_PCT.map(p => <Handle key={`${prefix}-r-${p}`} type="source" position={Position.Right}  id={`${prefix}-r-${p}`} style={{ ...zoneDot, right: -5, top: `${p}%` }} />)}
+      <div className="hc-zone-frame" aria-hidden="true"
+        style={rahmen === VOLLE_FLAECHE ? undefined : { ...kante, inset: 'auto' }} />
+      {ZONE_PCT.map(p => <Handle key={`${prefix}-t-${p}`} type="source" position={Position.Top}    id={`${prefix}-t-${p}`} style={{ ...zoneDot, top: y(0), left: x(p) }} />)}
+      {ZONE_PCT.map(p => <Handle key={`${prefix}-b-${p}`} type="source" position={Position.Bottom} id={`${prefix}-b-${p}`} style={{ ...zoneDot, top: y(100), left: x(p), bottom: 'auto' }} />)}
+      {ZONE_PCT.map(p => <Handle key={`${prefix}-l-${p}`} type="source" position={Position.Left}   id={`${prefix}-l-${p}`} style={{ ...zoneDot, left: x(0), top: y(p) }} />)}
+      {ZONE_PCT.map(p => <Handle key={`${prefix}-r-${p}`} type="source" position={Position.Right}  id={`${prefix}-r-${p}`} style={{ ...zoneDot, left: x(100), top: y(p), right: 'auto' }} />)}
     </>
   );
 }
+
+// Anschluss, dessen MITTE auf einem Punkt des Symbols liegt. Für Bauteile, bei
+// denen die Anschlussstelle Teil der Zeichnung ist (Speicher, Plattentauscher)
+// — dort zählt der Punkt auf der Linie, nicht der Rand der Node-Box.
+const HK = (pos, id, links, oben, bg) => (
+  <Handle
+    type="source"
+    position={pos}
+    id={id}
+    style={{
+      position: 'absolute', left: `${links}%`, top: `${oben}%`,
+      transform: 'translate(-50%, -50%)',
+      width: 9, height: 9, borderRadius: 2,
+      background: bg || '#475569', border: '1px solid white',
+      boxShadow: '0 0 0 1px #cbd5e1',
+      zIndex: 10,
+    }}
+  />
+);
+
+// ── Speicher und BWW-Speicher: Anschlusspunkte auf dem Behälterumriss ────────
+// Der Behälter ist in beiden Symbolen dasselbe Bild (viewBox 140×290):
+// Mantel x = 20…120, Schulter oben y = 45, unten y = 245, Kuppeln je 25 hoch.
+// Daraus die Prozentwerte; Editor und Export (schema_svg.py::handle_pos)
+// verwenden dieselben Zahlen.
+export const SPEICHER_RAHMEN = { links: 14.3, rechts: 85.7, oben: 15.5, unten: 84.5 };
+export const SPEICHER_PORTS = {
+  'top-l': [30, 8.4], 'top-r': [70, 8.4],
+  'bot-l': [30, 91.6], 'bot-r': [70, 91.6],
+  left: [14.3, 50], right: [85.7, 50],
+  // Trinkwasser: die Pfeilspitzen enden am Bauteilrand.
+  warmwasser: [50, 0], kaltwasser: [50, 100],
+};
 
 const selBorder = (sel) => sel ? '2px solid #3b82f6' : '2px solid transparent';
 const wrap = (sel) => ({
@@ -173,15 +229,22 @@ export function SicherheitsventilNode({ data, selected: sel }) {
 }
 
 // ── Plattenwärmetauscher PWT (4 Tore an den Rauten-Ecken) ────
+// Die vier Tore liegen auf den Seitenmitten der Raute — also genau auf der
+// schwarzen Linie des Symbols (Rautenecken 205/48, 356/191, 205/334, 54/191 in
+// der viewBox 472×342). Links = Primär (oben EIN/VL, unten AUS/RL),
+// rechts = Sekundär (oben AUS warm, unten EIN kalt).
+export const PWT_PORTS = {
+  left: [27.4, 34.9], top: [59.4, 34.9],
+  bottom: [27.4, 76.8], right: [59.4, 76.8],
+};
+
 export function PwtNode({ selected: sel }) {
   return (
     <div style={wrap(sel)}>
-      {/* Mitte der 4 Rauten-Seiten, oben/unten symmetrisch. Links = Primär
-          (oben EIN/VL, unten AUS/RL), rechts = Sekundär (oben AUS warm, unten EIN kalt). */}
-      {H(Position.Left,   'left',   { left: '27%', top: '35%', background: '#ef4444' })}
-      {H(Position.Bottom, 'bottom', { left: '27%', top: '77%', background: '#3b82f6' })}
-      {H(Position.Top,    'top',    { left: '59%', top: '35%', background: '#ef4444' })}
-      {H(Position.Right,  'right',  { left: '59%', top: '77%', background: '#3b82f6' })}
+      {HK(Position.Left,   'left',   ...PWT_PORTS.left,   '#ef4444')}
+      {HK(Position.Bottom, 'bottom', ...PWT_PORTS.bottom, '#3b82f6')}
+      {HK(Position.Top,    'top',    ...PWT_PORTS.top,    '#ef4444')}
+      {HK(Position.Right,  'right',  ...PWT_PORTS.right,  '#3b82f6')}
       <SymPWT />
     </div>
   );
@@ -476,13 +539,13 @@ export function SpeicherNode({ data, selected: sel }) {
   const liter = data.speicher_liter || c.speichervolumen_l;
   return (
     <div style={wrap(sel)}>
-      <ZoneHandles prefix="sz" />
-      {H(Position.Top,    'top-l',  { top: -6,    left: '30%', background:'#ef4444' })}
-      {H(Position.Top,    'top-r',  { top: -6,    left: '70%', background:'#ef4444' })}
-      {H(Position.Bottom, 'bot-l',  { bottom: -6, left: '30%', background:'#3b82f6' })}
-      {H(Position.Bottom, 'bot-r',  { bottom: -6, left: '70%', background:'#3b82f6' })}
-      {H(Position.Left,   'left',   { left: -6 })}
-      {H(Position.Right,  'right',  { right: -6 })}
+      <ZoneHandles prefix="sz" rahmen={SPEICHER_RAHMEN} />
+      {HK(Position.Top,    'top-l', ...SPEICHER_PORTS['top-l'], '#ef4444')}
+      {HK(Position.Top,    'top-r', ...SPEICHER_PORTS['top-r'], '#ef4444')}
+      {HK(Position.Bottom, 'bot-l', ...SPEICHER_PORTS['bot-l'], '#3b82f6')}
+      {HK(Position.Bottom, 'bot-r', ...SPEICHER_PORTS['bot-r'], '#3b82f6')}
+      {HK(Position.Left,   'left',  ...SPEICHER_PORTS.left)}
+      {HK(Position.Right,  'right', ...SPEICHER_PORTS.right)}
       <SymSpeicher liter={liter} obenC={c.speicher_oben_c} untenC={c.speicher_unten_c} />
       <Label text={data.label || 'Speicher'} />
     </div>
@@ -863,15 +926,16 @@ export function BwwNode({ data, selected: sel }) {
   const aussenregister = (c.register_bauart || data.bww_speicherkonfiguration || 'aussen') === 'aussen';
   return (
     <div style={{ ...wrap(sel), overflow:'visible' }}>
-      <ZoneHandles prefix="sz" />
-      {H(Position.Top,    'top-l',  { top: -6,    left: '30%', background:'#ef4444' })}
-      {H(Position.Top,    'top-r',  { top: -6,    left: '70%', background:'#ef4444' })}
-      {H(Position.Bottom, 'bot-l',  { bottom: -6, left: '30%', background:'#3b82f6' })}
-      {H(Position.Bottom, 'bot-r',  { bottom: -6, left: '70%', background:'#3b82f6' })}
-      {H(Position.Left,   'left',   { left: -6 })}
-      {H(Position.Right,  'right',  { right: -6 })}
-      {H(Position.Top, 'warmwasser', { top:-6, left:'50%', background:'#ef4444' })}
-      {H(Position.Bottom, 'kaltwasser', { bottom:-6, left:'50%', background:'#16a34a' })}
+      <ZoneHandles prefix="sz" rahmen={SPEICHER_RAHMEN} />
+      {HK(Position.Top,    'top-l', ...SPEICHER_PORTS['top-l'], '#ef4444')}
+      {HK(Position.Top,    'top-r', ...SPEICHER_PORTS['top-r'], '#ef4444')}
+      {HK(Position.Bottom, 'bot-l', ...SPEICHER_PORTS['bot-l'], '#3b82f6')}
+      {HK(Position.Bottom, 'bot-r', ...SPEICHER_PORTS['bot-r'], '#3b82f6')}
+      {HK(Position.Left,   'left',  ...SPEICHER_PORTS.left)}
+      {HK(Position.Right,  'right', ...SPEICHER_PORTS.right)}
+      {/* Trinkwarmwasser oben am roten Pfeil, Trinkkaltwasser unten am grünen. */}
+      {HK(Position.Top,    'warmwasser', ...SPEICHER_PORTS.warmwasser, '#ef4444')}
+      {HK(Position.Bottom, 'kaltwasser', ...SPEICHER_PORTS.kaltwasser, '#16a34a')}
       {aussenregister && (
         <div title="Aussenliegendes Register mit Plattentauscher" style={{
           position:'absolute', left:-54, top:51, width:47, height:34, zIndex:2,
@@ -879,7 +943,9 @@ export function BwwNode({ data, selected: sel }) {
         }}>
           <div style={{ position:'absolute', left:41, top:7, width:16, borderTop:'2px solid #ef4444' }}/>
           <div style={{ position:'absolute', left:41, top:25, width:16, borderTop:'2px dashed #3b82f6' }}/>
-          <SymPWT />
+          {/* Beiwerk im Speichersymbol, deshalb im alten Kleinmass (#65 ersetzt
+              dieses Kästchen durch ein echtes Bauteil). */}
+          <SymPWT width={47} />
           <div style={{ position:'absolute', left:8, top:34, fontSize:7, fontWeight:700, color:'#475569' }}>PWT</div>
         </div>
       )}

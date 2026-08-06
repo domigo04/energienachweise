@@ -264,17 +264,26 @@ def _handle_pos_base(node, handle: Optional[str]):
     if t == "junction":
         return {"left": (x, y + 30), "right": (x + w, y + 30), "top": (x + 23, y)}.get(handle, (x + 23, y + 30))
     if t in ("speicher", "bww"):
+        # Anschlüsse liegen auf dem gezeichneten Behälterumriss, nicht am Rand
+        # der Bauteilfläche (Dominic 2026-08-06). Mantel x = 20…120 von 140,
+        # Schultern y = 45 und 245 von 290 — dieselben Zahlen wie im Editor
+        # (HydraulikNodes.jsx::SPEICHER_RAHMEN / SPEICHER_PORTS).
+        links, rechts, oben, unten = 0.143, 0.857, 0.155, 0.845
         zone = re.match(r"^sz-(t|b|l|r)-(\d+)$", handle or "")
         if zone:
             seite, prozent = zone.group(1), float(zone.group(2)) / 100
+            auf_x = x + w * (links + prozent * (rechts - links))
+            auf_y = y + h * (oben + prozent * (unten - oben))
             return {
-                "t": (x + w * prozent, y), "b": (x + w * prozent, y + h),
-                "l": (x, y + h * prozent), "r": (x + w, y + h * prozent),
+                "t": (auf_x, y + h * oben), "b": (auf_x, y + h * unten),
+                "l": (x + w * links, auf_y), "r": (x + w * rechts, auf_y),
             }[seite]
-        return {"top-l": (x + w * 0.3, y), "top-r": (x + w * 0.7, y),
-                "bot-l": (x + w * 0.3, y + h), "bot-r": (x + w * 0.7, y + h),
-                "left": (x, y + h / 2), "right": (x + w, y + h / 2),
-                "warmwasser": (x + w / 2, y), "kaltwasser": (x + w / 2, y + h)}.get(handle, (x + w / 2, y + h / 2))
+        return {"top-l": (x + w * 0.3, y + h * 0.084), "top-r": (x + w * 0.7, y + h * 0.084),
+                "bot-l": (x + w * 0.3, y + h * 0.916), "bot-r": (x + w * 0.7, y + h * 0.916),
+                "left": (x + w * links, y + h / 2), "right": (x + w * rechts, y + h / 2),
+                # Trinkwasser: die Pfeilspitzen enden am Bauteilrand.
+                "warmwasser": (x + w / 2, y),
+                "kaltwasser": (x + w / 2, y + h)}.get(handle, (x + w / 2, y + h / 2))
     if t == "anschluss":  # Anschlüsse vorne rechts (nicht beim Buchstaben)
         return {"vl": (x + w, y + h * 0.28), "rl": (x + w, y + h * 0.72)}.get(handle, (x + w, y + h / 2))
     if t == "expansion":
@@ -286,9 +295,10 @@ def _handle_pos_base(node, handle: Optional[str]):
                 "right": (x + w, y + h * 0.51)}.get(handle, (x + w * 0.63, y + h / 2))
     if t == "sicherheitsventil":  # ein Fangpunkt am roten Knoten (x=24/199≈12%, y=102/167≈61%)
         return (x + w * 0.12, y + h * 0.61)
-    if t == "pwt":  # Mitte der 4 Rauten-Seiten (eng am Rand), nicht an den Ecken
+    if t == "pwt":  # Seitenmitten der Raute — auf der Linie, nicht an den Ecken
         return {"left": (x + w * 0.274, y + h * 0.349), "top": (x + w * 0.594, y + h * 0.349),
-                "bottom": (x + w * 0.274, y + h * 0.768), "right": (x + w * 0.594, y + h * 0.768)}.get(handle, (x + w / 2, y + h / 2))
+                "bottom": (x + w * 0.274, y + h * 0.768), "right": (x + w * 0.594, y + h * 0.768),
+                }.get(handle, (x + w / 2, y + h / 2))
     if t == "temperatur":
         return {"left": (x, y + h * 0.55), "bottom": (x + w * 0.38, y + h)}.get(handle, (x + w / 2, y + h / 2))
     # pump, stad, checkvalve, shutoff, default

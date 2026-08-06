@@ -33,7 +33,7 @@ RL_FARBE = "#3b82f6"
 # 1 mWs = 9.80665 kPa. Der Solekreis rechnet in mWs (so stehen die
 # Pumpenkennlinien), die Heizseite in kPa — die Umrechnung steht genau hier.
 MWS_JE_KPA = 9.80665
-VERBRAUCHER_TYPEN = ("gruppe", "heizkreis")
+VERBRAUCHER_TYPEN = ("gruppe", "heizkreis", "heizkoerper", "luftheizapparat")
 BLOCK_TYPEN = ("verteiler", "erzeuger")  # Ast-Suche stoppt hier (PHYSIK §2)
 # Hydraulische Trennstellen: ein Speicher entkoppelt Erzeuger- und
 # Verbraucherkreis (PHYSIK §4/§6 — beide Seiten dürfen unterschiedliche

@@ -150,6 +150,19 @@ def test_gruppen_default_pumpe_und_ventiltyp():
     assert m["leistung_kw"] == 35.0           # 20 + 10 + 5
 
 
+def test_heizkoerper_werden_separat_und_als_verbraucher_gezaehlt():
+    graph = {"nodes": [
+        _n("hk1", "heizkoerper", {"q_kw": "2.5", "system": "Heizkörper"}),
+        _n("hk2", "heizkoerper", {"q_kw": "3.5", "system": "Heizkörper"}),
+        _n("lha", "luftheizapparat", {"q_kw": "8", "system": "Lufterhitzer"}),
+    ]}
+    mengen = mengen_aus_schema(graph)
+    assert mengen["anzahl_heizkoerper"] == 2
+    assert mengen["anzahl_heizgruppen"] == 3
+    assert mengen["leistung_kw"] == 14.0
+    assert mengen["waermeabgabe"] == ["Heizkörper", "Lufterhitzer"]
+
+
 def test_waermezaehler_nur_bei_explizitem_flag():
     """hat_wz zählt nur wenn ausdrücklich True — kein stiller Default."""
     graph = {"nodes": [

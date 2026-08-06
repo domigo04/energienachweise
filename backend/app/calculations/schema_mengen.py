@@ -35,7 +35,7 @@ from typing import Optional
 
 
 # Verbrauchergruppen = Heizgruppen im Schema
-_VERBRAUCHER = ("gruppe", "heizkreis")
+_VERBRAUCHER = ("gruppe", "heizkreis", "heizkoerper", "luftheizapparat")
 
 # Wärmeabgabe-Typ einer Verbrauchergruppe → Kostenvokabular (§ Feedback Dominic:
 # der Gruppentyp soll direkt das Wärmeabgabesystem der Kostenschätzung speisen).
@@ -149,6 +149,7 @@ def mengen_aus_schema(graph_json) -> dict:
     anzahl_speicher = 0
     anzahl_verteiler = 0
     anzahl_heizgruppen = 0
+    anzahl_heizkoerper = 0
     anzahl_pumpen = 0
     anzahl_ventile_2weg = 0
     anzahl_ventile_3weg = 0
@@ -210,6 +211,8 @@ def mengen_aus_schema(graph_json) -> dict:
 
         if t in _VERBRAUCHER:
             anzahl_heizgruppen += 1
+            if t == "heizkoerper":
+                anzahl_heizkoerper += 1
             q = _num(d.get("q_kw"))
             if q is not None:
                 leistung_summe += q
@@ -238,6 +241,7 @@ def mengen_aus_schema(graph_json) -> dict:
         "anzahl_speicher": anzahl_speicher,
         "anzahl_verteiler": anzahl_verteiler,
         "anzahl_heizgruppen": anzahl_heizgruppen,
+        "anzahl_heizkoerper": anzahl_heizkoerper,
         "anzahl_pumpen": anzahl_pumpen,
         "anzahl_ventile_2weg": anzahl_ventile_2weg,
         "anzahl_ventile_3weg": anzahl_ventile_3weg,

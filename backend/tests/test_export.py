@@ -588,6 +588,21 @@ def test_lufterhitzer_anschluesse_liegen_auf_der_registerachse():
     assert "M204 29 L316 29 L366 76 L316 124 L204 124" in svg  # Spitze rechts (Austritt)
 
 
+def test_heizkoerper_und_luftheizapparat_haben_vl_rl_auf_einer_seite():
+    heizkoerper = {"id":"hk", "type":"heizkoerper", "position":{"x":100,"y":200},
+                   "style":{"width":180,"height":70}, "data":{"darstellung":"schema"}}
+    apparat = {"id":"lha", "type":"luftheizapparat", "position":{"x":400,"y":200}, "data":{}}
+    assert handle_pos(heizkoerper, "vl") == (100, 200 + 70 * .34)
+    assert handle_pos(heizkoerper, "rl") == (100, 200 + 70 * .66)
+    _, hoehe = node_groesse(apparat)
+    assert handle_pos(apparat, "vl") == (400, 200 + hoehe * .34)
+    assert handle_pos(apparat, "rl") == (400, 200 + hoehe * .66)
+    svg = erzeuge_svg([heizkoerper, apparat], [], {})
+    assert "Heizkörper" not in svg  # kompakte Schemaansicht statt Flächenbeschriftung
+    assert "rotate(120" in svg and "rotate(240" in svg  # kleiner dreiflügliger Lüfter
+    assert "L5 29" not in svg  # kein Lufterhitzer-Luftstrompfeil
+
+
 def test_lufterhitzer_gruppe_zeichnet_vollstaendigen_strang():
     from app.export.schema_svg import LH_CX, LH_H, node_groesse
 

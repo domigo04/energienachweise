@@ -44,6 +44,8 @@ export const COMPONENTS = [
   { type: "verteiler", label: "Verteiler", category: "verteilung", placement: "free" },
   { type: "pump", label: "Pumpe", category: "verteilung", ...INLINE },
   { type: "gruppe", label: "Heizgruppe", category: "verteilung", placement: "free" },
+  { type: "heizkoerper", label: "Heizkörper", category: "verbraucher", placement: "free" },
+  { type: "luftheizapparat", label: "Luftheizapparat", category: "verbraucher", placement: "free" },
   // Armaturen
   { type: "valve2", label: "2-Weg-Ventil", category: "armaturen", ...INLINE },
   // 3-Weg: die beiden gegenüberliegenden Hauptports (top/bottom) bilden den

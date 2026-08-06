@@ -184,6 +184,95 @@ export function leitungMitLueckeTrennen(route, a, b) {
   return { erste, zweite };
 }
 
+// ── Trimmen (AutoCAD TR) und Teilstücke löschen ────────────────────────────
+
+const TRIM_TOLERANZ = 1e-6;
+
+/** Schnitt zweier endlicher Segmente, inklusive ihrer Endpunkte. */
+export function segmentSchnittpunkt(a, b, c, d) {
+  if (![a, b, c, d].every(p => Number.isFinite(p?.x) && Number.isFinite(p?.y))) return null;
+  const rx = b.x - a.x, ry = b.y - a.y;
+  const sx = d.x - c.x, sy = d.y - c.y;
+  const kreuz = rx * sy - ry * sx;
+  if (Math.abs(kreuz) <= TRIM_TOLERANZ) return null;
+  const qx = c.x - a.x, qy = c.y - a.y;
+  const t = (qx * sy - qy * sx) / kreuz;
+  const u = (qx * ry - qy * rx) / kreuz;
+  if (t < -TRIM_TOLERANZ || t > 1 + TRIM_TOLERANZ
+      || u < -TRIM_TOLERANZ || u > 1 + TRIM_TOLERANZ) return null;
+  const tc = Math.max(0, Math.min(1, t));
+  return { x:a.x + tc * rx, y:a.y + tc * ry, t:tc };
+}
+
+/**
+ * Grenzen des zu entfernenden Bereichs auf einem angeklickten Teilstück.
+ * Alle übrigen sichtbaren Leitungssegmente sind Schnittkanten. Gibt es keine
+ * Schnittkante innerhalb des Teilstücks, ist das ganze Teilstück von Ecke zu
+ * Ecke gemeint — das ist zugleich die Delete-Semantik einer Segmentauswahl.
+ */
+export function trimGrenzen(route, segmentIndex, klick, schneidSegmente = []) {
+  if (!Array.isArray(route) || segmentIndex < 0 || segmentIndex >= route.length - 1) return null;
+  const a = route[segmentIndex], b = route[segmentIndex + 1];
+  const vx = b.x - a.x, vy = b.y - a.y;
+  const l2 = vx * vx + vy * vy;
+  if (l2 <= TRIM_TOLERANZ) return null;
+  const klickT = Math.max(0, Math.min(1,
+    (((klick?.x ?? a.x) - a.x) * vx + ((klick?.y ?? a.y) - a.y) * vy) / l2));
+  const ts = [0, 1];
+  schneidSegmente.forEach(([c, d]) => {
+    const hit = segmentSchnittpunkt(a, b, c, d);
+    if (hit && hit.t > TRIM_TOLERANZ && hit.t < 1 - TRIM_TOLERANZ) ts.push(hit.t);
+  });
+  const sortiert = [...new Set(ts.map(t => Math.round(t * 1e8) / 1e8))].sort((x, y) => x - y);
+  let links = sortiert[0], rechts = sortiert.at(-1);
+  for (let i = 0; i < sortiert.length - 1; i += 1) {
+    if (klickT >= sortiert[i] - TRIM_TOLERANZ && klickT <= sortiert[i + 1] + TRIM_TOLERANZ) {
+      links = sortiert[i]; rechts = sortiert[i + 1]; break;
+    }
+  }
+  const punkt = t => ({ segmentIndex, x:a.x + t * vx, y:a.y + t * vy });
+  return { a:punkt(links), b:punkt(rechts) };
+}
+
+/** Wie BREAK, aber Endstücke dürfen vollständig verschwinden (TRIM). */
+export function leitungTrimmen(route, a, b) {
+  if (!Array.isArray(route) || route.length < 2) return { fehler:'Keine Leitung.' };
+  const gueltig = h => h && Number.isInteger(h.segmentIndex)
+    && h.segmentIndex >= 0 && h.segmentIndex < route.length - 1
+    && Number.isFinite(h.x) && Number.isFinite(h.y);
+  if (!gueltig(a) || !gueltig(b)) return { fehler:'Ungültiger Trimmbereich.' };
+  const mass = h => h.segmentIndex + Math.hypot(h.x - route[h.segmentIndex].x, h.y - route[h.segmentIndex].y)
+    / (Math.hypot(route[h.segmentIndex + 1].x - route[h.segmentIndex].x,
+      route[h.segmentIndex + 1].y - route[h.segmentIndex].y) || 1);
+  const [vorn, hinten] = mass(a) <= mass(b) ? [a, b] : [b, a];
+  if (Math.hypot(hinten.x - vorn.x, hinten.y - vorn.y) < 0.5) return { fehler:'Kein trimmbarer Bereich.' };
+  const erste = [...route.slice(0, vorn.segmentIndex + 1), { x:vorn.x, y:vorn.y }];
+  const zweite = [{ x:hinten.x, y:hinten.y }, ...route.slice(hinten.segmentIndex + 1)];
+  const brauchbar = punkte => punkte.length >= 2
+    && punkte.some((p, i) => i && Math.hypot(p.x - punkte[i - 1].x, p.y - punkte[i - 1].y) >= 0.5);
+  return { erste:brauchbar(erste) ? erste : null, zweite:brauchbar(zweite) ? zweite : null };
+}
+
+/** Mehrere gewählte, gerade Teilstücke aus einer Route entfernen. */
+export function routeSegmenteEntfernen(route, segmentIndexes = []) {
+  if (!Array.isArray(route) || route.length < 2) return [];
+  const weg = new Set(segmentIndexes.filter(Number.isInteger));
+  const teile = [];
+  let aktuell = null;
+  for (let i = 0; i < route.length - 1; i += 1) {
+    if (weg.has(i)) {
+      if (aktuell?.length >= 2) teile.push(aktuell);
+      aktuell = null;
+    } else if (aktuell) {
+      aktuell.push({ ...route[i + 1] });
+    } else {
+      aktuell = [{ ...route[i] }, { ...route[i + 1] }];
+    }
+  }
+  if (aktuell?.length >= 2) teile.push(aktuell);
+  return teile;
+}
+
 // ── Dehnen (AutoCAD STRETCH) ───────────────────────────────────────────────
 //
 // Im Auswahlfenster liegende Punkte wandern, alle übrigen bleiben stehen. Ein

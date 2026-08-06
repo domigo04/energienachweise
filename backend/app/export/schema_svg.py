@@ -54,7 +54,7 @@ GROESSEN = {
     # Kugelhahn, Regelventile und STAD. Nur die Pumpe ist groesser, Entleerung
     # und Temperaturfuehler sind kleiner. Die Breiten sind so gewaehlt, dass
     # _sym (skaliert ueber die Breite) genau auf diese Hoehe kommt.
-    "heizkreis": (74, 74), "pump": (34, 34), "valve2": (35, 28),
+    "heizkreis": (74, 74), "heizkoerper": (160, 64), "luftheizapparat": (80, 56), "pump": (34, 34), "valve2": (35, 28),
     "valve3": (38, 28), "checkvalve": (48, 48), "shutoff": (35, 28),
     "erzeuger": (125, 137), "verbraucher": (68, 50), "speicher": (72, 149),
     "junction": (46, 46), "label": (120, 16),
@@ -245,6 +245,9 @@ def _handle_pos_base(node, handle: Optional[str]):
     if t == "heizkreis":
         return {"vl": (x, y + 28), "rl": (x + w, y + 28),
                 "top": (x + w / 2, y), "bottom": (x + w / 2, y + h)}.get(handle, (x + w / 2, y + h / 2))
+    if t in ("heizkoerper", "luftheizapparat"):
+        return {"vl": (x, y + h * 0.34), "rl": (x, y + h * 0.66)}.get(
+            handle, (x, y + h / 2))
     if t == "erzeuger":
         zone = re.match(r"^wz-(t|b|l|r)-(\d+)$", handle or "")
         if zone:
@@ -403,7 +406,8 @@ def zeichne_datenkasten(parts: list, mitte_x: float, oben_y: float,
 CAPTION_NAMEN = {
     "erzeuger": "Wärmeerzeuger", "erdsonden": "Erdsondenfeld",
     "speicher": "Speicher", "bww": "BWW-Speicher", "verteiler": "Verteiler",
-    "gruppe": "Verbrauchergruppe", "heizkreis": "Heizkreis", "pump": "Pumpe",
+    "gruppe": "Verbrauchergruppe", "heizkreis": "Heizkreis", "heizkoerper": "Heizkörper",
+    "luftheizapparat": "Luftheizapparat", "pump": "Pumpe",
     "valve2": "2-Weg-Ventil", "valve3": "3-Weg-Ventil", "shutoff": "Absperrventil",
     "stad": "STAD", "checkvalve": "Rückschlagventil", "waermezaehler": "Wärmezähler",
     "waermezaehler_cad": "Wärmezähler", "expansion": "Expansionsgefäss",
@@ -1069,6 +1073,27 @@ def zeichne_standard(parts, node, results):
         parts.append(f'<text x="{cx}" y="{cy - 2}" text-anchor="middle" font-size="10" font-weight="700" fill="#15803d">{_esc(label or "HK")}</text>')
         if v:
             parts.append(f'<text x="{cx}" y="{cy + 12}" text-anchor="middle" font-size="8" fill="#166534" font-family="monospace">{v:.3f} m³/h</text>')
+    elif t == "heizkoerper":
+        schema = d.get("darstellung") == "schema"
+        parts.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="2" '
+                     f'fill="{"white" if schema else "#dcfce7"}" fill-opacity="{1 if schema else 0.7}" '
+                     'stroke="#15803d" stroke-width="2"/>')
+        if schema:
+            for faktor in (0.40, 0.50, 0.60, 0.70, 0.80):
+                lx = x + w * faktor
+                parts.append(f'<line x1="{lx}" y1="{y + 7}" x2="{lx}" y2="{y + h - 7}" stroke="#15803d" stroke-width="1.4"/>')
+            parts.append(f'<line x1="{x}" y1="{y + h * .34}" x2="{x + w * .24}" y2="{y + h * .34}" stroke="{VL_FARBE}" stroke-width="2"/>')
+            parts.append(f'<line x1="{x}" y1="{y + h * .66}" x2="{x + w * .24}" y2="{y + h * .66}" stroke="{RL_FARBE}" stroke-width="2"/>')
+        else:
+            parts.append(f'<text x="{cx}" y="{cy + 4}" text-anchor="middle" font-size="10" font-weight="700" fill="#166534">{_esc(label or "Heizkörper")}</text>')
+    elif t == "luftheizapparat":
+        parts.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="2" fill="white" stroke="#111827" stroke-width="2"/>')
+        parts.append(f'<path d="M {x + 3} {y + 3} L {x + w - 3} {y + h - 3} M {x + w - 3} {y + 3} L {x + 3} {y + h - 3}" fill="none" stroke="#111827" stroke-width="1.5"/>')
+        r = min(w, h) * .22
+        parts.append(f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="white" stroke="#111827" stroke-width="1.7"/>')
+        parts.append(f'<circle cx="{cx}" cy="{cy}" r="2" fill="#111827"/>')
+        for winkel in (0, 120, 240):
+            parts.append(f'<path d="M {cx} {cy - 3} C {cx - 5} {cy - r + 5} {cx + 2} {cy - r} {cx + 7} {cy - r + 3} Z" fill="#d1fae5" stroke="#15803d" stroke-width="1" transform="rotate({winkel} {cx} {cy})"/>')
     elif t == "pump":
         _pumpe(parts, cx, cy, 17, nach_unten=True)  # gleiche Flussrichtung wie im Editor (Dreieck nach unten)
     elif t in ("valve2", "valve3", "shutoff", "stad", "temperatur", "sicherheitsventil",

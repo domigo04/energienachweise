@@ -27,7 +27,8 @@ from app.data.generator_types import (
 PLANER = "SIREGO GmbH · Dominic Goulon · Winterthur"
 
 TITEL = {
-    "gruppe": "Verbrauchergruppe", "heizkreis": "Heizkreis", "pump": "Pumpe",
+    "gruppe": "Verbrauchergruppe", "heizkreis": "Heizkreis", "heizkoerper": "Heizkörper",
+    "luftheizapparat": "Luftheizapparat", "pump": "Pumpe",
     "valve2": "2-Wege Regelventil", "valve3": "3-Wege Mischventil",
     "erzeuger": "Wärmeerzeuger", "verteiler": "Verteiler", "speicher": "Speicher",
     "erdsonden": "Erdsondenfeld",
@@ -90,7 +91,7 @@ def legende_zeilen(nodes: list, results: dict) -> list:
                 werte += f" · {bez} Ventil kvs {c['ventil'].get('kvs_eff')} (Pv {_fmt(c['ventil'].get('pv'), 1)} %)"
             if d.get("hat_wz"):
                 werte += " · WZ"
-        elif t == "heizkreis":
+        elif t in ("heizkreis", "heizkoerper", "luftheizapparat"):
             werte = f"{d.get('q_kw', '—')} kW · {d.get('vl_temp', '—')}/{d.get('rl_temp', '—')} °C · V' {_fmt(nf.get(n['id']))} m³/h"
         elif t == "lufterhitzer_gruppe":
             c = gr.get(n["id"], {})
@@ -291,7 +292,7 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
                     ("Ventil: kvs gewählt", c["ventil"].get("kvs_eff"), ""),
                     ("Ventil: Autorität Pv", _fmt(c["ventil"].get("pv"), 1), "%"),
                 ]
-        elif t == "heizkreis":
+        elif t in ("heizkreis", "heizkoerper", "luftheizapparat"):
             eingaben = [("Leistung Q", d.get("q_kw"), "kW"), ("Vorlauf VL", d.get("vl_temp"), "°C"),
                         ("Rücklauf RL", d.get("rl_temp"), "°C")]
             resultate = [("Volumenstrom V'", _fmt(nf.get(n["id"])), "m³/h")]

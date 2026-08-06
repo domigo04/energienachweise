@@ -80,6 +80,8 @@ PARAMETER: list[ParamDef] = [
     # Wärmeverteilung (Quelle B + Ergänzung)
     ParamDef("anzahl_heizgruppen", "Heizgruppen", "verteilung", "ganzzahl", schema_key="anzahl_heizgruppen",
              combine=COMBINE_SCHEMA_FIRST),
+    ParamDef("anzahl_heizkoerper", "Heizkörper", "verteilung", "ganzzahl", schema_key="anzahl_heizkoerper",
+             combine=COMBINE_SCHEMA_FIRST),
     ParamDef("anzahl_verteiler", "Verteiler", "verteilung", "ganzzahl", schema_key="anzahl_verteiler",
              combine=COMBINE_SCHEMA_FIRST),
     ParamDef("anzahl_pumpen", "Pumpen", "verteilung", "ganzzahl", schema_key="anzahl_pumpen",

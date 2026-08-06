@@ -1064,11 +1064,14 @@ const KOMPAKTE_BAUTEILE = new Set([
   'waermezaehler_cad',
 ]);
 
-// Der Datenblock ist bei jedem Bauteil gleich breit (Dominic 2026-08-06).
-// Bauteile sind verschieden gross, ihre Kennwerte-Kästchen sollen es nicht
-// sein: erst dadurch ergeben mehrere Blöcke nebeneinander ein ruhiges Bild.
-// Dieselbe Breite zeichnet der PDF-Export (schema_svg.py::DATENBLOCK_BREITE).
-const DATENBLOCK_BREITE = 184;
+// Eine gemeinsame Grundbreite statt einer Breite je Inhalt (Dominic
+// 2026-08-06): Pumpe, Ventil, Verbrauchergruppe und die übrigen gewöhnlichen
+// Bauteile landen alle auf demselben Mass und stehen dadurch ruhig
+// nebeneinander. Wer wirklich lange Angaben hat — der Wärmeerzeuger mit
+// «Sole/Wasser-WP (Erdsonden)» — darf breiter werden; enger wird keiner.
+// Dieselben Grenzen zeichnet der PDF-Export (schema_svg.py).
+const DATENBLOCK_MIN_BREITE = 120;
+const DATENBLOCK_MAX_BREITE = 210;
 // Fangradius für das Ausrichten, in Bildschirmpixeln bei 100 % — er wird beim
 // Ziehen durch den Zoom geteilt, damit er sich immer gleich anfühlt.
 const DATENBLOCK_FANG = 7;
@@ -1188,7 +1191,8 @@ function mitNr(Comp) {
             style={{
               position:'absolute', top:'100%', left:'50%',
               transform:`translate(calc(-50% + ${Number(props.data?.caption_offset_x) || 0}px), ${10 + (Number(props.data?.caption_offset_y) || 0)}px)`,
-              width:DATENBLOCK_BREITE, boxSizing:'border-box', padding:'3px 7px',
+              minWidth:DATENBLOCK_MIN_BREITE, maxWidth:DATENBLOCK_MAX_BREITE,
+              boxSizing:'border-box', padding:'3px 7px',
               border:'1px solid #94a3b8', borderRadius:3, background:'white',
               color:'#334155', fontSize:9, lineHeight:1.2, textAlign:'center',
               whiteSpace:'nowrap', cursor:'move', zIndex:18,
@@ -1284,11 +1288,12 @@ export const ROTATABLE = new Set([
   'expansion', 'anschluss',
 ]);
 
-// Gedreht wird das ÄUSSERSTE DIV des Bauteils, nicht nur das Symbol darin
-// (Dominic-Feedback): sonst bleibt der Auswahlrahmen — React Flow setzt ihn auf
-// das erste Kind des Node-Elements — waagrecht stehen, während das Zeichen
-// schon quer liegt. Nummer und Beschriftung liegen jetzt im gedrehten DIV und
-// werden in `mitNr` wieder geradegestellt.
+// Gedreht wird das Bauteilzeichen samt seinem Auswahlrahmen — der Rahmen ist
+// Teil des Symbols (siehe `wrap`) und liegt dadurch immer so wie das Zeichen.
+// Nummer und Datenblock liegen eine Schicht darüber (`mitNr` umschliesst
+// `mitRotation`) und drehen bewusst NICHT mit: sie sollen bei jeder Bauteillage
+// an derselben Stelle und lesbar bleiben (Dominic 2026-08-05). Genauso zeichnet
+// sie der PDF-Export.
 // eslint-disable-next-line no-unused-vars
 function mitRotation(Comp) {
   function MitRotation(props) {

@@ -3,11 +3,12 @@
 // Drei Zusagen, die man nur im Browser belegen kann:
 //
 //   1. Eine Leitung endet mit einem Doppelklick bzw. mit einem zweiten Klick
-//      auf denselben Punkt — nicht nur mit Enter oder Escape.
+//      auf denselben Punkt — Escape bricht ab und hinterlässt nichts.
 //   2. Ein Klick auf eine Leitung wählt das Teilstück; Tab nimmt den ganzen
 //      zusammenhängenden Strang dazu und Tab führt wieder zurück.
-//   3. Die 90°-Drehung dreht das ganze Bauteil-DIV, also auch den
-//      Auswahlrahmen — nicht nur das Zeichen darin.
+//   3. Die 90°-Drehung dreht das Bauteilzeichen samt Auswahlrahmen; Nummer
+//      und Datenblock drehen NICHT mit und bleiben lesbar
+//      (Dominic 2026-08-05, siehe HydraulikNodes.jsx::NODE_TYPES).
 import { protokoll, starten } from './lib.mjs';
 
 const { pruefe, kopf, bilanz } = protokoll('bedienung');
@@ -94,51 +95,63 @@ kopf('Klick wählt das Teilstück, Tab den Strang');
     /Teilstück/.test(status3), status3);
 }
 
-// ── 3. Drehung dreht das ganze DIV ─────────────────────────────────────────
-kopf('90°-Drehung dreht das ganze Bauteil-DIV');
+// ── 3. Drehung dreht das Zeichen, nicht die Beschriftung ───────────────────
+kopf('90°-Drehung dreht das Bauteilzeichen samt Auswahlrahmen');
 {
   // Bewusst ein NICHT quadratisches Bauteil: nur daran ist zu sehen, ob das
-  // ganze DIV quer liegt oder bloss das Zeichen darin gedreht wurde.
+  // Zeichen wirklich quer liegt.
   await w.graphSetzen({
     nodes: [{ id: 's1', type: 'speicher', position: { x: 500, y: 300 }, data: { nr: 1 } }],
     edges: [], layer_config: {},
   });
   await w.laden();
 
-  // Misst das äusserste Bauteil-DIV im Node — das ist das Element, auf dem
-  // React Flow den Auswahlrahmen setzt (`.react-flow__node.selected > *`).
-  const bauteilDiv = () => page.evaluate(() => {
+  // Der Node besteht aus zwei Schichten: die Hülle hält Nummer und Datenblock
+  // aufrecht, das Zeichen darin trägt die Drehung samt blauem Auswahlrahmen.
+  const bauteil = () => page.evaluate(() => {
     const node = document.querySelector('.react-flow__node[data-id="s1"]');
-    const kind = node.firstElementChild;
-    const stil = getComputedStyle(kind);
-    const kasten = kind.getBoundingClientRect();
+    const huelle = node.firstElementChild;
+    const zeichen = huelle.firstElementChild;
+    const block = node.querySelector('.hc-datenblock');
+    const rahmen = [...node.querySelectorAll('div')]
+      .find((el) => getComputedStyle(el).borderTopColor === 'rgb(59, 130, 246)');
+    // Gemessen wird immer DERSELBE Kasten — der mit dem blauen Rahmen. Vor der
+    // Drehung ist er das äusserste Zeichen-DIV, danach steckt er im gedrehten
+    // DIV; sein Bildschirmrechteck enthält die Drehung der Eltern.
+    const kasten = (rahmen || zeichen).getBoundingClientRect();
     return {
-      transform: stil.transform,
-      outline: stil.outlineWidth,
+      huelle: getComputedStyle(huelle).transform,
+      zeichen: getComputedStyle(zeichen).transform,
       breite: Math.round(kasten.width),
       hoehe: Math.round(kasten.height),
+      rahmenDrehtMit: !!rahmen && zeichen.contains(rahmen),
       nr: node.querySelector('div[style*="border-radius: 9px"]')?.textContent ?? null,
+      block: block ? getComputedStyle(block).transform : null,
     };
   });
 
   await page.locator('.react-flow__node[data-id="s1"]').click();
   await page.waitForTimeout(300);
-  const vorher = await bauteilDiv();
+  const vorher = await bauteil();
 
   await page.keyboard.press('d');       // Standard-Shortcut fürs Drehen
   await page.waitForTimeout(500);
-  const nachher = await bauteilDiv();
+  const nachher = await bauteil();
 
-  pruefe('R1', 'Das äusserste Bauteil-DIV trägt die Drehung',
-    nachher.transform !== 'none' && nachher.transform !== '', nachher.transform);
-  pruefe('R2', 'Der Auswahlrahmen sitzt auf genau diesem gedrehten DIV',
-    nachher.outline !== '0px' && vorher.outline !== '0px',
-    `outline vorher ${vorher.outline}, jetzt ${nachher.outline}`);
-  pruefe('R3', 'Das DIV liegt danach quer — Breite und Höhe sind getauscht',
+  pruefe('R1', 'Das Bauteilzeichen trägt die Drehung',
+    nachher.zeichen !== 'none' && nachher.zeichen !== '', nachher.zeichen);
+  pruefe('R2', 'Der blaue Auswahlrahmen liegt im gedrehten Zeichen, dreht also mit',
+    vorher.rahmenDrehtMit && nachher.rahmenDrehtMit,
+    `vorher ${vorher.rahmenDrehtMit}, jetzt ${nachher.rahmenDrehtMit}`);
+  pruefe('R3', 'Das Zeichen liegt danach quer — Breite und Höhe sind getauscht',
     Math.abs(nachher.breite - vorher.hoehe) <= 2 && Math.abs(nachher.hoehe - vorher.breite) <= 2,
     `vorher ${vorher.breite}×${vorher.hoehe} px, jetzt ${nachher.breite}×${nachher.hoehe} px`);
   pruefe('R4', 'Die Bauteilnummer bleibt lesbar (nicht mitgedreht)',
-    nachher.nr === '1', `Nr «${nachher.nr}»`);
+    nachher.nr === '1' && nachher.huelle === 'none', `Nr «${nachher.nr}», Hülle ${nachher.huelle}`);
+  // Der Datenblock darf nur verschoben sein (matrix(1, 0, 0, 1, …)) — jede
+  // Drehung wäre am zweiten und dritten Wert der Matrix zu sehen.
+  pruefe('R5', 'Der Datenblock bleibt waagrecht und damit lesbar',
+    /^matrix\(1, 0, 0, 1/.test(nachher.block || ''), `${nachher.block}`);
 }
 
 // ── 4. Klick auf einen Anschluss zeichnet sofort ───────────────────────────

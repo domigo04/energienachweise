@@ -299,11 +299,15 @@ def _handle_pos_base(node, handle: Optional[str]):
 KASTEN_ZEILE = 9.5      # Zeilenhöhe im Datenblock
 KASTEN_KOPF = 18.0      # Abstand Titelzeile → erste Kennwertzeile
 KASTEN_LUFT = 4.5       # Luft vor einem Abschnittstitel
-# Jeder Datenblock ist gleich breit — unabhängig davon, wie gross das Bauteil
-# ist und wie viel drinsteht (Dominic 2026-08-06). Nur so stehen mehrere Blöcke
-# nebeneinander ruhig im Plan. Dieselbe Breite zeichnet der Editor
-# (HydraulikNodes.jsx::DATENBLOCK_BREITE); die Höhe ergibt sich aus den Zeilen.
-DATENBLOCK_BREITE = 184.0
+# Eine gemeinsame Grundbreite statt einer Breite je Inhalt (Dominic
+# 2026-08-06): Pumpe, Ventil, Verbrauchergruppe und die übrigen gewöhnlichen
+# Bauteile landen alle auf demselben Mass und stehen dadurch ruhig
+# nebeneinander. Ein Bauteil mit wirklich langen Angaben — der Wärmeerzeuger
+# mit «Sole/Wasser-WP (Erdsonden)» — darf breiter werden; enger als die
+# Grundbreite wird keiner. Dieselben Grenzen gelten im Editor
+# (HydraulikNodes.jsx::DATENBLOCK_MIN_BREITE).
+DATENBLOCK_MIN_BREITE = 120.0
+DATENBLOCK_MAX_BREITE = 210.0
 KASTEN_RAND = 7.0       # Innenabstand links/rechts — wie das Padding im Editor
 
 
@@ -327,12 +331,18 @@ def kasten_zeilen(abschnitte: list) -> list:
 def datenkasten_masse(titel: str, abschnitte: list) -> tuple:
     """Breite und Höhe des Datenblocks — Editor und Export nutzen dasselbe.
 
-    Die Breite ist fest; nur die Höhe hängt vom Inhalt ab.
+    Die Breite ist mindestens die Grundbreite; nur ein Bauteil mit wirklich
+    langen Angaben wird breiter.
     """
-    del titel                            # steht in der festen Breite mit drin
+    zeilen = kasten_zeilen(abschnitte)
+    namen = max([len(str(n)) + 1 for art, n, _ in zeilen if art == "wert"] + [0])
+    werte = max([len(str(w)) for art, _, w in zeilen if art == "wert"] + [0])
+    kopfzeilen = [titel] + [n for art, n, _ in zeilen if art == "titel"]
+    breite = max([DATENBLOCK_MIN_BREITE, namen * 4.4 + werte * 4.4 + 2 * KASTEN_RAND]
+                 + [len(str(k)) * 4.9 + 2 * KASTEN_RAND for k in kopfzeilen])
     hoehe = KASTEN_KOPF + sum(KASTEN_LUFT if art == "luft" else KASTEN_ZEILE
-                              for art, _, _ in kasten_zeilen(abschnitte))
-    return (DATENBLOCK_BREITE, hoehe)
+                              for art, _, _ in zeilen)
+    return (min(DATENBLOCK_MAX_BREITE, breite), hoehe)
 
 
 def zeichne_datenkasten(parts: list, mitte_x: float, oben_y: float,

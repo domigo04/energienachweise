@@ -2,7 +2,8 @@
 //
 // Drei Zusagen, die man nur im Browser belegen kann:
 //
-//   1. Jeder Datenblock ist gleich breit, egal wie gross das Bauteil ist.
+//   1. Gewöhnliche Bauteile haben denselben Datenblock; nur wer wirklich
+//      lange Angaben hat, wird breiter.
 //   2. Beim Verschieben rastet ein Block an der Flucht der anderen ein
 //      (Fangpunkte und Hilfslinie sichtbar) und trifft sie exakt.
 //   3. Die ausgerichtete Lage übersteht Speichern und Neuladen — auch wenn
@@ -45,25 +46,29 @@ const fangAnzeige = () => page.evaluate(() => ({
   punkte: document.querySelectorAll('.react-flow__viewport svg rect[stroke="#16a34a"]').length,
 }));
 
-kopf('Alle Datenblöcke sind gleich breit');
+kopf('Gewöhnliche Bauteile haben denselben Datenblock');
 await w.graphSetzen({
   nodes: [
     { id: 'p1', type: 'pump', position: { x: 400, y: 300 }, data: { nr: 1, label: 'Pumpe' } },
     { id: 'v1', type: 'valve2', position: { x: 900, y: 460 }, data: { nr: 2, label: 'Ventil' } },
     // Weit weg: der dritte Block soll die Breite belegen, aber beim Ausrichten
-    // keine eigene Flucht in Reichweite haben.
-    { id: 'we', type: 'erzeuger', position: { x: 1500, y: 1100 }, data: { nr: 3, label: 'WP' } },
+    // keine eigene Flucht in Reichweite haben. «Sole/Wasser-WP (Erdsonden)»
+    // passt nicht in die Grundbreite — dieser Block darf breiter werden.
+    { id: 'we', type: 'erzeuger', position: { x: 1500, y: 1100 },
+      data: { nr: 3, label: 'WP', generator_type: 'ews_wp' } },
   ],
   edges: [], layer_config: {},
 });
 await w.laden();
 await w.mausWeg();
 {
-  const breiten = [];
-  for (const id of ['p1', 'v1', 'we']) breiten.push((await block(id))?.breite);
-  const gleich = breiten.every((b) => b != null && Math.abs(b - breiten[0]) < 0.6);
-  pruefe('B1', 'Kleines und grosses Bauteil bekommen denselben Kasten', gleich,
-    breiten.map((b) => (b == null ? '—' : b.toFixed(1))).join(' / '));
+  const p1 = await block('p1');
+  const v1 = await block('v1');
+  const we = await block('we');
+  pruefe('B1', 'Pumpe und Ventil bekommen denselben Kasten',
+    Math.abs(p1.breite - v1.breite) < 0.6, `${p1.breite.toFixed(1)} / ${v1.breite.toFixed(1)}`);
+  pruefe('B1b', 'Ein Bauteil mit langen Angaben darf breiter werden',
+    we.breite > p1.breite, `Wärmeerzeuger ${we.breite.toFixed(1)} vs Pumpe ${p1.breite.toFixed(1)}`);
 }
 
 kopf('Ausrichten mit Fangpunkten und Hilfslinie');

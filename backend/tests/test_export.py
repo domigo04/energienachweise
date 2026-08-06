@@ -8,6 +8,8 @@ from app.calculations.hydraulik import berechne_schema
 from app.export.bauteil_infos import bauteil_kennwerte, node_infos
 from app.export.pdf import berechnungs_abschnitte, erzeuge_pdf, legende_zeilen
 from app.export.schema_svg import (
+    DATENBLOCK_MAX_BREITE,
+    DATENBLOCK_MIN_BREITE,
     caption_titel,
     datenblock_anker,
     datenkasten_masse,
@@ -800,22 +802,29 @@ def test_datenblock_nennt_die_schaltungsart_nicht():
     assert "Wärmezähler" in [a["titel"] for a in abschnitte]
 
 
-def test_jeder_datenblock_ist_gleich_breit():
-    """Verschieden grosse Bauteile, gleich breite Kästchen — nur so lassen sie
-    sich aneinander ausrichten (Dominic 2026-08-06)."""
+def test_gewoehnliche_datenblöcke_haben_dieselbe_grundbreite():
+    """Pumpe, Ventil und Verbrauchergruppe landen auf demselben Mass; nur ein
+    Bauteil mit wirklich langen Angaben wird breiter (Dominic 2026-08-06)."""
     nodes, edges = _graph()
     gruppe = next(n for n in nodes if n["id"] == "g1")
     gruppe["data"] = {**gruppe["data"], "hat_wz": True, "pumpe_fabrikat": "Biral"}
     ventil = {"id": "v", "type": "valve2", "position": {"x": 0, "y": 0},
               "data": {"nr": 9, "label": "V"}}
+    pumpe = {"id": "p", "type": "pump", "position": {"x": 0, "y": 0},
+             "data": {"nr": 8, "label": "Pumpe"}}
+    erzeuger = {"id": "e", "type": "erzeuger", "position": {"x": 0, "y": 0},
+                "data": {"nr": 7, "label": "WP", "generator_type": "ews_wp"}}
     results = berechne_schema(nodes, edges)
 
-    breite_gruppe, hoehe_gruppe = datenkasten_masse(caption_titel(gruppe),
-                                                    bauteil_kennwerte(gruppe, results))
-    breite_ventil, hoehe_ventil = datenkasten_masse(caption_titel(ventil),
-                                                    bauteil_kennwerte(ventil, results))
-    assert breite_gruppe == breite_ventil
-    # Die Höhe darf sich weiterhin nach dem Inhalt richten.
+    def breite(node):
+        return datenkasten_masse(caption_titel(node), bauteil_kennwerte(node, results))[0]
+
+    assert breite(gruppe) == breite(ventil) == breite(pumpe) == DATENBLOCK_MIN_BREITE
+    # «Sole/Wasser-WP (Erdsonden)» passt nicht in die Grundbreite.
+    assert DATENBLOCK_MIN_BREITE < breite(erzeuger) <= DATENBLOCK_MAX_BREITE
+    # Die Höhe richtet sich weiterhin nach dem Inhalt.
+    _, hoehe_gruppe = datenkasten_masse(caption_titel(gruppe), bauteil_kennwerte(gruppe, results))
+    _, hoehe_ventil = datenkasten_masse(caption_titel(ventil), bauteil_kennwerte(ventil, results))
     assert hoehe_gruppe > hoehe_ventil
 
 

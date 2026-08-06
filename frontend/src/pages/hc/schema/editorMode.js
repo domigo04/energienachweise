@@ -44,12 +44,19 @@ export const EXTEND = 'extend';
 // Verbinden (AutoCAD JOIN): zwei aneinanderstossende Teilstücke werden eine
 // Leitung.
 export const JOIN = 'join';
+// Kopieren (AutoCAD COPY): Basispunkt, dann beliebig viele Zielpunkte. Läuft
+// immer als Dauerbefehl — erst ESC oder Rechtsklick beendet die Mehrfachkopie.
+export const COPY = 'copy';
+// Drehen (AutoCAD ROTATE): Basispunkt, dann Winkel — mit der Maus oder getippt.
+export const ROTATE = 'rotate';
+// Lineare Reihe (AutoCAD ARRAY): Basispunkt, Zielpunkt für den Abstand, Anzahl.
+export const ARRAY = 'array';
 
 // Der Grundzustand. Nach dem Laden und nach jedem ESC gilt genau das.
 export const HOME = Object.freeze({ type: MODIFY, persistent: false, payload: null });
 
 const BEFEHLE = new Set([MODIFY, DRAW_PIPE, PLACE, MIRROR, ALIGN, MOVE, BREAK, CONNECT_CORNER,
-  STRETCH, OFFSET, TRIM, EXTEND, JOIN]);
+  STRETCH, OFFSET, TRIM, EXTEND, JOIN, COPY, ROTATE, ARRAY]);
 
 /** Grundzustand. Absichtlich eine Funktion — nie eine gemeinsame Referenz teilen. */
 export function initialMode() {
@@ -119,6 +126,9 @@ export const MODE_LABEL = {
   // Statusleiste müssen die beiden unterscheidbar bleiben.
   [EXTEND]: 'Dehnen bis Kante',
   [JOIN]: 'Verbinden',
+  [COPY]: 'Kopieren',
+  [ROTATE]: 'Drehen',
+  [ARRAY]: 'Reihe',
 };
 
 export function modeLabel(mode) {
@@ -167,6 +177,10 @@ export function befehlsPrompt(mode, payload = {}) {
     case BREAK: return payload.hasFirst ? 'Zweiten Trennpunkt angeben' : 'Ersten Trennpunkt angeben';
     case CONNECT_CORNER: return mode.payload?.erste ? 'Zweites Teilstück wählen' : 'Erstes Teilstück wählen';
     case STRETCH: return payload.stage || 'Auswahlfenster angeben';
+    case COPY: return payload.hasBase ? 'Zielpunkt angeben (weitere Klicks = weitere Kopien)' : 'Basispunkt angeben';
+    case ROTATE: return payload.hasBase ? 'Winkel angeben oder eintippen' : 'Basispunkt angeben';
+    case ARRAY: return payload.hasSpacing ? 'Anzahl eintippen'
+      : payload.hasBase ? 'Zielpunkt der ersten Kopie angeben' : 'Basispunkt angeben';
     default: return 'Befehl eingeben';
   }
 }

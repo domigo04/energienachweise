@@ -2,6 +2,7 @@
 // Rein, ohne React, ohne Hydraulik.
 
 import { constrainPoint } from './cadConstraints';
+import { routeAbgebildet, verschiebung } from './cadTransform';
 
 /**
  * Grips einer Leitung: Endpunkte und Eckpunkte.
@@ -313,24 +314,16 @@ export function loeschAuswahl(ganzeEdgeIds = [], segmente = []) {
  *
  * Rückgabe: { points, start, end } — `points` sind die Zwischenpunkte der
  * Leitung (ohne Enden), `start`/`end` sind null, wenn das Ende fest bleibt.
+ *
+ * Das Verschieben ist der Sonderfall einer Abbildung (`cadTransform`); Spiegeln,
+ * Drehen und Reihe gehen denselben Weg. Die Regel für feste Enden steht darum
+ * nur EINMAL — in `routeAbgebildet`.
  */
-export function leitungVerschieben(route, delta, { startFrei = false, endFrei = false } = {}) {
-  if (!Array.isArray(route) || route.length < 2) return null;
+export function leitungVerschieben(route, delta, optionen = {}) {
   const dx = Number(delta?.x) || 0;
   const dy = Number(delta?.y) || 0;
   if (!dx && !dy) return null;
-  const versetzt = (p) => ({ x: p.x + dx, y: p.y + dy });
-  const ersterPunkt = route[0];
-  const letzterPunkt = route[route.length - 1];
-  return {
-    points: [
-      ...(startFrei ? [] : [versetzt(ersterPunkt)]),
-      ...route.slice(1, -1).map(versetzt),
-      ...(endFrei ? [] : [versetzt(letzterPunkt)]),
-    ],
-    start: startFrei ? versetzt(ersterPunkt) : null,
-    end: endFrei ? versetzt(letzterPunkt) : null,
-  };
+  return routeAbgebildet(route, verschiebung({ x: dx, y: dy }), optionen);
 }
 
 /**

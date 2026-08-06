@@ -2,7 +2,7 @@ import React, { useCallback, useState, useMemo, useRef, useEffect } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   AlertTriangle, AlignHorizontalJustifyCenter, ArrowLeft, Check, ChevronDown, Copy, Download, Eye,
-  FlipHorizontal2, History,
+  FlipHorizontal2, Grid2x2, History,
   Image as ImageIcon, Layers3, LayoutTemplate, Link2, Lock, Unlock, MapPin, Move, MoveHorizontal,
   CopyPlus, CornerDownRight, MoveRight, PanelLeftClose, PanelLeftOpen, RotateCcw, RotateCw,
   Scissors, Slice, Spline,
@@ -28,8 +28,8 @@ import { EDGE_TYPES } from '../../components/hc/edges/FlowEdge';
 import { pairedHandleId, parallelWaypoints, roundedPolylinePath, splitRouteAtCorner, splitRouteAtPoint, reconnectThroughNode, adaptivePolyline, orthogonalerAnschlussEckpunkt, segmentAchse, mitgezogeneWaypoints } from '../../components/hc/edges/geometry';
 import { createHydraulicEdge, canStartHydraulicLine } from './schema/edgeFactory';
 import {
-  ALIGN, BREAK, CONNECT_CORNER, DRAW_PIPE, EXTEND, HOME, JOIN, MOVE, OFFSET, PLACE,
-  STRETCH, TRIM,
+  ALIGN, ARRAY, BREAK, CONNECT_CORNER, COPY, DRAW_PIPE, EXTEND, HOME, JOIN, MIRROR, MOVE,
+  OFFSET, PLACE, ROTATE, STRETCH, TRIM,
   befehlMerken, befehlsPrompt, befehlsVorschlaege, escape as escapeMode, finishCommand, initialMode,
   letztenBefehlWiederholen,
   istBefehl, istModify, modeLabel, startCommand, toggleCommand, zeichnetLeitung,
@@ -42,7 +42,7 @@ import {
 } from './schema/cadConstraints';
 import {
   CORNER, ENDPOINT, GRID, MIDPOINT, NEAREST, PERPENDICULAR, PORT,
-  fangspurPunkt, fangStil, orthogonalerTStueckPunkt, senkrechterFang,
+  fangErgebnis, fangspurPunkt, fangStil, orthogonalerTStueckPunkt, senkrechterFang,
 } from './schema/cadSnap';
 import { SOLE_ROHRE, SOLE_TRAEGER } from './schema/soleTabellen';
 import {
@@ -59,6 +59,11 @@ import {
   griffAktionen, loeschAuswahl, segmentAusrichten, segmentVerschieben, segmentVerschiebungDelta,
   entwurfFuerAbschluss, segmentZumVerschieben, versatzSeite, verschiebungLabel,
 } from './schema/cadEdit';
+import {
+  anzahlAusBuffer, bauteilLage, bauteilPosition, drehung, kopierPlan,
+  reihenAbbildungen, routeAbgebildet, spiegelung, verschiebung as verschiebungsAbbildung,
+  winkelAusBuffer, winkelZwischen,
+} from './schema/cadTransform';
 import {
   CAD_GRID, DEFAULT_DRAWING_CONFIG, GRID_OPTIONEN,
   graphFuerEditor, normalisiereDrawingConfig,
@@ -283,16 +288,6 @@ function projektionAufSegment(point, a, b) {
   return { x, y, t, distance:Math.hypot(point.x - x, point.y - y) };
 }
 
-function punktAnAchseSpiegeln(point, a, b) {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const quadrat = dx * dx + dy * dy;
-  if (!quadrat) return { ...point };
-  const t = ((point.x - a.x) * dx + (point.y - a.y) * dy) / quadrat;
-  const lot = { x:a.x + t * dx, y:a.y + t * dy };
-  return { x:2 * lot.x - point.x, y:2 * lot.y - point.y };
-}
-
 const streckenLaenge = (points) => points.slice(1)
   .reduce((sum, point, index) => sum + Math.hypot(point.x - points[index].x, point.y - points[index].y), 0);
 
@@ -485,6 +480,10 @@ const paletteItem = kennung => STD_PALETTE.find(item => (item.paletteId || item.
 const paletteNodeType = kennung => paletteItem(kennung)?.type || kennung;
 
 const newId = () => `n_${Date.now()}_${Math.floor(Math.random() * 9999)}`;
+
+// Die vier Modify-Befehle (§74) und ihr Befehlszustand. Kopieren ist der
+// einzige Dauerbefehl — die Mehrfachkopie ist genau das, was ihn ausmacht.
+const TRANSFORM_MODUS = { kopieren:COPY, spiegeln:MIRROR, drehen:ROTATE, reihe:ARRAY };
 
 // Automatischer Vorschlag für den Plankopf/Schemanamen eines NEUEN Schemas —
 // Projektname + heutiges Datum. Bleibt im Namensfeld frei überschreibbar.
@@ -2513,7 +2512,22 @@ function EditorInner() {
   const letzteBefehleRef = useRef([]);
   const wiederholeLetztenRef = useRef(() => false);
   const [markierteEdgeIds, setMarkierteEdgeIds] = useState([]);
-  const [spiegelAchse, setSpiegelAchse] = useState(null); // { edgeId, start, cursor }
+  // ── Modify-Befehle mit Basispunkt (§74) ──────────────────────────────────
+  // Kopieren, Spiegeln, Drehen und Reihe sind EIN Zustand, weil sie denselben
+  // Ablauf haben: Auswahl → Basispunkt → Zielpunkt. Vier getrennte Zustände
+  // würden dieselbe Klickfolge viermal beschreiben und dabei auseinanderlaufen.
+  //
+  //   art          COPY | MIRROR | ROTATE | ARRAY
+  //   snapshot     eingefrorene Auswahl für die Kopien (unabhängig vom Graphen)
+  //   umfang       { nodeIds, edgeIds } für die Befehle, die an Ort wirken
+  //   basis        erster gesetzter Punkt (Basispunkt bzw. erster Achspunkt)
+  //   cursor       aktueller, bereits gefangener Punkt — was der Klick anwendet
+  //   achse        zweiter Achspunkt beim Spiegeln
+  //   abstand      Versatz der ersten Kopie einer Reihe
+  //   puffer       getippte Zahl (Winkel beim Drehen, Anzahl bei der Reihe)
+  const [transformBefehl, setTransformBefehl] = useState(null);
+  const transformBefehlRef = useRef(null);
+  transformBefehlRef.current = transformBefehl;
   // ── Notiz-Stecknadeln (Dominic 2026-07-31) ──────────────────────────────
   // Ein Journaleintrag kann an einer Stelle im Schema hängen. Der Editor zeigt
   // die Nadeln seines Schemas, setzt neue und öffnet den Eintrag direkt hier —
@@ -5440,19 +5454,48 @@ function EditorInner() {
     return true;
   }, [befehlLeitungsTreffer, verbindenAnwenden]);
 
-  const auswahlKopieren = useCallback(() => {
+  // Gemessene Bauteilgrösse. Gespiegelt und gedreht wird um die MITTE, React
+  // Flow speichert aber die linke obere Ecke — ohne die Grösse würde ein
+  // Bauteil beim Spiegeln um seine halbe Breite davonwandern.
+  const nodeGroesse = useCallback((id) => {
+    const internal = getInternalNode(id);
+    return {
+      width:internal?.measured?.width || 0,
+      height:internal?.measured?.height || 0,
+    };
+  }, [getInternalNode]);
+
+  /**
+   * Die aktuelle Auswahl als unabhängiger Schnappschuss.
+   *
+   * Das ist die EINE Stelle, an der «was ist gewählt?» beantwortet wird —
+   * Zwischenablage, Kopieren, Spiegeln und Reihe holen sich alle hier ihre
+   * Auswahl. Enthalten sind Bauteile, ganze Leitungen und einzeln gewählte
+   * Teilstücke; `sourceRef`/`targetRef` merken sich, welche Leitungsenden an
+   * einem MITKOPIERTEN Bauteil hängen. Alles andere endet später an einem
+   * eigenen freien Anker — daher kann keine Kopie am Original hängen bleiben.
+   *
+   * `ganzeLeitungen` hebt eine Teilstückauswahl auf die ganze Leitung an — die
+   * Shift-Regel des Verschieben-Befehls, damit alle Modify-Befehle gleich
+   * bedient werden. Spiegeln und Drehen setzen sie immer.
+   */
+  const auswahlSnapshot = useCallback(({ ganzeLeitungen = false } = {}) => {
     const knoten = nodesRef.current.filter(node => node.selected && node.type !== 'junction');
     if (!knoten.length && selected) {
       const einzeln = nodesRef.current.find(node => node.id === selected.id);
       if (einzeln && einzeln.type !== 'junction') knoten.push(einzeln);
     }
     const knotenIds = new Set(knoten.map(node => node.id));
+    const gewaehlteTeile = selectedSegments.length ? selectedSegments
+      : selectedEdgeSegment ? [selectedEdgeSegment] : [];
     const ganzeIds = new Set([
       ...markierteEdgeIds,
       ...edgesRef.current.filter(edge => edge.selected).map(edge => edge.id),
+      ...(ganzeLeitungen ? gewaehlteTeile.map(item => item.edgeId) : []),
+      // Ohne Teilstückauswahl zählt die angeklickte Leitung als Ganzes.
+      ...((ganzeLeitungen || !gewaehlteTeile.length) && selectedEdgeId ? [selectedEdgeId] : []),
     ]);
-    const teile = selectedSegments.length ? selectedSegments
-      : selectedEdgeSegment ? [selectedEdgeSegment] : [];
+    const teile = ganzeLeitungen ? [] : gewaehlteTeile;
     const routen = [];
     edgesRef.current.forEach(edge => {
       const route = routePunkte(edge);
@@ -5470,15 +5513,182 @@ function EditorInner() {
           targetRef:item.segmentIndex === route.length - 2 && knotenIds.has(edge.target) ? edge.target : null });
       });
     });
-    if (!knoten.length && !routen.length) return false;
-    clipboard.current = {
+    if (!knoten.length && !routen.length) return null;
+    return {
       kind:'selection',
-      nodes:knoten.map(kopierbarerKnoten),
+      nodes:knoten.map(node => ({ ...kopierbarerKnoten(node), groesse:nodeGroesse(node.id) })),
       routes:routen.map(item => ({ ...item, edge:JSON.parse(JSON.stringify(item.edge)),
         route:item.route.map(point => ({ x:point.x, y:point.y })) })),
     };
+  }, [markierteEdgeIds, nodeGroesse, routePunkte, selected, selectedEdgeId, selectedEdgeSegment, selectedSegments]);
+
+  /**
+   * Einen Schnappschuss als unabhängige Kopien einsetzen — eine Kopie je
+   * Abbildung. Die Reihe gibt mehrere Abbildungen mit, alle anderen genau eine.
+   *
+   * Unabhängig heisst hier drei Dinge, und alle drei entstehen genau hier:
+   *   • jede Kopie bekommt neue IDs für Bauteile, Leitungen UND Anker;
+   *   • jedes Leitungsende, das nicht an einem mitkopierten Bauteil hängt,
+   *     endet an einem EIGENEN freien Anker — nie am Anschluss des Originals;
+   *   • Paarungs- und Berechnungsverweise des Originals fallen weg.
+   * Damit kann keine Geisterverbindung entstehen (Prüfmuster `e2e/copy.mjs`).
+   *
+   * Alles landet in EINEM Zustandswechsel — die ganze Aktion ist ein Undo-Schritt.
+   */
+  const snapshotKopieren = useCallback((src, abbildungen) => {
+    if (!src || !abbildungen?.length) return null;
+    // Der Bauplan ist rein und getestet (`cadTransform.kopierPlan`); hier
+    // entstehen daraus nur die React-Flow-Objekte.
+    const plan = kopierPlan(src, abbildungen, {
+      neueId:newId,
+      ersteNummer:naechsteNr(nodesRef.current),
+      nummeriert:node => NUMMERIERT.includes(node.type),
+      drehbar:node => ROTATABLE.has(node.type),
+    });
+    if (!plan.nodes.length && !plan.edges.length) return null;
+    snap();
+    const quellNode = new Map(src.nodes.map(node => [node.id, node]));
+    const quellEdge = new Map(src.routes.map(item => [item.edge.id, item]));
+    const neueNodes = plan.nodes.map(eintrag => {
+      const quelle = quellNode.get(eintrag.quelle);
+      const neu = eingefuegterKnoten(quelle, eintrag.id, { nummer:eintrag.nr, versatz:0 });
+      delete neu.groesse;
+      // Nur drehbare Bauteile tragen eine Lage. Ein Textblock bekommt keine
+      // Spiegelung eingetragen — er soll auch im Spiegelbild lesbar bleiben.
+      return ROTATABLE.has(quelle.type)
+        ? { ...neu, position:eintrag.position,
+            data:{ ...neu.data, rotation:eintrag.rotation, mirrored:eintrag.mirrored } }
+        : { ...neu, position:eintrag.position };
+    });
+    const neueEdges = [];
+    const ankerNodes = [];
+    const layerFuer = new Map();
+    plan.edges.forEach(eintrag => {
+      const quelle = quellEdge.get(eintrag.quelle);
+      if (!quelle) return;
+      const layer = layerVonEdge(quelle.edge);
+      if (eintrag.eigenerSource) layerFuer.set(eintrag.source, layer);
+      if (eintrag.eigenerTarget) layerFuer.set(eintrag.target, layer);
+      const data = { ...(quelle.edge.data || {}) };
+      ['_routePoints','_routeStart','_routeEnd','paired_edge_id','auto_paired','auto_pair_open'].forEach(key => delete data[key]);
+      // Eine manuell eingetragene Länge gehört zur ganzen Ursprungsleitung;
+      // bei einer Segmentkopie wäre sie fachlich falsch.
+      if (!eintrag.whole) delete data.laenge_m;
+      const edge = createHydraulicEdge({
+        id:eintrag.id, source:eintrag.source,
+        sourceHandle:eintrag.eigenerSource ? 'center-source' : quelle.edge.sourceHandle,
+        target:eintrag.target,
+        targetHandle:eintrag.eigenerTarget ? 'center-target' : quelle.edge.targetHandle,
+        layerId:layer.id, layerColor:layer.color, points:eintrag.route.slice(1, -1),
+        cornerRadius:drawingConfig.corner_radius,
+      }, [...edgesRef.current, ...neueEdges]);
+      if (edge) neueEdges.push({ ...edge, selected:true,
+        data:{ ...(edge.data || {}), ...data, points:eintrag.route.slice(1, -1) } });
+    });
+    plan.anker.forEach(eintrag => {
+      const layer = layerFuer.get(eintrag.id);
+      if (layer) ankerNodes.push(cadAnker(eintrag.id, eintrag.punkt, layer));
+    });
+    setNodes([...nodesRef.current.map(node => ({ ...node, selected:false })), ...neueNodes, ...ankerNodes]);
+    setEdges([...edgesRef.current.map(edge => ({ ...edge, selected:false })), ...neueEdges]);
+    setSelected(neueNodes.at(-1) || null);
+    setSelectedEdgeId(neueEdges.at(-1)?.id || null);
+    setSelectedSegments([]);
+    setMarkierteEdgeIds([]);
+    return { nodes:neueNodes, edges:neueEdges, anker:ankerNodes };
+  }, [cadAnker, drawingConfig.corner_radius, setEdges, setNodes, snap]);
+
+  /**
+   * Die Auswahl AN ORT abbilden — für Drehen und für «Spiegeln, Original
+   * ersetzen». Anders als beim Kopieren behalten Bauteile und Leitungen ihre
+   * IDs; nur so bleiben ihre hydraulischen Anschlüsse und ihre Nummern
+   * erhalten. Ein Anschluss an ein NICHT gewähltes Bauteil bleibt stehen und
+   * bekommt einen Stützpunkt an der abgebildeten Stelle — dieselbe Regel wie
+   * beim Verschieben.
+   */
+  const auswahlAbbilden = useCallback((abbildung, snapshot = null) => {
+    // Beim Befehlsstart eingefrorene Auswahl bevorzugen — sonst könnte sich die
+    // Auswahl zwischen Basispunkt und Abschluss unbemerkt verändert haben.
+    const src = snapshot || auswahlSnapshot({ ganzeLeitungen:true });
+    if (!src) return false;
+    const bewegteNodes = new Set(src.nodes.map(node => node.id));
+    // Gespiegelt und gedreht wird immer die GANZE Leitung: ein einzelnes
+    // Teilstück an Ort zu kippen würde die Route zerreissen statt sie zu
+    // verändern.
+    const edgeIds = new Set(src.routes.map(item => item.edge.id));
+    if (!bewegteNodes.size && !edgeIds.size) return false;
+    // Ein Ende folgt der Abbildung, wenn es ohnehin mitwandert: weil sein
+    // Bauteil gewählt ist, oder weil an seinem freien Anker ausschliesslich
+    // gewählte Leitungen hängen.
+    const folgt = (nodeId) => {
+      if (bewegteNodes.has(nodeId)) return true;
+      const node = nodesRef.current.find(item => item.id === nodeId);
+      if (node?.type !== 'junction') return false;
+      return edgesRef.current
+        .filter(edge => edge.source === nodeId || edge.target === nodeId)
+        .every(edge => edgeIds.has(edge.id));
+    };
+    const neuePunkte = new Map();
+    const neueAnker = new Map();
+    edgesRef.current.filter(edge => edgeIds.has(edge.id)).forEach(edge => {
+      const startFolgt = folgt(edge.source);
+      const endFolgt = folgt(edge.target);
+      const ergebnis = routeAbgebildet(routePunkte(edge), abbildung, {
+        startFrei:startFolgt, endFrei:endFolgt,
+      });
+      if (!ergebnis) return;
+      neuePunkte.set(edge.id, ergebnis.points);
+      // Nur freie Anker tragen ihre Position selbst; ein Bauteilanschluss folgt
+      // schon dadurch, dass sich das Bauteil bewegt.
+      const anker = (nodeId, punkt) => {
+        if (!punkt) return;
+        if (nodesRef.current.find(item => item.id === nodeId)?.type === 'junction') {
+          neueAnker.set(nodeId, punkt);
+        }
+      };
+      anker(edge.source, ergebnis.start);
+      anker(edge.target, ergebnis.end);
+    });
+    if (!neuePunkte.size && !bewegteNodes.size) return false;
+    const lagen = new Map(src.nodes.map(node => [node.id, {
+      drehbar:ROTATABLE.has(node.type),
+      position:bauteilPosition(node.position, node.groesse, abbildung),
+      ...bauteilLage(node.data, abbildung, { drehbar:ROTATABLE.has(node.type) }),
+    }]));
+    snap();
+    setNodes(items => items.map(node => {
+      if (lagen.has(node.id)) {
+        const { position, rotation, mirrored, drehbar } = lagen.get(node.id);
+        // Text-, Beschriftungs- und Flächenblöcke wandern nur an ihren neuen
+        // Platz. Sie bekommen keine Drehung und keine Spiegelung eingetragen —
+        // sonst stünden sie seitenverkehrt und wären nicht mehr lesbar.
+        return drehbar
+          ? { ...node, position, data:{ ...(node.data || {}), rotation, mirrored } }
+          : { ...node, position };
+      }
+      return neueAnker.has(node.id) ? { ...node, position:neueAnker.get(node.id) } : node;
+    }));
+    setEdges(items => items.map(edge => (neuePunkte.has(edge.id)
+      ? { ...edge, data:{ ...(edge.data || {}), cad_polyline:true, points:neuePunkte.get(edge.id) } }
+      : edge)));
+    // Anschlüsse eines gedrehten oder gespiegelten Bauteils neu zuordnen und
+    // die Handle-Bounds nachmessen — dieselbe Nachbehandlung wie bei der
+    // 90°-Schnelldrehung.
+    src.nodes.filter(node => ROTATABLE.has(node.type)).forEach(node => {
+      const lage = lagen.get(node.id);
+      leitungenNeuZuordnen(node.id, lage.rotation, lage.mirrored);
+    });
+    const messen = [...lagen.keys()];
+    requestAnimationFrame(() => requestAnimationFrame(() => messen.forEach(id => updateNodeInternals(id))));
     return true;
-  }, [markierteEdgeIds, routePunkte, selected, selectedEdgeSegment, selectedSegments]);
+  }, [auswahlSnapshot, leitungenNeuZuordnen, routePunkte, setEdges, setNodes, snap, updateNodeInternals]);
+
+  const auswahlKopieren = useCallback(() => {
+    const src = auswahlSnapshot();
+    if (!src) return false;
+    clipboard.current = src;
+    return true;
+  }, [auswahlSnapshot]);
 
   const auswahlEinfuegen = useCallback(() => {
     const src = clipboard.current;
@@ -5494,57 +5704,163 @@ function EditorInner() {
       setSelectedEdgeId(null);
       return true;
     }
-    snap();
-    const versatz = 24;
-    const idMap = new Map();
-    let nummer = naechsteNr(nodesRef.current);
-    const neueNodes = src.nodes.map(snapshot => {
-      const id = newId();
-      idMap.set(snapshot.id, id);
-      const neu = eingefuegterKnoten(snapshot, id, {
-        nummer:NUMMERIERT.includes(snapshot.type) ? nummer++ : null,
-        versatz,
-      });
-      return neu;
-    });
-    const anker = [];
-    const neueEdges = [];
-    src.routes.forEach(item => {
-      const route = item.route.map(point => ({ x:point.x + versatz, y:point.y + versatz }));
-      const layer = layerVonEdge(item.edge);
-      const source = item.sourceRef && idMap.get(item.sourceRef) ? idMap.get(item.sourceRef) : newId();
-      const target = item.targetRef && idMap.get(item.targetRef) ? idMap.get(item.targetRef) : newId();
-      if (!(item.sourceRef && idMap.has(item.sourceRef))) anker.push(cadAnker(source, route[0], layer));
-      if (!(item.targetRef && idMap.has(item.targetRef))) anker.push(cadAnker(target, route.at(-1), layer));
-      const data = { ...(item.edge.data || {}) };
-      ['_routePoints','_routeStart','_routeEnd','paired_edge_id','auto_paired','auto_pair_open'].forEach(key => delete data[key]);
-      // Eine manuell eingetragene Länge gehört zur ganzen Ursprungsleitung;
-      // bei einer Segmentkopie wäre sie fachlich falsch.
-      if (!item.whole) delete data.laenge_m;
-      const edge = createHydraulicEdge({
-        id:newId(), source,
-        sourceHandle:item.sourceRef && idMap.has(item.sourceRef) ? item.edge.sourceHandle : 'center-source',
-        target,
-        targetHandle:item.targetRef && idMap.has(item.targetRef) ? item.edge.targetHandle : 'center-target',
-        layerId:layer.id, layerColor:layer.color, points:route.slice(1, -1),
-        cornerRadius:drawingConfig.corner_radius,
-      }, [...edgesRef.current, ...neueEdges]);
-      if (edge) neueEdges.push({ ...edge, selected:true,
-        data:{ ...(edge.data || {}), ...data, points:route.slice(1, -1) } });
-    });
-    setNodes([...nodesRef.current.map(node => ({ ...node, selected:false })), ...neueNodes, ...anker]);
-    setEdges([...edgesRef.current.map(edge => ({ ...edge, selected:false })), ...neueEdges]);
-    setSelected(neueNodes.at(-1) || null);
-    setSelectedEdgeId(neueEdges.at(-1)?.id || null);
-    setSelectedSegments([]);
+    const versatz = { x:24, y:24 };
+    if (!snapshotKopieren(src, [verschiebungsAbbildung(versatz)])) return false;
     // Nächstes Einfügen setzt dieselbe Auswahl nochmals um 24 Einheiten weiter.
     clipboard.current = {
       ...src,
-      nodes:src.nodes.map(node => ({ ...node, position:{ x:(node.position?.x || 0) + versatz, y:(node.position?.y || 0) + versatz } })),
-      routes:src.routes.map(item => ({ ...item, route:item.route.map(point => ({ x:point.x + versatz, y:point.y + versatz })) })),
+      nodes:src.nodes.map(node => ({ ...node, position:{ x:(node.position?.x || 0) + versatz.x, y:(node.position?.y || 0) + versatz.y } })),
+      routes:src.routes.map(item => ({ ...item, route:item.route.map(point => ({ x:point.x + versatz.x, y:point.y + versatz.y })) })),
     };
     return true;
-  }, [cadAnker, drawingConfig.corner_radius, setEdges, setNodes, snap]);
+  }, [setNodes, snap, snapshotKopieren]);
+
+  // ── Kopieren, Spiegeln, Drehen, Reihe (§74) ──────────────────────────────
+  //
+  // Vier Befehle, ein Ablauf: Auswahl → Basispunkt → Zielpunkt. Der Basispunkt
+  // ist dabei kein Detail, sondern der Kern — man kopiert «von dieser Ecke auf
+  // jene Ecke» und trifft damit genau, ohne zu zielen. Darum fängt hier jeder
+  // der beiden Punkte auf Objekte, nicht nur aufs Raster.
+
+  /**
+   * Objektfang für einen frei gesetzten Punkt eines Modify-Befehls.
+   *
+   * Anders als beim Zeichnen gibt es weder Layer noch Vorgängerpunkt: gefangen
+   * wird, was am nächsten liegt — Bauteilanschluss, Leitungsende, Eckpunkt oder
+   * Mittelpunkt, sonst das Raster. Punkt UND Marker kommen aus `fangErgebnis`,
+   * also aus einer Quelle: der gesetzte Punkt ist immer der angezeigte Punkt.
+   */
+  const befehlsFang = useCallback((raw, { basis = null, shift = false } = {}) => {
+    const zoom = Math.max(getZoom(), 0.2);
+    const kandidaten = [];
+    if (snapAnRef.current) {
+      const radius = 24 / zoom;
+      objektFangpunkte.forEach(punkt => {
+        const distanz = Math.hypot(raw.x - punkt.x, raw.y - punkt.y);
+        if (distanz > radius) return;
+        kandidaten.push({ typ:punkt.kind === 'handle' ? PORT : ENDPOINT, x:punkt.x, y:punkt.y, distanz });
+      });
+      const ecke = naechsterEckpunkt(raw, 14 / zoom);
+      if (ecke) kandidaten.push({ typ:CORNER, x:ecke.x, y:ecke.y, distanz:ecke.distanz });
+      const mitte = naechsterMittelpunkt(raw, 16 / zoom);
+      if (mitte) kandidaten.push({ typ:MIDPOINT, x:mitte.x, y:mitte.y, distanz:mitte.distanz });
+    }
+    // Ohne Objekttreffer gilt beim zweiten Punkt dieselbe Richtungsregel wie
+    // beim Zeichnen: achsnah orthogonal, Shift kehrt sie um.
+    const fallback = basis
+      ? constrainPoint(basis, raw, { ortho:orthoAnRef.current, shift, grid:drawingConfig.grid_size })
+      : rasterPunkt(raw, drawingConfig.grid_size);
+    // Der Rastermarker bleibt aus: er würde bei jeder Mausbewegung mitlaufen und
+    // vom eigentlichen Hinweis ablenken — «hier fängt etwas Bestimmtes».
+    return fangErgebnis(kandidaten, fallback, { zeigeRaster:false })
+      || { point:fallback, typ:GRID, marker:null };
+  }, [drawingConfig.grid_size, getZoom, naechsterEckpunkt, naechsterMittelpunkt, objektFangpunkte]);
+
+  const transformBeenden = useCallback(() => {
+    setTransformBefehl(null);
+    setBefehlHinweis(null);
+    setEditorMode(escapeMode(editorModeRef.current));
+  }, []);
+
+  /**
+   * Einen der vier Befehle starten. Die Auswahl wird dabei EINGEFROREN — ein
+   * Klick auf die Zeichenfläche darf sie nicht mehr abwählen, sonst liefe der
+   * Befehl ins Leere.
+   */
+  const transformStarten = useCallback((art, { ganzeLeitungen = false } = {}) => {
+    // Spiegeln und Drehen wirken auf ganze Leitungen: ein einzelnes Teilstück
+    // an Ort zu kippen würde die Route zerreissen statt sie zu verändern.
+    const ganz = ganzeLeitungen || art === 'spiegeln' || art === 'drehen';
+    const snapshot = auswahlSnapshot({ ganzeLeitungen:ganz });
+    if (!snapshot) {
+      setBefehlHinweis('Zuerst Bauteile oder Leitungen auswählen.');
+      return false;
+    }
+    const anzahlTeile = snapshot.nodes.length + snapshot.routes.length;
+    setEndpointMenu(null);
+    setEdgeMenu(null);
+    setLeitungsGuides([]);
+    setBefehlHinweis(null);
+    setVerschiebung(null);
+    setTransformBefehl({
+      art, snapshot, ganzeLeitungen:ganz,
+      beschreibung:`${anzahlTeile} ${anzahlTeile === 1 ? 'Element' : 'Elemente'}`,
+      basis:null, cursor:null, achse:null, abstand:null, puffer:null, marker:null,
+    });
+    setEditorMode(startCommand(TRANSFORM_MODUS[art], { persistent:art === 'kopieren' }));
+    return true;
+  }, [auswahlSnapshot]);
+
+  /** Reihe anwenden: Anzahl inklusive Original, Abstand aus Basis → Ziel. */
+  const reiheAnwenden = useCallback((befehl, anzahl) => {
+    const abbildungen = reihenAbbildungen(anzahl, befehl.abstand);
+    if (!abbildungen.length) {
+      setBefehlHinweis('Reihe · Anzahl ab 2 und ein Abstand ungleich null nötig.');
+      return;
+    }
+    snapshotKopieren(befehl.snapshot, abbildungen);
+    transformBeenden();
+  }, [snapshotKopieren, transformBeenden]);
+
+  /** Drehen anwenden: die Auswahl dreht an Ort um den Basispunkt. */
+  const drehenAnwenden = useCallback((befehl, winkel) => {
+    if (!Number.isFinite(winkel) || !(winkel % 360)) {
+      setBefehlHinweis('Drehen · Ein Winkel von 0° verändert nichts.');
+      return;
+    }
+    auswahlAbbilden(drehung(befehl.basis, winkel), befehl.snapshot);
+    transformBeenden();
+  }, [auswahlAbbilden, transformBeenden]);
+
+  /** Spiegeln anwenden — mit oder ohne das Original. */
+  const spiegelnAnwenden = useCallback((befehl, originalBehalten) => {
+    const abbildung = spiegelung(befehl.basis, befehl.achse);
+    if (originalBehalten) snapshotKopieren(befehl.snapshot, [abbildung]);
+    else auswahlAbbilden(abbildung, befehl.snapshot);
+    transformBeenden();
+  }, [auswahlAbbilden, snapshotKopieren, transformBeenden]);
+
+  /**
+   * Ein Klick auf die Zeichenfläche während eines der vier Befehle.
+   * Rückgabe `true` heisst: der Klick gehörte dem Befehl und ist erledigt.
+   */
+  const transformKlick = useCallback((event) => {
+    const befehl = transformBefehlRef.current;
+    if (!befehl) return false;
+    if (event.button != null && event.button !== 0) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    const raw = screenToFlowPosition({ x:event.clientX, y:event.clientY });
+    const { point } = befehlsFang(raw, { basis:befehl.basis, shift:event.shiftKey });
+    if (!befehl.basis) {
+      setTransformBefehl({ ...befehl, basis:point, cursor:point });
+      return true;
+    }
+    if (befehl.art === 'kopieren') {
+      // Mehrfachkopie: der Basispunkt bleibt stehen, jeder weitere Klick legt
+      // eine weitere Kopie ab. Beendet wird mit ESC oder Rechtsklick.
+      snapshotKopieren(befehl.snapshot, [verschiebungsAbbildung({
+        x:point.x - befehl.basis.x, y:point.y - befehl.basis.y,
+      })]);
+      return true;
+    }
+    if (befehl.art === 'reihe') {
+      setTransformBefehl({ ...befehl, abstand:{ x:point.x - befehl.basis.x, y:point.y - befehl.basis.y },
+        cursor:point, puffer:'3' });
+      return true;
+    }
+    if (befehl.art === 'drehen') {
+      drehenAnwenden(befehl, winkelZwischen(befehl.basis, point));
+      return true;
+    }
+    if (befehl.art === 'spiegeln' && !befehl.achse) {
+      // Zweiter Achspunkt. Auf demselben Punkt gibt es keine Achse.
+      if (Math.hypot(point.x - befehl.basis.x, point.y - befehl.basis.y) <= 2) return true;
+      setTransformBefehl({ ...befehl, achse:point, cursor:point });
+      return true;
+    }
+    return true;
+  }, [befehlsFang, drehenAnwenden, screenToFlowPosition, snapshotKopieren]);
 
   const auswahlLoeschen = useCallback(() => {
     const knotenIds = new Set(nodesRef.current.filter(node => node.selected).map(node => node.id));
@@ -5778,6 +6094,9 @@ function EditorInner() {
   }, []);
 
   const edgeContextMenu = useCallback((event, edgeId) => {
+    // Rechtsklick beendet einen laufenden Modify-Befehl — auch über einer
+    // Leitung, sonst gäbe es aus der Mehrfachkopie dort keinen Ausstieg.
+    if (transformBefehlRef.current) { event.preventDefault(); transformBeenden(); return; }
     setEndpointMenu(null);
     setSelectedEdgeId(edgeId);
     setSelected(null);
@@ -5787,7 +6106,7 @@ function EditorInner() {
       edgeId,
       point:screenToFlowPosition({ x:event.clientX, y:event.clientY }),
     });
-  }, [screenToFlowPosition]);
+  }, [screenToFlowPosition, transformBeenden]);
 
   const griffMenuOeffnen = useCallback((event, griff, sofort = false) => {
     if (gripMenuTimer.current) clearTimeout(gripMenuTimer.current);
@@ -6000,7 +6319,7 @@ function EditorInner() {
         if (befehlsfolgeTimer.current) clearTimeout(befehlsfolgeTimer.current);
         befehlsfolge.current = '';
         platzierVorschauRef.current = null;
-        setPlatzierVorschau(null); setInlineTreffer(null); setSpiegelAchse(null);
+        setPlatzierVorschau(null); setInlineTreffer(null); setTransformBefehl(null);
         setEndpointMenu(null); setEdgeMenu(null); setAusrichtenHinweis(null);
         setEditorMode(escapeMode(editorModeRef.current));
         return;
@@ -6043,6 +6362,37 @@ function EditorInner() {
         if (drawingConfig.dynamic_input && dynamikFeld === 'angle') setWinkelPuffer(ev.key);
         else setLaengenPuffer(ev.key);
         return;
+      }
+
+      // ── Eingaben der Modify-Befehle (§74) ───────────────────────────────
+      // Läuft einer der vier Befehle und wartet auf eine Zahl oder eine
+      // Entscheidung, gehört die Tastatur AUSSCHLIESSLICH ihm — sonst würde
+      // eine getippte «3» nebenbei einen anderen Befehl auslösen.
+      {
+        const befehl = transformBefehlRef.current;
+        if (befehl && !ev.metaKey && !ev.ctrlKey && ev.key !== 'Escape') {
+          // Spiegeln: am Ende die Frage nach dem Original.
+          if (befehl.art === 'spiegeln' && befehl.achse) {
+            if (['j', 'J', 'Enter'].includes(ev.key)) { ev.preventDefault(); spiegelnAnwenden(befehl, true); return; }
+            if (['n', 'N'].includes(ev.key)) { ev.preventDefault(); spiegelnAnwenden(befehl, false); return; }
+            return;
+          }
+          // Drehen: getippter Winkel statt Mausrichtung.
+          const wartetAufZahl = (befehl.art === 'drehen' && befehl.basis)
+            || (befehl.art === 'reihe' && befehl.abstand);
+          if (wartetAufZahl && (befehl.puffer !== null || /^[0-9]$/.test(ev.key))) {
+            ev.preventDefault();
+            const { buffer, action } = laengeTaste(befehl.puffer ?? '', ev.key);
+            if (action === 'abbrechen' && !buffer) { setTransformBefehl({ ...befehl, puffer:null }); return; }
+            if (action === 'anwenden') {
+              if (befehl.art === 'drehen') drehenAnwenden(befehl, winkelAusBuffer(buffer));
+              else reiheAnwenden(befehl, anzahlAusBuffer(buffer));
+              return;
+            }
+            setTransformBefehl({ ...befehl, puffer:buffer });
+            return;
+          }
+        }
       }
 
       if ((ev.metaKey || ev.ctrlKey) && (ev.key === 'z' || ev.key === 'Z')) {
@@ -6182,6 +6532,32 @@ function EditorInner() {
           verschiebenStarten(ev.shiftKey);
           return;
         }
+        // ── Kopieren und Reihe (§74) ──────────────────────────────────────
+        // Feste Tasten wie das zweistellige TR: C wie COPY, E wie rEihe. Sie
+        // liegen nicht in der frei belegbaren Liste, damit dort keine
+        // Doppelbelegung entstehen kann.
+        if (key === 'c') {
+          ev.preventDefault();
+          transformStarten('kopieren', { ganzeLeitungen:ev.shiftKey });
+          return;
+        }
+        if (key === 'e') {
+          ev.preventDefault();
+          transformStarten('reihe', { ganzeLeitungen:ev.shiftKey });
+          return;
+        }
+        // Spiegeln und Drehen mit Shift: dieselbe Taste wie die Bauteil-
+        // Schnellfunktion, nur der grosse Befehl mit Basispunkt und Achse.
+        if (ev.shiftKey && key === drawingConfig.shortcut_mirror) {
+          ev.preventDefault();
+          transformStarten('spiegeln');
+          return;
+        }
+        if (ev.shiftKey && key === drawingConfig.shortcut_rotate) {
+          ev.preventDefault();
+          transformStarten('drehen');
+          return;
+        }
         // Layer-Schnellwahl. Die frei belegbaren Befehlstasten haben Vorrang —
         // wer «v» auf Verschieben legt, bekommt Verschieben (Rückgabe oben).
         if (ev.key === 'v' || ev.key === 'V') layerWaehlen('heizung_vl');
@@ -6221,7 +6597,7 @@ function EditorInner() {
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [undo, redo, selected, selectedEdgeId, selectedEdgePoint, selectedLabelEdgeId, markierteEdgeIds, beschriftungSetzen, punktEntfernen, snap, rotateNode, mirrorNode, alignNode, nudgeNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, spiegelAchse, drawingConfig, dynamikFeld, setNodes, laengeAnwenden, entwurfVerwerfen, verschiebenStarten, ausrichtenUmschalten, trennenStarten, eckeVerbindenStarten, dehnenStarten, versatzStarten, grenzBefehlStarten, verbindenStarten, auswahlKopieren, auswahlEinfuegen, auswahlLoeschen]);
+  }, [undo, redo, selected, selectedEdgeId, selectedEdgePoint, selectedLabelEdgeId, markierteEdgeIds, beschriftungSetzen, punktEntfernen, snap, rotateNode, mirrorNode, alignNode, nudgeNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, drawingConfig, dynamikFeld, setNodes, laengeAnwenden, entwurfVerwerfen, verschiebenStarten, ausrichtenUmschalten, trennenStarten, eckeVerbindenStarten, dehnenStarten, versatzStarten, grenzBefehlStarten, verbindenStarten, auswahlKopieren, auswahlEinfuegen, auswahlLoeschen, transformStarten, drehenAnwenden, reiheAnwenden, spiegelnAnwenden]);
 
   // Berechnete Werte (Backend) in die Node-Daten spiegeln — nur für die Anzeige.
   // Verteiler-Rahmen: nur die Balken sind greifbar (dragHandle), die Lücke
@@ -6778,6 +7154,7 @@ function EditorInner() {
     // Bauteil. Sonst liesse sich der Basispunkt nie an ein Bauteil legen.
     if (dehnenKlick(event)) return;
     if (verschiebenKlick(event)) return;
+    if (transformKlick(event)) return;
     // Im Zeichenmodus oder bei aktivem Entwurf: Klick auf ein Bauteil startet/
     // führt die Leitung an dessen Anschluss (nur bei Anschluss-Treffer).
     if (leitungsEntwurfRef.current || zeichenModusRef.current) {
@@ -6803,7 +7180,7 @@ function EditorInner() {
     }
     setSelectedLabelEdgeId(null);
     setInspectorOpen(true);
-  }, [cadKlick, platzierenKlick, verschiebenKlick, nadelSetzen, screenToFlowPosition, dehnenKlick, eckeVerbindenKlick, setEdges, setNodes]);
+  }, [cadKlick, platzierenKlick, verschiebenKlick, transformKlick, nadelSetzen, screenToFlowPosition, dehnenKlick, eckeVerbindenKlick, setEdges, setNodes]);
   const onNodeDoubleClick = useCallback((_, node) => {
     if (node.type === 'label') return; // Textblock: Doppelklick editiert inline
     if (!leitungsEntwurfRef.current) setAuslegung(node);
@@ -6883,6 +7260,9 @@ function EditorInner() {
     if (lueckeKlick(event)) return;
     if (dehnenKlick(event)) return;
     if (verschiebenKlick(event)) return;
+    // Basis- und Zielpunkt liegen meist AUF einem Objekt — genau darum gibt es
+    // den Objektfang. Der Klick gehört deshalb dem Befehl, nicht der Auswahl.
+    if (transformKlick(event)) return;
     // Im Platzierungsbefehl setzt ein Klick auf eine Leitung das Bauteil — und
     // teilt sie dabei. Ohne das würde die Leitung den Klick verschlucken,
     // obwohl die Vorschau „in Leitung einsetzen" anzeigt.
@@ -6924,46 +7304,7 @@ function EditorInner() {
     }
     setSelectedLabelEdgeId(null);
     setInspectorOpen(true);
-  }, [ausrichtenKlick, cadKlick, platzierenKlick, routePunkte, screenToFlowPosition, verschiebenKlick, lueckeKlick, dehnenKlick, eckeVerbindenKlick, versatzKlick, grenzBefehlKlick, verbindenKlick, selectedSegments, setEdges, setNodes]);
-
-  const spiegelKopieErstellen = useCallback((edgeId, axisStart, axisEnd) => {
-    const edge = edgesRef.current.find(item => item.id === edgeId);
-    if (!edge) return;
-    const route = routePunkte(edge);
-    if (route.length < 2) return;
-    const gespiegelt = route.map(point => punktAnAchseSpiegeln(point, axisStart, axisEnd));
-    const layer = layerVonEdge(edge);
-    const sourceId = newId();
-    const targetId = newId();
-    const id = newId();
-    const data = {
-      ...(edge.data || {}),
-      cad_polyline:true,
-      polyline_version:1,
-      points:gespiegelt.slice(1, -1),
-    };
-    delete data.paired_edge_id;
-    delete data.auto_paired;
-    delete data.auto_pair_open;
-    snap();
-    setNodes(items => [
-      ...items,
-      cadAnker(sourceId, gespiegelt[0], layer),
-      cadAnker(targetId, gespiegelt.at(-1), layer),
-    ]);
-    setEdges(items => [...items, {
-      ...edge,
-      id,
-      source:sourceId,
-      sourceHandle:'center-source',
-      target:targetId,
-      targetHandle:'center-target',
-      selected:false,
-      data,
-    }]);
-    setSelectedEdgeId(id);
-    setMarkierteEdgeIds([]);
-  }, [cadAnker, routePunkte, setEdges, setNodes, snap]);
+  }, [ausrichtenKlick, cadKlick, platzierenKlick, routePunkte, screenToFlowPosition, verschiebenKlick, transformKlick, lueckeKlick, dehnenKlick, eckeVerbindenKlick, versatzKlick, grenzBefehlKlick, verbindenKlick, selectedSegments, setEdges, setNodes]);
 
   const onPaneClick = useCallback((event) => {
     // Pan darf die Auswahl nicht anfassen (Punkt 16). Ohne diese Prüfung würde
@@ -6979,23 +7320,13 @@ function EditorInner() {
     if (dehnenKlick(event)) return;
     if (lueckeKlick(event)) return;
     if (verschiebenKlick(event)) return;
+    if (transformKlick(event)) return;
     if (eckeVerbindenKlick(event)) return;
     // Leitungen ändern (#72). Auch ein Klick daneben bleibt im Befehl und
     // meldet, dass keine Leitung getroffen wurde — er wählt nichts ab.
     if (versatzKlick(event)) return;
     if (grenzBefehlKlick(event)) return;
     if (verbindenKlick(event)) return;
-    if (spiegelAchse) {
-      event.preventDefault();
-      const point = rasterPunkt(screenToFlowPosition({ x:event.clientX, y:event.clientY }), drawingConfig.grid_size);
-      if (!spiegelAchse.start) {
-        setSpiegelAchse({ ...spiegelAchse, start:point, cursor:point });
-      } else if (Math.hypot(point.x - spiegelAchse.start.x, point.y - spiegelAchse.start.y) > 2) {
-        spiegelKopieErstellen(spiegelAchse.edgeId, spiegelAchse.start, point);
-        setSpiegelAchse(null);
-      }
-      return;
-    }
     if (leitungsEntwurfRef.current) { cadKlick(event); return; }
     setEndpointMenu(null);
     setEdgeMenu(null);
@@ -7014,7 +7345,7 @@ function EditorInner() {
     setEdges(items => items.map(item => item.selected ? { ...item, selected:false } : item));
     setSelectedLabelEdgeId(null);
     setMarkierteEdgeIds([]);
-  }, [cadKlick, drawingConfig.grid_size, screenToFlowPosition, selected, selectedEdgeId, spiegelAchse, spiegelKopieErstellen, platzierenKlick, verschiebenKlick, nadelSetzen, dehnenKlick, lueckeKlick, eckeVerbindenKlick, versatzKlick, grenzBefehlKlick, verbindenKlick, setEdges, setNodes]);
+  }, [cadKlick, screenToFlowPosition, platzierenKlick, verschiebenKlick, transformKlick, nadelSetzen, dehnenKlick, lueckeKlick, eckeVerbindenKlick, versatzKlick, grenzBefehlKlick, verbindenKlick, setEdges, setNodes]);
 
   const canvasMouseMove = useCallback((event) => {
     // Platzierungsvorschau folgt dem Cursor — mit Raster und Ausrichtungslinien.
@@ -7072,19 +7403,31 @@ function EditorInner() {
       setVerschiebung(current => (current?.basis ? { ...current, cursor } : current));
       return;
     }
-    if (spiegelAchse?.start) {
-      const cursor = rasterPunkt(screenToFlowPosition({ x:event.clientX, y:event.clientY }), drawingConfig.grid_size);
-      setSpiegelAchse(current => current ? { ...current, cursor } : current);
+    // Kopieren, Spiegeln, Drehen, Reihe: die Vorschau hängt am gefangenen
+    // Punkt — gezeigt wird exakt das, was der nächste Klick anwendet.
+    if (transformBefehlRef.current) {
+      const befehl = transformBefehlRef.current;
+      // Wartet der Befehl auf eine getippte Zahl, ist der Zielpunkt bereits
+      // gesetzt — die Maus darf ihn dann nicht mehr verschieben.
+      if (befehl.abstand || (befehl.art === 'spiegeln' && befehl.achse)) return;
+      const raw = screenToFlowPosition({ x:event.clientX, y:event.clientY });
+      const { point, marker } = befehlsFang(raw, { basis:befehl.basis, shift:event.shiftKey });
+      setTransformBefehl(current => (current ? { ...current, cursor:point, marker } : current));
+      return;
     }
     cadCursorAktualisieren(event);
-  }, [cadCursorAktualisieren, drawingConfig.grid_size, drawingConfig.snap_tolerance, getZoom,
-      naechsteSichtbareLeitung, objektFangpunkte, screenToFlowPosition, spiegelAchse?.start]);
+  }, [befehlsFang, cadCursorAktualisieren, drawingConfig.grid_size, drawingConfig.snap_tolerance, getZoom,
+      naechsteSichtbareLeitung, objektFangpunkte, screenToFlowPosition]);
   const onPaneContextMenu = useCallback((event) => {
     // Der Rechtsklick öffnet das Befehlsmenü (#78). Läuft ein Befehl, steht
     // dort «Abbrechen» — auch für Versatz, Stutzen, Dehnen bis Kante und
     // Verbinden (#72), denn `active` prüft den Befehlszustand allgemein.
     event.preventDefault();
     event.stopPropagation();
+    // Läuft eine Mehrfachkopie, ist der Rechtsklick ihr vorgesehener Ausstieg
+    // (§74) und nicht der Weg ins Kontextmenü — sonst müsste man mitten im
+    // Befehl erst noch «Abbrechen» treffen.
+    if (transformBefehlRef.current) { transformBeenden(); return; }
     setEndpointMenu(null); setEdgeMenu(null); setGripMenu(null);
     setPaneMenu({
       x:event.clientX, y:event.clientY,
@@ -7092,7 +7435,12 @@ function EditorInner() {
       snapOverride:Boolean(event.shiftKey),
       mode:{ ...editorModeRef.current },
     });
-  }, []);
+  }, [transformBeenden]);
+  // Ist überhaupt etwas gewählt? Dieselbe Frage stellen inzwischen sechs
+  // Werkzeuge — einmal beantwortet statt sechsmal dieselbe lange Bedingung.
+  const hatAuswahl = Boolean(selected) || Boolean(selectedEdgeId)
+    || selectedSegments.length > 0 || markierteEdgeIds.length > 0
+    || nodes.some(node => node.selected) || edges.some(edge => edge.selected);
   const selectedNode  = selected  ? nodes.find(n => n.id === selected.id)  || null : null;
   const selectedEdge  = selectedEdgeId ? edges.find(e => e.id === selectedEdgeId) || null : null;
   const auslegungNode = auslegung ? nodes.find(n => n.id === auslegung.id) || null : null;
@@ -7527,6 +7875,28 @@ function EditorInner() {
                 hinweis:'Spiegelt das gewählte Bauteil waagrecht.',
                 gesperrt:!selected || !ROTATABLE.has(selected.type),
                 aktion:() => selected && mirrorNode(selected.id) },
+              // ── Modify-Befehle mit Basispunkt (§74) ───────────────────────
+              { id:'kopieren-basis', Icon:CopyPlus, name:'Kopieren (Basispunkt)', taste:'C',
+                hinweis:'Auswahl treffen, Basispunkt und Zielpunkt klicken. Bleibt aktiv: jeder weitere Klick legt eine Kopie ab, ESC oder Rechtsklick beendet.',
+                aktiv:transformBefehl?.art === 'kopieren',
+                gesperrt:!transformBefehl && !hatAuswahl,
+                dauer:true,
+                aktion:() => (transformBefehl?.art === 'kopieren' ? transformBeenden() : transformStarten('kopieren')) },
+              { id:'spiegeln-achse', Icon:FlipHorizontal2, name:'An Achse spiegeln', taste:'⇧S',
+                hinweis:'Zwei Achspunkte klicken; am Schluss die Frage, ob das Original bleibt. Wirkt auf ganze Leitungen und Bauteile.',
+                aktiv:transformBefehl?.art === 'spiegeln',
+                gesperrt:!transformBefehl && !hatAuswahl,
+                aktion:() => (transformBefehl?.art === 'spiegeln' ? transformBeenden() : transformStarten('spiegeln')) },
+              { id:'drehen-basis', Icon:RotateCcw, name:'Drehen (Basispunkt)', taste:'⇧D',
+                hinweis:'Basispunkt klicken, dann den Winkel mit der Maus zeigen oder eintippen.',
+                aktiv:transformBefehl?.art === 'drehen',
+                gesperrt:!transformBefehl && !hatAuswahl,
+                aktion:() => (transformBefehl?.art === 'drehen' ? transformBeenden() : transformStarten('drehen')) },
+              { id:'reihe', Icon:Grid2x2, name:'Lineare Reihe', taste:'E',
+                hinweis:'Basispunkt und Zielpunkt geben den Abstand, danach die Anzahl eintippen (Original zählt mit).',
+                aktiv:transformBefehl?.art === 'reihe',
+                gesperrt:!transformBefehl && !hatAuswahl,
+                aktion:() => (transformBefehl?.art === 'reihe' ? transformBeenden() : transformStarten('reihe')) },
               { id:'ausrichten', Icon:AlignHorizontalJustifyCenter, name:'Ausrichten',
                 taste:drawingConfig.shortcut_align,
                 hinweis:'Referenzsegment wählen, dann das Segment, das auf dieselbe Flucht soll.',
@@ -7556,15 +7926,11 @@ function EditorInner() {
                 hinweis:'Zwei aneinanderstossende Teilstücke werden eine Leitung; der Anker dazwischen verschwindet.',
                 aktiv:istBefehl(editorMode, JOIN), dauer:true, aktion:verbindenStarten },
               { id:'kopieren', Icon:Copy, name:'Auswahl kopieren', taste:'⌘C',
-                hinweis:'Kopiert alle gewählten Bauteile, Leitungen und Teilstücke.',
-                gesperrt:!selected && !selectedEdgeId && !selectedSegments.length
-                  && !nodes.some(node => node.selected) && !edges.some(edge => edge.selected),
-                aktion:auswahlKopieren },
+                hinweis:'Kopiert alle gewählten Bauteile, Leitungen und Teilstücke in die Zwischenablage.',
+                gesperrt:!hatAuswahl, aktion:auswahlKopieren },
               { id:'auswahl-loeschen', Icon:Trash2, name:'Auswahl löschen', taste:'DEL',
                 hinweis:'Löscht alle gewählten Bauteile, Leitungen und Teilstücke in einer Aktion.',
-                gesperrt:!selected && !selectedEdgeId && !selectedSegments.length
-                  && !nodes.some(node => node.selected) && !edges.some(edge => edge.selected),
-                aktion:auswahlLoeschen },
+                gesperrt:!hatAuswahl, aktion:auswahlLoeschen },
               { id:'dehnen', Icon:MoveHorizontal, name:'Dehnen',
                 taste:drawingConfig.shortcut_stretch,
                 hinweis:'Fenster aufziehen, Basispunkt, Zielpunkt. Was im Fenster liegt, wandert mit.',
@@ -7704,6 +8070,51 @@ function EditorInner() {
                 </div>
               </Panel>
             )}
+            {/* Kopieren, Spiegeln, Drehen, Reihe (§74): der Ablauf steht immer
+                da, damit niemand raten muss, welcher Klick als Nächstes kommt.
+                Die Spiegelfrage ist der einzige Schritt mit Knöpfen — sie ist
+                eine Entscheidung, kein Punkt auf der Zeichenfläche. */}
+            {transformBefehl && (
+              <Panel position="top-center">
+                <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:8, padding:'7px 12px', borderRadius:18,
+                  background:'#5b21b6', color:'white', fontSize:10, fontWeight:700, boxShadow:'0 6px 16px rgba(91,33,182,.28)' }}>
+                  <span>
+                    {transformBefehl.art === 'kopieren' && (transformBefehl.basis
+                      ? `Kopieren · ${transformBefehl.beschreibung} — Zielpunkt klicken · weitere Klicks = weitere Kopien · ESC oder Rechtsklick beendet`
+                      : `Kopieren · ${transformBefehl.beschreibung} — Basispunkt klicken`)}
+                    {transformBefehl.art === 'spiegeln' && (!transformBefehl.basis
+                      ? `Spiegeln · ${transformBefehl.beschreibung} — ersten Achspunkt klicken`
+                      : !transformBefehl.achse
+                        ? 'Spiegeln · zweiten Achspunkt klicken'
+                        : 'Spiegeln · Original behalten?')}
+                    {transformBefehl.art === 'drehen' && (!transformBefehl.basis
+                      ? `Drehen · ${transformBefehl.beschreibung} — Basispunkt klicken`
+                      : transformBefehl.puffer !== null
+                        ? `Drehen · Winkel ${transformBefehl.puffer}° · Enter übernimmt`
+                        : 'Drehen · Winkel mit der Maus zeigen und klicken — oder eintippen')}
+                    {transformBefehl.art === 'reihe' && (!transformBefehl.basis
+                      ? `Reihe · ${transformBefehl.beschreibung} — Basispunkt klicken`
+                      : !transformBefehl.abstand
+                        ? 'Reihe · Zielpunkt der ersten Kopie klicken (das ist der Abstand)'
+                        : `Reihe · Anzahl ${transformBefehl.puffer || ''} (mit Original) · Enter übernimmt`)}
+                  </span>
+                  {transformBefehl.art === 'spiegeln' && transformBefehl.achse && (
+                    <span style={{ display:'flex', gap:6 }}>
+                      <button type="button" onClick={() => spiegelnAnwenden(transformBefehl, true)}
+                        style={{ background:'white', color:'#5b21b6', border:'none', borderRadius:12,
+                          padding:'3px 10px', fontSize:10, fontWeight:700, cursor:'pointer' }}>
+                        Behalten (J)
+                      </button>
+                      <button type="button" onClick={() => spiegelnAnwenden(transformBefehl, false)}
+                        style={{ background:'rgba(255,255,255,.18)', color:'white', border:'1px solid rgba(255,255,255,.5)',
+                          borderRadius:12, padding:'3px 10px', fontSize:10, fontWeight:700, cursor:'pointer' }}>
+                        Ersetzen (N)
+                      </button>
+                    </span>
+                  )}
+                </div>
+              </Panel>
+            )}
             {segmentVerschiebung?.active && (
               <Panel position="top-center">
                 <div style={{ marginTop:46, padding:'7px 12px', borderRadius:18, background:'#5b21b6', color:'white', fontSize:10, fontWeight:700, boxShadow:'0 6px 16px rgba(91,33,182,.25)' }}>
@@ -7839,10 +8250,41 @@ function EditorInner() {
                     </text>
                   </g>
                 )}
-                {spiegelAchse?.start && spiegelAchse?.cursor && (
-                  <line x1={spiegelAchse.start.x} y1={spiegelAchse.start.y}
-                    x2={spiegelAchse.cursor.x} y2={spiegelAchse.cursor.y}
-                    stroke="#7c3aed" strokeWidth="2" strokeDasharray="9 6" />
+                {/* Kopieren, Spiegeln, Drehen, Reihe (§74): Basispunkt, der
+                    gefangene Zielpunkt und dazwischen das, was der nächste
+                    Klick bewirkt. Angezeigt wird ausschliesslich der bereits
+                    gefangene Punkt — Anzeige und Klick sind dieselbe Zahl. */}
+                {transformBefehl?.basis && (
+                  <g pointerEvents="none">
+                    <circle cx={transformBefehl.basis.x} cy={transformBefehl.basis.y}
+                      r={5 / zoomAnzeige} fill="white" stroke="#7c3aed" strokeWidth={2 / zoomAnzeige} />
+                    {transformBefehl.cursor && (
+                      <line x1={transformBefehl.basis.x} y1={transformBefehl.basis.y}
+                        x2={(transformBefehl.achse || transformBefehl.cursor).x}
+                        y2={(transformBefehl.achse || transformBefehl.cursor).y}
+                        stroke="#7c3aed" strokeWidth={2 / zoomAnzeige}
+                        strokeDasharray={`${9 / zoomAnzeige} ${6 / zoomAnzeige}`} />
+                    )}
+                    {transformBefehl.cursor && (
+                      <text x={transformBefehl.cursor.x + 12 / zoomAnzeige}
+                        y={transformBefehl.cursor.y - 12 / zoomAnzeige}
+                        fill="#7c3aed" fontSize={11 / zoomAnzeige} fontWeight="700"
+                        stroke="#ffffff" strokeWidth={3 / zoomAnzeige}
+                        strokeLinejoin="round" paintOrder="stroke">
+                        {transformBefehl.art === 'drehen'
+                          ? `${Math.round(Number(transformBefehl.puffer ?? winkelZwischen(transformBefehl.basis, transformBefehl.cursor)) || 0)}°`
+                          : verschiebungLabel({
+                            x:transformBefehl.cursor.x - transformBefehl.basis.x,
+                            y:transformBefehl.cursor.y - transformBefehl.basis.y,
+                          })}
+                      </text>
+                    )}
+                  </g>
+                )}
+                {transformBefehl?.marker && (
+                  <circle cx={transformBefehl.marker.x} cy={transformBefehl.marker.y}
+                    r={6 / zoomAnzeige} fill="none" pointerEvents="none"
+                    stroke={transformBefehl.marker.farbe} strokeWidth={2 / zoomAnzeige} />
                 )}
                 {/* Mit Lücke trennen: der bereits gesetzte erste Punkt. */}
                 {luecke?.erster && (
@@ -8122,8 +8564,10 @@ function EditorInner() {
               <input value={befehlszeile}
                 aria-label="Befehlszeile"
                 placeholder={befehlsPrompt(editorMode, {
-                  hasDraft:Boolean(leitungsEntwurf), hasBase:Boolean(verschiebung?.basis),
-                  hasStart:Boolean(spiegelAchse?.start), hasFirst:Boolean(luecke?.erster),
+                  hasDraft:Boolean(leitungsEntwurf),
+                  hasBase:Boolean(verschiebung?.basis || transformBefehl?.basis),
+                  hasStart:Boolean(transformBefehl?.basis), hasFirst:Boolean(luecke?.erster),
+                  hasSpacing:Boolean(transformBefehl?.abstand),
                 })}
                 onFocus={()=>setBefehlszeileAktiv(true)}
                 onBlur={()=>setTimeout(()=>setBefehlszeileAktiv(false), 120)}
@@ -8261,8 +8705,8 @@ function EditorInner() {
               {[
                 ['shortcut_line', 'Leitung starten'],
                 ['shortcut_polyline', 'Polylinie starten'],
-                ['shortcut_rotate', 'Bauteil drehen'],
-                ['shortcut_mirror', 'Bauteil spiegeln'],
+                ['shortcut_rotate', 'Bauteil drehen (Shift: um Basispunkt)'],
+                ['shortcut_mirror', 'Bauteil spiegeln (Shift: an Achse)'],
                 ['shortcut_align', 'Ausrichten (Shift: Bauteil aufs Raster)'],
                 ['shortcut_move', 'Verschieben (Shift: ganze Leitung)'],
                 ['shortcut_break', 'Mit Lücke trennen'],
@@ -8575,6 +9019,7 @@ function EditorInner() {
                 // Auch der Hinweistext der Befehle aus #72 gehört zum Abbruch —
                 // sonst bliebe «Stutzen · …» stehen, obwohl nichts mehr läuft.
                 setBefehlHinweis(null);
+                setTransformBefehl(null);
                 setEditorMode(escapeMode(editorModeRef.current));
               }],
             ] : [
@@ -8627,7 +9072,18 @@ function EditorInner() {
                   leitungWeiterziehen(edgeMenu.edgeId, ds <= dt ? 'source' : 'target');
                 }
               }],
-              ['◇', 'An Spiegelachse spiegeln', 'Zwei Punkte zeichnen · erzeugt eine Kopie', () => setSpiegelAchse({ edgeId:edgeMenu.edgeId, start:null, cursor:null })],
+              // Die drei Modify-Befehle wirken auf die AUSWAHL, nicht nur auf
+              // die angeklickte Leitung — der Rechtsklick wählt sie deshalb
+              // zuerst aus und startet dann denselben Befehl wie Taste und
+              // Werkzeugleiste.
+              ['⧉', 'Kopieren (Basispunkt)', 'Basispunkt und Zielpunkt · bleibt für weitere Kopien aktiv',
+                () => { setSelectedEdgeId(edgeMenu.edgeId); transformStarten('kopieren', { ganzeLeitungen:true }); }],
+              ['◇', 'An Spiegelachse spiegeln', 'Zwei Achspunkte · Original behalten oder ersetzen',
+                () => { setSelectedEdgeId(edgeMenu.edgeId); transformStarten('spiegeln'); }],
+              ['↻', 'Drehen (Basispunkt)', 'Basispunkt, dann Winkel zeigen oder eintippen',
+                () => { setSelectedEdgeId(edgeMenu.edgeId); transformStarten('drehen'); }],
+              ['⋯', 'Lineare Reihe', 'Abstand über zwei Punkte, danach die Anzahl',
+                () => { setSelectedEdgeId(edgeMenu.edgeId); transformStarten('reihe', { ganzeLeitungen:true }); }],
               // Beschriftung: dieselben zwei Befehle wie im Leitungspanel, hier
               // direkt dort, wo der Planer mit der rechten Maustaste hinzeigt.
               ...(edgesRef.current.find(item=>item.id===edgeMenu.edgeId)?.data?.label_hidden

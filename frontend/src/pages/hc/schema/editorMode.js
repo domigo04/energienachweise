@@ -103,3 +103,44 @@ export function modeLabel(mode) {
 export function cursorFor(mode) {
   return istModify(mode) ? 'default' : 'crosshair';
 }
+
+/** Verlauf der zuletzt gestarteten Befehle, neuester zuerst. */
+export function befehlMerken(verlauf = [], mode, limit = 3) {
+  if (!mode || mode.type === MODIFY || !BEFEHLE.has(mode.type)) return [...verlauf];
+  const eintrag = { type:mode.type, persistent:Boolean(mode.persistent), payload:mode.payload || null };
+  return [eintrag, ...(verlauf || []).filter(item => item?.type !== mode.type)].slice(0, limit);
+}
+
+export function letztenBefehlWiederholen(verlauf = []) {
+  const letzter = verlauf?.[0];
+  return letzter ? startCommand(letzter.type, { persistent:letzter.persistent, payload:letzter.payload }) : null;
+}
+
+/** Vorschläge der Befehlszeile; Kürzel und Name sind gleichwertig suchbar. */
+export function befehlsVorschlaege(eingabe = '', befehle = []) {
+  const query = String(eingabe).trim().toLowerCase();
+  if (!query) return [...befehle].slice(0, 8);
+  return befehle
+    .filter(item => String(item?.taste || '').toLowerCase().startsWith(query)
+      || String(item?.name || '').toLowerCase().includes(query))
+    .sort((a, b) => {
+      const aExakt = String(a.taste || '').toLowerCase() === query ? 0 : 1;
+      const bExakt = String(b.taste || '').toLowerCase() === query ? 0 : 1;
+      return aExakt - bExakt || String(a.name).localeCompare(String(b.name), 'de');
+    });
+}
+
+/** Was der aktive Befehl als Nächstes erwartet. */
+export function befehlsPrompt(mode, payload = {}) {
+  switch (mode?.type) {
+    case DRAW_PIPE: return payload.hasDraft ? 'Nächsten Punkt angeben' : 'Ersten Punkt angeben';
+    case PLACE: return 'Einfügepunkt angeben';
+    case MIRROR: return payload.hasStart ? 'Zweiten Punkt der Spiegelachse angeben' : 'Ersten Punkt der Spiegelachse angeben';
+    case ALIGN: return mode.payload ? 'Auszurichtendes Teilstück wählen' : 'Referenzteilstück wählen';
+    case MOVE: return payload.hasBase ? 'Zielpunkt angeben' : 'Basispunkt angeben';
+    case BREAK: return payload.hasFirst ? 'Zweiten Trennpunkt angeben' : 'Ersten Trennpunkt angeben';
+    case CONNECT_CORNER: return mode.payload?.erste ? 'Zweites Teilstück wählen' : 'Erstes Teilstück wählen';
+    case STRETCH: return payload.stage || 'Auswahlfenster angeben';
+    default: return 'Befehl eingeben';
+  }
+}

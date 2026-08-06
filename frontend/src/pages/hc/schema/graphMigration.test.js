@@ -85,6 +85,15 @@ describe('normalisiereDrawingConfig', () => {
     expect(c.ortho).toBe(true);         // orthogonal war schon vorher der Standard
     expect(c.object_snap).toBe(true);
     expect(c.auto_return).toBe(false);  // Auto-RL nur bei ausdrücklichem Flag
+    expect(c.polar_snap).toBe(false);
+    expect(c.polar_angle).toBe(45);
+    expect(c.dynamic_input).toBe(true);
+  });
+
+  it('normalisiert Polarfang und dynamische Eingabe', () => {
+    expect(normalisiereDrawingConfig({ polar_snap:true, polar_angle:30, dynamic_input:false }))
+      .toMatchObject({ polar_snap:true, polar_angle:30, dynamic_input:false });
+    expect(normalisiereDrawingConfig({ polar_angle:17 }).polar_angle).toBe(45);
   });
 
   it('respektiert ausdrücklich abgeschaltete CAD-Zustände', () => {

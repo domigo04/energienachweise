@@ -29,6 +29,7 @@ export const ORTHO = 'ortho';
 export const DIAG = 'diag';
 export const FREI = 'frei';
 export const SCHRAEGE_MIN_WINKEL = 30;
+export const POLAR_WINKEL = Object.freeze([90, 45, 30, 15]);
 
 /** Neigung eines Segments zur Horizontalen, unabhängig von der Zeichenrichtung. */
 export function segmentWinkelGrad(a, b) {
@@ -58,6 +59,32 @@ export function winkelLabel(winkel) {
   return `${Number.isInteger(gerundet) ? gerundet : gerundet.toFixed(1)}°`;
 }
 
+/** Gerichteter Winkel im Zeichenkoordinatensystem (0° rechts, 90° unten). */
+export function richtungsWinkelGrad(a, b) {
+  if (!a || !b || Math.hypot(b.x - a.x, b.y - a.y) < 0.5) return null;
+  const winkel = Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI;
+  return (winkel + 360) % 360;
+}
+
+/**
+ * Polarfang auf ein frei gewähltes Winkelraster. Die Cursorentfernung bleibt
+ * erhalten; nur die Richtung rastet auf das nächste Vielfache ein.
+ */
+export function polarPunkt(origin, point, winkelRaster = 45, grid = 10) {
+  if (!origin || !point) return rasterPunkt(point, grid);
+  const schritt = POLAR_WINKEL.includes(Number(winkelRaster)) ? Number(winkelRaster) : 45;
+  const laenge = Math.hypot(point.x - origin.x, point.y - origin.y);
+  if (laenge < 0.5) return { ...origin };
+  const roh = Math.atan2(point.y - origin.y, point.x - origin.x);
+  const rasterRad = schritt * Math.PI / 180;
+  const winkel = Math.round(roh / rasterRad) * rasterRad;
+  const ziel = {
+    x:origin.x + Math.cos(winkel) * laenge,
+    y:origin.y + Math.sin(winkel) * laenge,
+  };
+  return rasterPunkt(ziel, grid);
+}
+
 /** Welcher Modus gilt gerade, inklusive Shift-Umkehr? */
 export function aktiverConstraint(orthoAn, shift = false) {
   if (shift) return orthoAn ? DIAG : ORTHO;
@@ -72,10 +99,13 @@ export function aktiverConstraint(orthoAn, shift = false) {
  * DIAG:  freie, gerasterte Richtung — Shift ist die ausdrückliche Freigabe.
  * FREI:  nur Raster.
  */
-export function constrainPoint(origin, point, { ortho = true, shift = false, grid = 10 } = {}) {
+export function constrainPoint(origin, point, {
+  ortho = true, shift = false, grid = 10, polar = false, polarWinkel = 45,
+} = {}) {
   const modus = aktiverConstraint(ortho, shift);
   if (!origin) return rasterPunkt(point, grid);
   const raster = rasterPunkt(point, grid);
+  if (!ortho && polar && !shift) return polarPunkt(origin, point, polarWinkel, grid);
   if (modus === FREI) return raster;
   if (modus === ORTHO) {
     if (istBewussteDiagonale(origin, point)) return raster;
@@ -84,6 +114,37 @@ export function constrainPoint(origin, point, { ortho = true, shift = false, gri
       : { x: origin.x, y: raster.y };
   }
   return raster;
+}
+
+/**
+ * Exakter Zielpunkt der dynamischen Eingabe. Länge und Winkel können einzeln
+ * gesperrt werden; der jeweils fehlende Wert stammt aus der Cursorvorschau.
+ */
+export function punktAusDynamischerEingabe(origin, cursor, {
+  laenge = null, winkel = null, ortho = true, shift = false,
+  polar = false, polarWinkel = 45,
+} = {}) {
+  if (!origin || !cursor) return null;
+  const cursorLaenge = segmentLaenge(origin, cursor);
+  const zielLaenge = Number.isFinite(Number(laenge)) && Number(laenge) > 0
+    ? Number(laenge) : cursorLaenge;
+  if (!(zielLaenge > 0)) return null;
+
+  const hatWinkel = winkel !== null && winkel !== '' && Number.isFinite(Number(winkel));
+  const eingegebenerWinkel = Number(winkel);
+  if (hatWinkel) {
+    const rad = eingegebenerWinkel * Math.PI / 180;
+    const dx = Math.cos(rad) * zielLaenge;
+    const dy = Math.sin(rad) * zielLaenge;
+    return {
+      x:origin.x + (Math.abs(dx) < 1e-9 ? 0 : dx),
+      y:origin.y + (Math.abs(dy) < 1e-9 ? 0 : dy),
+    };
+  }
+  const richtungsPunkt = constrainPoint(origin, cursor, {
+    ortho, shift, grid:1, polar, polarWinkel,
+  });
+  return punktAusLaenge(origin, richtungsPunkt, zielLaenge, { ortho:false, shift:false });
 }
 
 /** Länge eines Segments in mm. */

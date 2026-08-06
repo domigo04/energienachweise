@@ -10,7 +10,7 @@ import {
   geradenSchnittpunkt, leitungMitLueckeTrennen, leitungenMitEckeVerbinden,
   leitungsSystem, leitungVerschieben,
   routeBereinigen, routeDehnen, routeIstGueltig, routeSegmenteEntfernen,
-  segmentAusrichten, segmentOrientierung, segmentVerschieben,
+  griffAktionen, loeschAuswahl, segmentAusrichten, segmentOrientierung, segmentVerschieben,
   segmentZumVerschieben, verschiebungLabel,
 } from './cadEdit';
 
@@ -35,6 +35,12 @@ describe('Grips', () => {
   it('liefert für eine unvollständige Route keine Grips', () => {
     expect(gripsFuerRoute([{ x: 0, y: 0 }])).toEqual([]);
     expect(gripsFuerRoute([])).toEqual([]);
+  });
+
+  it('nennt je Grifftyp genau seine möglichen Aktionen', () => {
+    expect(griffAktionen('endpoint')).toEqual(['strecken', 'weiterziehen', 'anschliessen']);
+    expect(griffAktionen('corner')).toEqual(['strecken', 'entfernen', 'teilen']);
+    expect(griffAktionen('segment')).toEqual(['versetzen', 'einfuegen', 'laenge']);
   });
 });
 
@@ -99,6 +105,12 @@ describe('Abstand Teilstück zu Bauteil', () => {
     expect(abstandSegmentZuRechteck(
       { x:0, y:350 }, { x:500, y:350 }, { x:200, y:300, width:100, height:80 },
     ).distance).toBe(0);
+  });
+
+  it('zeigt in einer diagonalen Ecklage keine schräge Hilfslinie', () => {
+    expect(abstandSegmentZuRechteck(
+      { x:0, y:0 }, { x:500, y:0 }, { x:600, y:300, width:100, height:80 },
+    )).toBeNull();
   });
 });
 
@@ -191,9 +203,26 @@ describe('segmentVerschieben — der CAD-Fall aus Punkt 11', () => {
     expect(bewegt).toEqual([{ x:0, y:200 }, { x:500, y:200 }]);
   });
 
+  it('verschiebt einen freien Endpunkt mit dem letzten Teilstück statt einen Knick zu erzeugen', () => {
+    const vorbereitet = segmentZumVerschieben(
+      [{ x:0, y:0 }, { x:500, y:0 }, { x:500, y:400 }], 1, { endFrei:true },
+    );
+    expect(vorbereitet.points).toEqual([{ x:500, y:0 }]);
+    expect(vorbereitet.pointIndexes).toEqual([0]);
+    expect(vorbereitet.moveEnd).toBe(true);
+  });
+
   it('beschriftet die Verschiebung in cm und ab einem Meter in m', () => {
     expect(verschiebungLabel({ x:300, y:400 })).toBe('50 cm');
     expect(verschiebungLabel({ x:1000, y:0 })).toBe('1 m');
+  });
+});
+
+describe('Löschauswahl', () => {
+  it('löscht ein gewähltes Teilstück nicht zusätzlich als ganze Leitung', () => {
+    expect(loeschAuswahl(['e1', 'e2'], [{ edgeId:'e1', segmentIndex:2 }])).toEqual({
+      ganzeEdgeIds:['e2'], segmente:[{ edgeId:'e1', segmentIndex:2 }],
+    });
   });
 });
 

@@ -159,3 +159,50 @@ export function orthogonalerTStueckPunkt(origin, a, b, toleranz = 0.5) {
   }
   return null;
 }
+
+/** Lotfuss von `origin` auf ein endliches Bestandssegment. */
+export function senkrechterFang(origin, cursor, a, b, radius = Infinity) {
+  if (![origin, cursor, a, b].every(p => Number.isFinite(p?.x) && Number.isFinite(p?.y))) return null;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const quadrat = dx * dx + dy * dy;
+  if (quadrat < 1) return null;
+  const t = ((origin.x - a.x) * dx + (origin.y - a.y) * dy) / quadrat;
+  if (t < 0 || t > 1) return null;
+  const punkt = { x:a.x + t * dx, y:a.y + t * dy };
+  const distanz = Math.hypot(cursor.x - punkt.x, cursor.y - punkt.y);
+  if (distanz > radius) return null;
+  return { ...punkt, t, distanz, typ:PERPENDICULAR };
+}
+
+/**
+ * Fangspur aus zuvor aufgenommenen Fangpunkten. Es entstehen ausschliesslich
+ * horizontale/vertikale Spuren; zwei aufgenommene Punkte können sich kreuzen.
+ */
+export function fangspurPunkt(cursor, aufgenommen = [], toleranz = 10) {
+  if (!Number.isFinite(cursor?.x) || !Number.isFinite(cursor?.y)) return null;
+  let xTreffer = null;
+  let yTreffer = null;
+  aufgenommen.forEach(punkt => {
+    if (!Number.isFinite(punkt?.x) || !Number.isFinite(punkt?.y)) return;
+    const dx = Math.abs(cursor.x - punkt.x);
+    const dy = Math.abs(cursor.y - punkt.y);
+    if (dx <= toleranz && (!xTreffer || dx < xTreffer.abstand)) xTreffer = { punkt, abstand:dx };
+    if (dy <= toleranz && (!yTreffer || dy < yTreffer.abstand)) yTreffer = { punkt, abstand:dy };
+  });
+  if (!xTreffer && !yTreffer) return null;
+  const point = {
+    x:xTreffer ? xTreffer.punkt.x : cursor.x,
+    y:yTreffer ? yTreffer.punkt.y : cursor.y,
+  };
+  const guides = [];
+  if (xTreffer) guides.push({
+    x1:xTreffer.punkt.x, y1:xTreffer.punkt.y, x2:point.x, y2:point.y,
+    snapType:'tracking', orientation:'vertical',
+  });
+  if (yTreffer) guides.push({
+    x1:yTreffer.punkt.x, y1:yTreffer.punkt.y, x2:point.x, y2:point.y,
+    snapType:'tracking', orientation:'horizontal',
+  });
+  return { point, guides, xMatch:xTreffer?.punkt || null, yMatch:yTreffer?.punkt || null };
+}

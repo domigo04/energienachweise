@@ -93,6 +93,14 @@ describe('normalisiereDrawingConfig', () => {
     expect(c.object_snap).toBe(false);
   });
 
+  it('zeigt das Raster nur, wenn es ausdrücklich eingeschaltet ist', () => {
+    // Zeichenhilfe, kein Planinhalt: ohne Angabe bleibt der Grund leer.
+    expect(normalisiereDrawingConfig({}).raster_sichtbar).toBe(false);
+    expect(normalisiereDrawingConfig({ raster_sichtbar: true }).raster_sichtbar).toBe(true);
+    // Der Rasterfang hängt an grid_size und bleibt davon unberührt.
+    expect(normalisiereDrawingConfig({ raster_sichtbar: false }).grid_size).toBe(10);
+  });
+
   it('lässt nur erlaubte Rasterweiten zu', () => {
     expect(normalisiereDrawingConfig({ grid_size: 25 }).grid_size).toBe(25);
     expect(normalisiereDrawingConfig({ grid_size: 7 }).grid_size).toBe(10);

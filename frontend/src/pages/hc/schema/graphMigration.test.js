@@ -127,4 +127,38 @@ describe('normalisiereDrawingConfig', () => {
     expect(normalisiereDrawingConfig({ shortcut_line: 'Shift+L' }).shortcut_line).toBe('l');
     expect(normalisiereDrawingConfig({ shortcut_rotate: '' }).shortcut_rotate).toBe('d');
   });
+
+  // ── Leitungen ändern (Issue #72) ─────────────────────────────────────────
+
+  it('kennt die vier neuen Befehlstasten und lässt sie belegen', () => {
+    const standard = normalisiereDrawingConfig({});
+    expect(standard.shortcut_offset).toBe('o');
+    expect(standard.shortcut_trim).toBe('w');
+    expect(standard.shortcut_extend).toBe('e');
+    expect(standard.shortcut_join).toBe('j');
+    expect(normalisiereDrawingConfig({ shortcut_trim: 'U' }).shortcut_trim).toBe('u');
+  });
+
+  it('verdrängt keine bestehende Belegung — insbesondere nicht TR', () => {
+    const config = normalisiereDrawingConfig({});
+    const belegt = [
+      config.shortcut_line, config.shortcut_polyline, config.shortcut_rotate,
+      config.shortcut_mirror, config.shortcut_align, config.shortcut_move,
+      config.shortcut_break, config.shortcut_stretch,
+      config.shortcut_offset, config.shortcut_trim, config.shortcut_extend,
+      config.shortcut_join,
+    ];
+    // Jede Standardtaste kommt genau einmal vor.
+    expect(new Set(belegt).size).toBe(belegt.length);
+    // `t` eröffnet die Folge TR = Ecke verbinden und bleibt frei von Befehlen.
+    expect(belegt).not.toContain('t');
+    // Stutzen übernimmt TR ausdrücklich NICHT (Vorgabe Dominic).
+    expect(config.shortcut_trim).not.toBe('t');
+  });
+
+  it('lässt ein Altschema ohne die neuen Tasten unverändert laufen', () => {
+    const alt = normalisiereDrawingConfig({ shortcut_line: 'l', corner_radius: 8 });
+    expect(alt.shortcut_offset).toBe('o');
+    expect(alt.shortcut_join).toBe('j');
+  });
 });

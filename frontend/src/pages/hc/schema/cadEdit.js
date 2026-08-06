@@ -505,6 +505,283 @@ export function routeDehnen(route, fenster, delta, { startFest = true, endFest =
   return { route: neu, bewegt };
 }
 
+// ── Leitungen ändern: Versatz, Stutzen, Dehnen bis Kante, Verbinden ───────
+//
+// Die vier CAD-Befehle, mit denen an einer bestehenden Leitung aufgeräumt
+// wird. Alles hier ist reine Geometrie auf Punktlisten — keine Kanten, keine
+// Knoten, keine Layer. Was daraus hydraulisch wird, entscheidet der Editor.
+//
+// Gemeinsame Regel: es wird nie geraten. Wo die Geometrie nicht eindeutig ist
+// (parallele Geraden, kein Schnittpunkt, Klick daneben), kommt ein `fehler`
+// zurück, den der Editor als Satz anzeigen kann.
+
+const TRIM_TOLERANZ = 0.5;
+
+/** Einheitsvektor eines Teilstücks, oder null bei Länge null. */
+const richtungVon = (a, b) => {
+  if (![a, b].every(p => Number.isFinite(p?.x) && Number.isFinite(p?.y))) return null;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const laenge = Math.hypot(dx, dy);
+  return laenge <= ECKE_TOLERANZ ? null : { x:dx / laenge, y:dy / laenge };
+};
+
+/** Hat eine Punktliste überhaupt eine sichtbare Ausdehnung? */
+const routeHatLaenge = (punkte, toleranz = TRIM_TOLERANZ) => Array.isArray(punkte)
+  && punkte.length >= 2
+  && punkte.some(p => Math.hypot(p.x - punkte[0].x, p.y - punkte[0].y) > toleranz);
+
+/**
+ * Auf welcher Seite eines Teilstücks steht der Cursor? +1 links, -1 rechts der
+ * Zeichenrichtung. Massgebend ist das getroffene Teilstück — bei einer
+ * abgewinkelten Leitung ist „links" sonst nicht eindeutig.
+ */
+export function versatzSeite(a, b, cursor) {
+  const dir = richtungVon(a, b);
+  if (!dir || !Number.isFinite(cursor?.x) || !Number.isFinite(cursor?.y)) return 1;
+  // Skalarprodukt mit der Normalen (-dy, dx): dasselbe Vorzeichen, das
+  // `routeVersetzen` zum Versetzen verwendet.
+  const seite = (cursor.x - a.x) * -dir.y + (cursor.y - a.y) * dir.x;
+  return seite < 0 ? -1 : 1;
+}
+
+/**
+ * Eine Leitung PARALLEL versetzen (AutoCAD OFFSET).
+ *
+ * Jedes Teilstück wandert um `abstand` auf seiner eigenen Normalen. Die neuen
+ * Ecken liegen dort, wo sich die versetzten Geraden schneiden — sonst
+ * entstünden an jeder Ecke Lücken oder Überstände:
+ *
+ *     ──────┐                ──────┐
+ *           │   Versatz →  ──────┐ │
+ *     ──────┘                    │ │
+ *
+ * Die Quelle wird NICHT verändert; zurück kommt nur die neue Punktliste.
+ * `seite` +1/-1 wählt, auf welcher Seite die Kopie entsteht.
+ */
+export function routeVersetzen(route, abstand, { seite = 1 } = {}) {
+  if (!Array.isArray(route) || route.length < 2) return { fehler:'Keine Leitung.' };
+  const weite = Number(abstand);
+  if (!Number.isFinite(weite) || Math.abs(weite) < TRIM_TOLERANZ) {
+    return { fehler:'Der Abstand muss grösser als null sein.' };
+  }
+  const vorzeichen = seite < 0 ? -1 : 1;
+
+  const versetzt = [];
+  for (let i = 0; i < route.length - 1; i += 1) {
+    const dir = richtungVon(route[i], route[i + 1]);
+    if (!dir) continue;                       // Nullsegment trägt keine Richtung
+    const nx = -dir.y * Math.abs(weite) * vorzeichen;
+    const ny = dir.x * Math.abs(weite) * vorzeichen;
+    versetzt.push({
+      a:{ x:route[i].x + nx, y:route[i].y + ny },
+      b:{ x:route[i + 1].x + nx, y:route[i + 1].y + ny },
+    });
+  }
+  if (!versetzt.length) return { fehler:'Die Leitung hat keine Länge.' };
+
+  const punkte = [{ ...versetzt[0].a }];
+  for (let i = 1; i < versetzt.length; i += 1) {
+    const ecke = geradenSchnittpunkt(
+      versetzt[i - 1].a, versetzt[i - 1].b, versetzt[i].a, versetzt[i].b,
+    );
+    // Parallel heisst hier: die Leitung läuft geradeaus weiter. Dann ist der
+    // versetzte Punkt selbst die Ecke.
+    punkte.push(ecke ? { x:ecke.x, y:ecke.y } : { ...versetzt[i].a });
+  }
+  punkte.push({ ...versetzt.at(-1).b });
+  if (!routeHatLaenge(punkte)) return { fehler:'Der Versatz ergäbe keine Leitung.' };
+  return { route:punkte };
+}
+
+/**
+ * Schnittpunkt zweier ENDLICHER Strecken, oder null.
+ *
+ * Anders als `geradenSchnittpunkt` zählt hier nur eine echte Kreuzung
+ * innerhalb beider Strecken — eine gedachte Verlängerung ist keine Begrenzung.
+ */
+export function streckenSchnittpunkt(a, b, c, d) {
+  if (![a, b, c, d].every(p => Number.isFinite(p?.x) && Number.isFinite(p?.y))) return null;
+  const rx = b.x - a.x, ry = b.y - a.y;
+  const sx = d.x - c.x, sy = d.y - c.y;
+  const kreuz = rx * sy - ry * sx;
+  if (Math.abs(kreuz) <= ECKE_TOLERANZ) return null;          // parallel
+  const qx = c.x - a.x, qy = c.y - a.y;
+  const t = (qx * sy - qy * sx) / kreuz;
+  const u = (qx * ry - qy * rx) / kreuz;
+  if (t < 0 || t > 1 || u < 0 || u > 1) return null;
+  return { x:a.x + t * rx, y:a.y + t * ry, t, u };
+}
+
+/**
+ * Alle Stellen, an denen eine Leitung eine Begrenzungsleitung wirklich kreuzt.
+ *
+ * Je Treffer kommen der Punkt, das getroffene Teilstück und das Längsmass
+ * entlang der Leitung zurück (Segmentindex plus Anteil im Segment). Damit lässt
+ * sich sagen, welches Stück der Leitung wo liegt — sortiert von vorn nach
+ * hinten.
+ */
+export function trimGrenzen(route, grenzRoute) {
+  if (!Array.isArray(route) || route.length < 2) return [];
+  if (!Array.isArray(grenzRoute) || grenzRoute.length < 2) return [];
+  const treffer = [];
+  for (let i = 0; i < route.length - 1; i += 1) {
+    for (let k = 0; k < grenzRoute.length - 1; k += 1) {
+      const punkt = streckenSchnittpunkt(route[i], route[i + 1], grenzRoute[k], grenzRoute[k + 1]);
+      if (!punkt) continue;
+      treffer.push({
+        x:punkt.x, y:punkt.y,
+        segmentIndex:i, mass:i + punkt.t, grenzSegmentIndex:k,
+      });
+    }
+  }
+  return treffer.sort((links, rechts) => links.mass - rechts.mass);
+}
+
+/** Längsmass eines Treffers auf der Route (Segmentindex plus Anteil). */
+const laengsmassAufRoute = (route, treffer) => {
+  const a = route[treffer.segmentIndex];
+  const b = route[treffer.segmentIndex + 1];
+  const laenge = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+  return treffer.segmentIndex + Math.hypot(treffer.x - a.x, treffer.y - a.y) / laenge;
+};
+
+/**
+ * Eine Leitung an einer Begrenzungsleitung STUTZEN (AutoCAD TRIM).
+ *
+ * Angeklickt wird das Stück, das weg soll. Die Schnittpunkte mit der Begrenzung
+ * teilen die Leitung; das Stück, in dem der Klick liegt, fällt weg:
+ *
+ *     ────┬────●────      ────┬────
+ *         │          →        │
+ *
+ * Liegt der Klick zwischen zwei Schnittpunkten, bleiben zwei Reste stehen —
+ * genau wie im CAD. Der Rest behält seine Punkte unverändert; nur am
+ * Schnittpunkt entsteht ein neues Ende.
+ *
+ * Rückgabe: { routen, punkte } oder { fehler }.
+ */
+export function leitungTrimmen(route, grenzRoute, klick) {
+  if (!Array.isArray(route) || route.length < 2) return { fehler:'Keine Leitung.' };
+  if (!Number.isInteger(klick?.segmentIndex)
+      || klick.segmentIndex < 0 || klick.segmentIndex >= route.length - 1
+      || !Number.isFinite(klick?.x) || !Number.isFinite(klick?.y)) {
+    return { fehler:'Der Klick liegt nicht auf der Leitung.' };
+  }
+  const grenzen = trimGrenzen(route, grenzRoute);
+  if (!grenzen.length) return { fehler:'Die Begrenzung kreuzt diese Leitung nicht.' };
+
+  const klickMass = laengsmassAufRoute(route, klick);
+  const davor = [...grenzen].reverse().find(grenze => grenze.mass <= klickMass) || null;
+  const danach = grenzen.find(grenze => grenze.mass >= klickMass) || null;
+
+  const routen = [];
+  if (davor) {
+    const rest = [
+      ...route.slice(0, davor.segmentIndex + 1).map(p => ({ x:p.x, y:p.y })),
+      { x:davor.x, y:davor.y },
+    ];
+    if (routeHatLaenge(rest)) routen.push(rest);
+  }
+  if (danach) {
+    const rest = [
+      { x:danach.x, y:danach.y },
+      ...route.slice(danach.segmentIndex + 1).map(p => ({ x:p.x, y:p.y })),
+    ];
+    if (routeHatLaenge(rest)) routen.push(rest);
+  }
+  if (!routen.length) return { fehler:'Stutzen würde die ganze Leitung entfernen.' };
+  return { routen, punkte:[davor, danach].filter(Boolean).map(g => ({ x:g.x, y:g.y })) };
+}
+
+/**
+ * Ein Leitungsende bis zur getroffenen Leitung DEHNEN (AutoCAD EXTEND).
+ *
+ * Verlängert wird ausschliesslich in der Richtung, die das Randstück bereits
+ * hat — es wird nichts abgeknickt und keine Ecke erfunden. Getroffen werden
+ * muss die Begrenzung innerhalb ihrer eigenen Länge; eine gedachte
+ * Verlängerung der Begrenzung zählt nicht, sonst entstünde ein Anschluss im
+ * Leeren.
+ *
+ * Rückgabe: { route, punkt, grenzSegmentIndex, weite } oder { fehler }.
+ */
+export function routeBisKanteDehnen(route, seite, grenzRoute) {
+  if (!Array.isArray(route) || route.length < 2) return { fehler:'Keine Leitung.' };
+  if (!['source', 'target'].includes(seite)) return { fehler:'Kein gültiges Leitungsende.' };
+  if (!Array.isArray(grenzRoute) || grenzRoute.length < 2) return { fehler:'Keine Begrenzung.' };
+  const ende = seite === 'source' ? route[0] : route.at(-1);
+  const nachbar = seite === 'source' ? route[1] : route.at(-2);
+  // Nach aussen zeigende Richtung: vom Nachbarn zum Ende.
+  const dir = richtungVon(nachbar, ende);
+  if (!dir) return { fehler:'Das Randstück hat keine Richtung.' };
+
+  let bester = null;
+  for (let k = 0; k < grenzRoute.length - 1; k += 1) {
+    const c = grenzRoute[k];
+    const d = grenzRoute[k + 1];
+    const sx = d.x - c.x, sy = d.y - c.y;
+    const kreuz = dir.x * sy - dir.y * sx;
+    if (Math.abs(kreuz) <= ECKE_TOLERANZ) continue;             // parallel
+    const qx = c.x - ende.x, qy = c.y - ende.y;
+    const weite = (qx * sy - qy * sx) / kreuz;                  // Weg ab dem Ende
+    const anteil = (qx * dir.y - qy * dir.x) / kreuz;           // Lage auf der Begrenzung
+    if (weite <= TRIM_TOLERANZ) continue;                       // nur nach vorn
+    if (anteil < 0 || anteil > 1) continue;                     // nur innerhalb der Begrenzung
+    if (!bester || weite < bester.weite) {
+      bester = {
+        weite,
+        punkt:{ x:ende.x + weite * dir.x, y:ende.y + weite * dir.y },
+        grenzSegmentIndex:k,
+      };
+    }
+  }
+  if (!bester) return { fehler:'In dieser Richtung liegt keine Leitung zum Andocken.' };
+
+  const neu = route.map(p => ({ x:p.x, y:p.y }));
+  if (seite === 'source') neu[0] = { ...bester.punkt };
+  else neu[neu.length - 1] = { ...bester.punkt };
+  return { route:neu, punkt:bester.punkt, grenzSegmentIndex:bester.grenzSegmentIndex, weite:bester.weite };
+}
+
+/**
+ * Zwei aneinanderstossende Teilstücke zu EINER Leitung zusammenführen
+ * (AutoCAD JOIN).
+ *
+ * Verbunden wird nur an einem gemeinsamen Endpunkt — eine Kreuzung in der
+ * Mitte ergibt keine durchgehende Leitung. Der gemeinsame Punkt steht danach
+ * genau einmal in der Route; ob er als Ecke überhaupt nötig bleibt, entscheidet
+ * anschliessend `routeBereinigen` (bei geradem Durchlauf fällt er weg).
+ *
+ * `seiteA`/`seiteB` nennen die Enden, die zusammenfallen, `beginntBei` die
+ * Leitung, an deren freiem Ende die neue Route startet. Damit weiss der
+ * Aufrufer, welcher Anker bleibt und welcher verschwindet.
+ */
+export function routenVerbinden(routeA, routeB, { toleranz = TRIM_TOLERANZ } = {}) {
+  const gueltig = route => Array.isArray(route) && route.length >= 2;
+  if (!gueltig(routeA) || !gueltig(routeB)) return { fehler:'Zwei Leitungen erforderlich.' };
+  const nah = (p, q) => Math.hypot(p.x - q.x, p.y - q.y) <= toleranz;
+  const rueckwaerts = route => [...route].reverse();
+
+  // Vier mögliche Berührungen. Die Reihenfolge legt fest, wie die neue Route
+  // durchläuft; der gemeinsame Punkt wird dabei genau einmal übernommen.
+  const faelle = [
+    { seiteA:'end', seiteB:'start', beginntBei:'a', a:routeA.at(-1), b:routeB[0],
+      bauen:() => [...routeA, ...routeB.slice(1)] },
+    { seiteA:'end', seiteB:'end', beginntBei:'a', a:routeA.at(-1), b:routeB.at(-1),
+      bauen:() => [...routeA, ...rueckwaerts(routeB).slice(1)] },
+    { seiteA:'start', seiteB:'end', beginntBei:'b', a:routeA[0], b:routeB.at(-1),
+      bauen:() => [...routeB, ...routeA.slice(1)] },
+    { seiteA:'start', seiteB:'start', beginntBei:'b', a:routeA[0], b:routeB[0],
+      bauen:() => [...rueckwaerts(routeB), ...routeA.slice(1)] },
+  ];
+  const treffer = faelle.find(fall => nah(fall.a, fall.b));
+  if (!treffer) return { fehler:'Die beiden Leitungen stossen nicht aneinander.' };
+
+  const route = treffer.bauen().map(p => ({ x:p.x, y:p.y }));
+  if (!routeHatLaenge(route)) return { fehler:'Die verbundene Leitung hätte keine Länge.' };
+  return { route, seiteA:treffer.seiteA, seiteB:treffer.seiteB, beginntBei:treffer.beginntBei };
+}
+
 // ── Leitungsbeschriftung (DN / m') ────────────────────────────────────────
 //
 // Die Beschriftung sitzt normalerweise in der Streckenmitte. Im echten Plan

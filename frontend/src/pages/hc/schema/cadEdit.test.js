@@ -9,9 +9,11 @@ import {
   fensterAus, imFenster, istKollinear, labelSichtbar, labelVerschoben, labelVersatz,
   geradenSchnittpunkt, leitungMitLueckeTrennen, leitungenMitEckeVerbinden,
   leitungsSystem, leitungVerschieben,
+  leitungTrimmen, routeBisKanteDehnen, routenVerbinden, routeVersetzen,
   routeBereinigen, routeDehnen, routeIstGueltig, routeSegmenteEntfernen,
   griffAktionen, loeschAuswahl, segmentAusrichten, segmentOrientierung, segmentVerschieben,
-  segmentZumVerschieben, verschiebungLabel,
+  segmentZumVerschieben, streckenSchnittpunkt, trimGrenzen, versatzSeite,
+  verschiebungLabel,
 } from './cadEdit';
 
 describe('Grips', () => {
@@ -665,5 +667,235 @@ describe('Leitungssystem (Tab-Auswahl)', () => {
   it('gibt bei unbekannter Leitung nichts zurück', () => {
     expect(leitungsSystem(edges, nodes, 'gibtsnicht')).toEqual([]);
     expect(leitungsSystem([], [], 'vl1')).toEqual([]);
+  });
+});
+
+// ── Leitungen ändern: Versatz, Stutzen, Dehnen bis Kante, Verbinden ────────
+
+describe('Versatz (OFFSET)', () => {
+  const gerade = [{ x:0, y:0 }, { x:1000, y:0 }];
+
+  it('legt eine gerade Leitung parallel im gewählten Abstand daneben', () => {
+    const { route } = routeVersetzen(gerade, 200, { seite:1 });
+    expect(route).toEqual([{ x:0, y:200 }, { x:1000, y:200 }]);
+  });
+
+  it('versetzt auf die andere Seite, wenn die Seite umgekehrt gewählt wird', () => {
+    const { route } = routeVersetzen(gerade, 200, { seite:-1 });
+    expect(route).toEqual([{ x:0, y:-200 }, { x:1000, y:-200 }]);
+  });
+
+  it('lässt die Quelle unverändert', () => {
+    const original = JSON.parse(JSON.stringify(gerade));
+    routeVersetzen(gerade, 200, { seite:1 });
+    expect(gerade).toEqual(original);
+  });
+
+  it('schneidet die Ecke sauber, statt an der Ecke eine Lücke zu lassen', () => {
+    // L-Form: rechts, dann runter. Nach innen versetzt muss die Ecke exakt
+    // auf dem Schnittpunkt der beiden versetzten Geraden sitzen.
+    const ecke = [{ x:0, y:0 }, { x:1000, y:0 }, { x:1000, y:800 }];
+    const { route } = routeVersetzen(ecke, 100, { seite:1 });
+    expect(route).toHaveLength(3);
+    expect(route[1]).toEqual({ x:900, y:100 });
+  });
+
+  it('bleibt bei einer geraden Durchlaufecke ohne erfundenen Knick', () => {
+    // Zwei Teilstücke auf derselben Achse: der Zwischenpunkt wandert nur mit.
+    const durchlauf = [{ x:0, y:0 }, { x:500, y:0 }, { x:1000, y:0 }];
+    const { route } = routeVersetzen(durchlauf, 50, { seite:1 });
+    expect(route).toEqual([{ x:0, y:50 }, { x:500, y:50 }, { x:1000, y:50 }]);
+  });
+
+  it('ist mehrfach anwendbar und liefert gleichmässige Abstände', () => {
+    const erste = routeVersetzen(gerade, 200, { seite:1 }).route;
+    const zweite = routeVersetzen(erste, 200, { seite:1 }).route;
+    expect(zweite).toEqual([{ x:0, y:400 }, { x:1000, y:400 }]);
+  });
+
+  it('weist Abstand null und unbrauchbare Leitungen ab, statt zu raten', () => {
+    expect(routeVersetzen(gerade, 0).fehler).toBeTruthy();
+    expect(routeVersetzen(gerade, Number.NaN).fehler).toBeTruthy();
+    expect(routeVersetzen([{ x:0, y:0 }], 100).fehler).toBeTruthy();
+    expect(routeVersetzen([{ x:0, y:0 }, { x:0, y:0 }], 100).fehler).toBeTruthy();
+  });
+
+  it('bestimmt die Seite aus der Cursorlage am getroffenen Teilstück', () => {
+    // Teilstück zeigt nach rechts; Normale (-dy, dx) zeigt nach unten (+y).
+    expect(versatzSeite({ x:0, y:0 }, { x:100, y:0 }, { x:50, y:80 })).toBe(1);
+    expect(versatzSeite({ x:0, y:0 }, { x:100, y:0 }, { x:50, y:-80 })).toBe(-1);
+  });
+
+  it('versetzt zur Cursorseite hin — Seite und Versatz stimmen überein', () => {
+    const cursor = { x:500, y:-300 };
+    const seite = versatzSeite(gerade[0], gerade[1], cursor);
+    const { route } = routeVersetzen(gerade, 200, { seite });
+    expect(route[0].y).toBe(-200);      // gleiche Richtung wie der Cursor
+  });
+});
+
+describe('Stutzen (TRIM)', () => {
+  // Waagrechte Leitung, senkrechte Begrenzung bei x = 600.
+  const route = [{ x:0, y:0 }, { x:1000, y:0 }];
+  const grenze = [{ x:600, y:-200 }, { x:600, y:200 }];
+
+  it('findet nur echte Kreuzungen innerhalb beider Strecken', () => {
+    expect(streckenSchnittpunkt({ x:0, y:0 }, { x:100, y:0 }, { x:50, y:-50 }, { x:50, y:50 }))
+      .toMatchObject({ x:50, y:0 });
+    // Die Begrenzung endet vor der Leitung — eine gedachte Verlängerung zählt nicht.
+    expect(streckenSchnittpunkt({ x:0, y:0 }, { x:100, y:0 }, { x:50, y:20 }, { x:50, y:50 }))
+      .toBeNull();
+    // Parallel.
+    expect(streckenSchnittpunkt({ x:0, y:0 }, { x:100, y:0 }, { x:0, y:10 }, { x:100, y:10 }))
+      .toBeNull();
+  });
+
+  it('meldet den Schnittpunkt mit Längsmass', () => {
+    const grenzen = trimGrenzen(route, grenze);
+    expect(grenzen).toHaveLength(1);
+    expect(grenzen[0]).toMatchObject({ x:600, y:0, segmentIndex:0 });
+  });
+
+  it('kürzt genau am Schnittpunkt und entfernt das angeklickte Stück', () => {
+    // Klick rechts der Begrenzung — der rechte Teil fällt weg.
+    const ergebnis = leitungTrimmen(route, grenze, { segmentIndex:0, x:800, y:0 });
+    expect(ergebnis.routen).toEqual([[{ x:0, y:0 }, { x:600, y:0 }]]);
+  });
+
+  it('entfernt spiegelbildlich das linke Stück, wenn links geklickt wird', () => {
+    const ergebnis = leitungTrimmen(route, grenze, { segmentIndex:0, x:200, y:0 });
+    expect(ergebnis.routen).toEqual([[{ x:600, y:0 }, { x:1000, y:0 }]]);
+  });
+
+  it('lässt bei zwei Begrenzungen zwei Reste stehen', () => {
+    const zweiFach = [
+      { x:300, y:-200 }, { x:300, y:200 },
+      { x:700, y:200 }, { x:700, y:-200 },
+    ];
+    const ergebnis = leitungTrimmen(route, zweiFach, { segmentIndex:0, x:500, y:0 });
+    expect(ergebnis.routen).toEqual([
+      [{ x:0, y:0 }, { x:300, y:0 }],
+      [{ x:700, y:0 }, { x:1000, y:0 }],
+    ]);
+  });
+
+  it('behält die Eckpunkte des stehenbleibenden Stücks unverändert', () => {
+    const abgewinkelt = [{ x:0, y:0 }, { x:0, y:500 }, { x:1000, y:500 }];
+    const senkrecht = [{ x:600, y:300 }, { x:600, y:700 }];
+    const ergebnis = leitungTrimmen(abgewinkelt, senkrecht, { segmentIndex:1, x:800, y:500 });
+    expect(ergebnis.routen).toEqual([[{ x:0, y:0 }, { x:0, y:500 }, { x:600, y:500 }]]);
+  });
+
+  it('weist ab, wenn die Begrenzung die Leitung nicht kreuzt', () => {
+    const daneben = [{ x:2000, y:-200 }, { x:2000, y:200 }];
+    expect(leitungTrimmen(route, daneben, { segmentIndex:0, x:500, y:0 }).fehler).toBeTruthy();
+  });
+
+  it('weist einen Klick ausserhalb der Leitung ab, statt zu raten', () => {
+    expect(leitungTrimmen(route, grenze, { segmentIndex:5, x:500, y:0 }).fehler).toBeTruthy();
+    expect(leitungTrimmen(route, grenze, null).fehler).toBeTruthy();
+  });
+});
+
+describe('Dehnen bis Kante (EXTEND)', () => {
+  const route = [{ x:0, y:0 }, { x:500, y:0 }];
+  const grenze = [{ x:900, y:-200 }, { x:900, y:200 }];
+
+  it('verlängert das Ende in seiner eigenen Richtung bis zur Begrenzung', () => {
+    const ergebnis = routeBisKanteDehnen(route, 'target', grenze);
+    expect(ergebnis.punkt).toEqual({ x:900, y:0 });
+    expect(ergebnis.route).toEqual([{ x:0, y:0 }, { x:900, y:0 }]);
+  });
+
+  it('verlängert spiegelbildlich am Leitungsanfang', () => {
+    const links = [{ x:-400, y:-200 }, { x:-400, y:200 }];
+    const ergebnis = routeBisKanteDehnen(route, 'source', links);
+    expect(ergebnis.route).toEqual([{ x:-400, y:0 }, { x:500, y:0 }]);
+  });
+
+  it('knickt nicht ab — die Richtung des Randstücks bleibt erhalten', () => {
+    const abgewinkelt = [{ x:0, y:0 }, { x:0, y:500 }, { x:500, y:500 }];
+    // Die Begrenzung muss auf der Höhe des Randstücks liegen (y = 500).
+    const aufHoehe = [{ x:900, y:300 }, { x:900, y:700 }];
+    const ergebnis = routeBisKanteDehnen(abgewinkelt, 'target', aufHoehe);
+    expect(ergebnis.route).toEqual([{ x:0, y:0 }, { x:0, y:500 }, { x:900, y:500 }]);
+  });
+
+  it('nimmt die nächstliegende Begrenzung, nicht irgendeine', () => {
+    const zwei = [
+      { x:700, y:-200 }, { x:700, y:200 },
+      { x:1200, y:200 }, { x:1200, y:-200 },
+    ];
+    expect(routeBisKanteDehnen(route, 'target', zwei).punkt).toEqual({ x:700, y:0 });
+  });
+
+  it('verlängert nie nach hinten', () => {
+    // Begrenzung liegt hinter dem Startpunkt: vom Ende aus nicht erreichbar.
+    const hinten = [{ x:-300, y:-200 }, { x:-300, y:200 }];
+    expect(routeBisKanteDehnen(route, 'target', hinten).fehler).toBeTruthy();
+  });
+
+  it('dockt nicht an eine gedachte Verlängerung der Begrenzung an', () => {
+    // Die Begrenzung endet oberhalb der Leitung — ihre Gerade träfe, sie selbst nicht.
+    const zuKurz = [{ x:900, y:100 }, { x:900, y:400 }];
+    expect(routeBisKanteDehnen(route, 'target', zuKurz).fehler).toBeTruthy();
+  });
+
+  it('weist parallele Begrenzungen und ungültige Eingaben ab', () => {
+    expect(routeBisKanteDehnen(route, 'target', [{ x:0, y:80 }, { x:900, y:80 }]).fehler).toBeTruthy();
+    expect(routeBisKanteDehnen(route, 'mitte', grenze).fehler).toBeTruthy();
+    expect(routeBisKanteDehnen([{ x:0, y:0 }], 'target', grenze).fehler).toBeTruthy();
+  });
+});
+
+describe('Verbinden (JOIN)', () => {
+  const links = [{ x:0, y:0 }, { x:500, y:0 }];
+  const rechts = [{ x:500, y:0 }, { x:1000, y:0 }];
+
+  it('macht aus zwei Teilstücken eine Leitung ohne doppelten Punkt', () => {
+    const ergebnis = routenVerbinden(links, rechts);
+    expect(ergebnis.route).toEqual([{ x:0, y:0 }, { x:500, y:0 }, { x:1000, y:0 }]);
+    expect(ergebnis).toMatchObject({ seiteA:'end', seiteB:'start', beginntBei:'a' });
+  });
+
+  it('verbindet auch, wenn das zweite Teilstück verkehrt herum läuft', () => {
+    const gedreht = [{ x:1000, y:0 }, { x:500, y:0 }];
+    const ergebnis = routenVerbinden(links, gedreht);
+    expect(ergebnis.route).toEqual([{ x:0, y:0 }, { x:500, y:0 }, { x:1000, y:0 }]);
+    expect(ergebnis).toMatchObject({ seiteA:'end', seiteB:'end' });
+  });
+
+  it('verbindet am Leitungsanfang und beginnt dann bei der zweiten Leitung', () => {
+    const davor = [{ x:-500, y:0 }, { x:0, y:0 }];
+    const ergebnis = routenVerbinden(links, davor);
+    expect(ergebnis.route).toEqual([{ x:-500, y:0 }, { x:0, y:0 }, { x:500, y:0 }]);
+    expect(ergebnis).toMatchObject({ seiteA:'start', seiteB:'end', beginntBei:'b' });
+  });
+
+  it('erhält die Ecken beider Teilstücke', () => {
+    const ecke = [{ x:500, y:0 }, { x:500, y:400 }, { x:900, y:400 }];
+    expect(routenVerbinden(links, ecke).route).toEqual([
+      { x:0, y:0 }, { x:500, y:0 }, { x:500, y:400 }, { x:900, y:400 },
+    ]);
+  });
+
+  it('lässt den überflüssigen Zwischenpunkt durch die Bereinigung fallen', () => {
+    const { route } = routenVerbinden(links, rechts);
+    // Der gemeinsame Punkt liegt auf der Geraden — als Ecke trägt er nichts.
+    expect(routeBereinigen(route.slice(1, -1), { start:route[0], end:route.at(-1) })).toEqual([]);
+  });
+
+  it('behält eine echte Ecke als Zwischenpunkt', () => {
+    const nachUnten = [{ x:500, y:0 }, { x:500, y:400 }];
+    const { route } = routenVerbinden(links, nachUnten);
+    expect(routeBereinigen(route.slice(1, -1), { start:route[0], end:route.at(-1) }))
+      .toEqual([{ x:500, y:0 }]);
+  });
+
+  it('verbindet nichts, was sich nur kreuzt oder gar nicht berührt', () => {
+    const kreuzt = [{ x:250, y:-200 }, { x:250, y:200 }];
+    expect(routenVerbinden(links, kreuzt).fehler).toBeTruthy();
+    expect(routenVerbinden(links, [{ x:900, y:0 }, { x:1200, y:0 }]).fehler).toBeTruthy();
+    expect(routenVerbinden(links, [{ x:0, y:0 }]).fehler).toBeTruthy();
   });
 });

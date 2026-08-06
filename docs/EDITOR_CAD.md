@@ -104,6 +104,10 @@ Alle Zeichenbefehle stehen senkrecht am linken Rand der Zeichenfläche
 | Mit Lücke trennen | `break` |
 | Ecke verbinden | `connect-corner`, Befehl `TR`, bleibt bis ESC aktiv |
 | Dehnen | `stretch` |
+| Versatz | `offset`, bleibt bis ESC aktiv |
+| Stutzen | `trim`, bleibt bis ESC aktiv |
+| Dehnen bis Kante | `extend`, bleibt bis ESC aktiv |
+| Verbinden | `join`, bleibt bis ESC aktiv |
 | Auswahl kopieren | Bauteile, Leitungen und einzelne Teilstücke gemeinsam |
 | Auswahl löschen | dieselbe gemeinsame Auswahl in einer Undo-Aktion |
 | Notiz-Stecknadel | Eintrag im Projektjournal |
@@ -160,6 +164,68 @@ gemeinsamen Eckpunkt bilden. Der Eckpunkt ist hydraulisch ein gemeinsamer
 Junction-Knoten. Parallele Leitungen, verschiedene Layer, Innensegmente oder an
 Bauteile gebundene Enden werden mit einer klaren Meldung abgewiesen. `ESC`
 beendet den Befehl.
+
+## Leitungen ändern: Versatz, Stutzen, Dehnen bis Kante, Verbinden
+
+Die vier Befehle, mit denen an einer bestehenden Leitung aufgeräumt wird. Sie
+haben je ein Werkzeug in der Leiste und eine **frei belegbare Taste**; die
+Vorgaben sind `O`, `W`, `E` und `J`.
+
+> **`TR` bleibt „Ecke verbinden".** Stutzen übernimmt diese Belegung
+> ausdrücklich **nicht** (Dominic 2026-08-06). `T` eröffnet die Befehlsfolge
+> `TR` und ist darum serverseitig als Befehlstaste gesperrt: der Editor fängt
+> `T` ab, bevor er eine belegbare Taste prüft — ein darauf gelegter Befehl wäre
+> stumm. Stutzen hat mit `W` eine eigene Taste.
+
+| Befehl | Bedienung |
+|---|---|
+| **Versatz** (`O`) | Auf die Leitung klicken, und zwar auf der Seite, wo die Kopie hin soll. Ein Klick sagt beides: welche Leitung und welche Seite. Ziffern ändern den Abstand (Vorgabe 200 mm), er bleibt für weitere Versätze stehen. |
+| **Stutzen** (`W`) | Erst die Begrenzungsleitung, dann auf das Stück klicken, das weg soll. |
+| **Dehnen bis Kante** (`E`) | Erst die Begrenzungsleitung, dann die Leitung nahe dem Ende, das verlängert werden soll. |
+| **Verbinden** (`J`) | Zwei aneinanderstossende Teilstücke nacheinander anklicken. |
+
+Alle vier bleiben bis `ESC` aktiv; der **Rechtsklick** öffnet das Befehlsmenü,
+das im laufenden Befehl «Abbrechen» anbietet. Bei
+Stutzen und Dehnen bleibt die gewählte Begrenzung stehen — mehrere Leitungen an
+derselben Kante zu bearbeiten ist der Normalfall. **Shift schaltet im laufenden
+Befehl zwischen Stutzen und Dehnen um**, ohne ihn zu verlassen (CAD-Konvention).
+
+Jede ausgeführte Änderung ist **genau ein Undo-Schritt**: der Schnappschuss
+entsteht einmal vor der Änderung, und Knoten wie Leitungen liegen gemeinsam
+darin.
+
+### Was fachlich dabei passiert
+
+- **Versatz** lässt die Quelle unverändert und legt eine zweite Leitung mit
+  eigenen Ankern daneben. Der Ziel-Layer ist standardmässig der **Rücklauf zum
+  Vorlauf** — ein Versatz dient fast immer dazu, den Partner mitzuzeichnen. Ohne
+  RL-Partner (Trinkwasser, Allgemein) bleibt die Kopie auf dem Layer der Quelle;
+  `Shift` legt sie auf den gerade aktiven Layer. An den Ecken schneiden sich die
+  versetzten Geraden, es entstehen also weder Lücken noch Überstände.
+- **Stutzen** teilt die Leitung an den Schnittpunkten mit der Begrenzung und
+  entfernt das angeklickte Stück. Liegt es zwischen zwei Schnittpunkten, bleiben
+  zwei Reste stehen. Die Reste behalten ihre Eckpunkte; äussere Bauteil-
+  anschlüsse bleiben erhalten, neue offene Enden werden echte Anker.
+- **Dehnen bis Kante** verlängert ausschliesslich in der Richtung, die das
+  Randstück schon hat — es wird nichts abgeknickt. Am Treffpunkt entsteht eine
+  **echte T-Verbindung**: die Begrenzung wird dort geteilt, und beide Hälften
+  hängen am selben Knoten wie das verlängerte Ende. Angedockt wird nur innerhalb
+  der Begrenzung, nie an ihre gedachte Verlängerung.
+- **Verbinden** führt zwei Teilstücke mit gemeinsamem Endpunkt zu einer Leitung
+  zusammen; der Anker dazwischen verschwindet, und ein Zwischenpunkt, der auf
+  der Geraden liegt, fällt weg.
+
+Abgewiesen wird mit klarer Meldung, statt zu raten: verschiedene Layer, ein
+Bauteil am Stosspunkt (es **trennt** zwei Leitungen), eine Abzweigung am
+Stosspunkt, ein an ein Bauteil gebundenes Ende, das wandern müsste, parallele
+Geraden ohne Schnittpunkt und ein Treffpunkt genau auf einem Leitungsende (dort
+ist `TR` der richtige Befehl).
+
+Die Geometrie liegt rein und getestet in `schema/cadEdit.js`
+(`routeVersetzen`, `trimGrenzen`, `leitungTrimmen`, `routeBisKanteDehnen`,
+`routenVerbinden`, `versatzSeite`, `streckenSchnittpunkt`). Dass die dabei
+entstehenden Graphen **hydraulisch gleichwertig** zu einer von Hand gleich
+gezeichneten Leitung sind, sichert `backend/tests/test_leitungen_aendern.py`.
 
 ## Orthogonales Zeichnen und bewusste Schrägen
 

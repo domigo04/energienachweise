@@ -27,6 +27,20 @@ export const DEFAULT_DRAWING_CONFIG = {
   // Mit Lücke trennen (BREAK) und Dehnen (STRETCH), wie im CAD frei belegbar.
   shortcut_break: 'k',
   shortcut_stretch: 'x',
+  // Leitungen ändern (Issue #72). Alle vier sind frei belegbar; die Vorgaben
+  // sind bewusst so gewählt, dass sie keine bestehende Belegung verdrängen:
+  //
+  //   `t`  bleibt der Auftakt der Befehlsfolge `TR` = ECKE VERBINDEN. Diese
+  //        Belegung ist gesetzt (Dominic 2026-08-06) und wird von Stutzen
+  //        ausdrücklich NICHT übernommen — Stutzen bekommt `w`.
+  //   `v`/`r`/`b` sind die Layer-Schnellwahl und bleiben frei von Befehlen.
+  //   `q` ist in `frontend/e2e/bedienung.mjs` die frei gewählte Umbelegungs-
+  //        taste und bleibt darum ebenfalls unbelegt.
+  //   `p l d s a m k x` sind bereits vergeben (siehe oben).
+  shortcut_offset: 'o',
+  shortcut_trim: 'w',
+  shortcut_extend: 'e',
+  shortcut_join: 'j',
   // Auto-Rücklauf ist AUS, solange ein Schema ihn nicht ausdrücklich einschaltet.
   auto_return: false,
   // CAD-Zustände. Fehlen sie (jedes Altschema), gilt der bisherige Default:
@@ -63,6 +77,10 @@ export function normalisiereDrawingConfig(config = {}) {
     shortcut_move: shortcutTaste(c.shortcut_move, DEFAULT_DRAWING_CONFIG.shortcut_move),
     shortcut_break: shortcutTaste(c.shortcut_break, DEFAULT_DRAWING_CONFIG.shortcut_break),
     shortcut_stretch: shortcutTaste(c.shortcut_stretch, DEFAULT_DRAWING_CONFIG.shortcut_stretch),
+    shortcut_offset: shortcutTaste(c.shortcut_offset, DEFAULT_DRAWING_CONFIG.shortcut_offset),
+    shortcut_trim: shortcutTaste(c.shortcut_trim, DEFAULT_DRAWING_CONFIG.shortcut_trim),
+    shortcut_extend: shortcutTaste(c.shortcut_extend, DEFAULT_DRAWING_CONFIG.shortcut_extend),
+    shortcut_join: shortcutTaste(c.shortcut_join, DEFAULT_DRAWING_CONFIG.shortcut_join),
     auto_return: c.auto_return === true,
     ortho: flagge(c.ortho, DEFAULT_DRAWING_CONFIG.ortho),
     object_snap: flagge(c.object_snap, DEFAULT_DRAWING_CONFIG.object_snap),

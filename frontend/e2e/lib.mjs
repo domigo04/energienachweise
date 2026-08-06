@@ -47,10 +47,22 @@ export function protokoll(name) {
   return { pruefe, kopf, bilanz, liste };
 }
 
+// Chromium liegt im CI-Container unter einem festen Pfad. Auf einem
+// Arbeitsplatz gibt es den nicht — dort nimmt Playwright seinen eigenen,
+// installierten Browser (`npx playwright install chromium`). Ohne diesen
+// Rückfall liessen sich die Browsertests ausschliesslich im Container
+// ausführen, und genau dann fehlt der Nachweis, wenn man ihn braucht.
+// `PLAYWRIGHT_CHROMIUM` überschreibt beides.
+const CI_CHROMIUM = '/opt/pw-browsers/chromium';
+const chromiumPfad = () => {
+  const gewuenscht = process.env.PLAYWRIGHT_CHROMIUM || CI_CHROMIUM;
+  return fs.existsSync(gewuenscht) ? gewuenscht : undefined;
+};
+
 /** Browser + angemeldete Seite. Gibt eine Werkzeugkiste zurück. */
 export async function starten() {
   const cfg = konfig();
-  const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+  const browser = await chromium.launch({ executablePath: chromiumPfad() });
   const page = await browser.newPage({ viewport: { width: 1600, height: 950 } });
   const fehler = [];
   page.on('pageerror', (e) => fehler.push(e.message));

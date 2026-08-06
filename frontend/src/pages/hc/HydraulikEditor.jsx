@@ -3,8 +3,9 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   AlertTriangle, AlignHorizontalJustifyCenter, ArrowLeft, Check, ChevronDown, Copy, Download, Eye,
   FlipHorizontal2, History,
-  Image as ImageIcon, Layers3, LayoutTemplate, Lock, Unlock, MapPin, Move, MoveHorizontal,
-  CornerDownRight, PanelLeftClose, PanelLeftOpen, RotateCcw, RotateCw, Scissors, Spline,
+  Image as ImageIcon, Layers3, LayoutTemplate, Link2, Lock, Unlock, MapPin, Move, MoveHorizontal,
+  CopyPlus, CornerDownRight, MoveRight, PanelLeftClose, PanelLeftOpen, RotateCcw, RotateCw,
+  Scissors, Slice, Spline,
   PanelRightClose, PanelRightOpen, Redo2, Save as SaveIcon, Settings, Settings2, Trash2, Undo2, X,
 } from 'lucide-react';
 import {
@@ -27,7 +28,8 @@ import { EDGE_TYPES } from '../../components/hc/edges/FlowEdge';
 import { pairedHandleId, parallelWaypoints, roundedPolylinePath, splitRouteAtCorner, splitRouteAtPoint, reconnectThroughNode, adaptivePolyline, orthogonalerAnschlussEckpunkt, segmentAchse, mitgezogeneWaypoints } from '../../components/hc/edges/geometry';
 import { createHydraulicEdge, canStartHydraulicLine } from './schema/edgeFactory';
 import {
-  ALIGN, BREAK, CONNECT_CORNER, DRAW_PIPE, HOME, MOVE, PLACE, STRETCH,
+  ALIGN, BREAK, CONNECT_CORNER, DRAW_PIPE, EXTEND, HOME, JOIN, MOVE, OFFSET, PLACE,
+  STRETCH, TRIM,
   befehlMerken, befehlsPrompt, befehlsVorschlaege, escape as escapeMode, finishCommand, initialMode,
   letztenBefehlWiederholen,
   istBefehl, istModify, modeLabel, startCommand, toggleCommand, zeichnetLeitung,
@@ -50,10 +52,12 @@ import { eingefuegterKnoten, kopierbarerKnoten } from './schema/nodeClipboard';
 import { nodesMitExportGeometrie } from './schema/exportGeometrie';
 import {
   abstandSegmentZuRechteck, abzweigPunkt, eckpunktWeiterziehen, endpunktWeiterziehen, fensterAus, labelVerschoben, labelVersatz,
-  leitungMitLueckeTrennen, leitungenMitEckeVerbinden, leitungsSystem, leitungVerschieben,
-  routeBereinigen, routeDehnen, routeSegmenteEntfernen,
+  leitungMitLueckeTrennen, leitungenMitEckeVerbinden, leitungsSystem, leitungTrimmen,
+  leitungVerschieben,
+  routeBereinigen, routeBisKanteDehnen, routeDehnen, routenVerbinden,
+  routeSegmenteEntfernen, routeVersetzen,
   griffAktionen, loeschAuswahl, segmentAusrichten, segmentVerschieben, segmentVerschiebungDelta,
-  entwurfFuerAbschluss, segmentZumVerschieben, verschiebungLabel,
+  entwurfFuerAbschluss, segmentZumVerschieben, versatzSeite, verschiebungLabel,
 } from './schema/cadEdit';
 import {
   CAD_GRID, DEFAULT_DRAWING_CONFIG, GRID_OPTIONEN,
@@ -157,6 +161,15 @@ const ruecklaufLayerVon = (layer) => {
   if (layer?.role !== 'vl' || !layer.id.endsWith('_vl')) return null;
   return LEITUNGS_LAYER.find(item => item.id === layer.id.replace(/_vl$/, '_rl')) || null;
 };
+
+// ── Leitungen ändern (Issue #72) ──────────────────────────────────────────
+// Standardabstand für den Versatz in mm. Im laufenden Befehl ändern ihn die
+// Zifferntasten; der zuletzt gewählte Wert bleibt für weitere Versätze stehen.
+const VERSATZ_STANDARD = 200;
+
+const versatzHinweis = (abstand) => `Versatz · Abstand ${abstand} mm · `
+  + 'auf die Leitung klicken, auf der Seite, wo die Kopie hin soll · '
+  + 'Ziffern ändern den Abstand · Shift legt die Kopie auf den aktiven Layer · ESC beendet.';
 
 const layerVonEdge = (edge) => {
   const gespeichert = LEITUNGS_LAYER.find(layer => layer.id === edge.data?.layer_id);
@@ -5029,6 +5042,404 @@ function EditorInner() {
     return true;
   }, [eckeVerbindenAnwenden, getZoom, naechsteSichtbareLeitung, screenToFlowPosition]);
 
+  // ── Leitungen ändern: Versatz, Stutzen, Dehnen bis Kante, Verbinden ──────
+  // (Issue #72)
+  //
+  // Alle vier folgen demselben Muster wie „Ecke verbinden": der Fortschritt
+  // liegt in der Nutzlast des Befehlszustands, nicht in eigenen Booleans. ESC
+  // und Rechtsklick führen dadurch ohne Sonderbehandlung nach `modify` zurück,
+  // und jede ausgeführte Änderung ist genau EIN `snap()` — also ein Undo-Schritt.
+
+  // Geometriedaten, die nach einer Formänderung nicht mehr stimmen. Eine
+  // falsche Länge ist schlimmer als keine: sie wanderte sonst unbemerkt in
+  // Kostenschätzung und Export.
+  const geometrieDaten = useCallback((edge) => {
+    const data = { ...(edge.data || {}), cad_polyline:true, polyline_version:1 };
+    delete data.laenge_m;
+    delete data.paired_edge_id;
+    delete data.auto_paired;
+    delete data.auto_pair_open;
+    delete data._routePoints;
+    delete data._routeStart;
+    delete data._routeEnd;
+    return data;
+  }, []);
+
+  const befehlLeitungsTreffer = useCallback((event) => {
+    const welt = screenToFlowPosition({ x:event.clientX, y:event.clientY });
+    const treffer = naechsteSichtbareLeitung(welt, 24 / Math.max(getZoom(), 0.2));
+    return treffer ? { ...treffer, welt } : null;
+  }, [getZoom, naechsteSichtbareLeitung, screenToFlowPosition]);
+
+  const istFreierKnoten = useCallback((nodeId) =>
+    nodesRef.current.find(node => node.id === nodeId)?.type === 'junction', []);
+
+  // ── Versatz (AutoCAD OFFSET) ─────────────────────────────────────────────
+  // Ein Klick genügt: er sagt zugleich, WELCHE Leitung versetzt wird und auf
+  // welche SEITE. Die Quelle bleibt unverändert — es entsteht eine zweite
+  // Leitung mit eigenen Ankern.
+  const versatzAnwenden = useCallback((treffer, abstand, zielLayerWunsch) => {
+    const edge = treffer.edge;
+    const route = treffer.route;
+    const quellLayer = layerVonEdge(edge);
+    const seite = versatzSeite(
+      route[treffer.segmentIndex], route[treffer.segmentIndex + 1], treffer.welt,
+    );
+    const ergebnis = routeVersetzen(route, abstand, { seite });
+    if (ergebnis.fehler) return ergebnis;
+
+    // Vorgabe ist der Rücklauf zum Vorlauf: ein Versatz dient fast immer dazu,
+    // den Partner mitzuzeichnen. Ohne RL-Partner (Trinkwasser, Allgemein)
+    // bleibt die Kopie auf dem Layer der Quelle.
+    const zielLayer = zielLayerWunsch || ruecklaufLayerVon(quellLayer) || quellLayer;
+    const sourceId = newId();
+    const targetId = newId();
+    const neu = createHydraulicEdge({
+      id:newId(),
+      source:sourceId, sourceHandle:'center-source',
+      target:targetId, targetHandle:'center-target',
+      layerId:zielLayer.id, layerColor:zielLayer.color,
+      points:ergebnis.route.slice(1, -1),
+      cornerRadius:drawingConfig.corner_radius,
+      startPoint:ergebnis.route[0], endPoint:ergebnis.route.at(-1),
+    }, edgesRef.current);
+    if (!neu) return { fehler:'Die versetzte Leitung wäre nicht gültig.' };
+
+    snap();
+    setNodes(items => [
+      ...items,
+      cadAnker(sourceId, ergebnis.route[0], zielLayer),
+      cadAnker(targetId, ergebnis.route.at(-1), zielLayer),
+    ]);
+    setEdges(items => [...items, {
+      ...neu,
+      // Fachdaten der Quelle (DN, Medium, Dämmung) erben; `neu.data` setzt
+      // danach Layer und Farbe der KOPIE — sonst behielte sie die der Quelle.
+      data:{ ...geometrieDaten(edge), ...(neu.data || {}), points:ergebnis.route.slice(1, -1) },
+    }]);
+    return { ok:true, layer:zielLayer };
+  }, [cadAnker, drawingConfig.corner_radius, geometrieDaten, setEdges, setNodes, snap]);
+
+  const versatzStarten = useCallback(() => {
+    setLuecke(null);
+    if (istBefehl(editorModeRef.current, OFFSET)) {
+      setEditorMode(escapeMode(editorModeRef.current));
+      setBefehlHinweis(null);
+      return;
+    }
+    setEditorMode(startCommand(OFFSET, {
+      persistent:true, payload:{ abstand:VERSATZ_STANDARD, puffer:'' },
+    }));
+    setBefehlHinweis(versatzHinweis(VERSATZ_STANDARD));
+  }, []);
+
+  const versatzKlick = useCallback((event) => {
+    if (!istBefehl(editorModeRef.current, OFFSET)) return false;
+    if (event.button != null && event.button !== 0) return true;
+    event.preventDefault();
+    event.stopPropagation();
+    const abstand = editorModeRef.current?.payload?.abstand ?? VERSATZ_STANDARD;
+    const treffer = befehlLeitungsTreffer(event);
+    if (!treffer) {
+      setBefehlHinweis('Versatz · Keine Leitung getroffen — direkt auf die Leitung klicken.');
+      return true;
+    }
+    const ergebnis = versatzAnwenden(treffer, abstand, event.shiftKey ? activeLayer : null);
+    setBefehlHinweis(ergebnis.fehler
+      ? `Versatz · ${ergebnis.fehler}`
+      : `Versatz · ${ergebnis.layer.label} im Abstand ${abstand} mm erstellt · `
+        + 'nächste Leitung anklicken · ESC beendet.');
+    return true;
+  }, [activeLayer, befehlLeitungsTreffer, versatzAnwenden]);
+
+  // ── Stutzen (AutoCAD TRIM) und Dehnen bis Kante (AutoCAD EXTEND) ─────────
+  // Zwei Befehle, eine Bedienung: erst die Begrenzung wählen, dann auf die
+  // Leitung klicken. Shift schaltet im laufenden Befehl auf den jeweils anderen
+  // um — das ist die CAD-Konvention und spart das Umschalten in der Leiste.
+  const stutzenAnwenden = useCallback((ziel, grenzEdgeId) => {
+    const grenzEdge = edgesRef.current.find(item => item.id === grenzEdgeId);
+    if (!grenzEdge) return { fehler:'Die Begrenzung existiert nicht mehr.' };
+    if (grenzEdge.id === ziel.edge.id) return { fehler:'Eine Leitung kann sich nicht selbst begrenzen.' };
+    const ergebnis = leitungTrimmen(ziel.route, routePunkte(grenzEdge), {
+      segmentIndex:ziel.segmentIndex, x:ziel.x, y:ziel.y,
+    });
+    if (ergebnis.fehler) return ergebnis;
+    snap();
+    const naechste = leitungDurchRoutenErsetzen(
+      ziel.edge, ergebnis.routen, edgesRef.current, nodesRef.current,
+    );
+    setNodes(naechste.nodes);
+    setEdges(naechste.edges);
+    setSelectedEdgeId(null);
+    setSelectedEdgeSegment(null);
+    setSelectedSegments([]);
+    return { ok:true, reste:ergebnis.routen.length };
+  }, [leitungDurchRoutenErsetzen, routePunkte, setEdges, setNodes, snap]);
+
+  const bisKanteDehnenAnwenden = useCallback((ziel, grenzEdgeId) => {
+    const grenzEdge = edgesRef.current.find(item => item.id === grenzEdgeId);
+    if (!grenzEdge) return { fehler:'Die Begrenzung existiert nicht mehr.' };
+    if (grenzEdge.id === ziel.edge.id) return { fehler:'Eine Leitung kann sich nicht an sich selbst verlängern.' };
+    const grenzLayer = layerVonEdge(grenzEdge);
+    // Ein T-Stück zwischen zwei Layern wäre hydraulisch falsch (Vorlauf auf
+    // Rücklauf). Dieselbe Sperre wie bei „Ecke verbinden".
+    if (layerVonEdge(ziel.edge).id !== grenzLayer.id) {
+      return { fehler:'Dehnen verbindet nur Leitungen auf demselben Layer.' };
+    }
+    const route = ziel.route;
+    // Verlängert wird das Ende, bei dem geklickt wurde — die CAD-Regel.
+    const seite = Math.hypot(ziel.x - route[0].x, ziel.y - route[0].y)
+      <= Math.hypot(ziel.x - route.at(-1).x, ziel.y - route.at(-1).y) ? 'source' : 'target';
+    const ankerId = seite === 'source' ? ziel.edge.source : ziel.edge.target;
+    const grad = edgesRef.current.filter(
+      item => item.source === ankerId || item.target === ankerId).length;
+    if (!istFreierKnoten(ankerId) || grad !== 1) {
+      return { fehler:'Dieses Leitungsende hängt an einem Bauteil oder einer Abzweigung und darf nicht wandern.' };
+    }
+
+    const grenzRoute = routePunkte(grenzEdge);
+    const ergebnis = routeBisKanteDehnen(route, seite, grenzRoute);
+    if (ergebnis.fehler) return ergebnis;
+
+    // Trifft die Verlängerung genau auf ein Ende der Begrenzung, entstünde beim
+    // Teilen ein Stück ohne Länge. Dafür gibt es den passenden Befehl bereits.
+    const amEnde = [grenzRoute[0], grenzRoute.at(-1)].some(punkt =>
+      Math.hypot(punkt.x - ergebnis.punkt.x, punkt.y - ergebnis.punkt.y) < 1);
+    if (amEnde) {
+      return { fehler:'Der Treffpunkt liegt auf einem Leitungsende — dort ist „Ecke verbinden" (TR) der richtige Befehl.' };
+    }
+
+    // Am Treffpunkt entsteht eine echte T-Verbindung: die Begrenzung wird dort
+    // geteilt, und beide Hälften hängen am selben Knoten wie das verlängerte
+    // Ende. Ohne das läge die Leitung nur optisch an.
+    const [ersteHaelfte, zweiteHaelfte] = leitungTeilen({
+      edge:grenzEdge, route:grenzRoute,
+      segmentIndex:ergebnis.grenzSegmentIndex,
+      x:ergebnis.punkt.x, y:ergebnis.punkt.y,
+    }, ankerId, grenzLayer.id);
+
+    snap();
+    setNodes(items => items.map(node => (node.id === ankerId
+      ? { ...node, position:{ x:ergebnis.punkt.x, y:ergebnis.punkt.y } }
+      : node)));
+    setEdges(items => items.flatMap(item => {
+      if (item.id === ziel.edge.id) {
+        return [{ ...item, selected:false,
+          data:{ ...geometrieDaten(item), points:ergebnis.route.slice(1, -1) } }];
+      }
+      if (item.id === grenzEdge.id) return [ersteHaelfte, zweiteHaelfte];
+      return [item];
+    }));
+    setSelectedEdgeId(null);
+    setSelectedEdgeSegment(null);
+    setSelectedSegments([]);
+    return { ok:true };
+  }, [geometrieDaten, istFreierKnoten, leitungTeilen, routePunkte, setEdges, setNodes, snap]);
+
+  // Einstieg für beide Befehle. `alsDehnen` sagt, was der Grundfall ist; Shift
+  // dreht ihn im laufenden Befehl um.
+  const grenzBefehlStarten = useCallback((alsDehnen) => {
+    setLuecke(null);
+    const typ = alsDehnen ? EXTEND : TRIM;
+    const name = alsDehnen ? 'Dehnen bis Kante' : 'Stutzen';
+    if (istBefehl(editorModeRef.current, typ)) {
+      setEditorMode(escapeMode(editorModeRef.current));
+      setBefehlHinweis(null);
+      return;
+    }
+    // Ein bereits gewähltes Teilstück ist die Begrenzung — dann fehlt nur noch
+    // der Klick auf die Leitung.
+    const vorwahl = selectedEdgeSegment || selectedSegments[0] || null;
+    setEditorMode(startCommand(typ, {
+      persistent:true, payload:{ grenzEdgeId:vorwahl?.edgeId || null },
+    }));
+    setBefehlHinweis(vorwahl?.edgeId
+      ? `${name} · Begrenzung steht · jetzt die Leitung anklicken · Shift schaltet auf ${alsDehnen ? 'Stutzen' : 'Dehnen'} · ESC beendet.`
+      : `${name} · Zuerst die Begrenzungsleitung anklicken · ESC beendet.`);
+  }, [selectedEdgeSegment, selectedSegments]);
+
+  const grenzBefehlKlick = useCallback((event) => {
+    const mode = editorModeRef.current;
+    const imTrimmen = istBefehl(mode, TRIM);
+    const imDehnen = istBefehl(mode, EXTEND);
+    if (!imTrimmen && !imDehnen) return false;
+    if (event.button != null && event.button !== 0) return true;
+    event.preventDefault();
+    event.stopPropagation();
+    // Shift kehrt die Wirkung um, ohne den Befehl zu verlassen (CAD-Konvention).
+    const dehnen = event.shiftKey ? !imDehnen : imDehnen;
+    const name = dehnen ? 'Dehnen bis Kante' : 'Stutzen';
+    const typ = imDehnen ? EXTEND : TRIM;
+    const treffer = befehlLeitungsTreffer(event);
+    if (!treffer) {
+      setBefehlHinweis(`${name} · Keine Leitung getroffen — direkt auf eine Leitung klicken.`);
+      return true;
+    }
+    const grenzEdgeId = mode?.payload?.grenzEdgeId;
+    if (!grenzEdgeId) {
+      setSelectedEdgeId(treffer.edge.id);
+      setSelectedEdgeSegment({ edgeId:treffer.edge.id, segmentIndex:treffer.segmentIndex });
+      setEditorMode(startCommand(typ, { persistent:true, payload:{ grenzEdgeId:treffer.edge.id } }));
+      setBefehlHinweis(`${name} · Begrenzung gewählt · jetzt die Leitung anklicken, ${
+        dehnen ? 'die verlängert werden soll' : 'auf das Stück, das weg soll'} · ESC beendet.`);
+      return true;
+    }
+    const ergebnis = dehnen
+      ? bisKanteDehnenAnwenden(treffer, grenzEdgeId)
+      : stutzenAnwenden(treffer, grenzEdgeId);
+    if (ergebnis.fehler) {
+      setBefehlHinweis(`${name} · ${ergebnis.fehler}`);
+      return true;
+    }
+    // Die Begrenzung bleibt stehen: mehrere Leitungen an derselben Kante
+    // nacheinander zu bearbeiten ist der Normalfall.
+    setEditorMode(startCommand(typ, { persistent:true, payload:{ grenzEdgeId } }));
+    setBefehlHinweis(`${name} · erledigt · nächste Leitung anklicken · `
+      + `Shift schaltet auf ${dehnen ? 'Stutzen' : 'Dehnen'} · ESC beendet.`);
+    return true;
+  }, [befehlLeitungsTreffer, bisKanteDehnenAnwenden, stutzenAnwenden]);
+
+  // ── Verbinden (AutoCAD JOIN) ─────────────────────────────────────────────
+  // Zwei aneinanderstossende Teilstücke werden eine Leitung. Der Anker
+  // dazwischen verschwindet, sobald er nichts mehr trägt.
+  const verbindenAnwenden = useCallback((ersteAuswahl, zweiteAuswahl) => {
+    if (!ersteAuswahl || !zweiteAuswahl) return { fehler:'Zwei Teilstücke erforderlich.' };
+    if (ersteAuswahl.edgeId === zweiteAuswahl.edgeId) {
+      return { fehler:'Verbinden braucht zwei verschiedene Leitungen.' };
+    }
+    const edgeA = edgesRef.current.find(item => item.id === ersteAuswahl.edgeId);
+    const edgeB = edgesRef.current.find(item => item.id === zweiteAuswahl.edgeId);
+    if (!edgeA || !edgeB) return { fehler:'Eine gewählte Leitung existiert nicht mehr.' };
+    if (layerVonEdge(edgeA).id !== layerVonEdge(edgeB).id) {
+      return { fehler:'Verbinden geht nur innerhalb desselben Layers.' };
+    }
+
+    const ergebnis = routenVerbinden(routePunkte(edgeA), routePunkte(edgeB));
+    if (ergebnis.fehler) return ergebnis;
+
+    const ende = (edge, seite) => (seite === 'start'
+      ? { node:edge.source, handle:edge.sourceHandle, rolle:'source' }
+      : { node:edge.target, handle:edge.targetHandle, rolle:'target' });
+    const stossA = ende(edgeA, ergebnis.seiteA);
+    const stossB = ende(edgeB, ergebnis.seiteB);
+    const freiA = ende(edgeA, ergebnis.seiteA === 'start' ? 'end' : 'start');
+    const freiB = ende(edgeB, ergebnis.seiteB === 'start' ? 'end' : 'start');
+
+    // Ein Bauteil TRENNT zwei Leitungen, es verbindet sie nicht. Würde hier
+    // zusammengeführt, verschwände die Pumpe zwischen den beiden Stücken.
+    if (!istFreierKnoten(stossA.node) || !istFreierKnoten(stossB.node)) {
+      return { fehler:'An dieser Stelle sitzt ein Bauteil — es trennt die beiden Leitungen.' };
+    }
+    const stossKnoten = new Set([stossA.node, stossB.node]);
+    const fremd = edgesRef.current.some(item => item.id !== edgeA.id && item.id !== edgeB.id
+      && (stossKnoten.has(item.source) || stossKnoten.has(item.target)));
+    if (fremd) return { fehler:'An diesem Punkt hängt eine weitere Leitung — er trägt eine Abzweigung.' };
+
+    const start = ergebnis.beginntBei === 'a' ? freiA : freiB;
+    const schluss = ergebnis.beginntBei === 'a' ? freiB : freiA;
+    if (stossKnoten.has(start.node) || stossKnoten.has(schluss.node)) {
+      return { fehler:'Die beiden Leitungen bilden einen Ring.' };
+    }
+    // Wechselt ein Ende die Rolle (aus einem Ziel wird eine Quelle), geht das
+    // nur an einem freien Anker — der trägt beide Anschlüsse. An einem Bauteil
+    // müsste dafür der Port gewechselt werden, und das wäre geraten.
+    const alsQuelle = (punkt) => (punkt.rolle === 'source'
+      ? { node:punkt.node, handle:punkt.handle }
+      : (istFreierKnoten(punkt.node) ? { node:punkt.node, handle:'center-source' } : null));
+    const alsZiel = (punkt) => (punkt.rolle === 'target'
+      ? { node:punkt.node, handle:punkt.handle }
+      : (istFreierKnoten(punkt.node) ? { node:punkt.node, handle:'center-target' } : null));
+    const quelle = alsQuelle(start);
+    const ziel = alsZiel(schluss);
+    if (!quelle || !ziel) {
+      return { fehler:'Die Leitungen laufen gegeneinander; dafür müsste ein Bauteilanschluss die Seite wechseln.' };
+    }
+    if (quelle.node === ziel.node) return { fehler:'Die verbundene Leitung würde auf sich selbst zeigen.' };
+
+    const points = routeBereinigen(ergebnis.route.slice(1, -1), {
+      start:ergebnis.route[0], end:ergebnis.route.at(-1),
+    });
+    snap();
+    setEdges(items => items.flatMap(item => {
+      if (item.id === edgeB.id) return [];
+      if (item.id === edgeA.id) {
+        return [{
+          ...item,
+          source:quelle.node, sourceHandle:quelle.handle,
+          target:ziel.node, targetHandle:ziel.handle,
+          selected:false,
+          data:{ ...geometrieDaten(item), points },
+        }];
+      }
+      if (item.data?.paired_edge_id !== edgeA.id && item.data?.paired_edge_id !== edgeB.id) return [item];
+      const data = { ...(item.data || {}) };
+      delete data.paired_edge_id;
+      delete data.auto_paired;
+      delete data.auto_pair_open;
+      return [{ ...item, data }];
+    }));
+    // Der Anker zwischen den Teilstücken trägt jetzt nichts mehr.
+    setNodes(items => items.filter(node => !stossKnoten.has(node.id)));
+    setSelectedEdgeId(null);
+    setSelectedEdgeSegment(null);
+    setSelectedSegments([]);
+    return { ok:true };
+  }, [geometrieDaten, istFreierKnoten, routePunkte, setEdges, setNodes, snap]);
+
+  const verbindenStarten = useCallback(() => {
+    setLuecke(null);
+    if (istBefehl(editorModeRef.current, JOIN)) {
+      setEditorMode(escapeMode(editorModeRef.current));
+      setBefehlHinweis(null);
+      return;
+    }
+    const auswahl = selectedSegments.filter((item, index, alle) =>
+      alle.findIndex(kandidat => kandidat.edgeId === item.edgeId) === index);
+    if (auswahl.length === 2) {
+      const ergebnis = verbindenAnwenden(auswahl[0], auswahl[1]);
+      setEditorMode(startCommand(JOIN, { persistent:true, payload:null }));
+      setBefehlHinweis(ergebnis.fehler
+        ? `Verbinden · ${ergebnis.fehler} Erste Leitung erneut wählen.`
+        : 'Verbinden · erledigt · nächste erste Leitung anklicken · ESC beendet.');
+      return;
+    }
+    const erste = auswahl[0] || null;
+    setEditorMode(startCommand(JOIN, { persistent:true, payload:erste ? { erste } : null }));
+    setBefehlHinweis(erste
+      ? 'Verbinden · Erste Leitung gewählt · zweite Leitung anklicken · ESC beendet.'
+      : 'Verbinden · Erste Leitung anklicken · danach die zweite · ESC beendet.');
+  }, [selectedSegments, verbindenAnwenden]);
+
+  const verbindenKlick = useCallback((event) => {
+    if (!istBefehl(editorModeRef.current, JOIN)) return false;
+    if (event.button != null && event.button !== 0) return true;
+    event.preventDefault();
+    event.stopPropagation();
+    const treffer = befehlLeitungsTreffer(event);
+    if (!treffer) {
+      setBefehlHinweis('Verbinden · Keine Leitung getroffen — direkt auf eine Leitung klicken.');
+      return true;
+    }
+    const auswahl = { edgeId:treffer.edge.id, segmentIndex:treffer.segmentIndex };
+    const erste = editorModeRef.current?.payload?.erste;
+    if (!erste) {
+      setSelectedEdgeId(treffer.edge.id);
+      setSelectedEdgeSegment(auswahl);
+      setSelectedSegments([auswahl]);
+      setEditorMode(startCommand(JOIN, { persistent:true, payload:{ erste:auswahl } }));
+      setBefehlHinweis('Verbinden · Erste Leitung gewählt · zweite Leitung anklicken · ESC beendet.');
+      return true;
+    }
+    const ergebnis = verbindenAnwenden(erste, auswahl);
+    setEditorMode(startCommand(JOIN, {
+      persistent:true, payload:ergebnis.fehler ? { erste } : null,
+    }));
+    setBefehlHinweis(ergebnis.fehler
+      ? `Verbinden · ${ergebnis.fehler} Zweite Leitung erneut wählen.`
+      : 'Verbinden · erledigt · nächste erste Leitung anklicken · ESC beendet.');
+    return true;
+  }, [befehlLeitungsTreffer, verbindenAnwenden]);
+
   const auswahlKopieren = useCallback(() => {
     const knoten = nodesRef.current.filter(node => node.selected && node.type !== 'junction');
     if (!knoten.length && selected) {
@@ -5651,6 +6062,18 @@ function EditorInner() {
       }
       if (!ev.metaKey && !ev.ctrlKey) {
         const key = ev.key.toLowerCase();
+        // Im Versatz-Befehl gehört die Zifferntastatur dem Abstand. Sie darf
+        // dort keinen anderen Befehl auslösen — dieselbe Regel wie bei der
+        // Längeneingabe während des Zeichnens.
+        if (istBefehl(editorModeRef.current, OFFSET)
+            && (/^[0-9]$/.test(ev.key) || ev.key === 'Backspace')) {
+          ev.preventDefault();
+          const { buffer } = laengeTaste(String(editorModeRef.current.payload?.puffer || ''), ev.key);
+          const abstand = Number(buffer) > 0 ? Number(buffer) : VERSATZ_STANDARD;
+          setEditorMode(startCommand(OFFSET, { persistent:true, payload:{ abstand, puffer:buffer } }));
+          setBefehlHinweis(versatzHinweis(abstand));
+          return;
+        }
         // Klassischer zweistelliger CAD-Befehl: T, dann R. Ein einzelnes R
         // bleibt dadurch weiterhin die schnelle Rücklauf-Layerwahl.
         if (befehlsfolge.current === 't' && key === 'r') {
@@ -5729,6 +6152,29 @@ function EditorInner() {
           dehnenStarten();
           return;
         }
+        // ── Leitungen ändern (#72) ────────────────────────────────────────
+        // Vier eigene, frei belegbare Tasten. `TR` bleibt unangetastet die
+        // Ecke-verbinden-Folge; Stutzen hat darum eine eigene Taste.
+        if (key === drawingConfig.shortcut_offset) {
+          ev.preventDefault();
+          versatzStarten();
+          return;
+        }
+        if (key === drawingConfig.shortcut_trim) {
+          ev.preventDefault();
+          grenzBefehlStarten(false);
+          return;
+        }
+        if (key === drawingConfig.shortcut_extend) {
+          ev.preventDefault();
+          grenzBefehlStarten(true);
+          return;
+        }
+        if (key === drawingConfig.shortcut_join) {
+          ev.preventDefault();
+          verbindenStarten();
+          return;
+        }
         // Verschieben (CAD-MOVE): frei belegbare Taste. Mit Shift wandert die
         // GANZE Leitung statt nur des angeklickten Teilstücks.
         if (key === drawingConfig.shortcut_move) {
@@ -5775,7 +6221,7 @@ function EditorInner() {
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [undo, redo, selected, selectedEdgeId, selectedEdgePoint, selectedLabelEdgeId, markierteEdgeIds, beschriftungSetzen, punktEntfernen, snap, rotateNode, mirrorNode, alignNode, nudgeNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, spiegelAchse, drawingConfig, dynamikFeld, setNodes, laengeAnwenden, entwurfVerwerfen, verschiebenStarten, ausrichtenUmschalten, trennenStarten, eckeVerbindenStarten, dehnenStarten, auswahlKopieren, auswahlEinfuegen, auswahlLoeschen]);
+  }, [undo, redo, selected, selectedEdgeId, selectedEdgePoint, selectedLabelEdgeId, markierteEdgeIds, beschriftungSetzen, punktEntfernen, snap, rotateNode, mirrorNode, alignNode, nudgeNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, spiegelAchse, drawingConfig, dynamikFeld, setNodes, laengeAnwenden, entwurfVerwerfen, verschiebenStarten, ausrichtenUmschalten, trennenStarten, eckeVerbindenStarten, dehnenStarten, versatzStarten, grenzBefehlStarten, verbindenStarten, auswahlKopieren, auswahlEinfuegen, auswahlLoeschen]);
 
   // Berechnete Werte (Backend) in die Node-Daten spiegeln — nur für die Anzeige.
   // Verteiler-Rahmen: nur die Balken sind greifbar (dragHandle), die Lücke
@@ -6426,6 +6872,11 @@ function EditorInner() {
 
   const onEdgeClick = useCallback((event, edge) => {
     if (eckeVerbindenKlick(event)) return;
+    // Leitungen ändern (#72): diese Befehle brauchen den Punkt AUF der Leitung
+    // und dürfen deshalb nicht bei der Auswahl hängen bleiben.
+    if (versatzKlick(event)) return;
+    if (grenzBefehlKlick(event)) return;
+    if (verbindenKlick(event)) return;
     if (istBefehl(editorModeRef.current, ALIGN)) { ausrichtenKlick(event); return; }
     // Der Trennbefehl braucht die Punkte AUF der Leitung — der Klick darf
     // deshalb nicht bei der Auswahl hängen bleiben.
@@ -6473,7 +6924,7 @@ function EditorInner() {
     }
     setSelectedLabelEdgeId(null);
     setInspectorOpen(true);
-  }, [ausrichtenKlick, cadKlick, platzierenKlick, routePunkte, screenToFlowPosition, verschiebenKlick, lueckeKlick, dehnenKlick, eckeVerbindenKlick, selectedSegments, setEdges, setNodes]);
+  }, [ausrichtenKlick, cadKlick, platzierenKlick, routePunkte, screenToFlowPosition, verschiebenKlick, lueckeKlick, dehnenKlick, eckeVerbindenKlick, versatzKlick, grenzBefehlKlick, verbindenKlick, selectedSegments, setEdges, setNodes]);
 
   const spiegelKopieErstellen = useCallback((edgeId, axisStart, axisEnd) => {
     const edge = edgesRef.current.find(item => item.id === edgeId);
@@ -6529,6 +6980,11 @@ function EditorInner() {
     if (lueckeKlick(event)) return;
     if (verschiebenKlick(event)) return;
     if (eckeVerbindenKlick(event)) return;
+    // Leitungen ändern (#72). Auch ein Klick daneben bleibt im Befehl und
+    // meldet, dass keine Leitung getroffen wurde — er wählt nichts ab.
+    if (versatzKlick(event)) return;
+    if (grenzBefehlKlick(event)) return;
+    if (verbindenKlick(event)) return;
     if (spiegelAchse) {
       event.preventDefault();
       const point = rasterPunkt(screenToFlowPosition({ x:event.clientX, y:event.clientY }), drawingConfig.grid_size);
@@ -6558,7 +7014,7 @@ function EditorInner() {
     setEdges(items => items.map(item => item.selected ? { ...item, selected:false } : item));
     setSelectedLabelEdgeId(null);
     setMarkierteEdgeIds([]);
-  }, [cadKlick, drawingConfig.grid_size, screenToFlowPosition, selected, selectedEdgeId, spiegelAchse, spiegelKopieErstellen, platzierenKlick, verschiebenKlick, nadelSetzen, dehnenKlick, lueckeKlick, eckeVerbindenKlick, setEdges, setNodes]);
+  }, [cadKlick, drawingConfig.grid_size, screenToFlowPosition, selected, selectedEdgeId, spiegelAchse, spiegelKopieErstellen, platzierenKlick, verschiebenKlick, nadelSetzen, dehnenKlick, lueckeKlick, eckeVerbindenKlick, versatzKlick, grenzBefehlKlick, verbindenKlick, setEdges, setNodes]);
 
   const canvasMouseMove = useCallback((event) => {
     // Platzierungsvorschau folgt dem Cursor — mit Raster und Ausrichtungslinien.
@@ -6624,6 +7080,9 @@ function EditorInner() {
   }, [cadCursorAktualisieren, drawingConfig.grid_size, drawingConfig.snap_tolerance, getZoom,
       naechsteSichtbareLeitung, objektFangpunkte, screenToFlowPosition, spiegelAchse?.start]);
   const onPaneContextMenu = useCallback((event) => {
+    // Der Rechtsklick öffnet das Befehlsmenü (#78). Läuft ein Befehl, steht
+    // dort «Abbrechen» — auch für Versatz, Stutzen, Dehnen bis Kante und
+    // Verbinden (#72), denn `active` prüft den Befehlszustand allgemein.
     event.preventDefault();
     event.stopPropagation();
     setEndpointMenu(null); setEdgeMenu(null); setGripMenu(null);
@@ -7079,6 +7538,23 @@ function EditorInner() {
               { id:'ecke-verbinden', Icon:CornerDownRight, name:'Ecke verbinden', taste:'TR',
                 hinweis:'Zwei Leitungs-Teilstücke wählen; ihre freien Enden werden bis zur gemeinsamen Ecke verlängert oder gekürzt.',
                 aktiv:istBefehl(editorMode, CONNECT_CORNER), dauer:true, aktion:eckeVerbindenStarten },
+              // ── Leitungen ändern (#72) ───────────────────────────────────
+              { id:'versatz', Icon:CopyPlus, name:'Versatz',
+                taste:drawingConfig.shortcut_offset,
+                hinweis:'Auf die Leitung klicken, auf der Seite, wo die parallele Kopie hin soll. Ziffern ändern den Abstand; Vorgabe ist der Rücklauf-Layer zum Vorlauf, Shift nimmt den aktiven Layer.',
+                aktiv:istBefehl(editorMode, OFFSET), dauer:true, aktion:versatzStarten },
+              { id:'stutzen', Icon:Slice, name:'Stutzen',
+                taste:drawingConfig.shortcut_trim,
+                hinweis:'Erst die Begrenzungsleitung, dann auf das Stück klicken, das weg soll. Shift schaltet auf Dehnen um.',
+                aktiv:istBefehl(editorMode, TRIM), dauer:true, aktion:() => grenzBefehlStarten(false) },
+              { id:'dehnen-kante', Icon:MoveRight, name:'Dehnen bis Kante',
+                taste:drawingConfig.shortcut_extend,
+                hinweis:'Erst die Begrenzungsleitung, dann das Leitungsende, das bis dorthin verlängert wird. Shift schaltet auf Stutzen um.',
+                aktiv:istBefehl(editorMode, EXTEND), dauer:true, aktion:() => grenzBefehlStarten(true) },
+              { id:'verbinden', Icon:Link2, name:'Verbinden',
+                taste:drawingConfig.shortcut_join,
+                hinweis:'Zwei aneinanderstossende Teilstücke werden eine Leitung; der Anker dazwischen verschwindet.',
+                aktiv:istBefehl(editorMode, JOIN), dauer:true, aktion:verbindenStarten },
               { id:'kopieren', Icon:Copy, name:'Auswahl kopieren', taste:'⌘C',
                 hinweis:'Kopiert alle gewählten Bauteile, Leitungen und Teilstücke.',
                 gesperrt:!selected && !selectedEdgeId && !selectedSegments.length
@@ -7776,7 +8252,8 @@ function EditorInner() {
             </div>
             <p className="hc-stand-dialog__intro">
               Gilt für dich in jedem Schema und wird sofort gespeichert. Ziffern
-              bleiben der Längeneingabe vorbehalten. Vergibst du eine Taste
+              bleiben der Längeneingabe vorbehalten, <strong>T</strong> der Folge
+              <strong>TR</strong> für „Ecke verbinden". Vergibst du eine Taste
               doppelt, behält sie der zuletzt geänderte Befehl — der andere
               bleibt frei und kann neu belegt werden.
             </p>
@@ -7790,6 +8267,10 @@ function EditorInner() {
                 ['shortcut_move', 'Verschieben (Shift: ganze Leitung)'],
                 ['shortcut_break', 'Mit Lücke trennen'],
                 ['shortcut_stretch', 'Dehnen'],
+                ['shortcut_offset', 'Versatz'],
+                ['shortcut_trim', 'Stutzen (Shift: dehnen)'],
+                ['shortcut_extend', 'Dehnen bis Kante (Shift: stutzen)'],
+                ['shortcut_join', 'Verbinden'],
               ].map(([feld, label]) => (
                 <React.Fragment key={feld}>
                   <label htmlFor={`sc-${feld}`}>{label}</label>
@@ -8091,6 +8572,9 @@ function EditorInner() {
               ]] : []),
               ['×', 'Abbrechen', 'Entspricht ESC', () => {
                 entwurfVerwerfen(); setVerschiebung(null); setLuecke(null); setDehnen(null);
+                // Auch der Hinweistext der Befehle aus #72 gehört zum Abbruch —
+                // sonst bliebe «Stutzen · …» stehen, obwohl nichts mehr läuft.
+                setBefehlHinweis(null);
                 setEditorMode(escapeMode(editorModeRef.current));
               }],
             ] : [

@@ -84,7 +84,7 @@ export function orthogonalerAnschlussEckpunkt(origin, target, side = null) {
 //
 // `start`/`end` sind die aktuellen Handle-Positionen. Rückgabe: volle Route
 // inkl. Endpunkten. Kollineares wird zusammengefasst (gerade bleibt gerade).
-export function adaptivePolyline(start, end, storedPoints = [], sourceSide = null, targetSide = null) {
+export function adaptivePolyline(start, end, storedPoints = [], sourceSide = null, targetSide = null, allowDiagonal = false) {
   if (!start || !end) return [];
   const raw = (storedPoints || []).filter(point => Number.isFinite(point?.x) && Number.isFinite(point?.y));
 
@@ -95,6 +95,10 @@ export function adaptivePolyline(start, end, storedPoints = [], sourceSide = nul
   const sameY = Math.abs(end.y - start.y) < 0.5;
   // (1) Auf gemeinsamer Achse → exakt gerade, unabhängig von der Handle-Richtung.
   if (sameX || sameY) return [{ ...start }, { ...end }];
+
+  // Nur der Editor setzt dieses Flag nach einer ausdrücklichen, deutlich
+  // schrägen Geste. Ohne Flag bleibt der sichere Fallback immer orthogonal.
+  if (allowDiagonal) return [{ ...start }, { ...end }];
 
   // (3) Genau ein 90°-Knick. Welche Achse zuerst, ergibt sich aus der Handle-Seite
   // (waagrechte Seite → erst horizontal), sonst aus der grösseren Distanz.

@@ -17,8 +17,9 @@ export const rasterPunkt = (point, grid = 10) => ({
 /**
  * Der Constraint-Zustand eines Zeichenbefehls.
  *
- * ortho  — Segmente werden auf die dominante Achse geführt (CAD ORTHO)
- * diag   — 45° zusätzlich erlaubt (bisheriges Shift-Verhalten)
+ * ortho  — achsnahe Segmente werden horizontal/vertikal geführt; eine klar
+ *          beabsichtigte Schräge ab 30° zur nächsten Achse bleibt erhalten
+ * diag   — freie Richtung als bewusstes Shift-Verhalten
  * frei   — keine Richtungsbindung, nur Raster
  *
  * Shift kehrt den ortho-Zustand temporär um. Das ist die CAD-Gewohnheit: ORTHO
@@ -27,6 +28,35 @@ export const rasterPunkt = (point, grid = 10) => ({
 export const ORTHO = 'ortho';
 export const DIAG = 'diag';
 export const FREI = 'frei';
+export const SCHRAEGE_MIN_WINKEL = 30;
+
+/** Neigung eines Segments zur Horizontalen, unabhängig von der Zeichenrichtung. */
+export function segmentWinkelGrad(a, b) {
+  if (!a || !b) return null;
+  const dx = Math.abs(b.x - a.x);
+  const dy = Math.abs(b.y - a.y);
+  if (Math.hypot(dx, dy) < 0.5) return null;
+  return Math.atan2(dy, dx) * 180 / Math.PI;
+}
+
+/** Kleinster Winkelabstand zur horizontalen oder vertikalen Achse (0…45°). */
+export function achsenAbstandGrad(a, b) {
+  const winkel = segmentWinkelGrad(a, b);
+  return winkel === null ? 0 : Math.min(winkel, 90 - winkel);
+}
+
+/** Nur eine deutlich gezeichnete Schräge darf den ORTHO-Fang überstimmen. */
+export function istBewussteDiagonale(a, b, minWinkel = SCHRAEGE_MIN_WINKEL) {
+  // Trigonometrische Rundung darf eine exakt gezeichnete 30°-Linie nicht als
+  // 29.999999999° unter die fachliche Schwelle drücken.
+  return achsenAbstandGrad(a, b) >= minWinkel - 1e-9;
+}
+
+export function winkelLabel(winkel) {
+  if (!Number.isFinite(winkel)) return '';
+  const gerundet = Math.round(winkel * 10) / 10;
+  return `${Number.isInteger(gerundet) ? gerundet : gerundet.toFixed(1)}°`;
+}
 
 /** Welcher Modus gilt gerade, inklusive Shift-Umkehr? */
 export function aktiverConstraint(orthoAn, shift = false) {
@@ -37,9 +67,9 @@ export function aktiverConstraint(orthoAn, shift = false) {
 /**
  * Punkt unter dem aktiven Constraint.
  *
- * ORTHO: die Achse gewinnt, in deren Richtung der Cursor weiter entfernt liegt.
- *        Start (1000,1000), Maus (1800,1200) → (1800,1000), weil |dx| > |dy|.
- * DIAG:  horizontal, vertikal oder exakt 45°.
+ * ORTHO: achsnahe Bewegungen werden exakt horizontal/vertikal. Erst eine
+ *        deutliche Schräge (mindestens 30° zur nächsten Achse) bleibt schräg.
+ * DIAG:  freie, gerasterte Richtung — Shift ist die ausdrückliche Freigabe.
  * FREI:  nur Raster.
  */
 export function constrainPoint(origin, point, { ortho = true, shift = false, grid = 10 } = {}) {
@@ -48,21 +78,12 @@ export function constrainPoint(origin, point, { ortho = true, shift = false, gri
   const raster = rasterPunkt(point, grid);
   if (modus === FREI) return raster;
   if (modus === ORTHO) {
+    if (istBewussteDiagonale(origin, point)) return raster;
     return Math.abs(point.x - origin.x) >= Math.abs(point.y - origin.y)
       ? { x: raster.x, y: origin.y }
       : { x: origin.x, y: raster.y };
   }
-  // DIAG — Achtelkreis bestimmen: 0 = horizontal, 1 = 45°, 2 = vertikal.
-  const dx = point.x - origin.x;
-  const dy = point.y - origin.y;
-  const achtel = Math.round(Math.atan2(Math.abs(dy), Math.abs(dx)) / (Math.PI / 4));
-  if (achtel <= 0) return { x: raster.x, y: origin.y };
-  if (achtel >= 2) return { x: origin.x, y: raster.y };
-  const distanz = Math.round(Math.max(Math.abs(dx), Math.abs(dy)) / grid) * grid;
-  return {
-    x: origin.x + (Math.sign(dx) || 1) * distanz,
-    y: origin.y + (Math.sign(dy) || 1) * distanz,
-  };
+  return raster;
 }
 
 /** Länge eines Segments in mm. */
@@ -82,6 +103,13 @@ export function massLabel(laengeMm) {
   const mm = Math.round(Number(laengeMm) || 0);
   if (mm >= 10000) return `${(mm / 1000).toFixed(2).replace(/\.?0+$/, '')} m`;
   return `${mm} mm`;
+}
+
+/** Länge plus Winkel — der Winkel erscheint nur bei einer bewussten Schräge. */
+export function segmentMassLabel(a, b) {
+  const basis = massLabel(segmentLaenge(a, b));
+  if (!istBewussteDiagonale(a, b)) return basis;
+  return `${basis} · ${winkelLabel(segmentWinkelGrad(a, b))}`;
 }
 
 /**
@@ -120,19 +148,11 @@ export function punktAusLaenge(origin, richtungsPunkt, laengeMm, { ortho = true,
 
   const modus = aktiverConstraint(ortho, shift);
   if (modus === ORTHO) {
-    // Auf die dominante Achse reduzieren, danach exakt die getippte Länge.
-    if (Math.abs(dx) >= Math.abs(dy)) return { x: origin.x + Math.sign(dx) * laenge, y: origin.y };
-    return { x: origin.x, y: origin.y + Math.sign(dy) * laenge };
-  }
-  if (modus === DIAG) {
-    const achtel = Math.round(Math.atan2(Math.abs(dy), Math.abs(dx)) / (Math.PI / 4));
-    if (achtel <= 0) return { x: origin.x + Math.sign(dx) * laenge, y: origin.y };
-    if (achtel >= 2) return { x: origin.x, y: origin.y + Math.sign(dy) * laenge };
-    const kante = laenge / Math.SQRT2;
-    return {
-      x: origin.x + (Math.sign(dx) || 1) * kante,
-      y: origin.y + (Math.sign(dy) || 1) * kante,
-    };
+    if (!istBewussteDiagonale(origin, richtungsPunkt)) {
+      // Auf die dominante Achse reduzieren, danach exakt die getippte Länge.
+      if (Math.abs(dx) >= Math.abs(dy)) return { x: origin.x + Math.sign(dx) * laenge, y: origin.y };
+      return { x: origin.x, y: origin.y + Math.sign(dy) * laenge };
+    }
   }
   const norm = Math.hypot(dx, dy);
   dx /= norm;

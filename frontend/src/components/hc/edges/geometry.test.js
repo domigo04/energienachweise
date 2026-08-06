@@ -146,6 +146,12 @@ describe("adaptivePolyline — CAD-Grundsatz", () => {
     expect(route[2]).toEqual({ x: 100, y: 60 });
   });
 
+  it("bewusst freigegebene Schräge bleibt ohne künstlichen 90°-Knick", () => {
+    expect(adaptivePolyline(
+      { x:0, y:0 }, { x:300, y:300 }, [], null, null, true,
+    )).toEqual([{ x:0, y:0 }, { x:300, y:300 }]);
+  });
+
   it("vorhandene Waypoints haben Vorrang — nur sie, keine zusätzlichen Punkte", () => {
     const wp = [{ x: 40, y: 0 }, { x: 40, y: 80 }];
     const route = adaptivePolyline({ x: 0, y: 0 }, { x: 80, y: 80 }, wp, "right", "left");

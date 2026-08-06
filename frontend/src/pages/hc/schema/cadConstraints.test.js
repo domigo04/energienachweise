@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   DIAG, FREI, ORTHO,
-  aktiverConstraint, constrainPoint, laengeAusBuffer, laengeTaste,
-  massAnker, massLabel, punktAusLaenge, rasterPunkt, segmentLaenge, zugLaenge,
+  achsenAbstandGrad, aktiverConstraint, constrainPoint, istBewussteDiagonale,
+  laengeAusBuffer, laengeTaste, massAnker, massLabel, punktAusLaenge, rasterPunkt,
+  segmentLaenge, segmentMassLabel, segmentWinkelGrad, winkelLabel, zugLaenge,
 } from './cadConstraints';
 
 describe('Constraint-Zustand', () => {
@@ -26,18 +27,34 @@ describe('constrainPoint', () => {
     expect(p).toEqual({ x: 1000, y: 1800 });
   });
 
-  it('ORTHO erzeugt immer exakt horizontal oder vertikal', () => {
+  it('ORTHO fängt kleine Abweichungen horizontal oder vertikal', () => {
     const origin = { x: 500, y: 500 };
-    for (const ziel of [{ x: 913, y: 622 }, { x: 431, y: 1288 }, { x: -222, y: 470 }]) {
+    for (const ziel of [{ x: 913, y: 572 }, { x: 569, y: 1288 }, { x: -222, y: 470 }]) {
       const p = constrainPoint(origin, ziel, { ortho: true, grid: 10 });
       const istHV = p.x === origin.x || p.y === origin.y;
       expect(istHV).toBe(true);
     }
   });
 
-  it('DIAG erlaubt exakte 45°', () => {
-    const p = constrainPoint({ x: 0, y: 0 }, { x: 400, y: 380 }, { ortho: true, shift: true, grid: 10 });
-    expect(Math.abs(p.x)).toBe(Math.abs(p.y));
+  it('ORTHO lässt eine deutlich gezeichnete Schräge ab 30° bestehen', () => {
+    const p = constrainPoint({ x: 0, y: 0 }, { x: 400, y: 300 }, { ortho: true, grid: 10 });
+    expect(p).toEqual({ x: 400, y: 300 });
+    expect(istBewussteDiagonale({ x:0, y:0 }, p)).toBe(true);
+  });
+
+  it('29° zur nächsten Achse bleiben orthogonal, 30° sind bewusst schräg', () => {
+    const origin = { x:0, y:0 };
+    const bei29 = { x:1000, y:Math.tan(29 * Math.PI / 180) * 1000 };
+    const bei30 = { x:1000, y:Math.tan(30 * Math.PI / 180) * 1000 };
+    expect(istBewussteDiagonale(origin, bei29)).toBe(false);
+    expect(istBewussteDiagonale(origin, bei30)).toBe(true);
+    expect(constrainPoint(origin, bei29, { ortho:true, grid:10 }).y).toBe(0);
+    expect(constrainPoint(origin, bei30, { ortho:true, grid:10 }).y).toBe(580);
+  });
+
+  it('Shift bewahrt eine ausdrücklich freie Schräge statt sie auf 45° zu zwingen', () => {
+    const p = constrainPoint({ x: 0, y: 0 }, { x: 400, y: 170 }, { ortho: true, shift: true, grid: 10 });
+    expect(p).toEqual({ x:400, y:170 });
   });
 
   it('FREI bindet nur ans Raster', () => {
@@ -66,6 +83,14 @@ describe('Masse', () => {
     expect(massLabel(2400.4)).toBe('2400 mm');
     expect(massLabel(12500)).toBe('12.5 m');
     expect(massLabel(0)).toBe('0 mm');
+  });
+
+  it('zeigt den Winkel nur an bewusst schrägen Segmenten', () => {
+    expect(segmentWinkelGrad({ x:0, y:0 }, { x:300, y:400 })).toBeCloseTo(53.1301, 3);
+    expect(achsenAbstandGrad({ x:0, y:0 }, { x:300, y:400 })).toBeCloseTo(36.8699, 3);
+    expect(winkelLabel(53.1301)).toBe('53.1°');
+    expect(segmentMassLabel({ x:0, y:0 }, { x:300, y:400 })).toBe('500 mm · 53.1°');
+    expect(segmentMassLabel({ x:0, y:0 }, { x:500, y:20 })).toBe('500 mm');
   });
 
   it('setzt den Massanker neben das Segment, nicht darauf', () => {
@@ -104,10 +129,15 @@ describe('numerische Direkteingabe', () => {
     expect(ende.y).toBeCloseTo(400, 6);
   });
 
-  it('legt bei 45° die exakte Länge auf die Diagonale', () => {
-    const ende = punktAusLaenge({ x: 0, y: 0 }, { x: 100, y: 95 }, 1000, { ortho: true, shift: true });
+  it('legt mit Shift die exakte Länge auf den tatsächlichen Vorschauwinkel', () => {
+    const ende = punktAusLaenge({ x: 0, y: 0 }, { x: 30, y: 40 }, 1000, { ortho: true, shift: true });
     expect(segmentLaenge({ x: 0, y: 0 }, ende)).toBeCloseTo(1000, 6);
-    expect(Math.abs(ende.x)).toBeCloseTo(Math.abs(ende.y), 6);
+    expect(ende).toEqual({ x:600, y:800 });
+  });
+
+  it('behält bei ORTHO eine bewusste 3-4-Schräge auch bei Direkteingabe', () => {
+    const ende = punktAusLaenge({ x:0, y:0 }, { x:300, y:400 }, 500, { ortho:true });
+    expect(ende).toEqual({ x:300, y:400 });
   });
 
   it('erfindet ohne Richtung keinen Punkt', () => {

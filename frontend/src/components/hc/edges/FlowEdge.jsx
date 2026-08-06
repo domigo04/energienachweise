@@ -51,7 +51,9 @@ export function FlowEdge({
     ? data._routePoints
     : storedWaypoints.length
       ? storedWaypoints
-      : automatischeEckpunkte(sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition);
+      : data.cad_diagonal
+        ? []
+        : automatischeEckpunkte(sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition);
   // Endpunkte: der Editor misst den Anschluss selbst und liefert ihn mit. Nur
   // wo diese Messung fehlt (Export, Vorschau ohne Editor), gelten React Flows
   // eigene Werte — sie leiten den Endpunkt aus der DEKLARIERTEN Handle-Seite

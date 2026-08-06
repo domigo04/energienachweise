@@ -1,5 +1,6 @@
 import { memo, useRef, useState } from 'react';
-import { Handle, Position, useReactFlow, NodeResizer } from '@xyflow/react';
+import { Handle, Position, useReactFlow, NodeResizer, ViewportPortal } from '@xyflow/react';
+import { datenblockAusrichten, fangPunkte } from '../../../pages/hc/schema/datenblockAusrichten';
 import {
   SymPump, SymValve2V, SymValve3, SymCheckValve,
   SymShutoff, SymWE, SymVerbraucher, SymSpeicher, SymBwwSpeicher, SymBypass,
@@ -1063,13 +1064,26 @@ const KOMPAKTE_BAUTEILE = new Set([
   'waermezaehler_cad',
 ]);
 
+// Der Datenblock ist bei jedem Bauteil gleich breit (Dominic 2026-08-06).
+// Bauteile sind verschieden gross, ihre Kennwerte-Kästchen sollen es nicht
+// sein: erst dadurch ergeben mehrere Blöcke nebeneinander ein ruhiges Bild.
+// Dieselbe Breite zeichnet der PDF-Export (schema_svg.py::DATENBLOCK_BREITE).
+const DATENBLOCK_BREITE = 184;
+// Fangradius für das Ausrichten, in Bildschirmpixeln bei 100 % — er wird beim
+// Ziehen durch den Zoom geteilt, damit er sich immer gleich anfühlt.
+const DATENBLOCK_FANG = 7;
+
 // eslint-disable-next-line no-unused-vars
 function mitNr(Comp) {
   function MitNr(props) {
     const nr = props.data?.nr;
     const kompakt = KOMPAKTE_BAUTEILE.has(props.type);
-    const { setNodes, getZoom } = useReactFlow();
+    const { setNodes, getZoom, screenToFlowPosition } = useReactFlow();
     const captionDrag = useRef(null);
+    const captionRef = useRef(null);
+    // Fangpunkte und Hilfslinien des laufenden Ziehens. Nur der Block, der
+    // gerade bewegt wird, hält diesen Zustand — die anderen zeichnen nichts.
+    const [fang, setFang] = useState(null);
     // Gedreht wird nur das Symbol (siehe NODE_TYPES: mitRotation liegt INNEN).
     // Nummer und Beschriftung stehen darüber und drehen bewusst nicht mit:
     // sie sollen bei jeder Bauteillage an derselben Stelle und lesbar bleiben
@@ -1088,15 +1102,35 @@ function mitNr(Comp) {
     // einen Abschnitt ohne Titel, eine Verbrauchergruppe je eingebautem Gerät
     // einen eigenen (Pumpe, Regelventil, Wärmezähler).
     const abschnitte = Array.isArray(props.data?._calc?.kennwerte) ? props.data._calc.kennwerte : [];
+    // Ein Datenblock in Weltkoordinaten. Gemessen wird der echte Kasten am
+    // Bildschirm — dadurch stimmen Fang und Anzeige immer mit dem überein, was
+    // der Planer sieht, auch bei Zoom und verschobener Ansicht.
+    const blockMessen = (element) => {
+      const r = element.getBoundingClientRect();
+      // Ohne `snapToGrid:false` rundet React Flow die gemessenen Ecken aufs
+      // Zeichenraster — der Block würde dann an ein gerastertes Zerrbild
+      // seiner Nachbarn fangen statt an deren echte Kanten.
+      const roh = { snapToGrid:false };
+      const links = screenToFlowPosition({ x:r.left, y:r.top }, roh);
+      const rechts = screenToFlowPosition({ x:r.right, y:r.bottom }, roh);
+      return { x:links.x, y:links.y, breite:rechts.x - links.x, hoehe:rechts.y - links.y };
+    };
     const captionPointerDown = (event) => {
       if (event.button !== 0) return;
       event.preventDefault();
       event.stopPropagation();
+      const eigener = captionRef.current;
       captionDrag.current = {
         x:event.clientX,
         y:event.clientY,
         offsetX:Number(props.data?.caption_offset_x) || 0,
         offsetY:Number(props.data?.caption_offset_y) || 0,
+        // Die anderen Blöcke stehen während des Ziehens still; sie werden
+        // einmal beim Anfassen gemessen statt bei jeder Mausbewegung.
+        rechteck:eigener ? blockMessen(eigener) : null,
+        andere:Array.from(document.querySelectorAll('.hc-datenblock'))
+          .filter(element => element !== eigener)
+          .map(blockMessen),
       };
       const move = (moveEvent) => {
         const drag = captionDrag.current;
@@ -1104,14 +1138,29 @@ function mitNr(Comp) {
         const zoom = Math.max(getZoom(), 0.05);
         // Beschriftung und Nummer liegen ausserhalb der Drehung (siehe
         // NODE_TYPES): die Maus bewegt sie direkt, ohne Umrechnung.
-        const nextX = drag.offsetX + (moveEvent.clientX - drag.x) / zoom;
-        const nextY = Math.max(0, drag.offsetY + (moveEvent.clientY - drag.y) / zoom);
+        const dx = (moveEvent.clientX - drag.x) / zoom;
+        const dy = (moveEvent.clientY - drag.y) / zoom;
+        // Alt hält den Fang an — sonst käme man an eine Flucht nie knapp heran.
+        const bewegt = drag.rechteck
+          ? { ...drag.rechteck, x:drag.rechteck.x + dx, y:drag.rechteck.y + dy }
+          : null;
+        const gefangen = bewegt && !moveEvent.altKey
+          ? datenblockAusrichten(bewegt, drag.andere, DATENBLOCK_FANG / zoom)
+          : { dx:0, dy:0, linien:[] };
+        const nextX = drag.offsetX + dx + gefangen.dx;
+        const nextY = drag.offsetY + dy + gefangen.dy;
         setNodes(nodes => nodes.map(node => node.id === props.id
           ? { ...node, data:{ ...node.data, caption_offset_x:nextX, caption_offset_y:nextY } }
           : node));
+        setFang(bewegt ? {
+          linien:gefangen.linien,
+          punkte:fangPunkte({ ...bewegt, x:bewegt.x + gefangen.dx, y:bewegt.y + gefangen.dy }),
+          zoom,
+        } : null);
       };
       const up = () => {
         captionDrag.current = null;
+        setFang(null);
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', up);
       };
@@ -1132,13 +1181,14 @@ function mitNr(Comp) {
           }}>{nr}</div>
         )}
         {nr != null && (
-          <div className="nodrag nopan"
+          <div className="nodrag nopan hc-datenblock"
+            ref={captionRef}
             onPointerDown={captionPointerDown}
-            title="Beschriftung verschieben"
+            title="Datenblock verschieben — rastet an den anderen Blöcken ein (Alt hält den Fang an)"
             style={{
               position:'absolute', top:'100%', left:'50%',
-              transform:`translate(calc(-50% + ${Number(props.data?.caption_offset_x) || 0}px), ${10 + Math.max(0, Number(props.data?.caption_offset_y) || 0)}px)`,
-              minWidth:54, maxWidth:160, padding:'3px 7px',
+              transform:`translate(calc(-50% + ${Number(props.data?.caption_offset_x) || 0}px), ${10 + (Number(props.data?.caption_offset_y) || 0)}px)`,
+              width:DATENBLOCK_BREITE, boxSizing:'border-box', padding:'3px 7px',
               border:'1px solid #94a3b8', borderRadius:3, background:'white',
               color:'#334155', fontSize:9, lineHeight:1.2, textAlign:'center',
               whiteSpace:'nowrap', cursor:'move', zIndex:18,
@@ -1165,6 +1215,30 @@ function mitNr(Comp) {
               </div>
             ))}
           </div>
+        )}
+        {/* Fangpunkte und Hilfslinien liegen in Weltkoordinaten über der
+            ganzen Zeichnung, nicht im Bauteil — sonst würden sie am Rand des
+            Bauteils abgeschnitten. */}
+        {fang && (
+          <ViewportPortal>
+            <svg width="1" height="1" role="presentation"
+              style={{ position:'absolute', left:0, top:0, overflow:'visible', pointerEvents:'none', zIndex:19 }}>
+              {fang.linien.map((linie, i) => (
+                <line key={i}
+                  x1={linie.achse === 'x' ? linie.wert : linie.von}
+                  y1={linie.achse === 'x' ? linie.von : linie.wert}
+                  x2={linie.achse === 'x' ? linie.wert : linie.bis}
+                  y2={linie.achse === 'x' ? linie.bis : linie.wert}
+                  stroke="#22c55e" strokeWidth={1.4 / fang.zoom}
+                  strokeDasharray={`${7 / fang.zoom} ${5 / fang.zoom}`} />
+              ))}
+              {fang.punkte.map((punkt, i) => (
+                <rect key={i} x={punkt.x - 2.5 / fang.zoom} y={punkt.y - 2.5 / fang.zoom}
+                  width={5 / fang.zoom} height={5 / fang.zoom}
+                  fill="white" stroke="#16a34a" strokeWidth={1.2 / fang.zoom} />
+              ))}
+            </svg>
+          </ViewportPortal>
         )}
       </div>
     );

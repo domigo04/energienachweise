@@ -92,12 +92,14 @@ def _temperaturen(vl, rl) -> Optional[str]:
     return f"{_z(vl, 0)}/{_z(rl, 0)} °C"
 
 
-SCHALTUNGSNAME = {"einspritz": "Einspritzschaltung", "beimisch": "Beimischschaltung",
-                  "drossel": "Drosselschaltung"}
-
-
 def _gruppe(d: dict, gr: dict) -> list:
-    """Verbrauchergruppe: Gruppenwerte, dann je eingebautem Gerät ein Abschnitt."""
+    """Verbrauchergruppe: Gruppenwerte, dann je eingebautem Gerät ein Abschnitt.
+
+    Die Schaltungsart steht bewusst NICHT im Block (Dominic 2026-08-06): ob
+    eine Gruppe drosselt, einspritzt oder beimischt, zeigt das Schema selbst.
+    Im Block stehen die Angaben, die man am Bauteil ablesen muss — Leistung,
+    Durchfluss, Wärmezähler und die Typenschilder der eingebauten Geräte.
+    """
     vl = gr.get("vl") if gr.get("vl") is not None else d.get("vl_temp")
     rl = gr.get("rl") if gr.get("rl") is not None else d.get("rl_temp")
     schaltung = str(gr.get("schaltung") or d.get("schaltung") or "einspritz").lower()
@@ -105,7 +107,6 @@ def _gruppe(d: dict, gr: dict) -> list:
         ("Temperaturen", _temperaturen(vl, rl)),
         ("Leistung", _z(gr.get("q_kw") if gr.get("q_kw") is not None else d.get("q_kw"), 1, "kW")),
         ("Massenstrom", _kg_h(gr.get("m_sek"))),
-        ("Schaltung", SCHALTUNGSNAME.get(schaltung)),
     ])]
 
     pumpe = gr.get("pumpe") or {}

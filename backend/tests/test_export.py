@@ -785,6 +785,49 @@ def test_datenblock_der_gruppe_hat_je_eingebautem_bauteil_einen_abschnitt():
     assert ">Umwälzpumpe<" in svg and ">Zweiweg-Ventil<" in svg and ">Wärmezähler<" in svg
 
 
+def test_datenblock_nennt_die_schaltungsart_nicht():
+    """Ob gedrosselt, eingespritzt oder beigemischt wird, zeigt das Schema —
+    im Block stehen nur ablesbare Angaben (Dominic 2026-08-06)."""
+    nodes, edges = _graph()
+    gruppe = next(n for n in nodes if n["id"] == "g1")
+    gruppe["data"] = {**gruppe["data"], "schaltung": "beimisch", "hat_wz": True}
+    abschnitte = bauteil_kennwerte(gruppe, berechne_schema(nodes, edges))
+
+    assert "Schaltung" not in dict(abschnitte[0]["zeilen"])
+    assert "Beimischschaltung" not in erzeuge_svg(nodes, edges, berechne_schema(nodes, edges))
+    # Was bleiben muss: Leistung, Durchfluss und der Wärmezähler.
+    assert "Leistung" in dict(abschnitte[0]["zeilen"])
+    assert "Wärmezähler" in [a["titel"] for a in abschnitte]
+
+
+def test_jeder_datenblock_ist_gleich_breit():
+    """Verschieden grosse Bauteile, gleich breite Kästchen — nur so lassen sie
+    sich aneinander ausrichten (Dominic 2026-08-06)."""
+    nodes, edges = _graph()
+    gruppe = next(n for n in nodes if n["id"] == "g1")
+    gruppe["data"] = {**gruppe["data"], "hat_wz": True, "pumpe_fabrikat": "Biral"}
+    ventil = {"id": "v", "type": "valve2", "position": {"x": 0, "y": 0},
+              "data": {"nr": 9, "label": "V"}}
+    results = berechne_schema(nodes, edges)
+
+    breite_gruppe, hoehe_gruppe = datenkasten_masse(caption_titel(gruppe),
+                                                    bauteil_kennwerte(gruppe, results))
+    breite_ventil, hoehe_ventil = datenkasten_masse(caption_titel(ventil),
+                                                    bauteil_kennwerte(ventil, results))
+    assert breite_gruppe == breite_ventil
+    # Die Höhe darf sich weiterhin nach dem Inhalt richten.
+    assert hoehe_gruppe > hoehe_ventil
+
+
+def test_datenblock_laesst_sich_auch_nach_oben_ausrichten():
+    """Zum Ausrichten auf eine gemeinsame Flucht muss ein Block auch nach oben
+    wandern können — der Versatz wird nicht mehr bei null abgeschnitten."""
+    node = {"id": "v", "type": "valve2", "position": {"x": 100, "y": 400},
+            "data": {"nr": 1, "caption_offset_y": -30}}
+    ohne = {**node, "data": {"nr": 1}}
+    assert datenblock_anker(node)[1] == datenblock_anker(ohne)[1] - 30
+
+
 def test_beimischschaltung_beschriftet_das_dreiwegeventil():
     nodes, edges = _graph()
     gruppe = next(n for n in nodes if n["id"] == "g1")

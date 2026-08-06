@@ -1,0 +1,146 @@
+// Datenblöcke am Bauteil ausrichten — Feedback Dominic 2026-08-06.
+//
+// Drei Zusagen, die man nur im Browser belegen kann:
+//
+//   1. Jeder Datenblock ist gleich breit, egal wie gross das Bauteil ist.
+//   2. Beim Verschieben rastet ein Block an der Flucht der anderen ein
+//      (Fangpunkte und Hilfslinie sichtbar) und trifft sie exakt.
+//   3. Die ausgerichtete Lage übersteht Speichern und Neuladen — auch wenn
+//      der Block dafür nach OBEN wandern musste.
+import { protokoll, starten } from './lib.mjs';
+
+const { pruefe, kopf, bilanz } = protokoll('datenblock');
+const w = await starten();
+const { page } = w;
+const OUT = w.cfg.arbeitsordner;
+
+/** Datenblock eines Bauteils in WELTkoordinaten plus Greifpunkt am Bildschirm. */
+const block = (nodeId) => page.evaluate((id) => {
+  const el = document.querySelector(`.react-flow__node[data-id="${id}"] .hc-datenblock`);
+  if (!el) return null;
+  const vp = document.querySelector('.react-flow__viewport');
+  const m = new DOMMatrix(getComputedStyle(vp).transform);
+  const r0 = document.querySelector('.react-flow').getBoundingClientRect();
+  const b = el.getBoundingClientRect();
+  const welt = (sx, sy) => ({ x: (sx - r0.left - m.e) / m.a, y: (sy - r0.top - m.f) / m.d });
+  const links = welt(b.left, b.top);
+  const rechts = welt(b.right, b.bottom);
+  return {
+    x: links.x, y: links.y,
+    breite: rechts.x - links.x, hoehe: rechts.y - links.y,
+    griff: { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + 6) },
+    text: (el.innerText || '').replace(/\s+/g, ' ').trim(),
+  };
+}, nodeId);
+
+/** Zoomfaktor der Ansicht — Weltmass × Faktor = Bildschirmmass. */
+const zoomFaktor = () => page.evaluate(() => {
+  const vp = document.querySelector('.react-flow__viewport');
+  return new DOMMatrix(getComputedStyle(vp).transform).a;
+});
+
+/** Hilfslinien und Fangpunkte, die gerade gezeichnet werden. */
+const fangAnzeige = () => page.evaluate(() => ({
+  linien: document.querySelectorAll('.react-flow__viewport svg line[stroke="#22c55e"]').length,
+  punkte: document.querySelectorAll('.react-flow__viewport svg rect[stroke="#16a34a"]').length,
+}));
+
+kopf('Alle Datenblöcke sind gleich breit');
+await w.graphSetzen({
+  nodes: [
+    { id: 'p1', type: 'pump', position: { x: 400, y: 300 }, data: { nr: 1, label: 'Pumpe' } },
+    { id: 'v1', type: 'valve2', position: { x: 900, y: 460 }, data: { nr: 2, label: 'Ventil' } },
+    // Weit weg: der dritte Block soll die Breite belegen, aber beim Ausrichten
+    // keine eigene Flucht in Reichweite haben.
+    { id: 'we', type: 'erzeuger', position: { x: 1500, y: 1100 }, data: { nr: 3, label: 'WP' } },
+  ],
+  edges: [], layer_config: {},
+});
+await w.laden();
+await w.mausWeg();
+{
+  const breiten = [];
+  for (const id of ['p1', 'v1', 'we']) breiten.push((await block(id))?.breite);
+  const gleich = breiten.every((b) => b != null && Math.abs(b - breiten[0]) < 0.6);
+  pruefe('B1', 'Kleines und grosses Bauteil bekommen denselben Kasten', gleich,
+    breiten.map((b) => (b == null ? '—' : b.toFixed(1))).join(' / '));
+}
+
+kopf('Ausrichten mit Fangpunkten und Hilfslinie');
+{
+  const ziel = await block('p1');          // Flucht, auf die ausgerichtet wird
+  const bewegt = await block('v1');
+  // Der Block soll knapp NEBEN die Flucht gezogen werden: 3–4 mm daneben liegt
+  // innerhalb des Fangradius, muss also einrasten. Die Maus bewegt sich in
+  // Bildschirmpixeln — das Weltmass muss dafür durch den Zoom.
+  const zoom = await zoomFaktor();
+  const dx = (ziel.x + 3 - bewegt.x) * zoom;
+  const dy = (ziel.y + 4 - bewegt.y) * zoom;
+
+  await page.mouse.move(bewegt.griff.x, bewegt.griff.y);
+  await page.mouse.down();
+  for (let i = 1; i <= 6; i += 1) {
+    await page.mouse.move(Math.round(bewegt.griff.x + (dx * i) / 6),
+      Math.round(bewegt.griff.y + (dy * i) / 6));
+    await page.waitForTimeout(60);
+  }
+  const anzeige = await fangAnzeige();
+  pruefe('B2', 'Während des Ziehens liegen Fangpunkte auf jeder Seite und Ecke',
+    anzeige.punkte === 8, `${anzeige.punkte} Punkte`);
+  pruefe('B3', 'Beide Fluchten werden als Hilfslinie gezeigt',
+    anzeige.linien === 2, `${anzeige.linien} Hilfslinien`);
+
+  await page.mouse.up();
+  await page.waitForTimeout(400);
+
+  const gerastet = await block('v1');
+  pruefe('B4', 'Die Oberkante liegt exakt auf der Oberkante des Nachbarn',
+    Math.abs(gerastet.y - ziel.y) < 0.6, `${gerastet.y.toFixed(1)} vs ${ziel.y.toFixed(1)}`);
+  pruefe('B5', 'Die linke Kante liegt exakt auf der linken Kante des Nachbarn',
+    Math.abs(gerastet.x - ziel.x) < 0.6, `${gerastet.x.toFixed(1)} vs ${ziel.x.toFixed(1)}`);
+}
+
+kopf('Die ausgerichtete Lage übersteht Speichern und Neuladen');
+{
+  await page.waitForTimeout(1500);                    // Autosave abwarten
+  const gespeichert = await w.graphLesen();
+  const daten = (gespeichert.nodes || []).find((n) => n.id === 'v1')?.data || {};
+  pruefe('B6', 'Der Versatz ist gespeichert und darf nach oben zeigen',
+    Number(daten.caption_offset_y) < 0,
+    `caption_offset_y = ${daten.caption_offset_y}`);
+
+  const vorher = await block('v1');
+  await w.laden();
+  await w.mausWeg();
+  const nachher = await block('v1');
+  const ziel = await block('p1');
+  pruefe('B7', 'Nach dem Neuladen steht der Block wieder auf der Flucht',
+    Math.abs(nachher.y - ziel.y) < 0.6 && Math.abs(nachher.x - ziel.x) < 0.6,
+    `${nachher.x.toFixed(1)},${nachher.y.toFixed(1)} vs ${ziel.x.toFixed(1)},${ziel.y.toFixed(1)}`
+    + ` (vor dem Neuladen ${vorher.x.toFixed(1)},${vorher.y.toFixed(1)})`);
+}
+
+kopf('Die Schaltungsart steht nicht im Datenblock');
+await w.graphSetzen({
+  nodes: [{
+    id: 'g1', type: 'gruppe', position: { x: 500, y: 300 },
+    data: { nr: 1, label: 'Lufterhitzer', schaltung: 'beimisch', q_kw: 12, vl_temp: 50, rl_temp: 30, hat_wz: true },
+  }],
+  edges: [], layer_config: {},
+});
+await w.laden();
+await w.mausWeg();
+{
+  const g = await block('g1');
+  pruefe('B8', 'Weder Beimisch- noch Drosselschaltung stehen im Block',
+    g && !/schaltung/i.test(g.text), g ? g.text.slice(0, 90) : 'kein Block');
+  pruefe('B9', 'Wärmezähler und Durchfluss stehen weiterhin drin',
+    g && /Wärmezähler/.test(g.text) && /Massenstrom|V'/.test(g.text),
+    g ? g.text.slice(0, 120) : 'kein Block');
+}
+
+pruefe('X', 'keine Konsolenfehler', w.fehler.length === 0, w.fehler.slice(0, 2).join(' || '));
+await page.screenshot({ path: `${OUT}/datenblock.png` });
+const offen = bilanz(OUT);
+await w.browser.close();
+process.exit(offen ? 1 : 0);

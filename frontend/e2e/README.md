@@ -48,6 +48,7 @@ behält den Arbeitsordner samt Serverprotokollen und Bildschirmfotos.
 | `mirror` | Spiegeln: Anschlusslagen, ID-Stabilität, Fang danach, Portreferenzen, Persistenz — mit und ohne angeschlossene Leitungen |
 | `copy` | Kopieren: eigene ID, eigene Nummer, eigene Anschlüsse, **keine Geisterverbindung**, keine verwaisten Referenzen |
 | `underlay` | Dieselbe Messreihe mit und ohne Unterlage im Vergleich, Zeigerereignisse, Weltsystemtreue bei 25/100/400 % |
+| `datenblock` | Datenblöcke am Bauteil: gleiche Breite, Ausrichten mit Fangpunkten und Hilfslinien, Lage nach Neuladen, Inhalt der Gruppe |
 
 Die zentrale Aussage von `portsnap` ist die Vierfach-Identität:
 

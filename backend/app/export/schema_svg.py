@@ -299,6 +299,12 @@ def _handle_pos_base(node, handle: Optional[str]):
 KASTEN_ZEILE = 9.5      # Zeilenhöhe im Datenblock
 KASTEN_KOPF = 18.0      # Abstand Titelzeile → erste Kennwertzeile
 KASTEN_LUFT = 4.5       # Luft vor einem Abschnittstitel
+# Jeder Datenblock ist gleich breit — unabhängig davon, wie gross das Bauteil
+# ist und wie viel drinsteht (Dominic 2026-08-06). Nur so stehen mehrere Blöcke
+# nebeneinander ruhig im Plan. Dieselbe Breite zeichnet der Editor
+# (HydraulikNodes.jsx::DATENBLOCK_BREITE); die Höhe ergibt sich aus den Zeilen.
+DATENBLOCK_BREITE = 184.0
+KASTEN_RAND = 7.0       # Innenabstand links/rechts — wie das Padding im Editor
 
 
 def kasten_zeilen(abschnitte: list) -> list:
@@ -319,39 +325,38 @@ def kasten_zeilen(abschnitte: list) -> list:
 
 
 def datenkasten_masse(titel: str, abschnitte: list) -> tuple:
-    """Breite und Höhe des Datenblocks — Editor und Export nutzen dasselbe."""
-    zeilen = kasten_zeilen(abschnitte)
-    namen = max([len(str(n)) + 1 for art, n, _ in zeilen if art == "wert"] + [0])
-    werte = max([len(str(w)) for art, _, w in zeilen if art == "wert"] + [0])
-    kopfzeilen = [titel] + [n for art, n, _ in zeilen if art == "titel"]
-    breite = max([60.0, namen * 4.4 + werte * 4.4 + 12]
-                 + [len(str(k)) * 4.9 + 6 for k in kopfzeilen])
+    """Breite und Höhe des Datenblocks — Editor und Export nutzen dasselbe.
+
+    Die Breite ist fest; nur die Höhe hängt vom Inhalt ab.
+    """
+    del titel                            # steht in der festen Breite mit drin
     hoehe = KASTEN_KOPF + sum(KASTEN_LUFT if art == "luft" else KASTEN_ZEILE
-                              for art, _, _ in zeilen)
-    return (min(210.0, breite), hoehe)
+                              for art, _, _ in kasten_zeilen(abschnitte))
+    return (DATENBLOCK_BREITE, hoehe)
 
 
 def zeichne_datenkasten(parts: list, mitte_x: float, oben_y: float,
                         titel: str, abschnitte: list) -> None:
     """Bauteilname und Kennwerte als Datenblock unter dem Bauteil.
 
-    Gestalt wie in Dominics Vorlage: Titelzeile, darunter je Kennwert die
-    Bezeichnung mit Doppelpunkt links und der Wert in einer zweiten Spalte.
-    Eine Verbrauchergruppe bringt mehrere Abschnitte mit (Pumpe, Ventil,
-    Wärmezähler); die bekommen je einen eigenen Zwischentitel.
-    Kein Rahmen — nur eine weisse Unterlegung, damit der Block über Rastern
-    und Unterlagen lesbar bleibt.
+    Gestalt wie im Editor: Titelzeile mittig, darunter je Kennwert die
+    Bezeichnung links und der Wert rechtsbündig am Kastenrand — Bildschirm und
+    Plan zeigen denselben Kasten. Eine Verbrauchergruppe bringt mehrere
+    Abschnitte mit (Pumpe, Ventil, Wärmezähler); die bekommen je einen eigenen
+    Zwischentitel. Kein Rahmen — nur eine weisse Unterlegung, damit der Block
+    über Rastern und Unterlagen lesbar bleibt.
     """
     breite, hoehe = datenkasten_masse(titel, abschnitte)
     x = mitte_x - breite / 2
-    wert_x = x + max(52.0, breite * 0.56)
+    name_x = x + KASTEN_RAND
+    wert_x = x + breite - KASTEN_RAND
     parts.append(
-        f'<rect x="{_svg_num(x - 2)}" y="{_svg_num(oben_y)}" width="{_svg_num(breite + 4)}" '
+        f'<rect x="{_svg_num(x)}" y="{_svg_num(oben_y)}" width="{_svg_num(breite)}" '
         f'height="{_svg_num(hoehe)}" fill="white" fill-opacity="0.82" stroke="none"/>'
     )
     parts.append(
-        f'<text x="{_svg_num(x)}" y="{_svg_num(oben_y + 8.5)}" font-size="8.5" '
-        f'font-weight="700" fill="#0f172a">{_esc(titel)}</text>'
+        f'<text x="{_svg_num(mitte_x)}" y="{_svg_num(oben_y + 8.5)}" font-size="8.5" '
+        f'text-anchor="middle" font-weight="700" fill="#0f172a">{_esc(titel)}</text>'
     )
     zeile_y = oben_y + KASTEN_KOPF
     for art, name, wert in kasten_zeilen(abschnitte):
@@ -360,17 +365,17 @@ def zeichne_datenkasten(parts: list, mitte_x: float, oben_y: float,
             continue
         if art == "titel":
             parts.append(
-                f'<text x="{_svg_num(x)}" y="{_svg_num(zeile_y)}" font-size="8" '
+                f'<text x="{_svg_num(name_x)}" y="{_svg_num(zeile_y)}" font-size="8" '
                 f'font-weight="700" fill="#0f172a">{_esc(name)}</text>'
             )
         else:
             parts.append(
-                f'<text x="{_svg_num(x)}" y="{_svg_num(zeile_y)}" font-size="8" '
+                f'<text x="{_svg_num(name_x)}" y="{_svg_num(zeile_y)}" font-size="8" '
                 f'fill="#334155">{_esc(name)}:</text>'
             )
             parts.append(
                 f'<text x="{_svg_num(wert_x)}" y="{_svg_num(zeile_y)}" font-size="8" '
-                f'fill="#0f172a">{_esc(wert)}</text>'
+                f'text-anchor="end" fill="#0f172a">{_esc(wert)}</text>'
             )
         zeile_y += KASTEN_ZEILE
 
@@ -394,13 +399,17 @@ def caption_titel(node) -> str:
 
 
 def datenblock_anker(node) -> tuple:
-    """Mitte-X und Oberkante des Datenblocks — verschoben wie im Editor."""
+    """Mitte-X und Oberkante des Datenblocks — verschoben wie im Editor.
+
+    Der Versatz darf in jede Richtung gehen: zum Ausrichten mehrerer Blöcke auf
+    eine gemeinsame Flucht muss ein Block auch nach oben wandern können.
+    """
     d = node.get("data") or {}
     w, h = node_groesse(node)
     x = (node.get("position") or {}).get("x", 0)
     y = (node.get("position") or {}).get("y", 0)
     return (x + w / 2 + (_f(d.get("caption_offset_x")) or 0),
-            y + h + 10 + max(0, _f(d.get("caption_offset_y")) or 0))
+            y + h + 10 + (_f(d.get("caption_offset_y")) or 0))
 
 
 def zeichne_datenblock(parts: list, node, results) -> None:

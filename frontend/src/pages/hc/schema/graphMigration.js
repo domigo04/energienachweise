@@ -33,6 +33,11 @@ export const DEFAULT_DRAWING_CONFIG = {
   // orthogonal an, Objektfang an — also exakt das bisherige Verhalten.
   ortho: true,
   object_snap: true,
+  // Das Raster ist eine Zeichenhilfe, kein Planinhalt: beurteilt wird ein
+  // Schema auf leerem Grund, so wie es später im PDF steht (Dominic
+  // 2026-08-06). Gefangen wird trotzdem aufs Raster — Sichtbarkeit und Fang
+  // sind zwei verschiedene Dinge.
+  raster_sichtbar: false,
 };
 
 const shortcutTaste = (value, fallback) =>
@@ -58,6 +63,7 @@ export function normalisiereDrawingConfig(config = {}) {
     auto_return: c.auto_return === true,
     ortho: flagge(c.ortho, DEFAULT_DRAWING_CONFIG.ortho),
     object_snap: flagge(c.object_snap, DEFAULT_DRAWING_CONFIG.object_snap),
+    raster_sichtbar: flagge(c.raster_sichtbar, DEFAULT_DRAWING_CONFIG.raster_sichtbar),
   };
 }
 

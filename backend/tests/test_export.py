@@ -149,6 +149,32 @@ def test_handle_positionen():
     assert handle_pos(g1, "rl") == (330 + 75, 186 + GR_H)
 
 
+def test_anschluesse_liegen_auf_dem_gezeichneten_umriss():
+    """Der Anschluss gehört auf die schwarze Linie des Symbols, nicht an den
+    Rand der Bauteilfläche (Dominic 2026-08-06). Die Zahlen stammen aus den
+    Symbolen selbst und stehen im Editor gleich (SPEICHER_PORTS, PWT_PORTS)."""
+    speicher = {"id": "sp", "type": "speicher", "position": {"x": 100, "y": 200}, "data": {}}
+    w, h = node_groesse(speicher)
+
+    # Mantel des Behälters: x = 20…120 von 140 → 14.3 % und 85.7 %.
+    assert handle_pos(speicher, "left") == pytest.approx((100 + w * 0.143, 200 + h / 2))
+    assert handle_pos(speicher, "right") == pytest.approx((100 + w * 0.857, 200 + h / 2))
+    # Kuppeln: die oberen Stutzen sitzen auf der Wölbung, nicht über dem Bauteil.
+    _, y_oben = handle_pos(speicher, "top-l")
+    assert 200 < y_oben < 200 + h * 0.15
+    _, y_unten = handle_pos(speicher, "bot-r")
+    assert 200 + h * 0.85 < y_unten < 200 + h
+    # Die Anschlusszone folgt demselben Umriss statt dem Node-Rechteck.
+    x_zone, _ = handle_pos(speicher, "sz-l-28")
+    assert x_zone == pytest.approx(100 + w * 0.143)
+
+    # Plattentauscher: Seitenmitten der Raute.
+    pwt = {"id": "p", "type": "pwt", "position": {"x": 0, "y": 0}, "data": {}}
+    pw, ph = node_groesse(pwt)
+    assert handle_pos(pwt, "left") == pytest.approx((pw * 0.274, ph * 0.349))
+    assert handle_pos(pwt, "right") == pytest.approx((pw * 0.594, ph * 0.768))
+
+
 def test_erdsondenfeld_waechst_mit_duplexsonden_und_exportiert_identisch():
     node = {
         "id": "ews",

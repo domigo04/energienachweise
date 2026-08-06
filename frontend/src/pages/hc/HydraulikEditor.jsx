@@ -686,6 +686,11 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
             Objektfang (SNAP)
           </label>
           <label style={{ display:'flex', alignItems:'center', gap:7, fontSize:11 }}>
+            <input type="checkbox" checked={drawingConfig.raster_sichtbar === true}
+              onChange={e => onDrawingConfig('raster_sichtbar', e.target.checked)} />
+            Raster anzeigen (Fang bleibt aktiv)
+          </label>
+          <label style={{ display:'flex', alignItems:'center', gap:7, fontSize:11 }}>
             <input type="checkbox" checked={drawingConfig.auto_return === true}
               onChange={e => onDrawingConfig('auto_return', e.target.checked)} />
             Rücklauf automatisch mitzeichnen
@@ -6195,11 +6200,17 @@ function EditorInner() {
           >
             {/* CAD-Optik (§ Editor #4): Millimeterpapier — feine Minor-Punkte am
                 Raster (bleiben beim Rauszoomen ruhig) plus kräftigere Major-Linien
-                alle 5 Rastereinheiten für die Orientierung. */}
-            <Background id="hc-minor" variant={BackgroundVariant.Dots} gap={drawingConfig.grid_size}
-              size={1} color="#cbd5e1"/>
-            <Background id="hc-major" variant={BackgroundVariant.Lines} gap={drawingConfig.grid_size * 5}
-              color="#dbe3ec" lineWidth={1}/>
+                alle 5 Rastereinheiten für die Orientierung. Standardmässig aus:
+                beurteilt wird das Schema auf leerem Grund, so wie es im PDF
+                steht. Der Rasterfang läuft unabhängig davon weiter. */}
+            {drawingConfig.raster_sichtbar && (
+              <>
+                <Background id="hc-minor" variant={BackgroundVariant.Dots} gap={drawingConfig.grid_size}
+                  size={1} color="#cbd5e1"/>
+                <Background id="hc-major" variant={BackgroundVariant.Lines} gap={drawingConfig.grid_size * 5}
+                  color="#dbe3ec" lineWidth={1}/>
+              </>
+            )}
             {/* Underlay (§ Editor #5): unter Bauteilen/Leitungen, über dem Raster.
                 Interaktiv (ziehbar) nur wenn entsperrt und nicht im Zeichenmodus —
                 sonst rein visuell, damit es das Zeichnen nie blockiert. */}
@@ -6620,6 +6631,12 @@ function EditorInner() {
               onClick={() => setSnapAn(v => { setDrawingConfig(c => ({ ...c, object_snap:!v })); return !v; })}
               className={`hc-statusbar__toggle${snapAn ? ' is-on' : ''}`}
               title="Objektfang auf Anschlüsse, Endpunkte und Leitungen">SNAP</button>
+            {/* Sichtbarkeit und Weite stehen nebeneinander: das Raster fängt
+                weiter, auch wenn man es nicht sieht. */}
+            <button type="button"
+              onClick={() => setDrawingConfig(c => ({ ...c, raster_sichtbar:!c.raster_sichtbar }))}
+              className={`hc-statusbar__toggle${drawingConfig.raster_sichtbar ? ' is-on' : ''}`}
+              title="Raster anzeigen (der Rasterfang bleibt davon unberührt)">RASTER</button>
             <label className="hc-statusbar__raster">
               Raster
               <select value={drawingConfig.grid_size} aria-label="Rasterweite"

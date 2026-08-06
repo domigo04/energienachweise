@@ -131,8 +131,18 @@ anderes als die Taste.
 | Doppelklick | beendet am letzten gesetzten Eckpunkt |
 | zweiter Klick auf denselben Punkt | dasselbe — es entsteht kein Nullsegment |
 | Enter | beendet an der aktuellen Cursorposition |
-| ESC | beendet am letzten gesetzten Eckpunkt, Dauerbefehl endet mit |
+| ✓ in der Hinweiszeile | beendet am letzten gesetzten Eckpunkt |
+| ESC | **bricht ab und hinterlässt nichts**, Dauerbefehl endet mit |
 | Rechtsklick | bricht ab, ohne etwas zu erzeugen |
+
+Abschliessen und Abbrechen sind seit 2026-08-06 sauber getrennt (PR #57).
+Vorher schloss ESC am letzten Eckpunkt ab — Klick, Klick, ESC hinterliess damit
+zwei Anker und eine Kante, obwohl ein Abbruch nichts hinterlassen darf. ESC
+verhält sich jetzt wie der Rechtsklick, der das schon immer tat; ob ein
+Dauerbefehl nach einem *Abschluss* aktiv bleibt, entscheidet allein
+`finishCommand`. Der Entwurf wird an genau einer Stelle verworfen
+(`entwurfVerwerfen`), und `entwurfFuerAbschluss` heisst so, weil ESC kein
+Abschluss mehr ist.
 
 ## Auswahlstufen an einer Leitung
 

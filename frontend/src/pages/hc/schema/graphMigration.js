@@ -33,6 +33,9 @@ export const DEFAULT_DRAWING_CONFIG = {
   // orthogonal an, Objektfang an — also exakt das bisherige Verhalten.
   ortho: true,
   object_snap: true,
+  polar_snap: false,
+  polar_angle: 45,
+  dynamic_input: true,
   // Das Raster ist eine Zeichenhilfe, kein Planinhalt: beurteilt wird ein
   // Schema auf leerem Grund, so wie es später im PDF steht (Dominic
   // 2026-08-06). Gefangen wird trotzdem aufs Raster — Sichtbarkeit und Fang
@@ -63,6 +66,10 @@ export function normalisiereDrawingConfig(config = {}) {
     auto_return: c.auto_return === true,
     ortho: flagge(c.ortho, DEFAULT_DRAWING_CONFIG.ortho),
     object_snap: flagge(c.object_snap, DEFAULT_DRAWING_CONFIG.object_snap),
+    polar_snap: flagge(c.polar_snap, DEFAULT_DRAWING_CONFIG.polar_snap),
+    polar_angle: [90, 45, 30, 15].includes(Number(c.polar_angle))
+      ? Number(c.polar_angle) : DEFAULT_DRAWING_CONFIG.polar_angle,
+    dynamic_input: flagge(c.dynamic_input, DEFAULT_DRAWING_CONFIG.dynamic_input),
     raster_sichtbar: flagge(c.raster_sichtbar, DEFAULT_DRAWING_CONFIG.raster_sichtbar),
   };
 }

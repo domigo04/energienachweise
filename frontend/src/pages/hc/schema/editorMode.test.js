@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ALIGN, CONNECT_CORNER, DRAW_PIPE, MIRROR, MODIFY, PLACE,
   cursorFor, escape, finishCommand, initialMode, istModify,
+  befehlMerken, befehlsPrompt, befehlsVorschlaege, letztenBefehlWiederholen,
   modeLabel, startCommand, toggleCommand, zeichnetLeitung,
 } from './editorMode';
 
@@ -80,5 +81,26 @@ describe('editorMode', () => {
     expect(mode.payload.edgeId).toBe('e1');
     expect(modeLabel(mode)).toBe('Ausrichten');
     expect(istModify(escape(mode))).toBe(true);
+  });
+
+  it('merkt und wiederholt die letzten drei Befehle', () => {
+    let verlauf = [];
+    verlauf = befehlMerken(verlauf, startCommand(DRAW_PIPE));
+    verlauf = befehlMerken(verlauf, startCommand(ALIGN));
+    expect(letztenBefehlWiederholen(verlauf).type).toBe(ALIGN);
+    expect(verlauf.map(item => item.type)).toEqual([ALIGN, DRAW_PIPE]);
+  });
+
+  it('findet Befehle über Kürzel oder Namen und sagt den nächsten Schritt', () => {
+    const liste = [
+      { taste:'l', name:'Leitung', type:DRAW_PIPE },
+      { taste:'p', name:'Polylinie', type:DRAW_PIPE },
+      { taste:'a', name:'Ausrichten', type:ALIGN },
+    ];
+    expect(befehlsVorschlaege('l', liste)[0].type).toBe(DRAW_PIPE);
+    expect(befehlsVorschlaege('p', liste)[0].name).toBe('Polylinie');
+    expect(befehlsVorschlaege('richt', liste)[0].type).toBe(ALIGN);
+    expect(befehlsPrompt(startCommand(DRAW_PIPE), { hasDraft:false })).toBe('Ersten Punkt angeben');
+    expect(befehlsPrompt(startCommand(DRAW_PIPE), { hasDraft:true })).toBe('Nächsten Punkt angeben');
   });
 });

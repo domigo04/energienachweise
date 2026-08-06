@@ -3,6 +3,7 @@ import {
   DIAG, FREI, ORTHO,
   achsenAbstandGrad, aktiverConstraint, constrainPoint, istBewussteDiagonale,
   laengeAusBuffer, laengeTaste, massAnker, massLabel, punktAusLaenge, rasterPunkt,
+  polarPunkt, punktAusDynamischerEingabe, richtungsWinkelGrad,
   segmentLaenge, segmentMassLabel, segmentWinkelGrad, winkelLabel, zugLaenge,
 } from './cadConstraints';
 
@@ -69,6 +70,16 @@ describe('constrainPoint', () => {
   it('rastert auf die konfigurierte Rasterweite', () => {
     expect(rasterPunkt({ x: 123, y: 77 }, 25)).toEqual({ x: 125, y: 75 });
   });
+
+  it('rastet beim Polarfang auf 0/45/90/135 Grad', () => {
+    const origin = { x:0, y:0 };
+    expect(polarPunkt(origin, { x:503, y:31 }, 45, 1)).toEqual({ x:504, y:0 });
+    const diagonal = polarPunkt(origin, { x:360, y:330 }, 45, 1);
+    expect(diagonal.x).toBe(diagonal.y);
+    expect(richtungsWinkelGrad(origin, constrainPoint(origin, { x:-300, y:280 }, {
+      ortho:false, polar:true, polarWinkel:45, grid:1,
+    }))).toBeCloseTo(135, 1);
+  });
 });
 
 describe('Masse', () => {
@@ -106,6 +117,14 @@ describe('Masse', () => {
 });
 
 describe('numerische Direkteingabe', () => {
+  it('sperrt Länge und Winkel unabhängig voneinander', () => {
+    const origin = { x:100, y:200 };
+    expect(punktAusDynamischerEingabe(origin, { x:900, y:220 }, { laenge:500, winkel:90 }))
+      .toEqual({ x:100, y:700 });
+    const nurWinkel = punktAusDynamischerEingabe(origin, { x:400, y:600 }, { winkel:0 });
+    expect(nurWinkel.y).toBe(200);
+    expect(segmentLaenge(origin, nurWinkel)).toBeCloseTo(500, 6);
+  });
   // Punkt 8 / Test 8 — der Kern der Demo im Auftrag.
   it('2400 nach rechts ergibt ein exakt 2400 mm langes Segment', () => {
     const start = { x: 1000, y: 1000 };

@@ -113,20 +113,44 @@ export function FlowEdge({
           Beim Ziehen mit Shift übernimmt der Editor den 0°/45°/90°-Fang. */}
       {selected && waypoints.map((point, index) => (
         <circle key={`${id}-point-${index}`} cx={point.x} cy={point.y} r={gripR}
-          fill={data._selectedPointIndex === index ? color : 'white'}
-          stroke={data._selectedPointIndex === index ? '#0f172a' : color} strokeWidth={gripStroke}
+          fill={data._selectedPointIndex === index || data._selectedGripPointIndexes?.includes(index) ? color : 'white'}
+          stroke={data._selectedPointIndex === index || data._selectedGripPointIndexes?.includes(index) ? '#0f172a' : color} strokeWidth={gripStroke}
           style={{ pointerEvents: 'all', cursor: 'move' }}
+          onPointerEnter={(event) => data._onGripHover?.(event, { typ:'corner', edgeId:id, pointIndex:index })}
+          onPointerLeave={() => data._onGripLeave?.()}
           onPointerDown={(event) => {
             event.stopPropagation();
-            data._onSelectPoint?.(id, index);
+            data._onSelectPoint?.(event, id, index);
             data._onPointPointerDown?.(event, id, index);
           }}
           onClick={(event) => {
             event.stopPropagation();
-            data._onSelectPoint?.(id, index);
+            data._onSelectPoint?.(event, id, index);
+          }}
+          onContextMenu={(event) => {
+            event.preventDefault(); event.stopPropagation();
+            data._onGripContextMenu?.(event, { typ:'corner', edgeId:id, pointIndex:index });
           }}
           onDoubleClick={(event) => { event.stopPropagation(); data._onRemovePoint?.(id, index); }} />
       ))}
+
+      {/* Segmentmitten sind eigene Griffe. Sie machen „Segment versetzen" und
+          „Ecke einfügen" sichtbar, ohne dass man die Geste kennen muss. */}
+      {selected && vertices.slice(1).map((point, index) => {
+        const a = vertices[index];
+        const mitte = { x:(a.x + point.x) / 2, y:(a.y + point.y) / 2 };
+        return <rect key={`${id}-segment-grip-${index}`}
+          x={mitte.x - gripR} y={mitte.y - gripR} width={gripR * 2} height={gripR * 2}
+          transform={`rotate(45 ${mitte.x} ${mitte.y})`} fill="white" stroke={color} strokeWidth={gripStroke}
+          style={{ pointerEvents:'all', cursor:'grab' }}
+          onPointerEnter={(event)=>data._onGripHover?.(event, { typ:'segment', edgeId:id, segmentIndex:index, point:mitte })}
+          onPointerLeave={()=>data._onGripLeave?.()}
+          onPointerDown={(event)=>{ event.stopPropagation(); if (event.button === 0) data._onSegmentPointerDown?.(event, id); }}
+          onContextMenu={(event)=>{
+            event.preventDefault(); event.stopPropagation();
+            data._onGripContextMenu?.(event, { typ:'segment', edgeId:id, segmentIndex:index, point:mitte });
+          }} />;
+      })}
 
       {/* Wie im React-Flow-Probeeditor: freie/verbundene Enden werden direkt
           an der Leitung gegriffen. Die internen Junction-Nodes bleiben unsichtbar. */}
@@ -137,6 +161,8 @@ export function FlowEdge({
         <g key={`${id}-${side}`}>
           <circle cx={x} cy={y} r={endHitR} fill="transparent"
             style={{ pointerEvents:'all', cursor:'crosshair' }}
+            onPointerEnter={(event)=>data._onGripHover?.(event, { typ:'endpoint', edgeId:id, side })}
+            onPointerLeave={()=>data._onGripLeave?.()}
             onPointerDown={(event) => {
               event.stopPropagation();
               if (event.button === 0) data._onEndpointPointerDown?.(event, id, side);
@@ -144,7 +170,7 @@ export function FlowEdge({
             onContextMenu={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              data._onEndpointContextMenu?.(event, id, side);
+              data._onGripContextMenu?.(event, { typ:'endpoint', edgeId:id, side });
             }} />
           <circle cx={x} cy={y} r={endR} fill="white" stroke={color}
             strokeWidth={endStroke} pointerEvents="none" />

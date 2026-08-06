@@ -28,16 +28,19 @@ import { pairedHandleId, parallelWaypoints, roundedPolylinePath, splitRouteAtCor
 import { createHydraulicEdge, canStartHydraulicLine } from './schema/edgeFactory';
 import {
   ALIGN, BREAK, CONNECT_CORNER, DRAW_PIPE, HOME, MOVE, PLACE, STRETCH,
-  escape as escapeMode, finishCommand, initialMode,
+  befehlMerken, befehlsPrompt, befehlsVorschlaege, escape as escapeMode, finishCommand, initialMode,
+  letztenBefehlWiederholen,
   istBefehl, istModify, modeLabel, startCommand, toggleCommand, zeichnetLeitung,
 } from './schema/editorMode';
 import {
   constrainPoint, istBewussteDiagonale, laengeAusBuffer, laengeTaste, massAnker,
   massLabel, rasterPunkt as rasterAufGitter,
-  punktAusLaenge, segmentMassLabel,
+  POLAR_WINKEL, punktAusDynamischerEingabe, punktAusLaenge, richtungsWinkelGrad,
+  segmentLaenge, segmentMassLabel, winkelLabel,
 } from './schema/cadConstraints';
 import {
-  CORNER, ENDPOINT, GRID, MIDPOINT, NEAREST, PORT, fangStil, orthogonalerTStueckPunkt,
+  CORNER, ENDPOINT, GRID, MIDPOINT, NEAREST, PERPENDICULAR, PORT,
+  fangspurPunkt, fangStil, orthogonalerTStueckPunkt, senkrechterFang,
 } from './schema/cadSnap';
 import { SOLE_ROHRE, SOLE_TRAEGER } from './schema/soleTabellen';
 import {
@@ -49,7 +52,7 @@ import {
   abstandSegmentZuRechteck, abzweigPunkt, eckpunktWeiterziehen, endpunktWeiterziehen, fensterAus, labelVerschoben, labelVersatz,
   leitungMitLueckeTrennen, leitungenMitEckeVerbinden, leitungsSystem, leitungVerschieben,
   routeBereinigen, routeDehnen, routeSegmenteEntfernen,
-  segmentAusrichten, segmentVerschieben,
+  griffAktionen, loeschAuswahl, segmentAusrichten, segmentVerschieben, segmentVerschiebungDelta,
   entwurfFuerAbschluss, segmentZumVerschieben, verschiebungLabel,
 } from './schema/cadEdit';
 import {
@@ -280,9 +283,9 @@ function punktAnAchseSpiegeln(point, a, b) {
 const streckenLaenge = (points) => points.slice(1)
   .reduce((sum, point, index) => sum + Math.hypot(point.x - points[index].x, point.y - points[index].y), 0);
 
-function ConstrainedConnectionLine({ fromX, fromY, toX, toY, fromPosition, connectionLineStyle = {}, shift = false, ortho = true }) {
+function ConstrainedConnectionLine({ fromX, fromY, toX, toY, fromPosition, connectionLineStyle = {}, shift = false, ortho = true, polar = false, polarWinkel = 45 }) {
   const start = { x:fromX, y:fromY };
-  const target = constrainPoint(start, { x:toX, y:toY }, { ortho, shift, grid:1 });
+  const target = constrainPoint(start, { x:toX, y:toY }, { ortho, shift, grid:1, polar, polarWinkel });
   const route = adaptivePolyline(start, target, [], String(fromPosition || '').toLowerCase(), null);
   return <path d={roundedPolylinePath(route, 8)} fill="none"
     stroke={connectionLineStyle.stroke || '#64748b'} strokeWidth={2.5} strokeDasharray="8 5" />;
@@ -347,6 +350,9 @@ function CadDirektMass({ mass, zoom }) {
   const z = Math.max(zoom || 1, 0.05);
   const dx = mass.b.x - mass.a.x;
   const dy = mass.b.y - mass.a.y;
+  // Distanzhilfen sind im Schema ausnahmslos horizontal oder vertikal. Eine
+  // diagonale Restgeometrie wird lieber nicht gezeigt als irreführend.
+  if (Math.abs(dx) > 0.5 && Math.abs(dy) > 0.5) return null;
   const laenge = Math.hypot(dx, dy) || 1;
   const tx = dx / laenge;
   const ty = dy / laenge;
@@ -2387,6 +2393,8 @@ function EditorInner() {
   const [selected, setSelected]     = useState(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState(null);
   const [selectedEdgePoint, setSelectedEdgePoint] = useState(null);
+  const [selectedGripPoints, setSelectedGripPoints] = useState([]);
+  const selectedGripPointsRef = useRef([]);
   const [selectedEdgeSegment, setSelectedEdgeSegment] = useState(null); // { edgeId, segmentIndex }
   const [selectedSegments, setSelectedSegments] = useState([]); // mehrere { edgeId, segmentIndex }
   const [activeLayerId, setActiveLayerId] = useState('heizung_vl');
@@ -2460,6 +2468,9 @@ function EditorInner() {
   // Solange er nicht null ist, dürfen KEINE Shortcuts feuern.
   const [laengenPuffer, setLaengenPuffer] = useState(null);
   const laengenPufferRef = useRef(null);
+  const [winkelPuffer, setWinkelPuffer] = useState(null);
+  const winkelPufferRef = useRef(null);
+  const [dynamikFeld, setDynamikFeld] = useState('length');
   // Underlay: Hintergrund-Plan zum Nachzeichnen (§ Editor #5). Firmenweit im
   // Projekt gespeichert, aber getrennt vom Autosave des Graphen geladen.
   const [underlay, setUnderlay] = useState(null);
@@ -2471,10 +2482,23 @@ function EditorInner() {
   const [leitungsCursor, setLeitungsCursor] = useState(null);
   const [leitungsSnap, setLeitungsSnap] = useState(null);
   const [leitungsGuides, setLeitungsGuides] = useState([]);
+  const [aufgenommeneFangpunkte, setAufgenommeneFangpunkte] = useState([]);
+  const aufgenommeneFangpunkteRef = useRef([]);
+  const fangHoverRef = useRef(null);
+  const [fangOverride, setFangOverride] = useState(null);
+  const fangOverrideRef = useRef(null);
   const [segmentVerschiebung, setSegmentVerschiebung] = useState(null);
   const [griffMass, setGriffMass] = useState(null); // Mass beim Ziehen eines Eck-/Endpunkts
   const [endpointMenu, setEndpointMenu] = useState(null); // { x, y, edgeId, side }
   const [edgeMenu, setEdgeMenu] = useState(null); // { x, y, edgeId, point }
+  const [gripMenu, setGripMenu] = useState(null);
+  const gripMenuTimer = useRef(null);
+  const [paneMenu, setPaneMenu] = useState(null);
+  const [befehlszeile, setBefehlszeile] = useState('');
+  const [befehlszeileAktiv, setBefehlszeileAktiv] = useState(false);
+  const [letzteBefehle, setLetzteBefehle] = useState([]);
+  const letzteBefehleRef = useRef([]);
+  const wiederholeLetztenRef = useRef(() => false);
   const [markierteEdgeIds, setMarkierteEdgeIds] = useState([]);
   const [spiegelAchse, setSpiegelAchse] = useState(null); // { edgeId, start, cursor }
   // ── Notiz-Stecknadeln (Dominic 2026-07-31) ──────────────────────────────
@@ -2545,7 +2569,16 @@ function EditorInner() {
   useEffect(() => { spacePanRef.current = spacePan; }, [spacePan]);
   useEffect(() => { platzierVorschauRef.current = platzierVorschau; }, [platzierVorschau]);
   useEffect(() => { laengenPufferRef.current = laengenPuffer; }, [laengenPuffer]);
+  useEffect(() => { winkelPufferRef.current = winkelPuffer; }, [winkelPuffer]);
   useEffect(() => { leitungsCursorRef.current = leitungsCursor; }, [leitungsCursor]);
+  useEffect(() => { aufgenommeneFangpunkteRef.current = aufgenommeneFangpunkte; }, [aufgenommeneFangpunkte]);
+  useEffect(() => { fangOverrideRef.current = fangOverride; }, [fangOverride]);
+  useEffect(() => { letzteBefehleRef.current = letzteBefehle; }, [letzteBefehle]);
+  useEffect(() => { selectedGripPointsRef.current = selectedGripPoints; }, [selectedGripPoints]);
+  useEffect(() => {
+    if (istModify(editorMode)) return;
+    setLetzteBefehle(verlauf => befehlMerken(verlauf, editorMode));
+  }, [editorMode]);
 
   useEffect(() => {
     const down = (event) => { if (event.key === 'Shift') setShiftPressed(true); };
@@ -2949,7 +2982,10 @@ function EditorInner() {
   selectedEdgeIdRef.current = selectedEdgeId;
 
   const activeLayer = LEITUNGS_LAYER.find(layer => layer.id === activeLayerId) || LEITUNGS_LAYER[0];
-  const connectionLineRenderer = useCallback((props) => <ConstrainedConnectionLine {...props} shift={shiftPressed} ortho={orthoAn} />, [shiftPressed, orthoAn]);
+  const connectionLineRenderer = useCallback((props) => <ConstrainedConnectionLine {...props}
+    shift={shiftPressed} ortho={orthoAn} polar={drawingConfig.polar_snap}
+    polarWinkel={drawingConfig.polar_angle} />,
+  [drawingConfig.polar_angle, drawingConfig.polar_snap, shiftPressed, orthoAn]);
   const layerWaehlen = useCallback((layerId) => {
     const layer = LEITUNGS_LAYER.find(item => item.id === layerId);
     if (!layer) return;
@@ -3334,6 +3370,22 @@ function EditorInner() {
     return best;
   }, [routePunkte]);
 
+  const naechsterSenkrechtFang = useCallback((origin, cursor, layerId, radius = 18, excludedEdgeIds = new Set()) => {
+    if (!origin) return null;
+    let best = null;
+    edgesRef.current.forEach(edge => {
+      if (excludedEdgeIds.has(edge.id) || layerVonEdge(edge).id !== layerId) return;
+      const route = routePunkte(edge);
+      for (let segmentIndex = 0; segmentIndex < route.length - 1; segmentIndex += 1) {
+        const hit = senkrechterFang(origin, cursor, route[segmentIndex], route[segmentIndex + 1], radius);
+        if (hit && (!best || hit.distanz < best.distanz)) {
+          best = { ...hit, edge, route, segmentIndex, position:{ x:hit.x, y:hit.y }, type:'perpendicular', fangArt:'perpendicular' };
+        }
+      }
+    });
+    return best;
+  }, [routePunkte]);
+
   const naechsteSichtbareLeitung = useCallback((point, radius = 24) => {
     let best = null;
     edgesRef.current.forEach(edge => {
@@ -3349,9 +3401,7 @@ function EditorInner() {
     return best;
   }, [layerVisibility, routePunkte]);
 
-  // Punkt 9 — Mittelpunkt eines geraden Leitungssegments. PERPENDICULAR bleibt
-  // bewusst unimplementiert: ein halber Fang ist schlechter als keiner, und
-  // Port/Endpunkt/Mittelpunkt deckt den Alltag ab.
+  // Mittelpunkt eines geraden Leitungssegments.
   const naechsterMittelpunkt = useCallback((point, radius = 14, excludedEdgeIds = new Set()) => {
     let best = null;
     edgesRef.current.forEach(edge => {
@@ -3433,7 +3483,7 @@ function EditorInner() {
   // Ein Fang „auf der Leitung" — dazu gehört auch der Mittelpunkt. Beide teilen
   // die getroffene Leitung und erzeugen eine echte Verbindung. Der Unterschied
   // liegt nur in der Beschriftung des Markers.
-  const istLeitungsfang = (hit) => ['line', 'midpoint', 'corner'].includes(hit?.type);
+  const istLeitungsfang = (hit) => ['line', 'midpoint', 'corner', 'perpendicular'].includes(hit?.type);
 
   const leitungTeilen = useCallback((hit, junctionId, layerId) => {
     const host = hit.edge;
@@ -3553,6 +3603,11 @@ function EditorInner() {
     setLeitungsCursor(null);
     setLeitungsSnap(null);
     setLeitungsGuides([]);
+    setAufgenommeneFangpunkte([]);
+    setLaengenPuffer(null);
+    setWinkelPuffer(null);
+    setDynamikFeld('length');
+    setFangOverride(null);
   }, []);
 
   const leitungsEntwurfStarten = useCallback((startPoint, startEndpoint = null, options = {}) => {
@@ -3569,6 +3624,10 @@ function EditorInner() {
     leitungsCursorRef.current = startPoint;
     setLeitungsSnap(null);
     setLeitungsGuides([]);
+    setAufgenommeneFangpunkte([]);
+    setLaengenPuffer(null);
+    setWinkelPuffer(null);
+    setDynamikFeld('length');
     setSelected(null);
     setSelectedEdgeId(null);
     setEndpointMenu(null);
@@ -3594,6 +3653,7 @@ function EditorInner() {
   const leitungsEntwurfAbschliessen = useCallback((rawPoint, snapHit = null, shift = false) => {
     const draft = leitungsEntwurfRef.current;
     if (!draft || !rawPoint) return;
+    setFangOverride(null);
     const layer = LEITUNGS_LAYER.find(item => item.id === draft.layerId) || activeLayer;
     const startPoint = draft.startEndpoint
       ? handlePosition(draft.startEndpoint.nodeId, draft.startEndpoint.handleId)
@@ -3601,7 +3661,10 @@ function EditorInner() {
     const anchor = letzterEntwurfsPunkt(draft) || startPoint;
     const endPoint = snapHit
       ? { x:snapHit.x, y:snapHit.y }
-      : constrainPoint(anchor, rawPoint, { ortho:orthoAnRef.current, shift, grid:drawingConfig.grid_size });
+      : constrainPoint(anchor, rawPoint, {
+        ortho:orthoAnRef.current, shift, grid:drawingConfig.grid_size,
+        polar:drawingConfig.polar_snap, polarWinkel:drawingConfig.polar_angle,
+      });
     if (!startPoint || Math.hypot(endPoint.x - startPoint.x, endPoint.y - startPoint.y) < 2) return;
     const finalPoints = [...(draft.points || [])];
     // Ein exakter Fangpunkt darf keine zufällige leichte Schräge erzeugen.
@@ -3613,7 +3676,10 @@ function EditorInner() {
     if (connectionCorner) finalPoints.push(connectionCorner);
     const direkteDiagonale = finalPoints.length === 0
       && !connectionCorner
-      && istBewussteDiagonale(startPoint, endPoint);
+      && (istBewussteDiagonale(startPoint, endPoint)
+        || (drawingConfig.polar_snap
+          && Math.abs(endPoint.x - startPoint.x) > 0.5
+          && Math.abs(endPoint.y - startPoint.y) > 0.5));
 
     snap();
 
@@ -3768,14 +3834,27 @@ function EditorInner() {
     event.stopPropagation();
     const raw = screenToFlowPosition({ x:event.clientX, y:event.clientY });
     const draft = leitungsEntwurfRef.current;
+    // Beim Doppelklick setzt nur der erste Klick den letzten bewussten Punkt.
+    // Der zweite beendet; er darf wegen einer minimalen Mausbewegung kein
+    // zusätzliches Mini-Teilstück mehr erzeugen.
+    if (draft && event.detail >= 2) {
+      entwurfAmLetztenPunktAbschliessen();
+      return true;
+    }
     const layer = draft
       ? LEITUNGS_LAYER.find(item => item.id === draft.layerId) || activeLayer
       : activeLayer;
     const zoom = Math.max(getZoom(), 0.2);
     // SNAP aus (Statusleiste): nur Raster und Richtungs-Constraint, kein Objektfang.
     const fangAktiv = snapAnRef.current;
-    const portHit = fangAktiv ? naechsterBauteilAnschluss(raw, null, layer.role, 28 / zoom) : null;
-    const endpointHit = (!fangAktiv || portHit) ? null : naechsterFreierLeitungsEndpunkt(raw, layer.id, 16 / zoom, draft?.extendEdgeId);
+    const nur = fangOverrideRef.current;
+    if (nur) {
+      fangOverrideRef.current = null;
+      setFangOverride(null);
+    }
+    const erlaubt = (typ) => !nur || nur === typ;
+    const portHit = fangAktiv && erlaubt('port') ? naechsterBauteilAnschluss(raw, null, layer.role, 28 / zoom) : null;
+    const endpointHit = (!fangAktiv || portHit || !erlaubt('endpoint')) ? null : naechsterFreierLeitungsEndpunkt(raw, layer.id, 16 / zoom, draft?.extendEdgeId);
 
     if (!draft) {
       if (nurBeiAnschluss && !portHit && !endpointHit) return true;
@@ -3796,32 +3875,40 @@ function EditorInner() {
     const excludedEdges = draft.extendEdgeId ? new Set([draft.extendEdgeId]) : new Set();
     // Eckpunkt vor Mittelpunkt und Leitung: er ist der genaueste Punkt und der
     // einzige, den der Planer bewusst gesetzt hat.
-    const eckHit = fangAktiv ? naechsterEckpunkt(raw, 12 / zoom, excludedEdges) : null;
+    const eckHit = fangAktiv && erlaubt('corner') ? naechsterEckpunkt(raw, 12 / zoom, excludedEdges) : null;
     if (eckHit) {
       leitungsEntwurfAbschliessen(eckHit.position, { ...eckHit, type:'corner' }, event.shiftKey || shiftPressed);
       return true;
     }
-    const midHit = fangAktiv ? naechsterMittelpunkt(raw, 14 / zoom, excludedEdges) : null;
+    const midHit = fangAktiv && erlaubt('midpoint') ? naechsterMittelpunkt(raw, 14 / zoom, excludedEdges) : null;
     if (midHit) {
       leitungsEntwurfAbschliessen(midHit.position, { ...midHit, type:'midpoint' }, event.shiftKey || shiftPressed);
       return true;
     }
-    const lineHit = fangAktiv ? naechsteLeitung(raw, layer.id, 22 / zoom, excludedEdges) : null;
+    const previous = letzterEntwurfsPunkt(draft);
+    const perpendicularHit = fangAktiv && erlaubt('perpendicular')
+      ? naechsterSenkrechtFang(previous, raw, layer.id, 18 / zoom, excludedEdges)
+      : null;
+    if (perpendicularHit) {
+      leitungsEntwurfAbschliessen(perpendicularHit.position, perpendicularHit, event.shiftKey || shiftPressed);
+      return true;
+    }
+    const lineHit = fangAktiv && erlaubt('nearest') ? naechsteLeitung(raw, layer.id, 22 / zoom, excludedEdges) : null;
     if (lineHit) {
-      const previous = letzterEntwurfsPunkt(draft);
       const hit = tStueckHit(previous, raw, { ...lineHit, type:'line' });
       leitungsEntwurfAbschliessen(hit, hit, event.shiftKey || shiftPressed);
       return true;
     }
-    const previous = letzterEntwurfsPunkt(draft);
-    const alignment = objektAusrichtung(raw, fangAktiv ? [
-        ...objektFangpunkte,
-        ...(previous ? [{ ...previous, kind:'draft', priority:1000 }] : []),
-      ] : [], drawingConfig.snap_tolerance / zoom, drawingConfig.grid_size);
-    const point = constrainPoint(previous, alignment.point, {
+    const spur = fangAktiv ? fangspurPunkt(raw, [
+      ...aufgenommeneFangpunkteRef.current,
+      ...(previous ? [{ ...previous, kind:'draft' }] : []),
+    ], drawingConfig.snap_tolerance / zoom) : null;
+    const point = constrainPoint(previous, spur?.point || rasterPunkt(raw, drawingConfig.grid_size), {
       ortho:orthoAnRef.current,
       shift:event.shiftKey || shiftPressed,
       grid:drawingConfig.grid_size,
+      polar:drawingConfig.polar_snap,
+      polarWinkel:drawingConfig.polar_angle,
     });
     // Ein zweiter Klick auf denselben Punkt beendet die Leitung — dieselbe
     // Bewegung, die ein Doppelklick auslöst. Der Punkt liegt bereits im
@@ -3834,8 +3921,9 @@ function EditorInner() {
     const next = { ...draft, points:[...(draft.points || []), point] };
     leitungsEntwurfRef.current = next;
     setLeitungsEntwurf(next);
+    setFangOverride(null);
     return true;
-  }, [activeLayer, drawingConfig, entwurfAmLetztenPunktAbschliessen, getZoom, letzterEntwurfsPunkt, leitungsEntwurfAbschliessen, leitungsEntwurfStarten, naechsteLeitung, naechsterBauteilAnschluss, naechsterEckpunkt, naechsterFreierLeitungsEndpunkt, naechsterMittelpunkt, objektFangpunkte, screenToFlowPosition, shiftPressed]);
+  }, [activeLayer, drawingConfig, entwurfAmLetztenPunktAbschliessen, getZoom, letzterEntwurfsPunkt, leitungsEntwurfAbschliessen, leitungsEntwurfStarten, naechsteLeitung, naechsterBauteilAnschluss, naechsterEckpunkt, naechsterFreierLeitungsEndpunkt, naechsterMittelpunkt, naechsterSenkrechtFang, screenToFlowPosition, shiftPressed]);
 
   // Doppelklick beendet die laufende Leitung. Der zweite Klick des Doppelklicks
   // schliesst sie meist schon über die Punktgleichheit oben ab; landet er durch
@@ -3910,7 +3998,28 @@ function EditorInner() {
       const layer = LEITUNGS_LAYER.find(item => item.id === draft.layerId) || activeLayer;
       const zoom = Math.max(getZoom(), 0.2);
       const fangAktiv = snapAnRef.current;
-      const portHit = fangAktiv ? naechsterBauteilAnschluss(raw, null, layer.role, 28 / zoom) : null;
+      const nur = fangOverrideRef.current;
+      const erlaubt = (typ) => !nur || nur === typ;
+      if (fangAktiv) {
+        const radius = 12 / zoom;
+        const kandidat = objektFangpunkte.reduce((beste, punkt) => {
+          const distanz = Math.hypot(raw.x - punkt.x, raw.y - punkt.y);
+          return distanz <= radius && (!beste || distanz < beste.distanz)
+            ? { ...punkt, distanz } : beste;
+        }, null);
+        const key = kandidat ? `${kandidat.kind}:${kandidat.nodeId || kandidat.edgeId || ''}:${kandidat.x}:${kandidat.y}` : null;
+        if (!key) fangHoverRef.current = null;
+        else if (fangHoverRef.current?.key !== key) fangHoverRef.current = { key, seit:performance.now(), punkt:kandidat };
+        else if (performance.now() - fangHoverRef.current.seit >= 320) {
+          const punkt = fangHoverRef.current.punkt;
+          setAufgenommeneFangpunkte(aktuell => aktuell.some(item => item.key === key)
+            ? aktuell : [...aktuell.slice(-1), { ...punkt, key }]);
+        }
+      } else {
+        fangHoverRef.current = null;
+        setAufgenommeneFangpunkte([]);
+      }
+      const portHit = fangAktiv && erlaubt('port') ? naechsterBauteilAnschluss(raw, null, layer.role, 28 / zoom) : null;
       if (portHit) {
         leitungsCursorRef.current = portHit.position;
         setLeitungsCursor(portHit.position);
@@ -3928,7 +4037,7 @@ function EditorInner() {
         }] : []);
         return;
       }
-      const endpointHit = fangAktiv ? naechsterFreierLeitungsEndpunkt(raw, layer.id, 16 / zoom, draft.extendEdgeId) : null;
+      const endpointHit = fangAktiv && erlaubt('endpoint') ? naechsterFreierLeitungsEndpunkt(raw, layer.id, 16 / zoom, draft.extendEdgeId) : null;
       if (endpointHit) {
         leitungsCursorRef.current = endpointHit.position;
         setLeitungsCursor(endpointHit.position);
@@ -3938,7 +4047,7 @@ function EditorInner() {
         return;
       }
       const excludedEdges = draft.extendEdgeId ? new Set([draft.extendEdgeId]) : new Set();
-      const eckHit = fangAktiv ? naechsterEckpunkt(raw, 12 / zoom, excludedEdges) : null;
+      const eckHit = fangAktiv && erlaubt('corner') ? naechsterEckpunkt(raw, 12 / zoom, excludedEdges) : null;
       if (eckHit) {
         leitungsCursorRef.current = eckHit.position;
         setLeitungsCursor(eckHit.position);
@@ -3947,7 +4056,7 @@ function EditorInner() {
         fangProtokoll('cursor', 'corner', eckHit.position, { edgeId:eckHit.edgeId });
         return;
       }
-      const midHit = fangAktiv ? naechsterMittelpunkt(raw, 14 / zoom, excludedEdges) : null;
+      const midHit = fangAktiv && erlaubt('midpoint') ? naechsterMittelpunkt(raw, 14 / zoom, excludedEdges) : null;
       if (midHit) {
         leitungsCursorRef.current = midHit.position;
         setLeitungsCursor(midHit.position);
@@ -3956,9 +4065,24 @@ function EditorInner() {
         fangProtokoll('cursor', 'midpoint', midHit.position, { edgeId:midHit.edgeId });
         return;
       }
-      const lineHit = fangAktiv ? naechsteLeitung(raw, layer.id, 22 / zoom, excludedEdges) : null;
+      const previous = letzterEntwurfsPunkt(draft);
+      const perpendicularHit = fangAktiv && erlaubt('perpendicular')
+        ? naechsterSenkrechtFang(previous, raw, layer.id, 18 / zoom, excludedEdges)
+        : null;
+      if (perpendicularHit) {
+        const point = perpendicularHit.position;
+        leitungsCursorRef.current = point;
+        setLeitungsCursor(point);
+        setLeitungsSnap(perpendicularHit);
+        const orthogonal = previous && (Math.abs(previous.x - point.x) < 0.5 || Math.abs(previous.y - point.y) < 0.5);
+        setLeitungsGuides(orthogonal ? [{
+          x1:previous.x, y1:previous.y, x2:point.x, y2:point.y, snapType:'perpendicular',
+        }] : []);
+        fangProtokoll('cursor', 'perpendicular', point, { edgeId:perpendicularHit.edge?.id });
+        return;
+      }
+      const lineHit = fangAktiv && erlaubt('nearest') ? naechsteLeitung(raw, layer.id, 22 / zoom, excludedEdges) : null;
       if (lineHit) {
-        const previous = letzterEntwurfsPunkt(draft);
         const hit = tStueckHit(previous, raw, { ...lineHit, type:'line' });
         const point = { x:hit.x, y:hit.y };
         leitungsCursorRef.current = point;
@@ -3968,23 +4092,24 @@ function EditorInner() {
         fangProtokoll('cursor', 'nearest', point, { edgeId:hit.edge?.id });
         return;
       }
-      const previous = letzterEntwurfsPunkt(draft);
-      const alignment = objektAusrichtung(raw, fangAktiv ? [
-          ...objektFangpunkte,
-          ...(previous ? [{ ...previous, kind:'draft', priority:1000 }] : []),
-        ] : [], drawingConfig.snap_tolerance / zoom, drawingConfig.grid_size);
-      const point = constrainPoint(previous, alignment.point, {
+      const spur = fangAktiv ? fangspurPunkt(raw, [
+        ...aufgenommeneFangpunkteRef.current,
+        ...(previous ? [{ ...previous, kind:'draft' }] : []),
+      ], drawingConfig.snap_tolerance / zoom) : null;
+      const point = constrainPoint(previous, spur?.point || rasterPunkt(raw, drawingConfig.grid_size), {
         ortho:orthoAnRef.current,
         shift:event.shiftKey || shiftPressed,
         grid:drawingConfig.grid_size,
+        polar:drawingConfig.polar_snap,
+        polarWinkel:drawingConfig.polar_angle,
       });
       leitungsCursorRef.current = point;
       setLeitungsCursor(point);
       setLeitungsSnap(null);
-      setLeitungsGuides(guidesAmPunkt(alignment.guides, point));
+      setLeitungsGuides(guidesAmPunkt(spur?.guides, point));
       fangProtokoll('cursor', lineHit ? 'nearest' : 'grid', point);
     });
-  }, [activeLayer, fangProtokoll, drawingConfig.grid_size, drawingConfig.snap_tolerance, getZoom, letzterEntwurfsPunkt, naechsteLeitung, naechsterBauteilAnschluss, naechsterEckpunkt, naechsterFreierLeitungsEndpunkt, naechsterMittelpunkt, objektFangpunkte, screenToFlowPosition, shiftPressed]);
+  }, [activeLayer, fangProtokoll, drawingConfig.grid_size, drawingConfig.polar_angle, drawingConfig.polar_snap, drawingConfig.snap_tolerance, getZoom, letzterEntwurfsPunkt, naechsteLeitung, naechsterBauteilAnschluss, naechsterEckpunkt, naechsterFreierLeitungsEndpunkt, naechsterMittelpunkt, naechsterSenkrechtFang, objektFangpunkte, screenToFlowPosition, shiftPressed]);
 
   const cadEntwurfRoute = (() => {
     if (!leitungsEntwurf) return [];
@@ -3992,11 +4117,19 @@ function EditorInner() {
       ? handlePosition(leitungsEntwurf.startEndpoint.nodeId, leitungsEntwurf.startEndpoint.handleId)
       : leitungsEntwurf.startPoint;
     const previous = leitungsEntwurf.points.at(-1) || start;
+    const dynamischeVorschau = drawingConfig.dynamic_input && leitungsCursor
+      ? punktAusDynamischerEingabe(previous, leitungsCursor, {
+        laenge:laengenPuffer,
+        winkel:winkelPuffer,
+        ortho:orthoAn,
+        shift:shiftPressed,
+        polar:drawingConfig.polar_snap,
+        polarWinkel:drawingConfig.polar_angle,
+      })
+      : null;
     const preview = leitungsSnap
       ? { x:leitungsSnap.x, y:leitungsSnap.y }
-      : leitungsCursor
-        ? leitungsCursor
-        : null;
+      : (dynamischeVorschau || leitungsCursor || null);
     if (!start || !preview) return [];
     const connectionCorner = leitungsSnap && !istBewussteDiagonale(previous, preview)
       ? orthogonalerAnschlussEckpunkt(previous, preview, leitungsSnap.handlePosition)
@@ -4007,7 +4140,10 @@ function EditorInner() {
     const targetSide = leitungsSnap?.type === 'port' ? leitungsSnap.handlePosition : null;
     const direkteDiagonale = !(leitungsEntwurf.points || []).length
       && !connectionCorner
-      && istBewussteDiagonale(start, preview);
+      && (istBewussteDiagonale(start, preview)
+        || (drawingConfig.polar_snap
+          && Math.abs(preview.x - start.x) > 0.5
+          && Math.abs(preview.y - start.y) > 0.5));
     return adaptivePolyline(
       start,
       preview,
@@ -4030,8 +4166,24 @@ function EditorInner() {
     const abstand = 22 / Math.max(zoomAnzeige, 0.05);
     const anker = massAnker(a, b, abstand);
     if (!anker?.laenge) return null;
-    return { ...anker, a, b, label:segmentMassLabel(a, b) };
-  }, [cadEntwurfRoute, zoomAnzeige]);
+    const label = drawingConfig.polar_snap
+      ? `${massLabel(segmentLaenge(a, b))} · ${winkelLabel(richtungsWinkelGrad(a, b))}`
+      : segmentMassLabel(a, b);
+    return { ...anker, a, b, label };
+  }, [cadEntwurfRoute, drawingConfig.polar_snap, zoomAnzeige]);
+
+  const dynamikAnzeige = useMemo(() => {
+    if (!drawingConfig.dynamic_input || !leitungsEntwurf || !leitungsCursor || !cadMass) return null;
+    const winkel = richtungsWinkelGrad(cadMass.a, cadMass.b);
+    return {
+      x:leitungsCursor.x,
+      y:leitungsCursor.y,
+      laenge:laengenPuffer !== null ? laengenPuffer : String(Math.round(segmentLaenge(cadMass.a, cadMass.b))),
+      winkel:winkelPuffer !== null ? winkelPuffer : String(Math.round((winkel ?? 0) * 10) / 10),
+      feld:dynamikFeld,
+      prompt:befehlsPrompt(editorMode, { hasDraft:Boolean(leitungsEntwurf) }),
+    };
+  }, [cadMass, drawingConfig.dynamic_input, dynamikFeld, editorMode, laengenPuffer, leitungsCursor, leitungsEntwurf, winkelPuffer]);
 
   // Punkt 5 — den intern gefundenen Fang auf einen CAD-Fangtyp abbilden. Das ist
   // die EINZIGE Stelle, an der die Darstellung entsteht; Koordinate und Marker
@@ -4054,6 +4206,8 @@ function EditorInner() {
             ? CORNER
             : leitungsSnap.type === 'midpoint'
               ? MIDPOINT
+              : leitungsSnap.type === 'perpendicular'
+                ? PERPENDICULAR
               : leitungsSnap.type === 'line'
                 ? NEAREST
                 : ENDPOINT;
@@ -4066,16 +4220,22 @@ function EditorInner() {
 
   // Punkt 8 — getippte Länge übernehmen. Die Richtung kommt aus der aktuellen
   // Vorschau, die Länge aus der Tastatur: exakt wie in Revit/AutoCAD.
-  const laengeAnwenden = useCallback((buffer) => {
+  const laengeAnwenden = useCallback((buffer, angleBuffer = winkelPufferRef.current) => {
     const laenge = laengeAusBuffer(buffer);
+    const winkel = angleBuffer !== null && angleBuffer !== '' ? Number.parseFloat(angleBuffer) : null;
     const draft = leitungsEntwurfRef.current;
     setLaengenPuffer(null);
-    if (!laenge || !draft) return;
+    setWinkelPuffer(null);
+    if ((!laenge && !Number.isFinite(winkel)) || !draft) return;
     const origin = letzterEntwurfsPunkt(draft);
     const richtung = leitungsCursorRef.current;
-    const ziel = punktAusLaenge(origin, richtung, laenge, {
+    const ziel = punktAusDynamischerEingabe(origin, richtung, {
+      laenge,
+      winkel,
       ortho:orthoAnRef.current,
       shift:shiftPressed,
+      polar:drawingConfig.polar_snap,
+      polarWinkel:drawingConfig.polar_angle,
     });
     // Ohne brauchbare Richtung wird nichts erfunden — der Entwurf bleibt offen.
     if (!ziel) return;
@@ -4086,7 +4246,7 @@ function EditorInner() {
     setLeitungsCursor(ziel);
     setLeitungsSnap(null);
     setLeitungsGuides([]);
-  }, [letzterEntwurfsPunkt, shiftPressed]);
+  }, [drawingConfig.polar_angle, drawingConfig.polar_snap, letzterEntwurfsPunkt, shiftPressed]);
 
   const punktHinzufuegen = useCallback((event, edgeId) => {
     event.preventDefault();
@@ -4128,10 +4288,31 @@ function EditorInner() {
     }));
   }, [routePunkte, setEdges, snap]);
 
+  const griffPunktWaehlen = useCallback((event, edgeId, pointIndex) => {
+    const griff = { edgeId, pointIndex };
+    const erweitert = event?.shiftKey || event?.metaKey || event?.ctrlKey;
+    setSelectedGripPoints(aktuell => {
+      const vorhanden = aktuell.some(item => item.edgeId === edgeId && item.pointIndex === pointIndex);
+      if (!erweitert) return [griff];
+      return vorhanden
+        ? aktuell.filter(item => item.edgeId !== edgeId || item.pointIndex !== pointIndex)
+        : [...aktuell, griff];
+    });
+    setSelectedEdgePoint(griff);
+  }, []);
+
   const punktDragStart = useCallback((event, edgeId, pointIndex) => {
     event.preventDefault();
     snap();
-    setSelectedEdgePoint({ edgeId, pointIndex });
+    const geklickt = { edgeId, pointIndex };
+    const erweitert = event.shiftKey || event.metaKey || event.ctrlKey;
+    const vorhanden = selectedGripPointsRef.current.some(item => item.edgeId === edgeId && item.pointIndex === pointIndex);
+    const auswahl = erweitert
+      ? (vorhanden ? selectedGripPointsRef.current : [...selectedGripPointsRef.current, geklickt])
+      : (vorhanden && selectedGripPointsRef.current.length > 1 ? selectedGripPointsRef.current : [geklickt]);
+    selectedGripPointsRef.current = auswahl;
+    setSelectedGripPoints(auswahl);
+    setSelectedEdgePoint(geklickt);
     const edge = edgesRef.current.find(item => item.id === edgeId);
     if (!edge) return;
     const route = routePunkte(edge);
@@ -4142,12 +4323,18 @@ function EditorInner() {
       pointIndex,
       route,
       origin:route[routeIndex - 1],
+      pointer:screenToFlowPosition({ x:event.clientX, y:event.clientY }),
+      multi:auswahl,
+      routes:new Map([...new Set(auswahl.map(item => item.edgeId))].map(id => {
+        const item = edgesRef.current.find(edgeItem => edgeItem.id === id);
+        return [id, item ? routePunkte(item) : []];
+      })),
     };
     setGriffMass(null);
     setEdges(items => items.map(item => item.id === edgeId
       ? { ...item, data:{ ...(item.data || {}), cad_polyline:true, points } }
       : item));
-  }, [routePunkte, setEdges, snap]);
+  }, [routePunkte, screenToFlowPosition, setEdges, snap]);
 
   const segmentDragStart = useCallback((event, edgeId) => {
     const edge = edgesRef.current.find(item => item.id === edgeId);
@@ -4163,7 +4350,14 @@ function EditorInner() {
     if (!best) return;
     event.preventDefault();
     snap();
-    const vorbereitet = segmentZumVerschieben(route, best.segmentIndex);
+    const frei = (nodeId) => {
+      const node = nodesRef.current.find(item => item.id === nodeId);
+      const grad = edgesRef.current.filter(item => item.source === nodeId || item.target === nodeId).length;
+      return node?.type === 'junction' && node.data?.cad_anchor && grad === 1;
+    };
+    const startFrei = best.segmentIndex === 0 && frei(edge.source);
+    const endFrei = best.segmentIndex === route.length - 2 && frei(edge.target);
+    const vorbereitet = segmentZumVerschieben(route, best.segmentIndex, { startFrei, endFrei });
     if (!vorbereitet) return;
     setSelectedEdgeId(edgeId);
     setSelectedEdgeSegment({ edgeId, segmentIndex:best.segmentIndex });
@@ -4173,6 +4367,10 @@ function EditorInner() {
       edgeId,
       pointer:raw,
       segmentIndex:best.segmentIndex,
+      sourceNodeId:startFrei ? edge.source : null,
+      targetNodeId:endFrei ? edge.target : null,
+      sourcePosition:startFrei ? { ...route[0] } : null,
+      targetPosition:endFrei ? { ...route.at(-1) } : null,
       ...vorbereitet,
     };
   }, [routePunkte, screenToFlowPosition, snap]);
@@ -4180,7 +4378,15 @@ function EditorInner() {
   const segmentNumerischVerschieben = useCallback((edgeId, segmentIndex, dxCm, dyCm) => {
     const edge = edgesRef.current.find(item => item.id === edgeId);
     if (!edge || !Number.isInteger(segmentIndex)) return;
-    const vorbereitet = segmentZumVerschieben(routePunkte(edge), segmentIndex);
+    const route = routePunkte(edge);
+    const frei = (nodeId) => {
+      const node = nodesRef.current.find(item => item.id === nodeId);
+      return node?.type === 'junction' && node.data?.cad_anchor
+        && edgesRef.current.filter(item => item.source === nodeId || item.target === nodeId).length === 1;
+    };
+    const startFrei = segmentIndex === 0 && frei(edge.source);
+    const endFrei = segmentIndex === route.length - 2 && frei(edge.target);
+    const vorbereitet = segmentZumVerschieben(route, segmentIndex, { startFrei, endFrei });
     if (!vorbereitet) return;
     const delta = { x:(Number(dxCm) || 0) * 10, y:(Number(dyCm) || 0) * 10 };
     if (!delta.x && !delta.y) return;
@@ -4189,11 +4395,20 @@ function EditorInner() {
       vorbereitet.points, vorbereitet.pointIndexes, vorbereitet.orientation, delta,
       { grid:1, direction:vorbereitet.direction, axisLocked:true },
     );
+    const bewegt = segmentVerschiebungDelta(vorbereitet.orientation, delta,
+      { grid:1, direction:vorbereitet.direction, axisLocked:true });
+    if (vorbereitet.moveStart || vorbereitet.moveEnd) {
+      setNodes(items => items.map(node => {
+        if (vorbereitet.moveStart && node.id === edge.source) return { ...node, position:{ x:route[0].x + bewegt.x, y:route[0].y + bewegt.y } };
+        if (vorbereitet.moveEnd && node.id === edge.target) return { ...node, position:{ x:route.at(-1).x + bewegt.x, y:route.at(-1).y + bewegt.y } };
+        return node;
+      }));
+    }
     setEdges(items => items.map(item => item.id === edgeId
       ? { ...item, data:{ ...(item.data || {}), cad_polyline:true, points } }
       : item));
     setSegmentVerschiebung({ edgeId, segmentIndex, delta, active:false });
-  }, [routePunkte, setEdges, snap]);
+  }, [routePunkte, setEdges, setNodes, snap]);
 
   useEffect(() => {
     const move = (event) => {
@@ -4207,18 +4422,21 @@ function EditorInner() {
         { x:raw.x - drag.pointer.x, y:raw.y - drag.pointer.y },
         { grid:drawingConfig.grid_size, direction:drag.direction, axisLocked:true },
       );
-      const frei = {
-        x:Math.round((raw.x - drag.pointer.x) / drawingConfig.grid_size) * drawingConfig.grid_size,
-        y:Math.round((raw.y - drag.pointer.y) / drawingConfig.grid_size) * drawingConfig.grid_size,
-      };
-      const delta = drag.orientation === 'horizontal' ? { x:0, y:frei.y }
-        : drag.orientation === 'vertical' ? { x:frei.x, y:0 }
-        : frei;
+      const delta = segmentVerschiebungDelta(drag.orientation,
+        { x:raw.x - drag.pointer.x, y:raw.y - drag.pointer.y },
+        { grid:drawingConfig.grid_size, direction:drag.direction, axisLocked:true });
       if (edgePointFrame.current) cancelAnimationFrame(edgePointFrame.current);
       edgePointFrame.current = requestAnimationFrame(() => {
         setEdges(items => items.map(item => item.id === drag.edgeId
           ? { ...item, data:{ ...(item.data || {}), cad_polyline:true, points:nextPoints } }
           : item));
+        if (drag.moveStart || drag.moveEnd) {
+          setNodes(items => items.map(node => {
+            if (drag.moveStart && node.id === drag.sourceNodeId) return { ...node, position:{ x:drag.sourcePosition.x + delta.x, y:drag.sourcePosition.y + delta.y } };
+            if (drag.moveEnd && node.id === drag.targetNodeId) return { ...node, position:{ x:drag.targetPosition.x + delta.x, y:drag.targetPosition.y + delta.y } };
+            return node;
+          }));
+        }
         setSegmentVerschiebung({ edgeId:drag.edgeId, segmentIndex:drag.segmentIndex, delta, active:true });
       });
     };
@@ -4234,13 +4452,31 @@ function EditorInner() {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
     };
-  }, [drawingConfig.grid_size, leitungNormalisieren, screenToFlowPosition, setEdges]);
+  }, [drawingConfig.grid_size, leitungNormalisieren, screenToFlowPosition, setEdges, setNodes]);
 
   useEffect(() => {
     const move = (event) => {
       const drag = edgePointDrag.current;
       if (!drag) return;
       const raw = screenToFlowPosition({ x:event.clientX, y:event.clientY });
+      if (drag.multi?.length > 1) {
+        const delta = {
+          x:Math.round((raw.x - drag.pointer.x) / drawingConfig.grid_size) * drawingConfig.grid_size,
+          y:Math.round((raw.y - drag.pointer.y) / drawingConfig.grid_size) * drawingConfig.grid_size,
+        };
+        if (edgePointFrame.current) cancelAnimationFrame(edgePointFrame.current);
+        edgePointFrame.current = requestAnimationFrame(() => {
+          setEdges(items => items.map(item => {
+            const original = drag.routes.get(item.id);
+            if (!original?.length) return item;
+            const indexe = new Set(drag.multi.filter(griff => griff.edgeId === item.id).map(griff => griff.pointIndex));
+            const points = original.slice(1, -1).map((punkt, index) => indexe.has(index)
+              ? { x:punkt.x + delta.x, y:punkt.y + delta.y } : punkt);
+            return { ...item, data:{ ...(item.data || {}), cad_polyline:true, points } };
+          }));
+        });
+        return;
+      }
       // Dieselbe Regel wie beim Zeichnen: achsnah exakt 0/90°, erst eine
       // bewusste Abweichung ab 30° bleibt schräg. Der Bezugspunkt bleibt für
       // den ganzen Drag stabil und wandert nicht mit dem bereits gesetzten
@@ -4269,7 +4505,9 @@ function EditorInner() {
       const beendet = edgePointDrag.current;
       edgePointDrag.current = null;
       setGriffMass(null);
-      if (beendet?.edgeId) leitungNormalisieren(beendet.edgeId);
+      if (beendet?.multi?.length > 1) {
+        [...new Set(beendet.multi.map(item => item.edgeId))].forEach(leitungNormalisieren);
+      } else if (beendet?.edgeId) leitungNormalisieren(beendet.edgeId);
     };
     window.addEventListener('pointermove', move, { passive:true });
     window.addEventListener('pointerup', up);
@@ -4900,19 +5138,21 @@ function EditorInner() {
   const auswahlLoeschen = useCallback(() => {
     const knotenIds = new Set(nodesRef.current.filter(node => node.selected).map(node => node.id));
     if (selected) knotenIds.add(selected.id);
-    const ganzeIds = new Set([
+    const roheGanzeIds = [
       ...markierteEdgeIds,
       ...edgesRef.current.filter(edge => edge.selected).map(edge => edge.id),
-    ]);
+    ];
     const teile = selectedSegments.length ? selectedSegments
       : selectedEdgeSegment ? [selectedEdgeSegment] : [];
-    if (!knotenIds.size && !ganzeIds.size && !teile.length) return false;
+    const normalisiert = loeschAuswahl(roheGanzeIds, teile);
+    const ganzeIds = new Set(normalisiert.ganzeEdgeIds);
+    if (!knotenIds.size && !ganzeIds.size && !normalisiert.segmente.length) return false;
     snap();
     let nextEdges = edgesRef.current.filter(edge => !ganzeIds.has(edge.id)
       && !knotenIds.has(edge.source) && !knotenIds.has(edge.target));
     let nextNodes = nodesRef.current.filter(node => !knotenIds.has(node.id));
     const gruppiert = new Map();
-    teile.forEach(item => {
+    normalisiert.segmente.forEach(item => {
       if (!gruppiert.has(item.edgeId)) gruppiert.set(item.edgeId, []);
       gruppiert.get(item.edgeId).push(item.segmentIndex);
     });
@@ -4932,6 +5172,67 @@ function EditorInner() {
     setSelectedEdgeSegment(null); setSelectedSegments([]); setMarkierteEdgeIds([]);
     return true;
   }, [leitungDurchRoutenErsetzen, markierteEdgeIds, routePunkte, selected, selectedEdgeSegment, selectedSegments, setEdges, setNodes, snap]);
+
+  const eckpunktTeilen = useCallback((edgeId, pointIndex) => {
+    const edge = edgesRef.current.find(item => item.id === edgeId);
+    const route = edge ? routePunkte(edge) : [];
+    const routeIndex = pointIndex + 1;
+    if (!edge || routeIndex <= 0 || routeIndex >= route.length - 1) return;
+    const layer = layerVonEdge(edge);
+    const junctionId = newId();
+    const zweiteId = newId();
+    const data = { ...(edge.data || {}) };
+    delete data.laenge_m; delete data.paired_edge_id;
+    snap();
+    const erste = {
+      ...edge, target:junctionId, targetHandle:'center-target', selected:false,
+      data:{ ...data, cad_polyline:true, points:route.slice(1, routeIndex) },
+    };
+    const zweite = createHydraulicEdge({
+      id:zweiteId, source:junctionId, sourceHandle:'center-source',
+      target:edge.target, targetHandle:edge.targetHandle,
+      layerId:layer.id, layerColor:layer.color,
+      points:route.slice(routeIndex + 1, -1), cornerRadius:drawingConfig.corner_radius,
+      startPoint:route[routeIndex], endPoint:route.at(-1),
+    }, edgesRef.current.filter(item => item.id !== edgeId));
+    if (!zweite) return;
+    setNodes(items => [...items, cadAnker(junctionId, route[routeIndex], layer)]);
+    setEdges(items => [...items.filter(item => item.id !== edgeId), erste, {
+      ...zweite, data:{ ...data, ...(zweite.data || {}), points:route.slice(routeIndex + 1, -1) },
+    }]);
+    setSelectedEdgePoint(null); setSelectedGripPoints([]);
+  }, [cadAnker, drawingConfig.corner_radius, routePunkte, setEdges, setNodes, snap]);
+
+  const segmentLaengeSetzen = useCallback((edgeId, segmentIndex) => {
+    const edge = edgesRef.current.find(item => item.id === edgeId);
+    const route = edge ? routePunkte(edge) : [];
+    const a = route[segmentIndex];
+    const b = route[segmentIndex + 1];
+    if (!a || !b) return;
+    const aktuell = Math.round(Math.hypot(b.x - a.x, b.y - a.y));
+    const eingabe = window.prompt('Teilstücklänge in mm', String(aktuell));
+    if (eingabe === null) return;
+    const laenge = Number.parseFloat(String(eingabe).replace(',', '.'));
+    if (!(laenge > 0)) { setBefehlHinweis('Die Länge muss grösser als 0 mm sein.'); return; }
+    const norm = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    const ziel = { x:a.x + (b.x - a.x) / norm * laenge, y:a.y + (b.y - a.y) / norm * laenge };
+    snap();
+    if (segmentIndex + 1 === route.length - 1) {
+      const node = nodesRef.current.find(item => item.id === edge.target);
+      const grad = edgesRef.current.filter(item => item.source === edge.target || item.target === edge.target).length;
+      if (node?.type === 'junction' && node.data?.cad_anchor && grad === 1) {
+        setNodes(items => items.map(item => item.id === edge.target ? { ...item, position:ziel } : item));
+      } else {
+        setEdges(items => items.map(item => item.id === edgeId
+          ? { ...item, data:{ ...(item.data || {}), points:[...route.slice(1, -1), ziel] } } : item));
+      }
+    } else {
+      const points = route.slice(1, -1);
+      points[segmentIndex] = ziel;
+      setEdges(items => items.map(item => item.id === edgeId
+        ? { ...item, data:{ ...(item.data || {}), cad_polyline:true, points } } : item));
+    }
+  }, [routePunkte, setEdges, setNodes, snap]);
 
   // ── Dehnen (AutoCAD STRETCH) ─────────────────────────────────────────────
   // Fenster aufziehen, Basispunkt, Zielpunkt: was im Fenster liegt, wandert;
@@ -5077,6 +5378,21 @@ function EditorInner() {
     });
   }, [screenToFlowPosition]);
 
+  const griffMenuOeffnen = useCallback((event, griff, sofort = false) => {
+    if (gripMenuTimer.current) clearTimeout(gripMenuTimer.current);
+    const menu = { ...griff, x:event.clientX, y:event.clientY };
+    if (sofort) setGripMenu(menu);
+    else gripMenuTimer.current = setTimeout(() => setGripMenu(menu), 420);
+  }, []);
+  const griffHover = useCallback((event, griff) => griffMenuOeffnen(event, griff, false), [griffMenuOeffnen]);
+  const griffVerlassen = useCallback(() => {
+    if (gripMenuTimer.current) clearTimeout(gripMenuTimer.current);
+  }, []);
+  const griffContextMenu = useCallback((event, griff) => {
+    setEndpointMenu(null); setEdgeMenu(null);
+    griffMenuOeffnen(event, griff, true);
+  }, [griffMenuOeffnen]);
+
   useEffect(() => {
     const punktFuerEvent = (event, drag) => {
       const raw = screenToFlowPosition({ x:event.clientX, y:event.clientY });
@@ -5176,6 +5492,49 @@ function EditorInner() {
     };
   }, [drawingConfig.grid_size, getZoom, leitungTeilen, naechsteLeitung, naechsterBauteilAnschluss, screenToFlowPosition, setEdges, setNodes]);
 
+  const befehlsEintraege = useMemo(() => [
+    { id:DRAW_PIPE, type:DRAW_PIPE, taste:drawingConfig.shortcut_line, name:'Leitung zeichnen' },
+    { id:`${DRAW_PIPE}-polyline`, type:DRAW_PIPE, taste:drawingConfig.shortcut_polyline, name:'Polylinie zeichnen' },
+    { id:MOVE, type:MOVE, taste:drawingConfig.shortcut_move, name:'Verschieben' },
+    { id:ALIGN, type:ALIGN, taste:drawingConfig.shortcut_align, name:'Ausrichten' },
+    { id:BREAK, type:BREAK, taste:drawingConfig.shortcut_break, name:'Mit Lücke trennen' },
+    { id:STRETCH, type:STRETCH, taste:drawingConfig.shortcut_stretch, name:'Dehnen' },
+    { id:CONNECT_CORNER, type:CONNECT_CORNER, taste:'tr', name:'Ecke verbinden' },
+    { id:'rotate', taste:drawingConfig.shortcut_rotate, name:'Drehen' },
+    { id:'mirror-node', taste:drawingConfig.shortcut_mirror, name:'Spiegeln' },
+  ], [drawingConfig]);
+
+  const befehlAusfuehren = useCallback((befehl) => {
+    const id = befehl?.type || befehl?.id;
+    if (!id) return false;
+    setPaneMenu(null); setBefehlszeile(''); setBefehlszeileAktiv(false);
+    if (id === DRAW_PIPE) {
+      setSelected(null); setSelectedEdgeId(null);
+      setEditorMode(startCommand(DRAW_PIPE));
+      return true;
+    }
+    if (id === MOVE) { verschiebenStarten(false); return true; }
+    if (id === ALIGN) { ausrichtenUmschalten(); return true; }
+    if (id === BREAK) { trennenStarten(); return true; }
+    if (id === STRETCH) { dehnenStarten(); return true; }
+    if (id === CONNECT_CORNER) { eckeVerbindenStarten(); return true; }
+    if (id === PLACE && befehl.payload?.nodeType) {
+      setEditorMode(startCommand(PLACE, { payload:befehl.payload }));
+      return true;
+    }
+    if (id === 'rotate' && selected && ROTATABLE.has(selected.type)) { rotateNode(selected.id); return true; }
+    if (id === 'mirror-node' && selected && ROTATABLE.has(selected.type)) { mirrorNode(selected.id); return true; }
+    setBefehlHinweis('Für diesen Befehl zuerst ein passendes Element wählen.');
+    return false;
+  }, [ausrichtenUmschalten, dehnenStarten, eckeVerbindenStarten, mirrorNode, rotateNode, selected, trennenStarten, verschiebenStarten]);
+
+  wiederholeLetztenRef.current = () => {
+    const mode = letztenBefehlWiederholen(letzteBefehleRef.current);
+    return mode ? befehlAusfuehren({ ...mode, id:mode.type }) : false;
+  };
+
+  const spaceTapRef = useRef(0);
+
   // Punkt 16 — Space hält das Pan-Werkzeug, wie in vielen CAD- und
   // Grafikprogrammen. Bewusst ein eigener Effekt: der Zustand hängt an keydown
   // UND keyup, und Space darf die Seite nicht scrollen.
@@ -5188,9 +5547,16 @@ function EditorInner() {
     const down = (ev) => {
       if (ev.code !== 'Space' || ev.repeat || tippt()) return;
       ev.preventDefault();
+      spaceTapRef.current = performance.now();
       setSpacePan(true);
     };
-    const up = (ev) => { if (ev.code === 'Space') setSpacePan(false); };
+    const up = (ev) => {
+      if (ev.code !== 'Space') return;
+      setSpacePan(false);
+      if (spaceTapRef.current && performance.now() - spaceTapRef.current < 180
+          && istModify(editorModeRef.current)) wiederholeLetztenRef.current();
+      spaceTapRef.current = 0;
+    };
     // Verlässt das Fenster den Fokus, bleibt Space sonst gedrückt „hängen".
     const verlassen = () => setSpacePan(false);
     window.addEventListener('keydown', down);
@@ -5211,21 +5577,60 @@ function EditorInner() {
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if (document.activeElement?.isContentEditable) return;
 
+      // ESC gehört immer dem laufenden CAD-Befehl — auch während gerade eine
+      // Zahl editiert wird. Der vollständige Entwurf verschwindet spurlos.
+      if (ev.key === 'Escape') {
+        ev.preventDefault();
+        ev.stopPropagation();
+        entwurfVerwerfen();
+        setLaengenPuffer(null); setWinkelPuffer(null); setDynamikFeld('length');
+        setVerschiebung(null); setLuecke(null); setDehnen(null); setBefehlHinweis(null);
+        setPaneMenu(null); setGripMenu(null);
+        if (befehlsfolgeTimer.current) clearTimeout(befehlsfolgeTimer.current);
+        befehlsfolge.current = '';
+        platzierVorschauRef.current = null;
+        setPlatzierVorschau(null); setInlineTreffer(null); setSpiegelAchse(null);
+        setEndpointMenu(null); setEdgeMenu(null); setAusrichtenHinweis(null);
+        setEditorMode(escapeMode(editorModeRef.current));
+        return;
+      }
+
+      if (leitungsEntwurfRef.current && drawingConfig.dynamic_input && ev.key === 'Tab') {
+        ev.preventDefault();
+        setDynamikFeld(feld => {
+          const next = feld === 'length' ? 'angle' : 'length';
+          if (next === 'length' && laengenPufferRef.current === null) setLaengenPuffer('');
+          if (next === 'angle' && winkelPufferRef.current === null) setWinkelPuffer('');
+          return next;
+        });
+        return;
+      }
+
       // ── Numerische Direkteingabe (Punkt 8) ──────────────────────────────
       // Läuft eine Längeneingabe, gehört die Tastatur AUSSCHLIESSLICH ihr.
       // Sonst würde eine getippte Zahl nebenbei einen Befehl auslösen.
-      if (laengenPufferRef.current !== null && !ev.metaKey && !ev.ctrlKey) {
+      if ((laengenPufferRef.current !== null || winkelPufferRef.current !== null) && !ev.metaKey && !ev.ctrlKey) {
         ev.preventDefault();
-        const { buffer, action } = laengeTaste(laengenPufferRef.current, ev.key);
-        if (action === 'abbrechen') { setLaengenPuffer(null); return; }
-        if (action === 'anwenden') { laengeAnwenden(buffer); return; }
-        setLaengenPuffer(buffer);
+        const istWinkel = dynamikFeld === 'angle';
+        const aktuell = istWinkel ? (winkelPufferRef.current || '') : (laengenPufferRef.current || '');
+        const { buffer, action } = laengeTaste(aktuell, ev.key);
+        if (action === 'abbrechen') {
+          if (istWinkel) setWinkelPuffer(null); else setLaengenPuffer(null);
+          return;
+        }
+        if (action === 'anwenden') {
+          laengeAnwenden(istWinkel ? laengenPufferRef.current : buffer,
+            istWinkel ? buffer : winkelPufferRef.current);
+          return;
+        }
+        if (istWinkel) setWinkelPuffer(buffer); else setLaengenPuffer(buffer);
         return;
       }
       // Eine Ziffer während des Zeichnens ERÖFFNET die Längeneingabe.
       if (leitungsEntwurfRef.current && !ev.metaKey && !ev.ctrlKey && /^[0-9]$/.test(ev.key)) {
         ev.preventDefault();
-        setLaengenPuffer(ev.key);
+        if (drawingConfig.dynamic_input && dynamikFeld === 'angle') setWinkelPuffer(ev.key);
+        else setLaengenPuffer(ev.key);
         return;
       }
 
@@ -5275,35 +5680,6 @@ function EditorInner() {
           setEditorMode(startCommand(DRAW_PIPE));   // Leitungsbefehl starten
           return;
         }
-        // ── ESC (Punkt 1) ─────────────────────────────────────────────────
-        // EIN Zweig, ohne Bedingung: ESC bricht jede laufende Aktion ab und
-        // endet IMMER im Grundzustand `modify`. Es darf keinen Zustand geben,
-        // aus dem ESC nicht herausführt — auch nicht den Dauerbefehl.
-        // ESC ist AUSSCHLIESSLICH Abbruch und hinterlässt nie eine halb
-        // gezeichnete Leitung (Dominic 2026-08-06). Abgeschlossen wird mit
-        // Doppelklick, zweitem Klick auf denselben Punkt, Enter oder ✓ —
-        // genau wie der Rechtsklick bricht ESC nur ab.
-        if (ev.key === 'Escape') {
-          ev.preventDefault();
-          ev.stopPropagation();
-          entwurfVerwerfen();
-          setLaengenPuffer(null);
-          setVerschiebung(null);
-          setLuecke(null);
-          setDehnen(null);
-          setBefehlHinweis(null);
-          if (befehlsfolgeTimer.current) clearTimeout(befehlsfolgeTimer.current);
-          befehlsfolge.current = '';
-          platzierVorschauRef.current = null;
-          setPlatzierVorschau(null);
-          setInlineTreffer(null);
-          setSpiegelAchse(null);
-          setEndpointMenu(null);
-          setEdgeMenu(null);
-          setAusrichtenHinweis(null);
-          setEditorMode(escapeMode(editorModeRef.current));
-          return;
-        }
         // Ausrichten (Punkt 33/34): dieselbe frei belegbare Taste wie bisher.
         // Ohne Shift richtet sie LEITUNGSSEGMENTE aus, mit Shift wie bisher das
         // gewählte Bauteil aufs Raster — ein Befehl, eine Taste.
@@ -5315,6 +5691,10 @@ function EditorInner() {
         if (ev.key === 'Enter' && leitungsEntwurfRef.current && leitungsCursorRef.current) {
           ev.preventDefault();
           leitungsEntwurfAbschliessen(leitungsCursorRef.current, leitungsSnap, ev.shiftKey || shiftPressed);
+          return;
+        }
+        if (ev.key === 'Enter' && istModify(editorModeRef.current)) {
+          if (wiederholeLetztenRef.current()) ev.preventDefault();
           return;
         }
         // Tab erweitert die Auswahl: ein Klick wählt nur das Teilstück, Tab
@@ -5395,7 +5775,7 @@ function EditorInner() {
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [undo, redo, selected, selectedEdgeId, selectedEdgePoint, selectedLabelEdgeId, markierteEdgeIds, beschriftungSetzen, punktEntfernen, snap, rotateNode, mirrorNode, alignNode, nudgeNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, spiegelAchse, drawingConfig, setNodes, laengeAnwenden, entwurfVerwerfen, verschiebenStarten, ausrichtenUmschalten, trennenStarten, eckeVerbindenStarten, dehnenStarten, auswahlKopieren, auswahlEinfuegen, auswahlLoeschen]);
+  }, [undo, redo, selected, selectedEdgeId, selectedEdgePoint, selectedLabelEdgeId, markierteEdgeIds, beschriftungSetzen, punktEntfernen, snap, rotateNode, mirrorNode, alignNode, nudgeNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, spiegelAchse, drawingConfig, dynamikFeld, setNodes, laengeAnwenden, entwurfVerwerfen, verschiebenStarten, ausrichtenUmschalten, trennenStarten, eckeVerbindenStarten, dehnenStarten, auswahlKopieren, auswahlEinfuegen, auswahlLoeschen]);
 
   // Berechnete Werte (Backend) in die Node-Daten spiegeln — nur für die Anzeige.
   // Verteiler-Rahmen: nur die Balken sind greifbar (dragHandle), die Lücke
@@ -5582,8 +5962,9 @@ function EditorInner() {
         _dashed:layer.dashed,
         _onAddPoint:punktHinzufuegen,
         _onRemovePoint:punktEntfernen,
-        _onSelectPoint:(edgeId, pointIndex) => setSelectedEdgePoint({ edgeId, pointIndex }),
+        _onSelectPoint:griffPunktWaehlen,
         _selectedPointIndex:selectedEdgePoint?.edgeId === edge.id ? selectedEdgePoint.pointIndex : null,
+        _selectedGripPointIndexes:selectedGripPoints.filter(item => item.edgeId === edge.id).map(item => item.pointIndex),
         _selectedSegmentIndex:selectedEdgeSegment?.edgeId === edge.id ? selectedEdgeSegment.segmentIndex : null,
         _selectedSegmentIndexes:selectedSegments
           .filter(item => item.edgeId === edge.id).map(item => item.segmentIndex),
@@ -5591,6 +5972,9 @@ function EditorInner() {
         _onSegmentPointerDown:segmentDragStart,
         _onEndpointPointerDown:endpointDragStart,
         _onEndpointContextMenu:endpointContextMenu,
+        _onGripHover:griffHover,
+        _onGripLeave:griffVerlassen,
+        _onGripContextMenu:griffContextMenu,
         _onContextMenu:edgeContextMenu,
         // Beschriftung: ziehen, zurücksetzen, ausblenden (Rechtsklick → Menü).
         _onLabelPointerDown:labelDragStart,
@@ -5607,7 +5991,7 @@ function EditorInner() {
       style: { ...edge.style, stroke:color },
       };
     });
-  }, [edges, edgeContextMenu, edgeFlows, endpointContextMenu, endpointDragStart, junctionDegrees, labelDragStart, labelZuruecksetzen, layerVisibility, leitungResults, markierteEdgeIds, nodeGeometryVersion, punktDragStart, punktEntfernen, punktHinzufuegen, routePunkte, segmentDragStart, selectedEdgeId, selectedEdgePoint, selectedEdgeSegment, selectedSegments, selectedLabelEdgeId]);
+  }, [edges, edgeContextMenu, edgeFlows, endpointContextMenu, endpointDragStart, griffContextMenu, griffHover, griffPunktWaehlen, griffVerlassen, junctionDegrees, labelDragStart, labelZuruecksetzen, layerVisibility, leitungResults, markierteEdgeIds, nodeGeometryVersion, punktDragStart, punktEntfernen, punktHinzufuegen, routePunkte, segmentDragStart, selectedEdgeId, selectedEdgePoint, selectedEdgeSegment, selectedSegments, selectedGripPoints, selectedLabelEdgeId]);
 
   const loadSchema = (key) => {
     const s = SCHALTUNGEN[key];
@@ -6240,14 +6624,16 @@ function EditorInner() {
   }, [cadCursorAktualisieren, drawingConfig.grid_size, drawingConfig.snap_tolerance, getZoom,
       naechsteSichtbareLeitung, objektFangpunkte, screenToFlowPosition, spiegelAchse?.start]);
   const onPaneContextMenu = useCallback((event) => {
-    // Rechtsklick bricht jede aktive Zeichenaktion vollständig ab (kein
-    // versehentliches Abschliessen einer Leitung) und beendet den Dauermodus.
-    if (!leitungsEntwurfRef.current && !zeichenModusRef.current && !dauerLeitungRef.current) return;
     event.preventDefault();
-    entwurfVerwerfen();
-    setEditorMode(escapeMode(editorModeRef.current));
-    setLaengenPuffer(null);
-  }, [entwurfVerwerfen]);
+    event.stopPropagation();
+    setEndpointMenu(null); setEdgeMenu(null); setGripMenu(null);
+    setPaneMenu({
+      x:event.clientX, y:event.clientY,
+      active:!istModify(editorModeRef.current),
+      snapOverride:Boolean(event.shiftKey),
+      mode:{ ...editorModeRef.current },
+    });
+  }, []);
   const selectedNode  = selected  ? nodes.find(n => n.id === selected.id)  || null : null;
   const selectedEdge  = selectedEdgeId ? edges.find(e => e.id === selectedEdgeId) || null : null;
   const auslegungNode = auslegung ? nodes.find(n => n.id === auslegung.id) || null : null;
@@ -6561,6 +6947,8 @@ function EditorInner() {
             </button>
             <button onClick={event=>{
               setDrawingConfig({ ...DEFAULT_DRAWING_CONFIG, ...eigeneShortcutsRef.current });
+              setOrthoAn(DEFAULT_DRAWING_CONFIG.ortho);
+              setSnapAn(DEFAULT_DRAWING_CONFIG.object_snap);
               setEdges(items => items.map(edge => ({ ...edge, data:{ ...(edge.data || {}), corner_radius:DEFAULT_DRAWING_CONFIG.corner_radius } })));
               closeToolbarMenu(event);
             }} style={{ ...menuActionStyle, marginTop:2, paddingLeft:0, color:'#4f46e5' }}>
@@ -6948,24 +7336,31 @@ function EditorInner() {
                 {/* Punkt 6 — getippte Länge direkt am Segmentende. Bewusst im
                     Viewport und nicht am Bildschirmrand: beim Zeichnen schaut
                     niemand nach unten in eine Leiste. */}
-                {laengenPuffer !== null && leitungsCursor && (
+                {dynamikAnzeige && (
                   <g pointerEvents="none">
-                    <rect x={leitungsCursor.x + 14 / zoomAnzeige} y={leitungsCursor.y - 30 / zoomAnzeige}
-                      width={92 / zoomAnzeige} height={24 / zoomAnzeige} rx={4 / zoomAnzeige}
+                    <rect x={dynamikAnzeige.x + 14 / zoomAnzeige} y={dynamikAnzeige.y - 54 / zoomAnzeige}
+                      width={178 / zoomAnzeige} height={48 / zoomAnzeige} rx={5 / zoomAnzeige}
                       fill="#0f172af2" />
-                    <text x={leitungsCursor.x + 20 / zoomAnzeige} y={leitungsCursor.y - 13 / zoomAnzeige}
-                      fill="#f8fafc" fontSize={13 / zoomAnzeige} fontWeight="700"
-                      fontFamily="ui-monospace, SFMono-Regular, monospace">
-                      {(laengenPuffer || '0')}
+                    {[
+                      ['length', dynamikAnzeige.laenge || '0', 'mm', 20],
+                      ['angle', dynamikAnzeige.winkel || '0', '°', 104],
+                    ].map(([feld, wert, einheit, offset]) => (
+                      <g key={feld}>
+                        <rect x={dynamikAnzeige.x + offset / zoomAnzeige} y={dynamikAnzeige.y - 48 / zoomAnzeige}
+                          width={76 / zoomAnzeige} height={22 / zoomAnzeige} rx={3 / zoomAnzeige}
+                          fill={dynamikAnzeige.feld === feld ? '#4338ca' : '#1e293b'}
+                          stroke={dynamikAnzeige.feld === feld ? '#a5b4fc' : '#475569'} strokeWidth={1 / zoomAnzeige} />
+                        <text x={dynamikAnzeige.x + (offset + 6) / zoomAnzeige} y={dynamikAnzeige.y - 33 / zoomAnzeige}
+                          fill="#f8fafc" fontSize={11 / zoomAnzeige} fontWeight="700"
+                          fontFamily="ui-monospace, SFMono-Regular, monospace">{wert}</text>
+                        <text x={dynamikAnzeige.x + (offset + 69) / zoomAnzeige} y={dynamikAnzeige.y - 33 / zoomAnzeige}
+                          textAnchor="end" fill="#cbd5e1" fontSize={8 / zoomAnzeige}>{einheit}</text>
+                      </g>
+                    ))}
+                    <text x={dynamikAnzeige.x + 20 / zoomAnzeige} y={dynamikAnzeige.y - 12 / zoomAnzeige}
+                      fill="#cbd5e1" fontSize={8 / zoomAnzeige} fontWeight="600">
+                      {dynamikAnzeige.prompt} · Tab wechselt Feld
                     </text>
-                    <text x={leitungsCursor.x + 98 / zoomAnzeige} y={leitungsCursor.y - 13 / zoomAnzeige}
-                      textAnchor="end" fill="#94a3b8" fontSize={9 / zoomAnzeige} fontWeight="600">mm</text>
-                    {/* Blinkender Eingabestrich — macht sichtbar, dass die
-                        Tastatur gerade der Eingabe gehört. */}
-                    <rect className="hc-cad-caret"
-                      x={leitungsCursor.x + (22 + (laengenPuffer || '0').length * 7.8) / zoomAnzeige}
-                      y={leitungsCursor.y - 25 / zoomAnzeige}
-                      width={1.5 / zoomAnzeige} height={14 / zoomAnzeige} fill="#f8fafc" />
                   </g>
                 )}
                 {spiegelAchse?.start && spiegelAchse?.cursor && (
@@ -7201,13 +7596,36 @@ function EditorInner() {
               {editorMode.persistent ? ' · Dauer' : ''}
             </span>
             <button type="button"
-              onClick={() => setOrthoAn(v => { setDrawingConfig(c => ({ ...c, ortho:!v })); return !v; })}
+              onClick={() => setOrthoAn(v => {
+                const next = !v;
+                setDrawingConfig(c => ({ ...c, ortho:next, ...(next ? { polar_snap:false } : {}) }));
+                return next;
+              })}
               className={`hc-statusbar__toggle${orthoAn ? ' is-on' : ''}`}
               title="Achsnah orthogonal; bewusste Schräge ab 30° (Shift gibt frei)">ORTHO</button>
+            <button type="button"
+              onClick={() => {
+                const next = !drawingConfig.polar_snap;
+                setDrawingConfig(c => ({ ...c, polar_snap:next, ...(next ? { ortho:false } : {}) }));
+                if (next) setOrthoAn(false);
+              }}
+              className={`hc-statusbar__toggle${drawingConfig.polar_snap ? ' is-on' : ''}`}
+              title="Polarfang auf ein festes Winkelraster">POLAR</button>
+            {drawingConfig.polar_snap && (
+              <select value={drawingConfig.polar_angle} aria-label="Polarwinkel"
+                onChange={event=>setDrawingConfig(c => ({ ...c, polar_angle:Number(event.target.value) }))}
+                className="hc-statusbar__polar-angle">
+                {POLAR_WINKEL.map(winkel => <option key={winkel} value={winkel}>{winkel}°</option>)}
+              </select>
+            )}
             <button type="button"
               onClick={() => setSnapAn(v => { setDrawingConfig(c => ({ ...c, object_snap:!v })); return !v; })}
               className={`hc-statusbar__toggle${snapAn ? ' is-on' : ''}`}
               title="Objektfang auf Anschlüsse, Endpunkte und Leitungen">SNAP</button>
+            <button type="button"
+              onClick={() => setDrawingConfig(c => ({ ...c, dynamic_input:!c.dynamic_input }))}
+              className={`hc-statusbar__toggle${drawingConfig.dynamic_input ? ' is-on' : ''}`}
+              title="Dynamische Eingabe für Länge und Winkel am Cursor">DYN</button>
             {/* Sichtbarkeit und Weite stehen nebeneinander: das Raster fängt
                 weiter, auch wenn man es nicht sieht. */}
             <button type="button"
@@ -7224,6 +7642,35 @@ function EditorInner() {
             <span className="hc-statusbar__system" style={{ color:activeLayer.color }}>
               ● {activeLayer.label}
             </span>
+            <div className="hc-commandline">
+              <input value={befehlszeile}
+                aria-label="Befehlszeile"
+                placeholder={befehlsPrompt(editorMode, {
+                  hasDraft:Boolean(leitungsEntwurf), hasBase:Boolean(verschiebung?.basis),
+                  hasStart:Boolean(spiegelAchse?.start), hasFirst:Boolean(luecke?.erster),
+                })}
+                onFocus={()=>setBefehlszeileAktiv(true)}
+                onBlur={()=>setTimeout(()=>setBefehlszeileAktiv(false), 120)}
+                onChange={event=>setBefehlszeile(event.target.value)}
+                onKeyDown={event=>{
+                  if (event.key === 'Escape') { event.preventDefault(); event.currentTarget.blur(); setBefehlszeile(''); return; }
+                  if (event.key !== 'Enter') return;
+                  event.preventDefault();
+                  const treffer = befehlsVorschlaege(befehlszeile, befehlsEintraege)[0];
+                  if (treffer) befehlAusfuehren(treffer);
+                  else if (!befehlszeile.trim()) wiederholeLetztenRef.current();
+                }} />
+              {befehlszeileAktiv && (
+                <div className="hc-commandline__suggestions">
+                  {befehlsVorschlaege(befehlszeile, befehlsEintraege).slice(0, 5).map(item => (
+                    <button key={item.id} type="button" onPointerDown={event=>event.preventDefault()}
+                      onClick={()=>befehlAusfuehren(item)}>
+                      <kbd>{String(item.taste).toUpperCase()}</kbd><span>{item.name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             {laengenPuffer !== null
               ? <span className="hc-statusbar__mass is-input">{laengenPuffer || '0'} mm ⌫</span>
               : cadMass && <span className="hc-statusbar__mass">{cadMass.label}</span>}
@@ -7566,6 +8013,99 @@ function EditorInner() {
           </div>
         );
       })()}
+
+      {gripMenu && (() => {
+        const typenLabel = { endpoint:'Endpunkt', corner:'Eckpunkt', segment:'Segmentmitte' };
+        const aktionen = griffAktionen(gripMenu.typ);
+        const eintraege = gripMenu.typ === 'endpoint' ? [
+          ['↗', 'Strecken', 'Neuen Zielpunkt angeben', () => leitungWeiterziehen(gripMenu.edgeId, gripMenu.side)],
+          ['⌁', 'Leitung weiterziehen', 'Weitere Eckpunkte setzen', () => leitungWeiterziehen(gripMenu.edgeId, gripMenu.side)],
+          ['◎', 'An Bauteil anschliessen', 'Zielanschluss mit SNAP wählen', () => leitungWeiterziehen(gripMenu.edgeId, gripMenu.side)],
+        ] : gripMenu.typ === 'corner' ? [
+          ['↗', 'Strecken', 'Griff ziehen; Shift/Cmd erweitert die Auswahl', () => {
+            setSelectedEdgeId(gripMenu.edgeId); setSelectedEdgePoint({ edgeId:gripMenu.edgeId, pointIndex:gripMenu.pointIndex });
+            setSelectedGripPoints([{ edgeId:gripMenu.edgeId, pointIndex:gripMenu.pointIndex }]);
+          }],
+          ['−', 'Ecke entfernen', 'Nachbarsegmente direkt verbinden', () => punktEntfernen(gripMenu.edgeId, gripMenu.pointIndex)],
+          ['÷', 'Ecke hier teilen', 'Zwei Leitungen mit gemeinsamem Anker', () => eckpunktTeilen(gripMenu.edgeId, gripMenu.pointIndex)],
+        ] : [
+          ['↕', 'Segment versetzen', 'Diamantgriff parallel ziehen', () => {
+            setSelectedEdgeId(gripMenu.edgeId); setSelectedEdgeSegment({ edgeId:gripMenu.edgeId, segmentIndex:gripMenu.segmentIndex });
+          }],
+          ['＋', 'Ecke einfügen', 'Stützpunkt in der Segmentmitte', () => {
+            const edge = edgesRef.current.find(item => item.id === gripMenu.edgeId);
+            const route = edge ? routePunkte(edge) : [];
+            const a = route[gripMenu.segmentIndex], b = route[gripMenu.segmentIndex + 1];
+            if (!a || !b) return;
+            snap();
+            const points = route.slice(1, -1);
+            points.splice(gripMenu.segmentIndex, 0, { x:(a.x + b.x) / 2, y:(a.y + b.y) / 2 });
+            setEdges(items => items.map(item => item.id === gripMenu.edgeId ? { ...item, data:{ ...(item.data || {}), points } } : item));
+          }],
+          ['↔', 'Länge setzen', 'Exakte Teilstücklänge in mm', () => segmentLaengeSetzen(gripMenu.edgeId, gripMenu.segmentIndex)],
+        ];
+        return (
+          <div onPointerDown={()=>setGripMenu(null)} style={{ position:'fixed', inset:0, zIndex:3700 }}>
+            <div onPointerDown={event=>event.stopPropagation()}
+              style={{ position:'fixed', left:Math.min(gripMenu.x, window.innerWidth - 235), top:Math.min(gripMenu.y, window.innerHeight - 235), width:220,
+                padding:6, borderRadius:10, background:'white', border:'1px solid #cbd5e1', boxShadow:'0 16px 36px rgba(15,23,42,.24)' }}>
+              <div style={{ padding:'4px 8px 6px', fontSize:9, fontWeight:800, color:'#4f46e5', textTransform:'uppercase', letterSpacing:'.06em' }}>
+                {typenLabel[gripMenu.typ]} · {aktionen.length} Möglichkeiten
+              </div>
+              {eintraege.map(([icon, title, sub, action]) => (
+                <button key={title} type="button" onClick={()=>{ action(); setGripMenu(null); }}
+                  style={{ width:'100%', display:'grid', gridTemplateColumns:'25px 1fr', gap:5, padding:'7px 8px', border:0, borderRadius:7, background:'transparent', textAlign:'left', cursor:'pointer', color:'#334155' }}>
+                  <span style={{ fontSize:15 }}>{icon}</span>
+                  <span style={{ fontSize:10.5, fontWeight:750 }}>{title}<span style={{ display:'block', marginTop:1, fontSize:8, fontWeight:500, color:'#94a3b8' }}>{sub}</span></span>
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {paneMenu && (
+        <div onPointerDown={()=>setPaneMenu(null)} style={{ position:'fixed', inset:0, zIndex:3650 }}>
+          <div onPointerDown={event=>event.stopPropagation()}
+            style={{ position:'fixed', left:Math.min(paneMenu.x, window.innerWidth - 240), top:Math.min(paneMenu.y, window.innerHeight - 260),
+              width:225, padding:6, borderRadius:10, background:'white', border:'1px solid #cbd5e1', boxShadow:'0 16px 36px rgba(15,23,42,.24)' }}>
+            <div style={{ padding:'4px 8px 6px', fontSize:9, fontWeight:800, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'.06em' }}>
+              {paneMenu.active ? modeLabel(paneMenu.mode) : 'Befehle'}
+            </div>
+            {(paneMenu.snapOverride ? [
+              ['○', 'Nur Anschluss', 'Gilt für den nächsten Klick', () => setFangOverride('port')],
+              ['□', 'Nur Endpunkt', 'Gilt für den nächsten Klick', () => setFangOverride('endpoint')],
+              ['△', 'Nur Mittelpunkt', 'Gilt für den nächsten Klick', () => setFangOverride('midpoint')],
+              ['∟', 'Nur Senkrecht', 'Gilt für den nächsten Klick', () => setFangOverride('perpendicular')],
+              ['⌛', 'Nur auf Leitung', 'Gilt für den nächsten Klick', () => setFangOverride('nearest')],
+            ] : paneMenu.active ? [
+              ...(leitungsEntwurfRef.current?.points?.length ? [[
+                '✓', 'Fertig', 'Entspricht Enter', () => entwurfAmLetztenPunktAbschliessen(),
+              ], [
+                '↶', 'Letzten Punkt zurück', 'Entspricht Backspace', () => {
+                  const draft = leitungsEntwurfRef.current;
+                  if (!draft?.points?.length) return;
+                  const next = { ...draft, points:draft.points.slice(0, -1) };
+                  leitungsEntwurfRef.current = next; setLeitungsEntwurf(next);
+                },
+              ]] : []),
+              ['×', 'Abbrechen', 'Entspricht ESC', () => {
+                entwurfVerwerfen(); setVerschiebung(null); setLuecke(null); setDehnen(null);
+                setEditorMode(escapeMode(editorModeRef.current));
+              }],
+            ] : [
+              ['↵', 'Letzten Befehl wiederholen', letzteBefehle[0] ? modeLabel(letzteBefehle[0]) : 'Noch kein Befehl', () => wiederholeLetztenRef.current()],
+              ...letzteBefehle.map(item => ['⌁', modeLabel(item), 'Erneut starten', () => befehlAusfuehren({ ...item, id:item.type })]),
+            ]).map(([icon, title, sub, action], index) => (
+              <button key={`${title}-${index}`} type="button" onClick={()=>{ action(); setPaneMenu(null); }}
+                style={{ width:'100%', display:'grid', gridTemplateColumns:'25px 1fr', gap:5, padding:'7px 8px', border:0, borderRadius:7, background:'transparent', textAlign:'left', cursor:'pointer', color:title==='Abbrechen'?'#b91c1c':'#334155' }}>
+                <span style={{ fontSize:15 }}>{icon}</span>
+                <span style={{ fontSize:10.5, fontWeight:750 }}>{title}<span style={{ display:'block', marginTop:1, fontSize:8, fontWeight:500, color:'#94a3b8' }}>{sub}</span></span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {edgeMenu && (
         <div onPointerDown={()=>setEdgeMenu(null)} style={{ position:'fixed', inset:0, zIndex:3600 }}>

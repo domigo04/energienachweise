@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   ENDPOINT, GRID, INTERSECTION, NEAREST, PORT,
-  fangErgebnis, fangMitHysterese, fangStil, orthogonalerTStueckPunkt,
-  pruefeFangTreue, segmentSchnittpunkt,
+  fangErgebnis, fangMitHysterese, fangStil, fangspurPunkt, orthogonalerTStueckPunkt,
+  pruefeFangTreue, segmentSchnittpunkt, senkrechterFang,
 } from './cadSnap';
 
 describe('Fangtypen', () => {
@@ -157,6 +157,25 @@ describe('orthogonaler T-Stück-Fang', () => {
     expect(orthogonalerTStueckPunkt(
       { x:100, y:300 }, { x:0, y:0 }, { x:500, y:500 },
     )).toBeNull();
+  });
+});
+
+describe('Senkrechtfang und Fangspur', () => {
+  it('setzt Marker und Ziel exakt auf den Lotfuss', () => {
+    const hit = senkrechterFang(
+      { x:250, y:50 }, { x:248, y:402 }, { x:0, y:400 }, { x:800, y:400 }, 10,
+    );
+    expect(hit).toMatchObject({ x:250, y:400, typ:'perpendicular' });
+    expect(pruefeFangTreue(fangErgebnis([hit], { x:248, y:402 }))).toBe(true);
+  });
+
+  it('erzeugt nur horizontale und vertikale Fangspuren samt Schnittpunkt', () => {
+    const result = fangspurPunkt({ x:102, y:298 }, [{ x:100, y:20 }, { x:500, y:300 }], 5);
+    expect(result.point).toEqual({ x:100, y:300 });
+    expect(result.guides).toHaveLength(2);
+    result.guides.forEach(guide => {
+      expect(guide.x1 === guide.x2 || guide.y1 === guide.y2).toBe(true);
+    });
   });
 });
 

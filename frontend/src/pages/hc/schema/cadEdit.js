@@ -121,18 +121,54 @@ export function abstandSegmentZuRechteck(a, b, rect) {
   if (punktImRechteck(a, rect) || punktImRechteck(b, rect)) return { a:{ ...a }, b:{ ...a }, distance:0 };
   const schnitt = segmentRechteckSchnitt(a, b, rect);
   if (schnitt) return { a:schnitt, b:{ ...schnitt }, distance:0 };
-  const ecken = [
-    { x:rect.x, y:rect.y }, { x:rect.x + rect.width, y:rect.y },
-    { x:rect.x + rect.width, y:rect.y + rect.height }, { x:rect.x, y:rect.y + rect.height },
-  ];
-  const kandidaten = [a, b].map(punkt => {
-    const box = naechsterPunktImRechteck(punkt, rect);
-    return { a:{ ...punkt }, b:box, distance:Math.hypot(box.x - punkt.x, box.y - punkt.y) };
-  });
-  ecken.forEach(ecke => {
-    const linie = projektion(ecke, a, b);
-    kandidaten.push({ a:linie, b:ecke, distance:Math.hypot(ecke.x - linie.x, ecke.y - linie.y) });
-  });
+  const links = rect.x;
+  const rechts = rect.x + rect.width;
+  const oben = rect.y;
+  const unten = rect.y + rect.height;
+  const kandidaten = [];
+  const zwischen = (wert, p, q) => wert >= Math.min(p, q) - 0.5 && wert <= Math.max(p, q) + 0.5;
+  const add = (linie, box) => {
+    const horizontal = Math.abs(linie.y - box.y) <= 0.5;
+    const vertical = Math.abs(linie.x - box.x) <= 0.5;
+    if (!horizontal && !vertical) return;
+    kandidaten.push({ a:linie, b:box, distance:Math.hypot(box.x - linie.x, box.y - linie.y) });
+  };
+
+  // Nur orthogonale Masse: Liegt eine Rechteckkante in der Projektion des
+  // Teilstücks, wird horizontal oder vertikal zu genau dieser Kante gemessen.
+  for (const x of [links, rechts]) {
+    if (zwischen(x, a.x, b.x)) {
+      const t = Math.abs(b.x - a.x) > 1e-9 ? (x - a.x) / (b.x - a.x) : 0;
+      const y = a.y + Math.max(0, Math.min(1, t)) * (b.y - a.y);
+      if (y < oben) add({ x, y }, { x, y:oben });
+      else if (y > unten) add({ x, y }, { x, y:unten });
+    }
+  }
+  for (const y of [oben, unten]) {
+    if (zwischen(y, a.y, b.y)) {
+      const t = Math.abs(b.y - a.y) > 1e-9 ? (y - a.y) / (b.y - a.y) : 0;
+      const x = a.x + Math.max(0, Math.min(1, t)) * (b.x - a.x);
+      if (x < links) add({ x, y }, { x:links, y });
+      else if (x > rechts) add({ x, y }, { x:rechts, y });
+    }
+  }
+  // Achsparallele Segmente können eine ganze Kante überdecken. Dafür genügt
+  // ein Punkt im gemeinsamen Bereich; eine diagonale Hilfslinie ist verboten.
+  if (Math.abs(a.y - b.y) <= 0.5) {
+    const x = Math.max(Math.min(Math.max(a.x, b.x), rechts), Math.max(Math.min(a.x, b.x), links));
+    if (x >= Math.min(a.x, b.x) - 0.5 && x <= Math.max(a.x, b.x) + 0.5) {
+      if (a.y < oben) add({ x, y:a.y }, { x, y:oben });
+      else if (a.y > unten) add({ x, y:a.y }, { x, y:unten });
+    }
+  }
+  if (Math.abs(a.x - b.x) <= 0.5) {
+    const y = Math.max(Math.min(Math.max(a.y, b.y), unten), Math.max(Math.min(a.y, b.y), oben));
+    if (y >= Math.min(a.y, b.y) - 0.5 && y <= Math.max(a.y, b.y) + 0.5) {
+      if (a.x < links) add({ x:a.x, y }, { x:links, y });
+      else if (a.x > rechts) add({ x:a.x, y }, { x:rechts, y });
+    }
+  }
+  if (!kandidaten.length) return null;
   return kandidaten.reduce((beste, kandidat) => (!beste || kandidat.distance < beste.distance ? kandidat : beste), null);
 }
 
@@ -168,6 +204,19 @@ export function segmentVerschieben(points, pointIndexes, orientation, delta, {
   if (!Array.isArray(points) || !idx.size) return points || [];
   const raster = (wert) => Math.round(wert / grid) * grid;
 
+  const bewegt = segmentVerschiebungDelta(orientation, delta, { grid, direction, axisLocked });
+  const moveX = bewegt.x;
+  const moveY = bewegt.y;
+  return points.map((punkt, index) => (idx.has(index)
+    ? { x: punkt.x + moveX, y: punkt.y + moveY }
+    : punkt));
+}
+
+/** Effektiver, gerasterter Verschiebevektor eines Teilstücks. */
+export function segmentVerschiebungDelta(orientation, delta, {
+  grid = 10, direction = null, axisLocked = false,
+} = {}) {
+  const raster = (wert) => Math.round(wert / grid) * grid;
   let moveX = delta?.x || 0;
   let moveY = delta?.y || 0;
   if (!axisLocked) {
@@ -196,9 +245,7 @@ export function segmentVerschieben(points, pointIndexes, orientation, delta, {
     moveY = raster(moveY);
   }
 
-  return points.map((punkt, index) => (idx.has(index)
-    ? { x: punkt.x + moveX, y: punkt.y + moveY }
-    : punkt));
+  return { x:moveX, y:moveY };
 }
 
 /**
@@ -206,26 +253,50 @@ export function segmentVerschieben(points, pointIndexes, orientation, delta, {
  * einem Bauteilanschluss, wird innen ein Stützpunkt ergänzt. Der hydraulische
  * Anschluss bleibt dadurch fest und nur das gewählte Teilstück wandert.
  */
-export function segmentZumVerschieben(route, segmentIndex) {
+export function segmentZumVerschieben(route, segmentIndex, { startFrei = false, endFrei = false } = {}) {
   if (!Array.isArray(route) || segmentIndex < 0 || segmentIndex >= route.length - 1) return null;
   const workingRoute = route.map(point => ({ x:point.x, y:point.y }));
   let startIndex = segmentIndex;
   let endIndex = startIndex + 1;
-  if (startIndex === 0) {
+  if (startIndex === 0 && !startFrei) {
     workingRoute.splice(1, 0, { ...workingRoute[0] });
     startIndex = 1;
     endIndex = 2;
   }
-  if (endIndex === workingRoute.length - 1) {
+  if (endIndex === workingRoute.length - 1 && !endFrei) {
     workingRoute.splice(endIndex, 0, { ...workingRoute.at(-1) });
   }
   const a = workingRoute[startIndex];
   const b = workingRoute[endIndex];
+  const pointIndexes = [startIndex, endIndex]
+    .filter(index => index > 0 && index < workingRoute.length - 1)
+    .map(index => index - 1);
   return {
     points:workingRoute.slice(1, -1),
-    pointIndexes:[startIndex - 1, endIndex - 1],
+    pointIndexes,
+    moveStart:startFrei && startIndex === 0,
+    moveEnd:endFrei && endIndex === workingRoute.length - 1,
     orientation:segmentOrientierung(a, b),
     direction:{ x:b.x - a.x, y:b.y - a.y },
+  };
+}
+
+export const GRIFF_AKTIONEN = Object.freeze({
+  endpoint:Object.freeze(['strecken', 'weiterziehen', 'anschliessen']),
+  corner:Object.freeze(['strecken', 'entfernen', 'teilen']),
+  segment:Object.freeze(['versetzen', 'einfuegen', 'laenge']),
+});
+
+export function griffAktionen(typ) {
+  return [...(GRIFF_AKTIONEN[typ] || [])];
+}
+
+/** Teilstückauswahl hat beim Löschen Vorrang vor der Edge-Gesamtauswahl. */
+export function loeschAuswahl(ganzeEdgeIds = [], segmente = []) {
+  const teilEdges = new Set((segmente || []).map(item => item?.edgeId).filter(Boolean));
+  return {
+    ganzeEdgeIds:[...new Set(ganzeEdgeIds || [])].filter(id => !teilEdges.has(id)),
+    segmente:(segmente || []).filter(item => item?.edgeId && Number.isInteger(item.segmentIndex)),
   };
 }
 

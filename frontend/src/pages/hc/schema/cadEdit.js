@@ -264,10 +264,12 @@ export function verschiebungLabel(delta = {}) {
 }
 
 /**
- * Abschlussdaten für ESC: nur bewusst gesetzte Punkte zählen. Der bewegte
- * Cursor gehört nie zur gespeicherten Leitung.
+ * Abschlussdaten für Doppelklick, zweiten Klick auf denselben Punkt und ✓:
+ * nur bewusst gesetzte Punkte zählen. Der bewegte Cursor gehört nie zur
+ * gespeicherten Leitung. ESC ist kein Abschluss, sondern Abbruch — dort
+ * entsteht überhaupt keine Leitung.
  */
-export function entwurfFuerEscape(draft) {
+export function entwurfFuerAbschluss(draft) {
   const endPoint = draft?.points?.at(-1);
   if (!endPoint) return null;
   return {

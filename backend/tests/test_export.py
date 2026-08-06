@@ -822,3 +822,16 @@ def test_node_infos_liefert_abschnitte_fuer_den_editor():
     infos = node_infos(nodes, berechne_schema(nodes, edges))
     assert infos["g1"][0]["titel"] is None
     assert {"name": "Temperaturen", "wert": "35/28 °C"} in infos["g1"][0]["zeilen"]
+
+
+def test_fehlende_angaben_stehen_als_strich_im_datenblock():
+    """Eine leere Zeile weglassen sieht aus wie «gibt es nicht» — ein Strich
+    zeigt dagegen, was noch zu erfassen ist (Dominic 2026-08-06)."""
+    nodes = [{"id": "v", "type": "valve2", "position": {"x": 0, "y": 0},
+              "data": {"nr": 1, "label": "Regelventil", "fabrikat": "Siemens"}}]
+    zeilen = dict(bauteil_kennwerte(nodes[0], {})[0]["zeilen"])
+
+    assert zeilen["Fabrikat"] == "Siemens"
+    assert zeilen["Typ"] == "-" and zeilen["DN"] == "-"
+    assert zeilen["kvs"] == "-" and zeilen["Pv"] == "-"
+    assert ">Typ:<" in erzeuge_svg(nodes, [], {})

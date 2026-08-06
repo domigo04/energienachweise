@@ -52,13 +52,22 @@ def _text(wert) -> Optional[str]:
     return text or None
 
 
+FEHLT = "-"     # noch nicht erfasst — die Zeile bleibt trotzdem stehen
+
+
 def _paar(bereiche: list) -> list:
-    """Nur Zeilen mit Wert behalten — ein leeres Kästchen hilft niemandem."""
-    return [(name, wert) for name, wert in bereiche if wert not in (None, "")]
+    """Alle Zeilen behalten; was fehlt, bekommt einen Strich.
+
+    Eine weggelassene Zeile sieht aus wie eine Angabe, die es nicht gibt. Ein
+    Strich zeigt dagegen, dass die Angabe zum Bauteil gehört und noch fehlt —
+    der Block wird damit zur Liste dessen, was noch zu erfassen ist
+    (Dominic 2026-08-06).
+    """
+    return [(name, wert if wert not in (None, "") else FEHLT) for name, wert in bereiche]
 
 
 def _abschnitt(titel: Optional[str], zeilen: list) -> Optional[dict]:
-    """Ein Abschnitt des Datenblocks — ohne Zeilen gibt es ihn nicht."""
+    """Ein Abschnitt des Datenblocks — ohne jede Zeile gibt es ihn nicht."""
     gefiltert = _paar(zeilen)
     return {"titel": titel, "zeilen": gefiltert} if gefiltert else None
 

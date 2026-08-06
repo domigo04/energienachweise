@@ -82,16 +82,13 @@ export function FlowEdge({
       {selected && <path d={edgePath} fill="none" stroke="#0f172a" strokeWidth={7 / zoom + 2.5} opacity={0.11} pointerEvents="none" />}
       {data._groupSelected && !selected && <path d={edgePath} fill="none" stroke="#7c3aed" strokeWidth={7 / zoom + 2.5} opacity={0.18} pointerEvents="none" />}
 
-      {selected && Number.isInteger(data._selectedSegmentIndex) && vertices[data._selectedSegmentIndex + 1] && (
-        <line
-          x1={vertices[data._selectedSegmentIndex].x}
-          y1={vertices[data._selectedSegmentIndex].y}
-          x2={vertices[data._selectedSegmentIndex + 1].x}
-          y2={vertices[data._selectedSegmentIndex + 1].y}
+      {(data._selectedSegmentIndexes || []).map(index => vertices[index + 1] ? (
+        <line key={`${id}-selected-${index}`}
+          x1={vertices[index].x} y1={vertices[index].y}
+          x2={vertices[index + 1].x} y2={vertices[index + 1].y}
           stroke="#7c3aed" strokeWidth={4.5 / zoom} strokeLinecap="round"
-          opacity="0.5" pointerEvents="none"
-        />
-      )}
+          opacity="0.58" pointerEvents="none" />
+      ) : null)}
 
       {/* Breiter unsichtbarer Klick-Bereich */}
       <path d={edgePath} fill="none" stroke="transparent" strokeWidth={14 / zoom}

@@ -146,6 +146,7 @@ FEATURE_TO_CONTEXT = {
     "valve_2way_count": "anzahl_ventile_2weg",
     "valve_3way_count": "anzahl_ventile_3weg",
     "floor_heating_manifold_count": "anzahl_fbh_verteiler",
+    "radiator_count": "anzahl_heizkoerper",
     "pipe_length_m": "rohrmeter",
 }
 

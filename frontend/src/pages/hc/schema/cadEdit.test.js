@@ -4,8 +4,9 @@ import {
   entwurfFuerAbschluss,
   eckpunktEntfernen, eckpunktSetzen, gripsFuerRoute,
   fensterAus, imFenster, istKollinear, labelSichtbar, labelVerschoben, labelVersatz,
-  leitungMitLueckeTrennen, leitungsSystem, leitungVerschieben,
-  routeBereinigen, routeDehnen, routeIstGueltig,
+  leitungMitLueckeTrennen, leitungTrimmen, leitungsSystem, leitungVerschieben,
+  routeBereinigen, routeDehnen, routeIstGueltig, routeSegmenteEntfernen,
+  segmentSchnittpunkt, trimGrenzen,
   segmentAusrichten, segmentOrientierung, segmentVerschieben,
   segmentZumVerschieben, verschiebungLabel,
 } from './cadEdit';
@@ -415,6 +416,51 @@ describe('Mit Lücke trennen (BREAK)', () => {
   it('verweigert einen Punkt neben der Leitung', () => {
     expect(leitungMitLueckeTrennen(route, { segmentIndex: 9, x: 0, y: 0 },
       { segmentIndex: 0, x: 100, y: 0 }).fehler).toBeTruthy();
+  });
+});
+
+describe('Trimmen (TR)', () => {
+  const route = [{ x:0, y:0 }, { x:600, y:0 }, { x:600, y:400 }];
+
+  it('findet die Schnittkanten beidseits des Klicks', () => {
+    const grenzen = trimGrenzen(route, 0, { x:320, y:0 }, [
+      [{ x:100, y:-50 }, { x:100, y:50 }],
+      [{ x:500, y:-50 }, { x:500, y:50 }],
+    ]);
+    expect(grenzen.a.segmentIndex).toBe(0);
+    expect(grenzen.b.segmentIndex).toBe(0);
+    expect(grenzen.a.x).toBeCloseTo(100, 4);
+    expect(grenzen.b.x).toBeCloseTo(500, 4);
+  });
+
+  it('nimmt ohne Schnittkante genau das gerade Teilstück von Ecke zu Ecke', () => {
+    expect(trimGrenzen(route, 1, { x:600, y:200 }, [])).toEqual({
+      a:{ segmentIndex:1, x:600, y:0 },
+      b:{ segmentIndex:1, x:600, y:400 },
+    });
+  });
+
+  it('darf beim Trimmen ein Leitungsende verschlucken', () => {
+    const result = leitungTrimmen(route,
+      { segmentIndex:0, x:0, y:0 }, { segmentIndex:0, x:200, y:0 });
+    expect(result.erste).toBeNull();
+    expect(result.zweite).toEqual([{ x:200, y:0 }, { x:600, y:0 }, { x:600, y:400 }]);
+  });
+
+  it('entfernt mehrere ausgewählte Teilstücke als getrennte Lücken', () => {
+    const teile = routeSegmenteEntfernen([
+      { x:0, y:0 }, { x:100, y:0 }, { x:100, y:100 }, { x:200, y:100 }, { x:200, y:200 },
+    ], [1, 3]);
+    expect(teile).toEqual([
+      [{ x:0, y:0 }, { x:100, y:0 }],
+      [{ x:100, y:100 }, { x:200, y:100 }],
+    ]);
+  });
+
+  it('schneidet nur endliche Segmente', () => {
+    expect(segmentSchnittpunkt({ x:0,y:0 }, { x:100,y:0 }, { x:50,y:-10 }, { x:50,y:10 }))
+      .toMatchObject({ x:50, y:0, t:0.5 });
+    expect(segmentSchnittpunkt({ x:0,y:0 }, { x:10,y:0 }, { x:50,y:-10 }, { x:50,y:10 })).toBeNull();
   });
 });
 

@@ -5,7 +5,7 @@ import {
   SymPump, SymValve2V, SymValve3, SymCheckValve,
   SymShutoff, SymWE, SymVerbraucher, SymSpeicher, SymBwwSpeicher, SymBypass,
   SymSTAD, SymTemperatur, SymSicherheitsventil, SymPWT,
-  SymLufterhitzer, SymAbsperrklappe, SymEntleerung, SymEntleerhahn,
+  SymLufterhitzer, SymLuftheizapparat, SymAbsperrklappe, SymEntleerung, SymEntleerhahn,
   SymWaermezaehlerCad,
 } from './symbols';
 
@@ -261,6 +261,18 @@ export function LufterhitzerNode({ data, selected: sel }) {
       {H(Position.Bottom, 'bottom', { bottom: -3, left: '45%', background: '#3b82f6' })}
       <SymLufterhitzer />
       <Label text={data.label || 'Lufterhitzer'} />
+    </div>
+  );
+}
+
+// ── Luftheizapparat: Register ohne Luftstrompfeil, VL/RL links ──────────────
+export function LuftheizapparatNode({ data, selected: sel }) {
+  return (
+    <div style={{ ...wrap(sel), position:'relative' }}>
+      {H(Position.Left, 'vl', { left:-5, top:'34%', background:'#ef4444' })}
+      {H(Position.Left, 'rl', { left:-5, top:'66%', background:'#3b82f6' })}
+      <SymLuftheizapparat />
+      <Label text={data.label || 'Luftheizapparat'} />
     </div>
   );
 }
@@ -529,6 +541,42 @@ export function HeizkreisNode({ data, selected: sel }) {
       {/* VL/RL labels */}
       <div style={{ position: 'absolute', left: -22, top: '28%', fontSize: 7, color: '#ef4444', fontWeight: 700 }}>VL</div>
       <div style={{ position: 'absolute', right: -18, top: '28%', fontSize: 7, color: '#3b82f6', fontWeight: 700 }}>RL</div>
+    </div>
+  );
+}
+
+// ── Heizkörper: frei skalierbare Fläche oder kompakter Schema-Abgang ───────
+// Beide Darstellungen sind dasselbe hydraulische Bauteil. Dadurch kann der
+// Planer vom grünen Grundriss-Rechteck auf ein kompaktes Symbol wechseln, ohne
+// Anschlüsse oder Berechnungsdaten zu verlieren.
+export function HeizkoerperNode({ data, selected: sel }) {
+  const schema = data.darstellung === 'schema';
+  const border = sel ? '#3b82f6' : '#15803d';
+  return (
+    <div style={{
+      width:'100%', height:'100%', minWidth:70, minHeight:38, position:'relative',
+      boxSizing:'border-box', border:`2px solid ${border}`, borderRadius:2,
+      background:schema ? 'white' : 'rgba(34,197,94,0.24)',
+      boxShadow:sel ? '0 0 0 2px #bfdbfe' : 'none', cursor:'grab',
+    }}>
+      <NodeResizer isVisible={sel} minWidth={70} minHeight={38} color="#3b82f6" />
+      {H(Position.Left, 'vl', { left:-6, top:'34%', background:'#ef4444' })}
+      {H(Position.Left, 'rl', { left:-6, top:'66%', background:'#3b82f6' })}
+      {schema ? (
+        <svg width="100%" height="100%" viewBox="0 0 120 60" preserveAspectRatio="none" aria-label="Heizkörper Schema-Abgang">
+          <g fill="none" stroke="#15803d" strokeWidth="2">
+            <rect x="29" y="8" width="82" height="44" fill="#dcfce7" />
+            {[42,55,68,81,94].map(x => <line key={x} x1={x} y1="12" x2={x} y2="48" />)}
+            <line x1="0" y1="20" x2="29" y2="20" stroke="#ef4444" />
+            <line x1="0" y1="40" x2="29" y2="40" stroke="#3b82f6" />
+          </g>
+        </svg>
+      ) : (
+        <div style={{ width:'100%', height:'100%', display:'flex', alignItems:'center', justifyContent:'center',
+          color:'#166534', fontSize:10, fontWeight:700, userSelect:'none' }}>
+          {data.label || 'Heizkörper'}
+        </div>
+      )}
     </div>
   );
 }
@@ -1123,10 +1171,10 @@ export function InterfaceLineNode({ id, data, selected: sel }) {
 // ── Bauteil-Nummern (Pflichtenheft §10: Nummerierung + Legende) ──────
 // Jedes nummerierbare Bauteil bekommt ein rotes Badge (data.nr) oben rechts.
 // eslint-disable-next-line react-refresh/only-export-components
-export const NUMMERIERT = ['gruppe', 'heizkreis', 'pump', 'valve2', 'valve3', 'checkvalve', 'shutoff', 'erzeuger', 'speicher', 'erdsonden', 'verteiler', 'waermezaehler', 'expansion', 'bww', 'stad', 'sicherheitsventil', 'pwt', 'lufterhitzer', 'lufterhitzer_gruppe', 'waermezaehler_cad'];
+export const NUMMERIERT = ['gruppe', 'heizkreis', 'heizkoerper', 'luftheizapparat', 'pump', 'valve2', 'valve3', 'checkvalve', 'shutoff', 'erzeuger', 'speicher', 'erdsonden', 'verteiler', 'waermezaehler', 'expansion', 'bww', 'stad', 'sicherheitsventil', 'pwt', 'lufterhitzer', 'lufterhitzer_gruppe', 'waermezaehler_cad'];
 const KOMPAKTE_BAUTEILE = new Set([
   'pump', 'valve2', 'valve3', 'checkvalve', 'shutoff', 'stad',
-  'waermezaehler', 'expansion', 'sicherheitsventil', 'pwt', 'lufterhitzer',
+  'waermezaehler', 'expansion', 'sicherheitsventil', 'pwt', 'lufterhitzer', 'luftheizapparat',
   'waermezaehler_cad',
 ]);
 
@@ -1147,6 +1195,7 @@ function mitNr(Comp) {
   function MitNr(props) {
     const nr = props.data?.nr;
     const kompakt = KOMPAKTE_BAUTEILE.has(props.type);
+    const skaliert = props.type === 'heizkoerper';
     const { setNodes, getZoom, screenToFlowPosition } = useReactFlow();
     const captionDrag = useRef(null);
     const captionRef = useRef(null);
@@ -1160,7 +1209,7 @@ function mitNr(Comp) {
     const caption = props.data?.label || {
       erzeuger:'Wärmeerzeuger', erdsonden:'Erdsondenfeld', speicher:'Speicher',
       bww:'BWW-Speicher', verteiler:'Verteiler', gruppe:'Verbrauchergruppe',
-      heizkreis:'Heizkreis', pump:'Pumpe', valve2:'2-Weg-Ventil',
+      heizkreis:'Heizkreis', heizkoerper:'Heizkörper', luftheizapparat:'Luftheizapparat', pump:'Pumpe', valve2:'2-Weg-Ventil',
       valve3:'3-Weg-Ventil', checkvalve:'Rückschlagventil', shutoff:'Absperrventil',
       stad:'STAD', waermezaehler:'Wärmezähler', expansion:'Expansionsgefäss',
       sicherheitsventil:'Sicherheitsventil', pwt:'Plattentauscher',
@@ -1237,7 +1286,8 @@ function mitNr(Comp) {
       window.addEventListener('pointerup', up);
     };
     return (
-      <div style={{ position: 'relative', display: 'inline-block' }}>
+      <div style={{ position:'relative', display:skaliert ? 'block' : 'inline-block',
+        ...(skaliert ? { width:'100%', height:'100%' } : {}) }}>
         <Comp {...props} />
         {nr != null && (
           <div style={{
@@ -1319,8 +1369,10 @@ function mitNr(Comp) {
 const BASIS_TYPES = {
   gruppe:      GruppeNode,
   lufterhitzer:        LufterhitzerNode,
+  luftheizapparat:     LuftheizapparatNode,
   lufterhitzer_gruppe: LufterhitzerGruppeNode,
   heizkreis:   HeizkreisNode,
+  heizkoerper: HeizkoerperNode,
   pump:        PumpNode,
   valve2:      Valve2Node,
   valve3:      Valve3Node,
@@ -1349,7 +1401,7 @@ const BASIS_TYPES = {
 // ── Drehung um 90° (data.rotation) ───────────────────────────────────────────
 export const ROTATABLE = new Set([
   'pump', 'valve2', 'valve3', 'checkvalve', 'shutoff',
-  'stad', 'temperatur', 'sicherheitsventil', 'pwt', 'lufterhitzer',
+  'stad', 'temperatur', 'sicherheitsventil', 'pwt', 'lufterhitzer', 'luftheizapparat', 'heizkoerper',
   'waermezaehler', 'waermezaehler_cad', 'erzeuger', 'verbraucher', 'speicher', 'bww',
   'expansion', 'anschluss',
 ]);
@@ -1366,10 +1418,12 @@ function mitRotation(Comp) {
     const rot = props.data?.rotation || 0;
     const mirrored = Boolean(props.data?.mirrored);
     if (!rot && !mirrored) return <Comp {...props} />;
+    const skaliert = props.type === 'heizkoerper';
     // Reihenfolge rotate() scaleX(-1): erst spiegeln, dann drehen — passend zur
     // Seiten-Korrektur in anschlussSeite (spiegelSeite vor rotiereSeite).
     return (
-      <div style={{ transform: `rotate(${rot}deg) scaleX(${mirrored ? -1 : 1})`, transformOrigin: 'center center', display: 'inline-block' }}>
+      <div style={{ transform:`rotate(${rot}deg) scaleX(${mirrored ? -1 : 1})`, transformOrigin:'center center',
+        display:skaliert ? 'block' : 'inline-block', ...(skaliert ? { width:'100%', height:'100%' } : {}) }}>
         <Comp {...props} />
       </div>
     );

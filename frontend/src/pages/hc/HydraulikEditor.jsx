@@ -1,10 +1,10 @@
 import React, { useCallback, useState, useMemo, useRef, useEffect } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  AlertTriangle, AlignHorizontalJustifyCenter, ArrowLeft, Check, ChevronDown, Download, Eye,
+  AlertTriangle, AlignHorizontalJustifyCenter, ArrowLeft, Check, ChevronDown, Copy, Download, Eye,
   FlipHorizontal2, History,
   Image as ImageIcon, Layers3, LayoutTemplate, Lock, Unlock, MapPin, Move, MoveHorizontal,
-  PanelLeftClose, PanelLeftOpen, RotateCcw, RotateCw, Scissors, Spline,
+  PanelLeftClose, PanelLeftOpen, RotateCcw, RotateCw, Scissors, Spline, Eraser,
   PanelRightClose, PanelRightOpen, Redo2, Save as SaveIcon, Settings, Settings2, Trash2, Undo2, X,
 } from 'lucide-react';
 import {
@@ -27,7 +27,7 @@ import { EDGE_TYPES } from '../../components/hc/edges/FlowEdge';
 import { pairedHandleId, parallelWaypoints, roundedPolylinePath, splitRouteAtCorner, splitRouteAtPoint, reconnectThroughNode, adaptivePolyline, orthogonalerAnschlussEckpunkt, segmentAchse, mitgezogeneWaypoints } from '../../components/hc/edges/geometry';
 import { createHydraulicEdge, canStartHydraulicLine } from './schema/edgeFactory';
 import {
-  ALIGN, BREAK, DRAW_PIPE, HOME, MOVE, PLACE, STRETCH,
+  ALIGN, BREAK, DRAW_PIPE, HOME, MOVE, PLACE, STRETCH, TRIM,
   escape as escapeMode, finishCommand, initialMode,
   istBefehl, istModify, modeLabel, startCommand, toggleCommand, zeichnetLeitung,
 } from './schema/editorMode';
@@ -45,7 +45,8 @@ import { eingefuegterKnoten, kopierbarerKnoten } from './schema/nodeClipboard';
 import { nodesMitExportGeometrie } from './schema/exportGeometrie';
 import {
   abzweigPunkt, fensterAus, labelVerschoben, labelVersatz,
-  leitungMitLueckeTrennen, leitungsSystem, leitungVerschieben, routeBereinigen, routeDehnen,
+  leitungMitLueckeTrennen, leitungTrimmen, leitungsSystem, leitungVerschieben, routeBereinigen, routeDehnen,
+  routeSegmenteEntfernen, trimGrenzen,
   segmentAusrichten, segmentVerschieben,
   entwurfFuerAbschluss, segmentZumVerschieben, verschiebungLabel,
 } from './schema/cadEdit';
@@ -390,6 +391,8 @@ const PALETTE_GRUPPEN = [
   { titel: 'Verteilung', items: [
     { type: 'verteiler',  label: 'Verteiler',           desc: 'VL/RL-Balken, wählbare Abgänge' },
     { type: 'gruppe',     label: 'Verbrauchergruppe',   desc: 'CAD-Strang: Pumpe, Einspritz, Q/VL/RL' },
+    { type: 'heizkoerper', label: 'Heizkörper',         desc: 'Grüne, skalierbare Fläche oder kompakter Schema-Abgang' },
+    { type: 'luftheizapparat', label: 'Luftheizapparat', desc: 'Register mit Lüfter; VL/RL auf derselben Seite' },
     { type: 'lufterhitzer', label: 'Lufterhitzer',      desc: 'Register mit Luftstrom quer hindurch' },
     { type: 'lufterhitzer_gruppe', label: 'Lufterhitzer-Gruppe', desc: 'CAD-Strang: Klappe, Regelventil, Register, STAD' },
   ]},
@@ -1340,7 +1343,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
 
 // ── Auslegungs-Modal (Doppelklick auf ein Bauteil) ───────────
 const TITLES = {
-  gruppe: 'Verbrauchergruppe', heizkreis: 'Heizkreis', valve2: '2-Wege Regelventil',
+  gruppe: 'Verbrauchergruppe', heizkreis: 'Heizkreis', heizkoerper:'Heizkörper', luftheizapparat:'Luftheizapparat', valve2: '2-Wege Regelventil',
   valve3: '3-Wege Mischventil', pump: 'Pumpe', erzeuger: 'Wärmeerzeuger',
   verteiler: 'Verteiler', speicher: 'Speicher', erdsonden: 'Erdsondenfeld',
   waermezaehler: 'Wärmezähler', expansion: 'Expansionsgefäss',
@@ -1567,11 +1570,16 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
         )}
       </div>
     ) : <div style={warnSt}>Verbrauchergruppen an die Stutzen anschliessen — dann rechnet der Verteiler.</div>;
-  } else if (node.type === 'heizkreis') {
+  } else if (node.type === 'heizkreis' || node.type === 'heizkoerper' || node.type === 'luftheizapparat') {
     const vl=parseFloat(d.vl_temp), rl=parseFloat(d.rl_temp);
     const dt=vl-rl, calc = v ?? null; // V' kommt vom Backend
     body = (
       <div style={stapel}>
+        {node.type === 'heizkoerper' && <div><label style={lbl}>Darstellung</label>
+          <select style={sel} value={d.darstellung || 'flaeche'} onChange={e=>set('darstellung', e.target.value)}>
+            <option value="flaeche">Grüne Fläche (frei skalierbar)</option>
+            <option value="schema">Kompakter Schema-Abgang</option>
+          </select></div>}
         <div style={gitter2}>
           <div><label style={lbl}>Vorlauf [°C]</label>
             <input type="number" style={inpVl} value={d.vl_temp??''} onChange={e=>set('vl_temp',e.target.value)} placeholder="35"/></div>
@@ -1580,6 +1588,7 @@ function AuslegungModal({ node, v, gr, vr, ver, pr, xr, sr, er, br, onUpdate, on
         </div>
         <div><label style={lbl}>Leistung Q [kW]</label>
           <input type="number" style={inp} value={d.q_kw??''} onChange={e=>set('q_kw',e.target.value)} placeholder="8.5"/></div>
+        {node.type !== 'heizkreis' && <Typenschild d={d} set={set} />}
         <BigVal label="Volumenstrom V'" value={calc!=null?calc.toFixed(4):null} unit="m³/h" color="#15803d"
           sub={calc!=null?`V' = Q / (1.163 · ΔT),  ΔT = ${dt} K  →  ${(calc*1000).toFixed(0)} l/h`:'Vorlauf, Rücklauf und Leistung eingeben'}/>
       </div>
@@ -2338,6 +2347,7 @@ function EditorInner() {
   const [selectedEdgeId, setSelectedEdgeId] = useState(null);
   const [selectedEdgePoint, setSelectedEdgePoint] = useState(null);
   const [selectedEdgeSegment, setSelectedEdgeSegment] = useState(null); // { edgeId, segmentIndex }
+  const [selectedSegments, setSelectedSegments] = useState([]); // mehrere { edgeId, segmentIndex }
   const [activeLayerId, setActiveLayerId] = useState('heizung_vl');
   const [layerVisibility, setLayerVisibility] = useState(DEFAULT_LAYER_VISIBILITY);
   const [showLayers, setShowLayers] = useState(false);
@@ -2878,6 +2888,8 @@ function EditorInner() {
   }, [setNodes, snap, drawingConfig.grid_size]);
 
   const clipboard = useRef(null);
+  const befehlsfolge = useRef('');
+  const befehlsfolgeTimer = useRef(null);
   const nodesRef = useRef([]);
   const edgesRef = useRef([]);
   const edgePointDrag = useRef(null);
@@ -4409,6 +4421,12 @@ function EditorInner() {
     setEditorMode(startCommand(BREAK));
   }, []);
 
+  const trimmenStarten = useCallback(() => {
+    setBefehlHinweis('TR · Zu entfernenden Leitungsabschnitt anklicken · ESC beendet.');
+    setLuecke(null);
+    setEditorMode(startCommand(TRIM, { persistent:true }));
+  }, []);
+
   const dehnenStarten = useCallback(() => {
     setBefehlHinweis(null);
     setDehnen({ ecke1:null, ecke2:null, basis:null, cursor:null });
@@ -4491,6 +4509,233 @@ function EditorInner() {
     lueckeTrennen(aktuell.edgeId, aktuell.erster, treffer);
     return true;
   }, [lueckeTrennen, routePunkte, screenToFlowPosition]);
+
+  // Eine hydraulische Leitung durch null, eine oder mehrere Rest-Routen
+  // ersetzen. Neue offene Enden werden echte Junctions; ursprüngliche
+  // Bauteilanschlüsse bleiben an den äusseren Reststücken erhalten.
+  const leitungDurchRoutenErsetzen = useCallback((edge, routes, basisEdges, basisNodes) => {
+    const original = routePunkte(edge);
+    const layer = layerVonEdge(edge);
+    const gleich = (a, b) => a && b && Math.hypot(a.x - b.x, a.y - b.y) < 0.5;
+    const neueNodes = [];
+    const neueEdges = [];
+    const daten = { ...(edge.data || {}) };
+    delete daten.laenge_m;
+    delete daten.paired_edge_id;
+    delete daten.auto_paired;
+    delete daten.auto_pair_open;
+    delete daten._routePoints;
+    delete daten._routeStart;
+    delete daten._routeEnd;
+    routes.forEach((route, index) => {
+      if (!Array.isArray(route) || route.length < 2) return;
+      const amStart = gleich(route[0], original[0]);
+      const amEnde = gleich(route.at(-1), original.at(-1));
+      const source = amStart ? edge.source : newId();
+      const target = amEnde ? edge.target : newId();
+      if (!amStart) neueNodes.push(cadAnker(source, route[0], layer));
+      if (!amEnde) neueNodes.push(cadAnker(target, route.at(-1), layer));
+      const erstellt = createHydraulicEdge({
+        id:index === 0 ? edge.id : newId(),
+        source, sourceHandle:amStart ? edge.sourceHandle : 'center-source',
+        target, targetHandle:amEnde ? edge.targetHandle : 'center-target',
+        layerId:layer.id, layerColor:layer.color,
+        points:route.slice(1, -1), cornerRadius:drawingConfig.corner_radius,
+      }, [...basisEdges, ...neueEdges]);
+      if (erstellt) neueEdges.push({ ...erstellt, selected:false,
+        data:{ ...(erstellt.data || {}), ...daten, cad_polyline:true, polyline_version:1,
+          points:route.slice(1, -1) } });
+    });
+    const naechsteEdges = [
+      ...basisEdges.filter(item => item.id !== edge.id).map(item => {
+        if (item.data?.paired_edge_id !== edge.id) return item;
+        const data = { ...(item.data || {}) }; delete data.paired_edge_id;
+        return { ...item, data };
+      }),
+      ...neueEdges,
+    ];
+    const benutzt = new Set(naechsteEdges.flatMap(item => [item.source, item.target]));
+    const naechsteNodes = [...basisNodes, ...neueNodes]
+      .filter(node => node.type !== 'junction' || benutzt.has(node.id));
+    return { nodes:naechsteNodes, edges:naechsteEdges };
+  }, [cadAnker, drawingConfig.corner_radius, routePunkte]);
+
+  const trimmenKlick = useCallback((event) => {
+    if (!istBefehl(editorModeRef.current, TRIM)) return false;
+    if (event.button != null && event.button !== 0) return true;
+    event.preventDefault();
+    event.stopPropagation();
+    const welt = screenToFlowPosition({ x:event.clientX, y:event.clientY });
+    const treffer = naechsteSichtbareLeitung(welt, 24 / Math.max(getZoom(), 0.2));
+    if (!treffer) {
+      setBefehlHinweis('TR · Kein Teilstück getroffen — direkt auf eine Leitung klicken.');
+      return true;
+    }
+    const schneidSegmente = [];
+    edgesRef.current.forEach(andere => {
+      if (andere.id === treffer.edge.id) return;
+      const route = routePunkte(andere);
+      for (let i = 0; i < route.length - 1; i += 1) schneidSegmente.push([route[i], route[i + 1]]);
+    });
+    const grenzen = trimGrenzen(treffer.route, treffer.segmentIndex, welt, schneidSegmente);
+    const ergebnis = grenzen && leitungTrimmen(treffer.route, grenzen.a, grenzen.b);
+    if (!ergebnis || ergebnis.fehler) {
+      setBefehlHinweis(ergebnis?.fehler || 'TR · Teilstück kann nicht getrimmt werden.');
+      return true;
+    }
+    snap();
+    const rest = [ergebnis.erste, ergebnis.zweite].filter(Boolean);
+    const next = leitungDurchRoutenErsetzen(treffer.edge, rest, edgesRef.current, nodesRef.current);
+    setNodes(next.nodes);
+    setEdges(next.edges);
+    setSelectedEdgeId(null);
+    setSelectedEdgeSegment(null);
+    setSelectedSegments([]);
+    setBefehlHinweis('TR · Abschnitt entfernt · nächsten Abschnitt anklicken · ESC beendet.');
+    return true;
+  }, [getZoom, leitungDurchRoutenErsetzen, naechsteSichtbareLeitung, routePunkte, screenToFlowPosition, setEdges, setNodes, snap]);
+
+  const auswahlKopieren = useCallback(() => {
+    const knoten = nodesRef.current.filter(node => node.selected && node.type !== 'junction');
+    if (!knoten.length && selected) {
+      const einzeln = nodesRef.current.find(node => node.id === selected.id);
+      if (einzeln && einzeln.type !== 'junction') knoten.push(einzeln);
+    }
+    const knotenIds = new Set(knoten.map(node => node.id));
+    const ganzeIds = new Set([
+      ...markierteEdgeIds,
+      ...edgesRef.current.filter(edge => edge.selected).map(edge => edge.id),
+    ]);
+    const teile = selectedSegments.length ? selectedSegments
+      : selectedEdgeSegment ? [selectedEdgeSegment] : [];
+    const routen = [];
+    edgesRef.current.forEach(edge => {
+      const route = routePunkte(edge);
+      if (ganzeIds.has(edge.id)) {
+        routen.push({ edge, route, whole:true,
+          sourceRef:knotenIds.has(edge.source) ? edge.source : null,
+          targetRef:knotenIds.has(edge.target) ? edge.target : null });
+        return;
+      }
+      teile.filter(item => item.edgeId === edge.id).forEach(item => {
+        const a = route[item.segmentIndex], b = route[item.segmentIndex + 1];
+        if (!a || !b) return;
+        routen.push({ edge, route:[a, b], whole:false,
+          sourceRef:item.segmentIndex === 0 && knotenIds.has(edge.source) ? edge.source : null,
+          targetRef:item.segmentIndex === route.length - 2 && knotenIds.has(edge.target) ? edge.target : null });
+      });
+    });
+    if (!knoten.length && !routen.length) return false;
+    clipboard.current = {
+      kind:'selection',
+      nodes:knoten.map(kopierbarerKnoten),
+      routes:routen.map(item => ({ ...item, edge:JSON.parse(JSON.stringify(item.edge)),
+        route:item.route.map(point => ({ x:point.x, y:point.y })) })),
+    };
+    return true;
+  }, [markierteEdgeIds, routePunkte, selected, selectedEdgeSegment, selectedSegments]);
+
+  const auswahlEinfuegen = useCallback(() => {
+    const src = clipboard.current;
+    if (!src) return false;
+    // Alte Einzelknoten-Snapshots bleiben abwärtskompatibel.
+    if (src.kind !== 'selection') {
+      snap();
+      const nummer = NUMMERIERT.includes(src.type) ? naechsteNr(nodesRef.current) : null;
+      const neu = eingefuegterKnoten(src, newId(), { nummer });
+      setNodes(items => [...items.map(node => ({ ...node, selected:false })), neu]);
+      clipboard.current = kopierbarerKnoten(neu);
+      setSelected(neu);
+      setSelectedEdgeId(null);
+      return true;
+    }
+    snap();
+    const versatz = 24;
+    const idMap = new Map();
+    let nummer = naechsteNr(nodesRef.current);
+    const neueNodes = src.nodes.map(snapshot => {
+      const id = newId();
+      idMap.set(snapshot.id, id);
+      const neu = eingefuegterKnoten(snapshot, id, {
+        nummer:NUMMERIERT.includes(snapshot.type) ? nummer++ : null,
+        versatz,
+      });
+      return neu;
+    });
+    const anker = [];
+    const neueEdges = [];
+    src.routes.forEach(item => {
+      const route = item.route.map(point => ({ x:point.x + versatz, y:point.y + versatz }));
+      const layer = layerVonEdge(item.edge);
+      const source = item.sourceRef && idMap.get(item.sourceRef) ? idMap.get(item.sourceRef) : newId();
+      const target = item.targetRef && idMap.get(item.targetRef) ? idMap.get(item.targetRef) : newId();
+      if (!(item.sourceRef && idMap.has(item.sourceRef))) anker.push(cadAnker(source, route[0], layer));
+      if (!(item.targetRef && idMap.has(item.targetRef))) anker.push(cadAnker(target, route.at(-1), layer));
+      const data = { ...(item.edge.data || {}) };
+      ['_routePoints','_routeStart','_routeEnd','paired_edge_id','auto_paired','auto_pair_open'].forEach(key => delete data[key]);
+      // Eine manuell eingetragene Länge gehört zur ganzen Ursprungsleitung;
+      // bei einer Segmentkopie wäre sie fachlich falsch.
+      if (!item.whole) delete data.laenge_m;
+      const edge = createHydraulicEdge({
+        id:newId(), source,
+        sourceHandle:item.sourceRef && idMap.has(item.sourceRef) ? item.edge.sourceHandle : 'center-source',
+        target,
+        targetHandle:item.targetRef && idMap.has(item.targetRef) ? item.edge.targetHandle : 'center-target',
+        layerId:layer.id, layerColor:layer.color, points:route.slice(1, -1),
+        cornerRadius:drawingConfig.corner_radius,
+      }, [...edgesRef.current, ...neueEdges]);
+      if (edge) neueEdges.push({ ...edge, selected:true,
+        data:{ ...(edge.data || {}), ...data, points:route.slice(1, -1) } });
+    });
+    setNodes([...nodesRef.current.map(node => ({ ...node, selected:false })), ...neueNodes, ...anker]);
+    setEdges([...edgesRef.current.map(edge => ({ ...edge, selected:false })), ...neueEdges]);
+    setSelected(neueNodes.at(-1) || null);
+    setSelectedEdgeId(neueEdges.at(-1)?.id || null);
+    setSelectedSegments([]);
+    // Nächstes Einfügen setzt dieselbe Auswahl nochmals um 24 Einheiten weiter.
+    clipboard.current = {
+      ...src,
+      nodes:src.nodes.map(node => ({ ...node, position:{ x:(node.position?.x || 0) + versatz, y:(node.position?.y || 0) + versatz } })),
+      routes:src.routes.map(item => ({ ...item, route:item.route.map(point => ({ x:point.x + versatz, y:point.y + versatz })) })),
+    };
+    return true;
+  }, [cadAnker, drawingConfig.corner_radius, setEdges, setNodes, snap]);
+
+  const auswahlLoeschen = useCallback(() => {
+    const knotenIds = new Set(nodesRef.current.filter(node => node.selected).map(node => node.id));
+    if (selected) knotenIds.add(selected.id);
+    const ganzeIds = new Set([
+      ...markierteEdgeIds,
+      ...edgesRef.current.filter(edge => edge.selected).map(edge => edge.id),
+    ]);
+    const teile = selectedSegments.length ? selectedSegments
+      : selectedEdgeSegment ? [selectedEdgeSegment] : [];
+    if (!knotenIds.size && !ganzeIds.size && !teile.length) return false;
+    snap();
+    let nextEdges = edgesRef.current.filter(edge => !ganzeIds.has(edge.id)
+      && !knotenIds.has(edge.source) && !knotenIds.has(edge.target));
+    let nextNodes = nodesRef.current.filter(node => !knotenIds.has(node.id));
+    const gruppiert = new Map();
+    teile.forEach(item => {
+      if (!gruppiert.has(item.edgeId)) gruppiert.set(item.edgeId, []);
+      gruppiert.get(item.edgeId).push(item.segmentIndex);
+    });
+    gruppiert.forEach((indexes, edgeId) => {
+      const edge = nextEdges.find(item => item.id === edgeId);
+      if (!edge) return;
+      const routes = routeSegmenteEntfernen(routePunkte(edge), indexes);
+      const ersetzt = leitungDurchRoutenErsetzen(edge, routes, nextEdges, nextNodes);
+      nextEdges = ersetzt.edges;
+      nextNodes = ersetzt.nodes;
+    });
+    const benutzt = new Set(nextEdges.flatMap(edge => [edge.source, edge.target]));
+    nextNodes = nextNodes.filter(node => node.type !== 'junction' || benutzt.has(node.id));
+    setNodes(nextNodes);
+    setEdges(nextEdges);
+    setSelected(null); setSelectedEdgeId(null); setSelectedEdgePoint(null);
+    setSelectedEdgeSegment(null); setSelectedSegments([]); setMarkierteEdgeIds([]);
+    return true;
+  }, [leitungDurchRoutenErsetzen, markierteEdgeIds, routePunkte, selected, selectedEdgeSegment, selectedSegments, setEdges, setNodes, snap]);
 
   // ── Dehnen (AutoCAD STRETCH) ─────────────────────────────────────────────
   // Fenster aufziehen, Basispunkt, Zielpunkt: was im Fenster liegt, wandert;
@@ -4764,26 +5009,35 @@ function EditorInner() {
         ev.preventDefault(); redo();
       }
       if ((ev.metaKey || ev.ctrlKey) && (ev.key === 'c' || ev.key === 'C')) {
-        const ausgewaehlt = nodesRef.current.find(node => node.selected)
-          || (selected ? nodesRef.current.find(node => node.id === selected.id) : null);
-        if (ausgewaehlt) {
-          ev.preventDefault();
-          clipboard.current = kopierbarerKnoten(ausgewaehlt);
-        }
+        if (auswahlKopieren()) ev.preventDefault();
       }
       if ((ev.metaKey || ev.ctrlKey) && (ev.key === 'v' || ev.key === 'V') && clipboard.current) {
         ev.preventDefault();
-        const src = clipboard.current;
-        snap();
-        const nummer = NUMMERIERT.includes(src.type) ? naechsteNr(nodesRef.current) : null;
-        const neu = eingefuegterKnoten(src, newId(), { nummer });
-        setNodes(ns => [...ns.map(node => ({ ...node, selected:false })), neu]);
-        clipboard.current = kopierbarerKnoten(neu);
-        setSelected(neu);
-        setSelectedEdgeId(null);
+        auswahlEinfuegen();
       }
       if (!ev.metaKey && !ev.ctrlKey) {
         const key = ev.key.toLowerCase();
+        // Klassischer zweistelliger CAD-Befehl: T, dann R. Ein einzelnes R
+        // bleibt dadurch weiterhin die schnelle Rücklauf-Layerwahl.
+        if (befehlsfolge.current === 't' && key === 'r') {
+          ev.preventDefault();
+          befehlsfolge.current = '';
+          if (befehlsfolgeTimer.current) clearTimeout(befehlsfolgeTimer.current);
+          trimmenStarten();
+          return;
+        }
+        if (key === 't' && !ev.repeat) {
+          ev.preventDefault();
+          befehlsfolge.current = 't';
+          setBefehlHinweis('T … R für Trimmen');
+          if (befehlsfolgeTimer.current) clearTimeout(befehlsfolgeTimer.current);
+          befehlsfolgeTimer.current = setTimeout(() => {
+            befehlsfolge.current = '';
+            setBefehlHinweis(null);
+          }, 1200);
+          return;
+        }
+        befehlsfolge.current = '';
         if (key === drawingConfig.shortcut_line || key === drawingConfig.shortcut_polyline) {
           ev.preventDefault();
           setSelected(null);
@@ -4809,6 +5063,8 @@ function EditorInner() {
           setLuecke(null);
           setDehnen(null);
           setBefehlHinweis(null);
+          if (befehlsfolgeTimer.current) clearTimeout(befehlsfolgeTimer.current);
+          befehlsfolge.current = '';
           platzierVorschauRef.current = null;
           setPlatzierVorschau(null);
           setInlineTreffer(null);
@@ -4902,6 +5158,7 @@ function EditorInner() {
             ev.preventDefault();
             punktEntfernen(selectedEdgePoint.edgeId, selectedEdgePoint.pointIndex);
           }
+          else if (auswahlLoeschen()) ev.preventDefault();
           else if (selected) { snap(); deleteNodeRef.current?.(selected.id); }
           else if (selectedEdgeId) { deleteEdgeRef.current?.(selectedEdgeId); }
         }
@@ -4909,7 +5166,7 @@ function EditorInner() {
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [undo, redo, selected, selectedEdgeId, selectedEdgePoint, selectedLabelEdgeId, markierteEdgeIds, beschriftungSetzen, punktEntfernen, snap, rotateNode, mirrorNode, alignNode, nudgeNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, spiegelAchse, drawingConfig, setNodes, laengeAnwenden, entwurfVerwerfen, verschiebenStarten, ausrichtenUmschalten, trennenStarten, dehnenStarten]);
+  }, [undo, redo, selected, selectedEdgeId, selectedEdgePoint, selectedLabelEdgeId, markierteEdgeIds, beschriftungSetzen, punktEntfernen, snap, rotateNode, mirrorNode, alignNode, nudgeNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, spiegelAchse, drawingConfig, setNodes, laengeAnwenden, entwurfVerwerfen, verschiebenStarten, ausrichtenUmschalten, trennenStarten, trimmenStarten, dehnenStarten, auswahlKopieren, auswahlEinfuegen, auswahlLoeschen]);
 
   // Berechnete Werte (Backend) in die Node-Daten spiegeln — nur für die Anzeige.
   // Verteiler-Rahmen: nur die Balken sind greifbar (dragHandle), die Lücke
@@ -4939,7 +5196,7 @@ function EditorInner() {
         data: c ? { ...n.data, _calc: { ...(n.data?._calc || {}), ...c } } : n.data,
       };
     }
-    if (n.type === 'gruppe' || n.type === 'heizkreis' || n.type === 'lufterhitzer_gruppe') {
+    if (n.type === 'gruppe' || n.type === 'heizkreis' || n.type === 'heizkoerper' || n.type === 'luftheizapparat' || n.type === 'lufterhitzer_gruppe') {
       return { ...n, data: { ...n.data, _calc: { ...(n.data?._calc || {}), ...(gruppeResults[n.id] || {}), v: nodeFlows[n.id] } } };
     }
     if (n.type === 'waermezaehler') {
@@ -4983,7 +5240,7 @@ function EditorInner() {
         } else if (n.type === 'lufterhitzer_gruppe') {
           const c = gruppeResults[n.id] || {};
           werte = `${d.q_kw ?? '—'} kW · VL/RL ${c.vl ?? '—'}/${c.rl ?? '—'} °C · V' ${fx(c.m_sek)} m³/h${c.ventil?.kvs_eff != null ? ` · kvs ${c.ventil.kvs_eff}` : ''}`;
-        } else if (n.type === 'heizkreis') {
+        } else if (n.type === 'heizkreis' || n.type === 'heizkoerper' || n.type === 'luftheizapparat') {
           werte = `${d.q_kw ?? '—'} kW · ${d.vl_temp ?? '—'}/${d.rl_temp ?? '—'} °C · V' ${fx(nodeFlows[n.id])} m³/h`;
         } else if (n.type === 'verteiler') {
           const c = verteilerResults[n.id] || {};
@@ -5046,7 +5303,7 @@ function EditorInner() {
     ) : undefined;
     return {
       ...edge, type: 'flow', animated: false,
-      selected:selectedEdgeId === edge.id,
+      selected:Boolean(edge.selected) || selectedEdgeId === edge.id,
       hidden: layerVisibility[layer.id] === false,
       data: {
         ...(edge.data || {}),
@@ -5069,6 +5326,8 @@ function EditorInner() {
         _onSelectPoint:(edgeId, pointIndex) => setSelectedEdgePoint({ edgeId, pointIndex }),
         _selectedPointIndex:selectedEdgePoint?.edgeId === edge.id ? selectedEdgePoint.pointIndex : null,
         _selectedSegmentIndex:selectedEdgeSegment?.edgeId === edge.id ? selectedEdgeSegment.segmentIndex : null,
+        _selectedSegmentIndexes:selectedSegments
+          .filter(item => item.edgeId === edge.id).map(item => item.segmentIndex),
         _onPointPointerDown:punktDragStart,
         _onSegmentPointerDown:segmentDragStart,
         _onEndpointPointerDown:endpointDragStart,
@@ -5089,7 +5348,7 @@ function EditorInner() {
       style: { ...edge.style, stroke:color },
       };
     });
-  }, [edges, edgeContextMenu, edgeFlows, endpointContextMenu, endpointDragStart, junctionDegrees, labelDragStart, labelZuruecksetzen, layerVisibility, leitungResults, markierteEdgeIds, nodeGeometryVersion, punktDragStart, punktEntfernen, punktHinzufuegen, routePunkte, segmentDragStart, selectedEdgeId, selectedEdgePoint, selectedEdgeSegment, selectedLabelEdgeId]);
+  }, [edges, edgeContextMenu, edgeFlows, endpointContextMenu, endpointDragStart, junctionDegrees, labelDragStart, labelZuruecksetzen, layerVisibility, leitungResults, markierteEdgeIds, nodeGeometryVersion, punktDragStart, punktEntfernen, punktHinzufuegen, routePunkte, segmentDragStart, selectedEdgeId, selectedEdgePoint, selectedEdgeSegment, selectedSegments, selectedLabelEdgeId]);
 
   const loadSchema = (key) => {
     const s = SCHALTUNGEN[key];
@@ -5278,6 +5537,8 @@ function EditorInner() {
         : nodeType === 'erdsonden' ? { sonden_anzahl: 5, sonden_laenge_m: 180 }
         : nodeType === 'gruppe' ? { schaltung: 'einspritz' }
         : nodeType === 'lufterhitzer_gruppe' ? { schaltung: 'drossel' }
+        : nodeType === 'heizkoerper' ? { darstellung:'flaeche', system:'Heizkörper', vl_temp:50, rl_temp:40 }
+        : nodeType === 'luftheizapparat' ? { system:'Lufterhitzer', vl_temp:60, rl_temp:45 }
         : nodeType === 'anschluss' ? { buchstabe: naechsterBuchstabe(ns) }
         : nodeType === 'label' ? { label: 'Text', fontSize: 12 }
         : nodeType === 'concrete_area' ? { label: '', hatch_scale:8 }
@@ -5286,6 +5547,7 @@ function EditorInner() {
       // Skalierbare Annotationen brauchen eine Startgrösse; die Betonfläche liegt
       // hinter den Bauteilen (niedriger zIndex).
       const annoStyle = nodeType === 'concrete_area' ? { style: { width: 220, height: 130 }, zIndex: -1 }
+        : nodeType === 'heizkoerper' ? { style:{ width:160, height:64 } }
         : nodeType === 'interface_line' ? { style: { width: 200, height: 24 } }
         : {};
       const bauteil = {
@@ -5422,6 +5684,7 @@ function EditorInner() {
       nadelSetzen(screenToFlowPosition({ x:event.clientX, y:event.clientY }), node.id);
       return;
     }
+    if (trimmenKlick(event)) return;
     // Im Verschieben-Befehl setzt jeder Klick einen Punkt — auch auf einem
     // Bauteil. Sonst liesse sich der Basispunkt nie an ein Bauteil legen.
     if (dehnenKlick(event)) return;
@@ -5433,13 +5696,25 @@ function EditorInner() {
       return;
     }
     setEndpointMenu(null);
-    setSelected(node);
-    setSelectedEdgeId(null);
-    setSelectedEdgePoint(null);
-    setSelectedEdgeSegment(null);
+    const addieren = event.metaKey || event.ctrlKey;
+    const entfernen = event.shiftKey;
+    setNodes(items => items.map(item => ({ ...item,
+      selected:entfernen && item.id === node.id ? false
+        : addieren ? (item.id === node.id ? !item.selected : Boolean(item.selected))
+          : item.id === node.id,
+    })));
+    if (entfernen) setSelected(current => current?.id === node.id ? null : current);
+    else setSelected(node);
+    if (!addieren && !entfernen) {
+      setEdges(items => items.map(item => ({ ...item, selected:false })));
+      setSelectedEdgeId(null);
+      setSelectedEdgePoint(null);
+      setSelectedEdgeSegment(null);
+      setSelectedSegments([]);
+    }
     setSelectedLabelEdgeId(null);
     setInspectorOpen(true);
-  }, [cadKlick, platzierenKlick, verschiebenKlick, nadelSetzen, screenToFlowPosition, dehnenKlick]);
+  }, [cadKlick, platzierenKlick, verschiebenKlick, nadelSetzen, screenToFlowPosition, dehnenKlick, setEdges, setNodes]);
   const onNodeDoubleClick = useCallback((_, node) => {
     if (node.type === 'label') return; // Textblock: Doppelklick editiert inline
     if (!leitungsEntwurfRef.current) setAuslegung(node);
@@ -5507,6 +5782,7 @@ function EditorInner() {
   }, [getZoom, naechsteSichtbareLeitung, routePunkte, screenToFlowPosition, setEdges, setNodes, snap]);
 
   const onEdgeClick = useCallback((event, edge) => {
+    if (trimmenKlick(event)) return;
     if (istBefehl(editorModeRef.current, ALIGN)) { ausrichtenKlick(event); return; }
     // Der Trennbefehl braucht die Punkte AUF der Leitung — der Klick darf
     // deshalb nicht bei der Auswahl hängen bleiben.
@@ -5520,7 +5796,7 @@ function EditorInner() {
     if (leitungsEntwurfRef.current) { cadKlick(event); return; }
     setEndpointMenu(null);
     setEdgeMenu(null);
-    setMarkierteEdgeIds([]);
+    if (!event.metaKey && !event.ctrlKey && !event.shiftKey) setMarkierteEdgeIds([]);
     setSelectedEdgeId(edge.id);
     setSelectedEdgePoint(current => current?.edgeId === edge.id ? current : null);
     const route = routePunkte(edge);
@@ -5530,11 +5806,31 @@ function EditorInner() {
       const hit = projektionAufSegment(welt, route[index], route[index + 1]);
       if (hit && (!segment || hit.distance < segment.distance)) segment = { ...hit, segmentIndex:index };
     }
-    setSelectedEdgeSegment(segment ? { edgeId:edge.id, segmentIndex:segment.segmentIndex } : null);
-    setSelected(null);
+    const teil = segment ? { edgeId:edge.id, segmentIndex:segment.segmentIndex } : null;
+    if (teil) {
+      const key = `${teil.edgeId}:${teil.segmentIndex}`;
+      const schonGewaehlt = selectedSegments.some(item => `${item.edgeId}:${item.segmentIndex}` === key);
+      setSelectedSegments(items => {
+        if (event.shiftKey) return items.filter(item => `${item.edgeId}:${item.segmentIndex}` !== key);
+        if (event.metaKey || event.ctrlKey) {
+          return items.some(item => `${item.edgeId}:${item.segmentIndex}` === key)
+            ? items.filter(item => `${item.edgeId}:${item.segmentIndex}` !== key)
+            : [...items, teil];
+        }
+        return [teil];
+      });
+      setSelectedEdgeSegment(event.shiftKey || ((event.metaKey || event.ctrlKey) && schonGewaehlt) ? null : teil);
+      // Ein Segmentklick ist keine Auswahl der ganzen React-Flow-Edge. Eine
+      // Rahmenauswahl kann weiterhin vollständige Leitungen markieren.
+      setEdges(items => items.map(item => item.id === edge.id ? { ...item, selected:false } : item));
+    }
+    if (!event.metaKey && !event.ctrlKey && !event.shiftKey) {
+      setNodes(items => items.map(item => ({ ...item, selected:false })));
+      setSelected(null);
+    }
     setSelectedLabelEdgeId(null);
     setInspectorOpen(true);
-  }, [ausrichtenKlick, cadKlick, platzierenKlick, routePunkte, screenToFlowPosition, verschiebenKlick, lueckeKlick, dehnenKlick]);
+  }, [ausrichtenKlick, cadKlick, platzierenKlick, routePunkte, screenToFlowPosition, verschiebenKlick, lueckeKlick, dehnenKlick, trimmenKlick, selectedSegments, setEdges, setNodes]);
 
   const spiegelKopieErstellen = useCallback((edgeId, axisStart, axisEnd) => {
     const edge = edgesRef.current.find(item => item.id === edgeId);
@@ -5613,9 +5909,12 @@ function EditorInner() {
     setSelectedEdgeId(null);
     setSelectedEdgePoint(null);
     setSelectedEdgeSegment(null);
+    setSelectedSegments([]);
+    setNodes(items => items.map(item => item.selected ? { ...item, selected:false } : item));
+    setEdges(items => items.map(item => item.selected ? { ...item, selected:false } : item));
     setSelectedLabelEdgeId(null);
     setMarkierteEdgeIds([]);
-  }, [cadKlick, drawingConfig.grid_size, screenToFlowPosition, selected, selectedEdgeId, spiegelAchse, spiegelKopieErstellen, platzierenKlick, verschiebenKlick, nadelSetzen, dehnenKlick, lueckeKlick]);
+  }, [cadKlick, drawingConfig.grid_size, screenToFlowPosition, selected, selectedEdgeId, spiegelAchse, spiegelKopieErstellen, platzierenKlick, verschiebenKlick, nadelSetzen, dehnenKlick, lueckeKlick, trimmenKlick, setEdges, setNodes]);
 
   const canvasMouseMove = useCallback((event) => {
     // Platzierungsvorschau folgt dem Cursor — mit Raster und Ausrichtungslinien.
@@ -6129,6 +6428,19 @@ function EditorInner() {
                 taste:drawingConfig.shortcut_break,
                 hinweis:'Zwei Punkte auf der Leitung; das Stück dazwischen fällt weg. Trennt auch die hydraulische Verbindung.',
                 aktiv:Boolean(luecke), gesperrt:!selectedEdgeId && !luecke, aktion:trennenStarten },
+              { id:'trimmen', Icon:Eraser, name:'Trimmen', taste:'TR',
+                hinweis:'Entfernt den angeklickten Abschnitt bis zu den nächsten Schnittkanten; ohne Schnittkante das Teilstück von Ecke zu Ecke.',
+                aktiv:istBefehl(editorMode, TRIM), dauer:true, aktion:trimmenStarten },
+              { id:'kopieren', Icon:Copy, name:'Auswahl kopieren', taste:'⌘C',
+                hinweis:'Kopiert alle gewählten Bauteile, Leitungen und Teilstücke.',
+                gesperrt:!selected && !selectedEdgeId && !selectedSegments.length
+                  && !nodes.some(node => node.selected) && !edges.some(edge => edge.selected),
+                aktion:auswahlKopieren },
+              { id:'auswahl-loeschen', Icon:Trash2, name:'Auswahl löschen', taste:'DEL',
+                hinweis:'Löscht alle gewählten Bauteile, Leitungen und Teilstücke in einer Aktion.',
+                gesperrt:!selected && !selectedEdgeId && !selectedSegments.length
+                  && !nodes.some(node => node.selected) && !edges.some(edge => edge.selected),
+                aktion:auswahlLoeschen },
               { id:'dehnen', Icon:MoveHorizontal, name:'Dehnen',
                 taste:drawingConfig.shortcut_stretch,
                 hinweis:'Fenster aufziehen, Basispunkt, Zielpunkt. Was im Fenster liegt, wandert mit.',
@@ -6183,7 +6495,7 @@ function EditorInner() {
             selectionOnDrag={istGrundzustand && !spacePan}
             selectionMode={selectionMode}
             selectionKeyCode={null}
-            multiSelectionKeyCode="Shift"
+            multiSelectionKeyCode={['Meta', 'Control']}
             // Löschen macht der Editor selbst (mit Undo-Schnappschuss und
             // Aufräumen der Anker). React Flow soll NICHT zusätzlich löschen.
             deleteKeyCode={null}

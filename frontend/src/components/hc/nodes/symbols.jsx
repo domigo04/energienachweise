@@ -275,6 +275,27 @@ export function SymLufterhitzer({ width = 104 }) {
   );
 }
 
+// Luftheizapparat: dasselbe Registermotiv wie der Lufterhitzer, aber als
+// Umluftgerät ohne Richtungspfeil. Der kleine dreiflüglige Ventilator ist nur
+// eine schematische Kennzeichnung; die beiden Wasseranschlüsse zeichnet der
+// Node auf derselben Seite des Registers.
+export function SymLuftheizapparat({ width = 80 }) {
+  return (
+    <svg viewBox="0 0 160 112" width={width} height={width * 112 / 160}
+      role="img" aria-label="Luftheizapparat mit Ventilator">
+      <rect x="2" y="2" width="156" height="108" rx="3" fill="white" stroke="#111827" strokeWidth="3" />
+      <path d="M5 5 L155 107 M155 5 L5 107" fill="none" stroke="#111827" strokeWidth="2.4" />
+      <circle cx="80" cy="56" r="25" fill="white" stroke="#111827" strokeWidth="2.8" />
+      <circle cx="80" cy="56" r="4" fill="#111827" />
+      <g fill="#d1fae5" stroke="#15803d" strokeWidth="1.8" strokeLinejoin="round">
+        <path d="M80 52 C75 37 78 28 87 24 C93 35 91 44 80 52 Z" />
+        <path d="M83 58 C99 58 106 63 105 73 C93 76 86 70 83 58 Z" />
+        <path d="M77 59 C70 73 62 77 54 71 C58 59 66 55 77 59 Z" />
+      </g>
+    </svg>
+  );
+}
+
 const generatorAria = {
   ews_wp: 'Sole/Wasser-Wärmepumpe',
   lwwp: 'Luft/Wasser-Wärmepumpe mit Aussenluft und Fortluft',

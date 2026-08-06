@@ -72,6 +72,7 @@ modify      neutraler Grundzustand, Auswahl und Bearbeitung
 draw-pipe   Leitung zeichnen
 place       Bauteil aus der Bibliothek setzen
 mirror      Spiegelachse angeben
+trim        Abschnitt bis zur nächsten Schnittkante entfernen
 ```
 
 Regeln:
@@ -101,7 +102,10 @@ Alle Zeichenbefehle stehen senkrecht am linken Rand der Zeichenfläche
 | Bauteil spiegeln | waagrechte Spiegelung |
 | Ausrichten | `align` |
 | Mit Lücke trennen | `break` |
+| Trimmen | `trim`, Befehl `TR`, bleibt bis ESC aktiv |
 | Dehnen | `stretch` |
+| Auswahl kopieren | Bauteile, Leitungen und einzelne Teilstücke gemeinsam |
+| Auswahl löschen | dieselbe gemeinsame Auswahl in einer Undo-Aktion |
 | Notiz-Stecknadel | Eintrag im Projektjournal |
 
 Drei Gründe für die Leiste:
@@ -138,6 +142,22 @@ Ein Klick trifft das **Teilstück**. `Tab` erweitert auf das **Leitungssystem** 
 Klick auf den Vorlauf über die Pumpe hinweg den Rücklauf mitmarkieren. Die
 Geometrie dazu liegt rein und getestet in `schema/cadEdit.js::leitungsSystem`;
 die Statusleiste sagt jederzeit, welche Stufe gewählt ist.
+
+Jedes gerade Stück zwischen zwei Ecken ist dabei ein eigenes Auswahlobjekt.
+`Cmd/Ctrl` ergänzt oder entfernt ein Teilstück, `Shift` entfernt es aus der
+Auswahl. `Cmd/Ctrl+C` kopiert alle gewählten Bauteile, ganzen Leitungen und
+Teilstücke; beim Einfügen erhalten freie Segmentenden echte CAD-Anker und können
+wie gezeichnete Leitungsenden wieder an einen Port oder eine Leitung gefangen
+werden. `Delete` entfernt dieselbe gemeinsame Auswahl.
+
+## Trimmen (`TR`)
+
+`T`, danach `R`, startet den dauerhaften Trimmbefehl. Alle übrigen sichtbaren
+Leitungssegmente gelten als Schnittkanten. Ein Klick entfernt den Bereich des
+getroffenen geraden Teilstücks zwischen den beiden nächsten Schnittkanten. Gibt
+es auf diesem Teilstück keine Schnittkante, wird das ganze Teilstück von Ecke zu
+Ecke entfernt. Die hydraulische Verbindung wird an der Lücke wirklich getrennt;
+offene Enden sind Junctions. `ESC` beendet den Befehl.
 
 ## Ruhe im Grundzustand
 

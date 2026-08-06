@@ -304,3 +304,15 @@ def test_schema_freier_kreis_ohne_verteiler():
     assert r["node_flows"]["hk"] == pytest.approx(1.4617, abs=0.001)
     assert r["edge_flows"]["e1"] == pytest.approx(1.4617, abs=0.001)
     assert r["node_flows"]["p"] == pytest.approx(1.4617, abs=0.001)
+
+
+@pytest.mark.parametrize("typ", ["heizkoerper", "luftheizapparat"])
+def test_neue_verbraucher_rechnen_wie_heizkreis(typ):
+    nodes = [
+        {"id": "v", "type": typ, "data": {"q_kw": "8.5", "vl_temp": "50", "rl_temp": "40"}},
+        {"id": "p", "type": "pump", "data": {}},
+    ]
+    edges = [{"id": "e", "source": "p", "target": "v", "stroke": VL}]
+    result = berechne_schema(nodes, edges)
+    assert result["node_flows"]["v"] == pytest.approx(8.5 / (1.163 * 10), abs=0.001)
+    assert result["edge_flows"]["e"] == pytest.approx(result["node_flows"]["v"])

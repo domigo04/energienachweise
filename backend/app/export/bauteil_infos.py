@@ -167,6 +167,13 @@ def _einzelbauteil(t: str, d: dict, node_id: str, results: dict) -> list:
             ("H", _z(p.get("mws"), 2, "mWS")),
         ]
 
+    if t in ("heizkreis", "heizkoerper", "luftheizapparat"):
+        return stamm + [
+            ("Temperaturen", _temperaturen(d.get("vl_temp"), d.get("rl_temp"))),
+            ("Q", _z(d.get("q_kw"), 1, "kW")),
+            ("V'", _z(fluss, 3, "m³/h")),
+        ]
+
     if t == "erzeuger":
         er = (results.get("heatpump_results") or {}).get(node_id) or {}
         return [

@@ -47,7 +47,7 @@ import {
   abzweigPunkt, fensterAus, labelVerschoben, labelVersatz,
   leitungMitLueckeTrennen, leitungsSystem, leitungVerschieben, routeBereinigen, routeDehnen,
   segmentAusrichten, segmentVerschieben,
-  entwurfFuerEscape, segmentZumVerschieben, verschiebungLabel,
+  entwurfFuerAbschluss, segmentZumVerschieben, verschiebungLabel,
 } from './schema/cadEdit';
 import {
   CAD_GRID, DEFAULT_DRAWING_CONFIG, GRID_OPTIONEN,
@@ -3475,6 +3475,20 @@ function EditorInner() {
     return draft.startPoint;
   }, [handlePosition]);
 
+  // Der laufende Leitungsentwurf wird an genau EINER Stelle verworfen — egal
+  // ob durch Abbruch (ESC, Rechtsklick, anderer Befehl) oder nach dem
+  // Abschluss. Der Entwurf lebt nur im Zustand; solange er nicht abgeschlossen
+  // ist, existiert im Graphen weder Anker noch Kante. Ein Abbruch kann deshalb
+  // nichts hinterlassen.
+  const entwurfVerwerfen = useCallback(() => {
+    leitungsEntwurfRef.current = null;
+    leitungsCursorRef.current = null;
+    setLeitungsEntwurf(null);
+    setLeitungsCursor(null);
+    setLeitungsSnap(null);
+    setLeitungsGuides([]);
+  }, []);
+
   const leitungsEntwurfStarten = useCallback((startPoint, startEndpoint = null, options = {}) => {
     const draft = {
       layerId:options.layerId || activeLayer.id,
@@ -3586,12 +3600,7 @@ function EditorInner() {
         setEdges(items => items.map(item => item.id === existing.id ? extended : item));
       }
 
-      leitungsEntwurfRef.current = null;
-      setLeitungsEntwurf(null);
-      setLeitungsSnap(null);
-      setLeitungsCursor(null);
-      leitungsCursorRef.current = null;
-      setLeitungsGuides([]);
+      entwurfVerwerfen();
       setSelectedEdgeId(existing.id);
       // Befehl fertig: Dauerbefehl bleibt aktiv, sonst zurück nach modify.
       setEditorMode(finishCommand(editorModeRef.current));
@@ -3602,12 +3611,7 @@ function EditorInner() {
     // grossflächigen Anschlusszone sonst leicht versehentlich ausgelöst.
     if (draft.startEndpoint?.nodeId && snapHit?.type === 'port'
         && snapHit.nodeId === draft.startEndpoint.nodeId) {
-      leitungsEntwurfRef.current = null;
-      setLeitungsEntwurf(null);
-      setLeitungsSnap(null);
-      setLeitungsCursor(null);
-      leitungsCursorRef.current = null;
-      setLeitungsGuides([]);
+      entwurfVerwerfen();
       return;
     }
 
@@ -3640,12 +3644,7 @@ function EditorInner() {
     }, edgesRef.current);
     if (!edge) {
       // Ungültige Leitung (z. B. Selbstanschluss) → Zeichnen sauber beenden.
-      leitungsEntwurfRef.current = null;
-      leitungsCursorRef.current = null;
-      setLeitungsEntwurf(null);
-      setLeitungsCursor(null);
-      setLeitungsSnap(null);
-      setLeitungsGuides([]);
+      entwurfVerwerfen();
       setEditorMode(finishCommand(editorModeRef.current));
       return;
     }
@@ -3664,30 +3663,25 @@ function EditorInner() {
       setEdges(items => [...items, edge, ...pairedEdges]);
     }
 
-    leitungsEntwurfRef.current = null;
-    setLeitungsEntwurf(null);
-    setLeitungsSnap(null);
-    setLeitungsCursor(null);
-    leitungsCursorRef.current = null;
-    setLeitungsGuides([]);
+    entwurfVerwerfen();
     setSelectedEdgeId(edgeId);
     // Nach Abschluss beenden — ausser der dauerhafte Leitungsmodus ist aktiv.
     setEditorMode(finishCommand(editorModeRef.current));
-  }, [activeLayer, bestehendeJunction, cadAnker, drawingConfig, handleAusrichtung, handlePosition, letzterEntwurfsPunkt, leitungTeilen, routePunkte, ruecklaufPaarErstellen, setEdges, setNodes, snap]);
+  }, [activeLayer, bestehendeJunction, cadAnker, drawingConfig, entwurfVerwerfen, handleAusrichtung, handlePosition, letzterEntwurfsPunkt, leitungTeilen, routePunkte, ruecklaufPaarErstellen, setEdges, setNodes, snap]);
 
-  // ESC beendet eine frei gezeichnete Leitung am LETZTEN bewusst geklickten
-  // Eckpunkt. Die aktuelle Cursorvorschau wird nicht gespeichert. Der letzte
-  // Punkt wird vor dem Abschluss aus den Zwischenpunkten genommen, weil er nun
-  // zum echten Leitungsende wird.
+  // Doppelklick, zweiter Klick auf denselben Punkt und ✓ beenden eine frei
+  // gezeichnete Leitung am LETZTEN bewusst geklickten Eckpunkt. Die aktuelle
+  // Cursorvorschau wird nicht gespeichert. Der letzte Punkt wird vor dem
+  // Abschluss aus den Zwischenpunkten genommen, weil er nun zum echten
+  // Leitungsende wird. Ob ein Dauerbefehl aktiv bleibt, entscheidet allein
+  // `finishCommand` im Abschluss — ESC ist kein Abschluss, sondern Abbruch.
   const entwurfAmLetztenPunktAbschliessen = useCallback(() => {
     const draft = leitungsEntwurfRef.current;
-    const abschluss = entwurfFuerEscape(draft);
+    const abschluss = entwurfFuerAbschluss(draft);
     if (!abschluss) return false;
     leitungsEntwurfRef.current = abschluss.draft;
     setLeitungsEntwurf(abschluss.draft);
     leitungsEntwurfAbschliessen(abschluss.endPoint, null, false);
-    // Auch ein Dauerbefehl endet nach ESC immer im Grundzustand.
-    setEditorMode(escapeMode(editorModeRef.current));
     return true;
   }, [leitungsEntwurfAbschliessen]);
 
@@ -4797,21 +4791,14 @@ function EditorInner() {
         // EIN Zweig, ohne Bedingung: ESC bricht jede laufende Aktion ab und
         // endet IMMER im Grundzustand `modify`. Es darf keinen Zustand geben,
         // aus dem ESC nicht herausführt — auch nicht den Dauerbefehl.
+        // ESC ist AUSSCHLIESSLICH Abbruch und hinterlässt nie eine halb
+        // gezeichnete Leitung (Dominic 2026-08-06). Abgeschlossen wird mit
+        // Doppelklick, zweitem Klick auf denselben Punkt, Enter oder ✓ —
+        // genau wie der Rechtsklick bricht ESC nur ab.
         if (ev.key === 'Escape') {
           ev.preventDefault();
           ev.stopPropagation();
-          if (entwurfAmLetztenPunktAbschliessen()) {
-            setLaengenPuffer(null);
-            setEndpointMenu(null);
-            setEdgeMenu(null);
-            return;
-          }
-          leitungsEntwurfRef.current = null;
-          leitungsCursorRef.current = null;
-          setLeitungsEntwurf(null);
-          setLeitungsCursor(null);
-          setLeitungsSnap(null);
-          setLeitungsGuides([]);
+          entwurfVerwerfen();
           setLaengenPuffer(null);
           setVerschiebung(null);
           setLuecke(null);
@@ -4917,7 +4904,7 @@ function EditorInner() {
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [undo, redo, selected, selectedEdgeId, selectedEdgePoint, selectedLabelEdgeId, markierteEdgeIds, beschriftungSetzen, punktEntfernen, snap, rotateNode, mirrorNode, alignNode, nudgeNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, spiegelAchse, drawingConfig, setNodes, laengeAnwenden, entwurfAmLetztenPunktAbschliessen, verschiebenStarten, ausrichtenUmschalten, trennenStarten, dehnenStarten]);
+  }, [undo, redo, selected, selectedEdgeId, selectedEdgePoint, selectedLabelEdgeId, markierteEdgeIds, beschriftungSetzen, punktEntfernen, snap, rotateNode, mirrorNode, alignNode, nudgeNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, spiegelAchse, drawingConfig, setNodes, laengeAnwenden, entwurfVerwerfen, verschiebenStarten, ausrichtenUmschalten, trennenStarten, dehnenStarten]);
 
   // Berechnete Werte (Backend) in die Node-Daten spiegeln — nur für die Anzeige.
   // Verteiler-Rahmen: nur die Balken sind greifbar (dragHandle), die Lücke
@@ -5397,13 +5384,10 @@ function EditorInner() {
     setEdgeMenu(null);
     // Ein laufender Leitungsentwurf wird verworfen — zwei Befehle gleichzeitig
     // gibt es nicht.
-    leitungsEntwurfRef.current = null;
-    setLeitungsEntwurf(null);
-    setLeitungsSnap(null);
-    setLeitungsGuides([]);
+    entwurfVerwerfen();
     setLaengenPuffer(null);
     setEditorMode(startCommand(PLACE, { persistent, payload:{ nodeType:typ } }));
-  }, []);
+  }, [entwurfVerwerfen]);
 
   // Klick im Platzierungsbefehl. Die Weltkoordinate ist DIESELBE, die die
   // Vorschau anzeigt — sonst würde das Bauteil neben dem Geist landen.
@@ -5696,15 +5680,10 @@ function EditorInner() {
     // versehentliches Abschliessen einer Leitung) und beendet den Dauermodus.
     if (!leitungsEntwurfRef.current && !zeichenModusRef.current && !dauerLeitungRef.current) return;
     event.preventDefault();
-    leitungsEntwurfRef.current = null;
-    leitungsCursorRef.current = null;
-    setLeitungsEntwurf(null);
-    setLeitungsCursor(null);
-    setLeitungsSnap(null);
-    setLeitungsGuides([]);
+    entwurfVerwerfen();
     setEditorMode(escapeMode(editorModeRef.current));
     setLaengenPuffer(null);
-  }, []);
+  }, [entwurfVerwerfen]);
   const selectedNode  = selected  ? nodes.find(n => n.id === selected.id)  || null : null;
   const selectedEdge  = selectedEdgeId ? edges.find(e => e.id === selectedEdgeId) || null : null;
   const auslegungNode = auslegung ? nodes.find(n => n.id === auslegung.id) || null : null;
@@ -6298,12 +6277,12 @@ function EditorInner() {
                     : ['line', 'midpoint'].includes(leitungsSnap?.type)
                       ? 'T-Verbindung erstellen'
                       : leitungsEntwurf.extendEdgeId
-                        ? 'Linie weiterziehen · Klick = neuer Eckpunkt · Esc = fertig'
-                        : 'Leitung zeichnen · Klick = Eckpunkt · Esc = fertig'}
+                        ? 'Linie weiterziehen · Klick = neuer Eckpunkt · Doppelklick = fertig · Esc = abbrechen'
+                        : 'Leitung zeichnen · Klick = Eckpunkt · Doppelklick = fertig · Esc = abbrechen'}
                   <button onClick={entwurfAmLetztenPunktAbschliessen}
                     disabled={!leitungsEntwurf.points?.length}
                     style={{ width:22, height:22, borderRadius:11, border:0, background:'rgba(255,255,255,.2)', color:'white', cursor:'pointer', fontWeight:800 }}
-                    title="Am letzten Eckpunkt abschliessen (Esc)">✓</button>
+                    title="Am letzten Eckpunkt abschliessen (Doppelklick)">✓</button>
                 </div>
               </Panel>
             )}

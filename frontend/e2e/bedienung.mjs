@@ -3,11 +3,12 @@
 // Drei Zusagen, die man nur im Browser belegen kann:
 //
 //   1. Eine Leitung endet mit einem Doppelklick bzw. mit einem zweiten Klick
-//      auf denselben Punkt — nicht nur mit Enter oder Escape.
+//      auf denselben Punkt — Escape bricht ab und hinterlässt nichts.
 //   2. Ein Klick auf eine Leitung wählt das Teilstück; Tab nimmt den ganzen
 //      zusammenhängenden Strang dazu und Tab führt wieder zurück.
-//   3. Die 90°-Drehung dreht das ganze Bauteil-DIV, also auch den
-//      Auswahlrahmen — nicht nur das Zeichen darin.
+//   3. Die 90°-Drehung dreht nur das Bauteilzeichen; Nummer und Datenblock
+//      drehen NICHT mit und bleiben lesbar
+//      (Dominic 2026-08-05, siehe HydraulikNodes.jsx::NODE_TYPES).
 import { protokoll, starten } from './lib.mjs';
 
 const { pruefe, kopf, bilanz } = protokoll('bedienung');
@@ -94,11 +95,11 @@ kopf('Klick wählt das Teilstück, Tab den Strang');
     /Teilstück/.test(status3), status3);
 }
 
-// ── 3. Drehung dreht das ganze DIV ─────────────────────────────────────────
-kopf('90°-Drehung dreht das ganze Bauteil-DIV');
+// ── 3. Drehung dreht das Zeichen, nicht die Beschriftung ───────────────────
+kopf('90°-Drehung dreht das Bauteilzeichen, nicht Nummer und Datenblock');
 {
   // Bewusst ein NICHT quadratisches Bauteil: nur daran ist zu sehen, ob das
-  // ganze DIV quer liegt oder bloss das Zeichen darin gedreht wurde.
+  // Zeichen wirklich quer liegt.
   await w.graphSetzen({
     nodes: [{ id: 's1', type: 'speicher', position: { x: 500, y: 300 }, data: { nr: 1 } }],
     edges: [], layer_config: {},
@@ -108,7 +109,7 @@ kopf('90°-Drehung dreht das ganze Bauteil-DIV');
   // Misst das äusserste Bauteil-DIV im Node — das ist das Element, auf dem
   // React Flow den Auswahlrahmen setzt (`.react-flow__node.selected > *`).
   // Gedreht wird nur das SYMBOL. Der äussere Rahmen trägt Nummer und
-  // Beschriftung und bleibt bewusst aufrecht, damit beides in jeder Bauteillage
+  // Datenblock und bleibt bewusst aufrecht, damit beides in jeder Bauteillage
   // lesbar ist (Dominic 2026-08-05) — im Editor wie im PDF-Export.
   // Das Symbol ist das Element mit der Dreh-Transformation (`rotate(...)`).
   const bauteilDiv = () => page.evaluate(() => {
@@ -119,6 +120,7 @@ kopf('90°-Drehung dreht das ganze Bauteil-DIV');
     const symbol = [...node.querySelectorAll('div')]
       .find(el => (el.getAttribute('style') || '').includes('rotate('));
     const symbolKasten = symbol?.getBoundingClientRect();
+    const block = node.querySelector('.hc-datenblock');
     return {
       transform: stil.transform,
       outline: stil.outlineWidth,
@@ -128,6 +130,7 @@ kopf('90°-Drehung dreht das ganze Bauteil-DIV');
       symbolBreite: symbolKasten ? Math.round(symbolKasten.width) : null,
       symbolHoehe: symbolKasten ? Math.round(symbolKasten.height) : null,
       nr: node.querySelector('div[style*="border-radius: 9px"]')?.textContent ?? null,
+      block: block ? getComputedStyle(block).transform : null,
     };
   });
 
@@ -154,6 +157,10 @@ kopf('90°-Drehung dreht das ganze Bauteil-DIV');
     `aufrecht ${vorher.breite}×${vorher.hoehe} px, Symbol jetzt ${nachher.symbolBreite}×${nachher.symbolHoehe} px`);
   pruefe('R4', 'Die Bauteilnummer bleibt lesbar (nicht mitgedreht)',
     nachher.nr === '1', `Nr «${nachher.nr}»`);
+  // Der Datenblock darf nur verschoben sein (matrix(1, 0, 0, 1, …)) — jede
+  // Drehung wäre am zweiten und dritten Wert der Matrix zu sehen.
+  pruefe('R5', 'Der Datenblock bleibt waagrecht und damit lesbar',
+    /^matrix\(1, 0, 0, 1/.test(nachher.block || ''), `${nachher.block}`);
 }
 
 // ── 4. Klick auf einen Anschluss zeichnet sofort ───────────────────────────

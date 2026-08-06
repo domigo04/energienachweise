@@ -8,6 +8,8 @@ from app.calculations.hydraulik import berechne_schema
 from app.export.bauteil_infos import bauteil_kennwerte, node_infos
 from app.export.pdf import berechnungs_abschnitte, erzeuge_pdf, legende_zeilen
 from app.export.schema_svg import (
+    DATENBLOCK_MAX_BREITE,
+    DATENBLOCK_MIN_BREITE,
     caption_titel,
     datenblock_anker,
     datenkasten_masse,
@@ -783,6 +785,56 @@ def test_datenblock_der_gruppe_hat_je_eingebautem_bauteil_einen_abschnitt():
     # Die Abschnittstitel müssen auch wirklich im Schema-SVG stehen.
     svg = erzeuge_svg(nodes, edges, results)
     assert ">Umwälzpumpe<" in svg and ">Zweiweg-Ventil<" in svg and ">Wärmezähler<" in svg
+
+
+def test_datenblock_nennt_die_schaltungsart_nicht():
+    """Ob gedrosselt, eingespritzt oder beigemischt wird, zeigt das Schema —
+    im Block stehen nur ablesbare Angaben (Dominic 2026-08-06)."""
+    nodes, edges = _graph()
+    gruppe = next(n for n in nodes if n["id"] == "g1")
+    gruppe["data"] = {**gruppe["data"], "schaltung": "beimisch", "hat_wz": True}
+    abschnitte = bauteil_kennwerte(gruppe, berechne_schema(nodes, edges))
+
+    assert "Schaltung" not in dict(abschnitte[0]["zeilen"])
+    assert "Beimischschaltung" not in erzeuge_svg(nodes, edges, berechne_schema(nodes, edges))
+    # Was bleiben muss: Leistung, Durchfluss und der Wärmezähler.
+    assert "Leistung" in dict(abschnitte[0]["zeilen"])
+    assert "Wärmezähler" in [a["titel"] for a in abschnitte]
+
+
+def test_gewoehnliche_datenblöcke_haben_dieselbe_grundbreite():
+    """Pumpe, Ventil und Verbrauchergruppe landen auf demselben Mass; nur ein
+    Bauteil mit wirklich langen Angaben wird breiter (Dominic 2026-08-06)."""
+    nodes, edges = _graph()
+    gruppe = next(n for n in nodes if n["id"] == "g1")
+    gruppe["data"] = {**gruppe["data"], "hat_wz": True, "pumpe_fabrikat": "Biral"}
+    ventil = {"id": "v", "type": "valve2", "position": {"x": 0, "y": 0},
+              "data": {"nr": 9, "label": "V"}}
+    pumpe = {"id": "p", "type": "pump", "position": {"x": 0, "y": 0},
+             "data": {"nr": 8, "label": "Pumpe"}}
+    erzeuger = {"id": "e", "type": "erzeuger", "position": {"x": 0, "y": 0},
+                "data": {"nr": 7, "label": "WP", "generator_type": "ews_wp"}}
+    results = berechne_schema(nodes, edges)
+
+    def breite(node):
+        return datenkasten_masse(caption_titel(node), bauteil_kennwerte(node, results))[0]
+
+    assert breite(gruppe) == breite(ventil) == breite(pumpe) == DATENBLOCK_MIN_BREITE
+    # «Sole/Wasser-WP (Erdsonden)» passt nicht in die Grundbreite.
+    assert DATENBLOCK_MIN_BREITE < breite(erzeuger) <= DATENBLOCK_MAX_BREITE
+    # Die Höhe richtet sich weiterhin nach dem Inhalt.
+    _, hoehe_gruppe = datenkasten_masse(caption_titel(gruppe), bauteil_kennwerte(gruppe, results))
+    _, hoehe_ventil = datenkasten_masse(caption_titel(ventil), bauteil_kennwerte(ventil, results))
+    assert hoehe_gruppe > hoehe_ventil
+
+
+def test_datenblock_laesst_sich_auch_nach_oben_ausrichten():
+    """Zum Ausrichten auf eine gemeinsame Flucht muss ein Block auch nach oben
+    wandern können — der Versatz wird nicht mehr bei null abgeschnitten."""
+    node = {"id": "v", "type": "valve2", "position": {"x": 100, "y": 400},
+            "data": {"nr": 1, "caption_offset_y": -30}}
+    ohne = {**node, "data": {"nr": 1}}
+    assert datenblock_anker(node)[1] == datenblock_anker(ohne)[1] - 30
 
 
 def test_beimischschaltung_beschriftet_das_dreiwegeventil():

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   abzweigPunkt,
-  entwurfFuerEscape,
+  entwurfFuerAbschluss,
   eckpunktEntfernen, eckpunktSetzen, gripsFuerRoute,
   fensterAus, imFenster, istKollinear, labelSichtbar, labelVerschoben, labelVersatz,
   leitungMitLueckeTrennen, leitungsSystem, leitungVerschieben,
@@ -129,20 +129,20 @@ describe('segmentVerschieben — der CAD-Fall aus Punkt 11', () => {
   });
 });
 
-describe('Leitung mit Escape abschliessen', () => {
+describe('Leitung am letzten Eckpunkt abschliessen', () => {
   it('verwendet den letzten gesetzten Eckpunkt und nie die Cursorvorschau', () => {
     const draft = {
       startPoint:{ x:0, y:0 },
       points:[{ x:300, y:0 }, { x:300, y:500 }],
     };
-    expect(entwurfFuerEscape(draft)).toEqual({
+    expect(entwurfFuerAbschluss(draft)).toEqual({
       endPoint:{ x:300, y:500 },
       draft:{ startPoint:{ x:0, y:0 }, points:[{ x:300, y:0 }] },
     });
   });
 
   it('erzeugt ohne gesetzten Eckpunkt keine Leitung', () => {
-    expect(entwurfFuerEscape({ startPoint:{ x:0, y:0 }, points:[] })).toBeNull();
+    expect(entwurfFuerAbschluss({ startPoint:{ x:0, y:0 }, points:[] })).toBeNull();
   });
 });
 

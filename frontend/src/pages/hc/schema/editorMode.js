@@ -25,11 +25,31 @@ export const BREAK = 'break';
 export const CONNECT_CORNER = 'connect-corner';
 // Dehnen (AutoCAD STRETCH): Fenster aufziehen, dann Basis- und Zielpunkt.
 export const STRETCH = 'stretch';
+// Versatz (AutoCAD OFFSET): Leitung wählen, dann die Seite anklicken. Der
+// Abstand steht in der Nutzlast und bleibt über mehrere Durchläufe stehen —
+// der Befehl ist ausdrücklich mehrfach anwendbar.
+export const OFFSET = 'offset';
+// Stutzen (AutoCAD TRIM): erst die Begrenzung wählen, dann auf das Stück
+// klicken, das weg soll. Die Begrenzung bleibt in der Nutzlast stehen, damit
+// mehrere Leitungen nacheinander an derselben Kante gestutzt werden können.
+//
+// ACHTUNG: `TR` ist in diesem Produkt seit jeher „Ecke verbinden"
+// (CONNECT_CORNER) und bleibt es. Stutzen hat eine eigene, frei belegbare
+// Taste (Vorgabe `q`) — die bestehende Belegung wird NICHT überschrieben.
+export const TRIM = 'trim';
+// Dehnen bis Kante (AutoCAD EXTEND): erst die Begrenzung, dann das Leitungs-
+// ende, das bis dorthin verlängert wird. Bewusst getrennt vom STRETCH oben —
+// das ist ein Fensterbefehl und etwas anderes.
+export const EXTEND = 'extend';
+// Verbinden (AutoCAD JOIN): zwei aneinanderstossende Teilstücke werden eine
+// Leitung.
+export const JOIN = 'join';
 
 // Der Grundzustand. Nach dem Laden und nach jedem ESC gilt genau das.
 export const HOME = Object.freeze({ type: MODIFY, persistent: false, payload: null });
 
-const BEFEHLE = new Set([MODIFY, DRAW_PIPE, PLACE, MIRROR, ALIGN, MOVE, BREAK, CONNECT_CORNER, STRETCH]);
+const BEFEHLE = new Set([MODIFY, DRAW_PIPE, PLACE, MIRROR, ALIGN, MOVE, BREAK, CONNECT_CORNER,
+  STRETCH, OFFSET, TRIM, EXTEND, JOIN]);
 
 /** Grundzustand. Absichtlich eine Funktion — nie eine gemeinsame Referenz teilen. */
 export function initialMode() {
@@ -93,6 +113,12 @@ export const MODE_LABEL = {
   [BREAK]: 'Mit Lücke trennen',
   [CONNECT_CORNER]: 'Ecke verbinden',
   [STRETCH]: 'Dehnen',
+  [OFFSET]: 'Versatz',
+  [TRIM]: 'Stutzen',
+  // Bewusst nicht nur „Dehnen": das ist oben der Fensterbefehl STRETCH. In der
+  // Statusleiste müssen die beiden unterscheidbar bleiben.
+  [EXTEND]: 'Dehnen bis Kante',
+  [JOIN]: 'Verbinden',
 };
 
 export function modeLabel(mode) {

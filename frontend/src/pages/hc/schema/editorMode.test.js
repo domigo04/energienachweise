@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ALIGN, CONNECT_CORNER, DRAW_PIPE, MIRROR, MODIFY, PLACE,
-  cursorFor, escape, finishCommand, initialMode, istModify,
+  ALIGN, CONNECT_CORNER, DRAW_PIPE, EXTEND, JOIN, MIRROR, MODIFY, OFFSET, PLACE, TRIM,
+  cursorFor, escape, finishCommand, initialMode, istBefehl, istModify,
   befehlMerken, befehlsPrompt, befehlsVorschlaege, letztenBefehlWiederholen,
   modeLabel, startCommand, toggleCommand, zeichnetLeitung,
 } from './editorMode';
@@ -102,5 +102,46 @@ describe('editorMode', () => {
     expect(befehlsVorschlaege('richt', liste)[0].type).toBe(ALIGN);
     expect(befehlsPrompt(startCommand(DRAW_PIPE), { hasDraft:false })).toBe('Ersten Punkt angeben');
     expect(befehlsPrompt(startCommand(DRAW_PIPE), { hasDraft:true })).toBe('Nächsten Punkt angeben');
+  });
+
+  // ── Leitungen ändern (Issue #72) ────────────────────────────────────────
+
+  it('kennt die vier Befehle zum Ändern bestehender Leitungen', () => {
+    expect(modeLabel(startCommand(OFFSET))).toBe('Versatz');
+    expect(modeLabel(startCommand(TRIM))).toBe('Stutzen');
+    expect(modeLabel(startCommand(JOIN))).toBe('Verbinden');
+  });
+
+  it('hält Dehnen bis Kante von Dehnen (Fensterbefehl) auseinander', () => {
+    // Zwei verschiedene Befehle — die Statusleiste darf sie nie verwechseln.
+    expect(modeLabel(startCommand(EXTEND))).toBe('Dehnen bis Kante');
+    expect(startCommand(EXTEND).type).not.toBe(startCommand('stretch').type);
+  });
+
+  it('trägt den Fortschritt in der Nutzlast statt in eigenen Zuständen', () => {
+    const versatz = startCommand(OFFSET, { persistent: true, payload: { abstand: 350 } });
+    expect(istBefehl(versatz, OFFSET)).toBe(true);
+    expect(versatz.payload.abstand).toBe(350);
+    const stutzen = startCommand(TRIM, { persistent: true, payload: { grenzEdgeId: 'e1' } });
+    expect(stutzen.payload.grenzEdgeId).toBe('e1');
+  });
+
+  it('ESC führt aus jedem der vier Befehle zurück nach modify', () => {
+    [OFFSET, TRIM, EXTEND, JOIN].forEach(typ => {
+      const mode = startCommand(typ, { persistent: true, payload: { irgendwas: 1 } });
+      expect(istModify(escape(mode))).toBe(true);
+      expect(escape(mode).payload).toBeNull();
+    });
+  });
+
+  it('bleibt als Dauerbefehl aktiv, wirft aber die alte Nutzlast weg', () => {
+    const mode = startCommand(TRIM, { persistent: true, payload: { grenzEdgeId: 'e1' } });
+    const danach = finishCommand(mode);
+    expect(danach).toEqual({ type: TRIM, persistent: true, payload: null });
+  });
+
+  it('lässt sich über denselben Knopf wieder ausschalten', () => {
+    const mode = startCommand(JOIN, { persistent: true });
+    expect(istModify(toggleCommand(mode, JOIN))).toBe(true);
   });
 });

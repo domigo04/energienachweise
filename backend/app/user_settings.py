@@ -34,11 +34,22 @@ STANDARD_SHORTCUTS: dict[str, str] = {
     "shortcut_move": "m",
     "shortcut_break": "k",
     "shortcut_stretch": "x",
+    # Leitungen ändern (Issue #72).
+    "shortcut_offset": "o",
+    "shortcut_trim": "w",
+    "shortcut_extend": "e",
+    "shortcut_join": "j",
 }
 
 # Tasten, die der Editor fest vergeben hat. Sie stehen nicht zur Belegung frei,
 # weil sonst ein Befehl eine Taste bekäme, die er nie zu sehen bekommt.
-RESERVIERTE_TASTEN = frozenset({"escape", "enter", "tab", "backspace", "delete", " "})
+#
+# `t` eröffnet die zweistellige Befehlsfolge `TR` = Ecke verbinden. Der Editor
+# fängt die Taste ab, bevor er überhaupt eine belegbare Taste prüft — ein darauf
+# gelegter Befehl wäre also stumm. Die Belegung `TR` = Ecke verbinden ist
+# gesetzt (Dominic 2026-08-06) und wird von Stutzen NICHT übernommen; Stutzen
+# hat mit `w` eine eigene, frei belegbare Taste.
+RESERVIERTE_TASTEN = frozenset({"escape", "enter", "tab", "backspace", "delete", " ", "t"})
 
 
 def _taste(wert) -> Optional[str]:

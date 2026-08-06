@@ -74,3 +74,28 @@ def test_einstellungssatz_ist_immer_vollstaendig():
     satz = bereinige_einstellungen(None)
     assert set(satz) == {"shortcuts"}
     assert satz["shortcuts"] == STANDARD_SHORTCUTS
+
+
+# ── Leitungen ändern (Issue #72) ────────────────────────────────────────────
+
+def test_die_vier_neuen_befehle_sind_belegbar():
+    """Ohne Eintrag im Server könnte der Editor sie speichern, aber nie laden."""
+    belegung = bereinige_shortcuts({})
+    for befehl in ("shortcut_offset", "shortcut_trim", "shortcut_extend", "shortcut_join"):
+        assert belegung[befehl], f"{befehl} braucht eine Standardtaste"
+    assert bereinige_shortcuts({"shortcut_trim": "U"})["shortcut_trim"] == "u"
+
+
+def test_standardbelegung_ist_widerspruchsfrei():
+    tasten = [t for t in STANDARD_SHORTCUTS.values() if t]
+    assert len(tasten) == len(set(tasten))
+
+
+def test_t_bleibt_der_folge_tr_fuer_ecke_verbinden():
+    """`TR` = Ecke verbinden ist gesetzt (Dominic 2026-08-06). Der Editor fängt
+    `t` ab, bevor er eine belegbare Taste prüft — ein darauf gelegter Befehl
+    wäre stumm. Darum ist `t` reserviert und Stutzen hat eine eigene Taste."""
+    assert "t" not in STANDARD_SHORTCUTS.values()
+    belegung = bereinige_shortcuts({"shortcut_trim": "t"})
+    assert belegung["shortcut_trim"] == STANDARD_SHORTCUTS["shortcut_trim"]
+    assert belegung["shortcut_trim"] != "t"

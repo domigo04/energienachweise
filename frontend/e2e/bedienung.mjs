@@ -107,16 +107,26 @@ kopf('90°-Drehung dreht das ganze Bauteil-DIV');
 
   // Misst das äusserste Bauteil-DIV im Node — das ist das Element, auf dem
   // React Flow den Auswahlrahmen setzt (`.react-flow__node.selected > *`).
+  // Gedreht wird nur das SYMBOL. Der äussere Rahmen trägt Nummer und
+  // Beschriftung und bleibt bewusst aufrecht, damit beides in jeder Bauteillage
+  // lesbar ist (Dominic 2026-08-05) — im Editor wie im PDF-Export.
+  // Das Symbol ist das Element mit der Dreh-Transformation (`rotate(...)`).
   const bauteilDiv = () => page.evaluate(() => {
     const node = document.querySelector('.react-flow__node[data-id="s1"]');
     const kind = node.firstElementChild;
     const stil = getComputedStyle(kind);
     const kasten = kind.getBoundingClientRect();
+    const symbol = [...node.querySelectorAll('div')]
+      .find(el => (el.getAttribute('style') || '').includes('rotate('));
+    const symbolKasten = symbol?.getBoundingClientRect();
     return {
       transform: stil.transform,
       outline: stil.outlineWidth,
       breite: Math.round(kasten.width),
       hoehe: Math.round(kasten.height),
+      symbolTransform: symbol ? getComputedStyle(symbol).transform : null,
+      symbolBreite: symbolKasten ? Math.round(symbolKasten.width) : null,
+      symbolHoehe: symbolKasten ? Math.round(symbolKasten.height) : null,
       nr: node.querySelector('div[style*="border-radius: 9px"]')?.textContent ?? null,
     };
   });
@@ -129,14 +139,19 @@ kopf('90°-Drehung dreht das ganze Bauteil-DIV');
   await page.waitForTimeout(500);
   const nachher = await bauteilDiv();
 
-  pruefe('R1', 'Das äusserste Bauteil-DIV trägt die Drehung',
-    nachher.transform !== 'none' && nachher.transform !== '', nachher.transform);
-  pruefe('R2', 'Der Auswahlrahmen sitzt auf genau diesem gedrehten DIV',
+  pruefe('R1', 'Die Drehung sitzt am Symbol, nicht am äusseren Rahmen',
+    nachher.symbolTransform !== null && nachher.symbolTransform !== vorher.symbolTransform
+      && nachher.transform === vorher.transform,
+    `Symbol ${vorher.symbolTransform} → ${nachher.symbolTransform}, Rahmen ${nachher.transform}`);
+  pruefe('R2', 'Der Auswahlrahmen sitzt auf dem äusseren Bauteil-DIV',
     nachher.outline !== '0px' && vorher.outline !== '0px',
     `outline vorher ${vorher.outline}, jetzt ${nachher.outline}`);
-  pruefe('R3', 'Das DIV liegt danach quer — Breite und Höhe sind getauscht',
-    Math.abs(nachher.breite - vorher.hoehe) <= 2 && Math.abs(nachher.hoehe - vorher.breite) <= 2,
-    `vorher ${vorher.breite}×${vorher.hoehe} px, jetzt ${nachher.breite}×${nachher.hoehe} px`);
+  // Vor der Drehung gibt es keine Dreh-Transformation; Ausgangsmass ist deshalb
+  // der aufrechte Rahmen. Danach muss das Symbol quer dazu liegen.
+  pruefe('R3', 'Das Symbol liegt danach quer — Breite und Höhe sind getauscht',
+    Math.abs(nachher.symbolBreite - vorher.hoehe) <= 2
+      && Math.abs(nachher.symbolHoehe - vorher.breite) <= 2,
+    `aufrecht ${vorher.breite}×${vorher.hoehe} px, Symbol jetzt ${nachher.symbolBreite}×${nachher.symbolHoehe} px`);
   pruefe('R4', 'Die Bauteilnummer bleibt lesbar (nicht mitgedreht)',
     nachher.nr === '1', `Nr «${nachher.nr}»`);
 }

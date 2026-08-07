@@ -23,6 +23,7 @@ bewusst nicht gesetzt (nie Q_source = Q_heat) — Physik vor Bequemlichkeit.
 from typing import Optional
 
 from app.data.generator_types import HEAT_PUMP_TYPES
+from app.calculations.grundlagen import mit_grundlage
 
 # c·ρ Wasser in kWh/(m³·K) — PHYSIK §1.
 CE_WASSER = 1.163
@@ -149,7 +150,7 @@ def berechne_waermepumpe(d: dict, hat_quellenseite: bool = False,
             f"c·ρ der Sole hier eintragen."
         )
 
-    return {
+    return mit_grundlage({
         "q_heat_kw": _rund(q_heat, 2),
         "p_el_kw": _rund(p_el, 2),
         "p_el_quelle": p_el_quelle,
@@ -171,4 +172,4 @@ def berechne_waermepumpe(d: dict, hat_quellenseite: bool = False,
         "ist_waermepumpe": ist_waermepumpe(d),
         "hat_hydraulischen_quellenkreis": hat_quellenseite,
         "warnings": warnungen,
-    }
+    }, 'waermepumpe')

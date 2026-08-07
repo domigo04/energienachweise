@@ -14,6 +14,8 @@ from reportlab.lib.utils import ImageReader
 from svglib.svglib import svg2rlg
 
 from app.calculations.bww_sia385 import CP_WASSER_KJ_KGK
+from app.calculations.grundlagen import GRUNDLAGE_FEHLT, grundlage_zeile
+from app.export.design import STANDARD, Marke, logo_klein, wasserzeichen
 from app.export import diagramme as diagramm
 from app.export.diagramme import FARBEN
 from app.export.formelsatz import formel
@@ -40,6 +42,27 @@ TITEL = {
     "sicherheitsventil": "Sicherheitsventil", "pwt": "Plattentauscher (PWT)",
 }
 INHALT_TEXT = {"schema": "Nur Schema", "berechnungen": "Nur Berechnungen", "beides": "Schema + Berechnungen"}
+
+# Welches Berechnungsmodul liefert die Grundlage eines Abschnitts (Issue #84).
+# Ein Bauteil ohne Eintrag bekommt «Grundlage nicht angegeben» — sichtbar, statt
+# stillschweigend leer. Die Zuordnung selbst steht in `calculations/grundlagen.py`.
+GRUNDLAGE_JE_TYP = {
+    "gruppe": "heizgruppen",
+    "heizkreis": "heizgruppen",
+    "heizkoerper": "heizgruppen",
+    "luftheizapparat": "heizgruppen",
+    "lufterhitzer_gruppe": "heizgruppen",
+    "verteiler": "hydraulik",
+    "valve2": "ventil",
+    "valve3": "ventil",
+    "pump": "druckverlust",
+    "expansion": "expansion",
+    "bww": "bww_sia385",
+    "erdsonden": "sole_druckverlust",
+    "speicher": "schema_sizing",
+    "erzeuger": "waermepumpe",
+    "pwt": "einzel",
+}
 
 
 def _f(x):
@@ -331,6 +354,7 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
                 hinweise = p.get("warnings") or []
                 abschnitte.append({"nr": d.get("nr"), "titel": TITEL.get(t, t),
                                    "bezeichnung": d.get("label") or "",
+                                   "grundlage": grundlage_zeile(GRUNDLAGE_JE_TYP.get(t)),
                                    "eingaben": eingaben, "resultate": resultate,
                                    "rechenweg": rechenweg, "hinweise": hinweise,
                                    "diagramme": diagramme})
@@ -605,6 +629,7 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
         else:
             continue
         abschnitte.append({"nr": d.get("nr"), "titel": TITEL.get(t, t), "bezeichnung": d.get("label") or "",
+                           "grundlage": grundlage_zeile(GRUNDLAGE_JE_TYP.get(t)),
                            "eingaben": eingaben, "resultate": resultate,
                            "rechenweg": rechenweg, "hinweise": hinweise,
                            "diagramme": diagramme})
@@ -612,11 +637,14 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
 
 
 # ── PDF zusammenbauen ───────────────────────────────────────────────────────
-def _deckblatt(c, projekt_name, schema_name, inhalt, plankopf=None):
+def _deckblatt(c, projekt_name, schema_name, inhalt, plankopf=None, marke: Marke = STANDARD):
     w, h = A4
     c.setPageSize(A4)
-    c.setFillColorRGB(0.86, 0.15, 0.15)
+    # Wasserzeichen zuerst — PDF kennt keine Ebenen, es gilt die Reihenfolge.
+    wasserzeichen(c, w, h, marke)
+    c.setFillColorRGB(*marke.akzent)
     c.rect(0, h - 24, w, 24, stroke=0, fill=1)
+    logo_klein(c, w - 50 - 30, h - 92, 30, marke)
     c.setFillColorRGB(0.1, 0.12, 0.2)
     c.setFont("Helvetica", 11)
     c.drawString(50, h - 90, "Heizungscockpit — Anlagendokumentation")
@@ -737,7 +765,7 @@ def _schema_seite(c, svg_string, projekt_name, schema_name, plankopf=None):
     c.showPage()
 
 
-def _legende_seiten(c, zeilen, projekt_name, warnungen=None):
+def _legende_seiten(c, zeilen, projekt_name, warnungen=None, marke: Marke = STANDARD):
     if not zeilen:
         return
     seite = landscape(A3)
@@ -745,6 +773,7 @@ def _legende_seiten(c, zeilen, projekt_name, warnungen=None):
 
     def kopf(y):
         c.setPageSize(seite)
+        wasserzeichen(c, seite[0], seite[1], marke)
         c.setFont("Helvetica-Bold", 14)
         c.setFillColorRGB(0.1, 0.12, 0.2)
         c.drawString(40, seite[1] - 50, f"Legende — {projekt_name}")
@@ -799,7 +828,8 @@ def _groessen_formel(groesse, max_breite: float):
     return formel(latex, groesse=8.5, fallback=text, max_breite=max_breite)
 
 
-def _rechenweg_block(c, schritte: list, y: float, kopf) -> float:
+def _rechenweg_block(c, schritte: list, y: float, kopf,
+                     marke: Marke = STANDARD) -> float:
     """Rechenweg mit echtem Formelsatz: Bruchstrich statt «/», Formelzeichen.
 
     Gezeichnet wird dieselbe LaTeX-Fassung, die der Editor mit KaTeX anzeigt;
@@ -829,7 +859,7 @@ def _rechenweg_block(c, schritte: list, y: float, kopf) -> float:
         if neue_gruppe:
             gruppe_aktiv = gruppe
             c.setFont("Helvetica-Bold", 8.5)
-            c.setFillColorRGB(0.86, 0.15, 0.15)
+            c.setFillColorRGB(*marke.akzent)
             c.drawString(64, y, _gruppentitel(gruppe))
             y -= 13
         grundlinie = y - oben
@@ -870,10 +900,11 @@ def _diagramm_block(c, diagramme: list, y: float, kopf) -> float:
     return y
 
 
-def _berechnungs_seiten(c, abschnitte, projekt_name):
+def _berechnungs_seiten(c, abschnitte, projekt_name, marke: Marke = STANDARD):
     w, h = A4
     def kopf():
         c.setPageSize(A4)
+        wasserzeichen(c, w, h, marke)
         c.setFont("Helvetica-Bold", 14)
         c.setFillColorRGB(0.1, 0.12, 0.2)
         c.drawString(50, h - 50, f"Berechnungen — {projekt_name}")
@@ -889,9 +920,22 @@ def _berechnungs_seiten(c, abschnitte, projekt_name):
             y = kopf()
         nr = f"Nr. {a['nr']} — " if a["nr"] is not None else ""
         c.setFont("Helvetica-Bold", 11)
-        c.setFillColorRGB(0.86, 0.15, 0.15)
+        c.setFillColorRGB(*marke.akzent)
         c.drawString(50, y, f"{nr}{a['titel']}{' — ' + a['bezeichnung'] if a['bezeichnung'] else ''}")
-        y -= 16
+        y -= 14
+        # Grundlage direkt unter dem Titel (Issue #84). Sie steht bewusst VOR
+        # den Zahlen: die erste Frage einer Prüfung lautet «wonach gerechnet?»,
+        # und die Antwort soll nicht erst hinter dem Rechenweg auftauchen.
+        # Fehlt sie, steht das ausgeschrieben da — eine leere Zeile sähe wie
+        # eine bewusste Entscheidung aus.
+        grundlage = a.get("grundlage")
+        if grundlage:
+            offen = GRUNDLAGE_FEHLT in grundlage
+            c.setFont("Helvetica-Oblique" if offen else "Helvetica", 8.5)
+            c.setFillColorRGB(*(0.57, 0.25, 0.05) if offen else (0.45, 0.5, 0.55))
+            c.drawString(50, y, grundlage)
+            y -= 13
+        y -= 2
         c.setFillColorRGB(0.1, 0.12, 0.2)
         for gruppe, rows in [("Eingaben", a["eingaben"]), ("Resultate", a["resultate"])]:
             if not rows:
@@ -916,7 +960,7 @@ def _berechnungs_seiten(c, abschnitte, projekt_name):
 
         # Rechenweg: Formel, eingesetzte Werte und Ergebnis je Schritt. Ohne ihn
         # ist die Zahl im Export nur eine Behauptung.
-        y = _rechenweg_block(c, a.get("rechenweg") or [], y, kopf)
+        y = _rechenweg_block(c, a.get("rechenweg") or [], y, kopf, marke)
         y = _diagramm_block(c, a.get("diagramme") or [], y, kopf)
 
         for hinweis in a.get("hinweise") or []:
@@ -951,17 +995,18 @@ def _umbruch(text: str, breite: int) -> list:
 
 def erzeuge_pdf(projekt_name: str, schema_name: str, inhalt: str,
                 nodes: list, edges: list, results: dict,
-                plankopf: dict | None = None) -> bytes:
+                plankopf: dict | None = None,
+                marke: Marke = STANDARD) -> bytes:
     """Komplettes PDF gemäss gewähltem Inhalt (Deckblatt immer dabei)."""
     buf = io.BytesIO()
     c = pdfcanvas.Canvas(buf, pagesize=A4)
     c.setTitle(f"{projekt_name} — {schema_name}")
-    _deckblatt(c, projekt_name, schema_name, inhalt, plankopf)
+    _deckblatt(c, projekt_name, schema_name, inhalt, plankopf, marke)
     if inhalt in ("schema", "beides"):
         svg = erzeuge_svg(nodes, edges, results)
         _schema_seite(c, svg, projekt_name, schema_name, plankopf)
-        _legende_seiten(c, legende_zeilen(nodes, results), projekt_name, results.get("warnungen"))
+        _legende_seiten(c, legende_zeilen(nodes, results), projekt_name, results.get("warnungen"), marke)
     if inhalt in ("berechnungen", "beides"):
-        _berechnungs_seiten(c, berechnungs_abschnitte(nodes, results), projekt_name)
+        _berechnungs_seiten(c, berechnungs_abschnitte(nodes, results), projekt_name, marke)
     c.save()
     return buf.getvalue()

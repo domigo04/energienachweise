@@ -10,6 +10,8 @@ Methode (PHYSIK.md §8, aus dem Excel übernommen):
 """
 from typing import Optional
 
+from app.calculations.grundlagen import mit_grundlage
+
 # Ausdehnung e (absolut, nicht %) je Mitteltemperatur — Stufen wie im Excel
 E_TABELLE = {
     "heizungswasser": {15: 0.002, 20: 0.0027, 25: 0.0033, 30: 0.004, 35: 0.00575,
@@ -134,7 +136,7 @@ def berechne_expansion(
 
     vn = vex_tot * (pfin + 1) / (pfin - p0)
     vorschlag = next((g for g in NORM_GROESSEN if g >= vn), NORM_GROESSEN[-1])
-    return {
+    return mit_grundlage({
         "vsys_l": round(vsys, 2),
         "vsys_quelle": vsys_quelle,
         "t_mittel": t_mittel,
@@ -148,4 +150,4 @@ def berechne_expansion(
         "pfin_bar": round(pfin, 3),
         "vn_l": round(vn, 1),
         "vorschlag_l": vorschlag,
-    }
+    }, "expansion")

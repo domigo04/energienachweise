@@ -5,6 +5,7 @@ der der Reibungsdruckverlust R ≤ 70 Pa/m bleibt (Dominics Maximalwert).
 Datenquelle: Dominics Rohrnetz-Tabelle (R [Pa/m] × DN → Kapazität [kg/h]).
 """
 from typing import Optional
+from app.calculations.grundlagen import mit_grundlage
 
 R_STUFEN = [25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75]
 R_MAX = 70.0  # Dominics Maximalwert — nie darüber dimensionieren
@@ -59,8 +60,8 @@ def automatische_dimension(volumenstrom_m3h: float) -> Optional[dict]:
         if kap[_R_MAX_INDEX] >= flow_kg_h:
             return {"dn": dn, "pam": round(_interpoliere_r(flow_kg_h, kap), 1)}
     letzte_dn, letzte_kap = list(DN_KAPAZITAET.items())[-1]
-    return {
+    return mit_grundlage({
         "dn": letzte_dn,
         "pam": round(_interpoliere_r(flow_kg_h, letzte_kap), 1),
         "warnung": f"Durchfluss übersteigt {letzte_dn} bei {R_MAX:.0f} Pa/m — grössere Dimension prüfen",
-    }
+    }, 'leitungsdimension')

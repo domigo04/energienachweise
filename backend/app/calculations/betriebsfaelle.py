@@ -18,6 +18,7 @@ Ladeleistung eine sichtbare Eingabe.
 from typing import Optional
 
 from app.calculations.waermepumpe import berechne_waermepumpe
+from app.calculations.grundlagen import mit_grundlage
 
 HEIZEN = "heizen"
 BWW = "bww"
@@ -113,11 +114,11 @@ def betriebsfaelle(wp_d: dict, *, bww_ladeleistung_kw: Optional[float] = None,
             f"Die Lasten werden nicht addiert — {summe:.1f} kW wären fachlich falsch."
         )
 
-    return {
+    return mit_grundlage({
         "hat_vorrang": True,
         "faelle": faelle,
         "massgebend": massgebend["key"] if massgebend else None,
         "massgebend_q_source_kw": massgebend["q_source_kw"] if massgebend else None,
         "bww_ladeleistung_kw": ladeleistung,
         "warnungen": warnungen,
-    }
+    }, 'betriebsfaelle')

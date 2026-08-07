@@ -11,7 +11,10 @@ from datetime import date
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas as pdfcanvas
 
+from app.export.design import STANDARD, Marke, logo_klein, wasserzeichen  # noqa: E402
+
 PLANER = "SIREGO GmbH · Dominic Goulon · Winterthur"
+# Rot bleibt die Vorgabe (STANDARD.akzent); SIREGO ersetzt sie durch Markenblau.
 ROT = (0.86, 0.15, 0.15)
 DUNKEL = (0.1, 0.12, 0.2)
 GRAU = (0.45, 0.5, 0.55)
@@ -64,10 +67,11 @@ def _wrap(text, breite):
     return zeilen or [""]
 
 
-def _kopfzeile(c, titel, projekt_name):
+def _kopfzeile(c, titel, projekt_name, marke: Marke = STANDARD):
     w, h = A4
     c.setPageSize(A4)
-    c.setFillColorRGB(*ROT)
+    wasserzeichen(c, w, h, marke)
+    c.setFillColorRGB(*marke.akzent)
     c.rect(0, h - 10, w, 10, stroke=0, fill=1)
     c.setFont("Helvetica-Bold", 15)
     c.setFillColorRGB(*DUNKEL)
@@ -87,10 +91,12 @@ def _fusszeile(c, w):
     c.drawString(50, 30, f"{date.today().strftime('%d.%m.%Y')} · {PLANER} · Grobschätzung, kein Devis/keine Ausschreibung")
 
 
-def _deckblatt(c, projekt_name, inputs):
+def _deckblatt(c, projekt_name, inputs, marke: Marke = STANDARD):
     w, h = A4
     c.setPageSize(A4)
-    c.setFillColorRGB(*ROT)
+    wasserzeichen(c, w, h, marke)
+    c.setFillColorRGB(*marke.akzent)
+    logo_klein(c, w - 50 - 30, h - 92, 30, marke)
     c.rect(0, h - 24, w, 24, stroke=0, fill=1)
     c.setFillColorRGB(*DUNKEL)
     c.setFont("Helvetica", 11)

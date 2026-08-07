@@ -23,6 +23,7 @@ import math
 from typing import Optional
 
 from app.calculations.einzel import _schritt, _z
+from app.calculations.grundlagen import mit_grundlage
 from app.calculations.sole_rohre import (  # noqa: F401  (Re-Export fürs Frontend)
     KONZENTRAT_DICHTE_KG_L,
     PN_RANG,
@@ -577,7 +578,7 @@ def sole_druckverlust(
             "Verdampferwiderstand zu klein."
         )
 
-    return {
+    return mit_grundlage({
         "sonden_anzahl": anzahl,
         "sonden_tiefe_m": round(tiefe, 1),
         "sonden_straenge": sonden_straenge,
@@ -613,4 +614,4 @@ def sole_druckverlust(
         "sonde_turbulent": sonde["stroemungsart"] in ("Turbulent glatt", "Turbulent rauh"),
         "rechenweg": rechenweg,
         "warnungen": warnungen,
-    }
+    }, 'sole_druckverlust')

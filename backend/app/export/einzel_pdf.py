@@ -10,6 +10,9 @@ from datetime import date
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas as pdfcanvas
 
+from app.calculations.grundlagen import GRUNDLAGE_FEHLT
+from app.export.design import STANDARD, Marke, logo_klein, wasserzeichen
+
 PLANER = "SIREGO GmbH · Dominic Goulon · Winterthur"
 BLAU = (0.031, 0.498, 0.898)   # #087fe5, die Aktionsfarbe der Marke
 DUNKEL = (0.031, 0.184, 0.286)  # #082f49, das Marine der Überschriften
@@ -20,7 +23,10 @@ RAND = 20 * 2.834645  # 20 mm
 BREITE, HOEHE = A4
 
 
-def _kopf(c, titel: str, untertitel: str) -> float:
+def _kopf(c, titel: str, untertitel: str, marke: Marke = STANDARD) -> float:
+    # Wasserzeichen zuerst: PDF kennt keine Ebenen, es gilt die Reihenfolge.
+    wasserzeichen(c, BREITE, HOEHE, marke)
+    logo_klein(c, BREITE - RAND - 26, HOEHE - RAND - 12, 26, marke)
     c.setFillColorRGB(*DUNKEL)
     c.setFont("Helvetica-Bold", 17)
     c.drawString(RAND, HOEHE - RAND - 6, titel)
@@ -65,13 +71,14 @@ def _zeile(c, y: float, spalten: list[tuple[str, float, str]], *, fett=False, hi
     return y - 16
 
 
-def _umbruch(c, y: float, titel: str, untertitel: str, mindestens: float = 90) -> float:
+def _umbruch(c, y: float, titel: str, untertitel: str, mindestens: float = 90,
+             marke: Marke = STANDARD) -> float:
     """Neue Seite anfangen, bevor eine Tabelle unten aus dem Blatt läuft."""
     if y > RAND + mindestens:
         return y
     _fuss(c)
     c.showPage()
-    return _kopf(c, titel, untertitel)
+    return _kopf(c, titel, untertitel, marke)
 
 
 def einzelberechnung_pdf(
@@ -81,6 +88,7 @@ def einzelberechnung_pdf(
     rechenweg: list[dict],
     ergebnisse: list[dict],
     hinweise: list[str] | None = None,
+    marke: Marke = STANDARD,
 ) -> bytes:
     """Baut das PDF.
 
@@ -90,14 +98,17 @@ def einzelberechnung_pdf(
     puffer = io.BytesIO()
     c = pdfcanvas.Canvas(puffer, pagesize=A4)
     c.setTitle(f"{titel} – Einzelberechnung")
-    untertitel = f"Einzelberechnung · Grundlage: {grundlage}" if grundlage else "Einzelberechnung"
-    y = _kopf(c, titel, untertitel)
+    # Ohne Angabe stand hier bisher nur «Einzelberechnung» — die Lücke war
+    # unsichtbar und damit von einer bewussten Entscheidung nicht zu
+    # unterscheiden. Sie wird jetzt ausgeschrieben (Issue #84).
+    untertitel = f"Einzelberechnung · Grundlage: {grundlage or GRUNDLAGE_FEHLT}"
+    y = _kopf(c, titel, untertitel, marke)
 
     rechts = BREITE - RAND
 
     y = _abschnitt(c, y, "Eingaben")
     for eintrag in eingaben:
-        y = _umbruch(c, y, titel, untertitel)
+        y = _umbruch(c, y, titel, untertitel, marke=marke)
         einheit = eintrag.get("einheit") or ""
         wert = f"{eintrag['wert']} {einheit}".strip()
         y = _zeile(c, y, [(str(eintrag["label"]), RAND + 4, "l"), (wert, rechts - 4, "r")])
@@ -106,7 +117,7 @@ def einzelberechnung_pdf(
     if rechenweg:
         y = _abschnitt(c, y, "Rechenweg")
         for schritt in rechenweg:
-            y = _umbruch(c, y, titel, untertitel, 110)
+            y = _umbruch(c, y, titel, untertitel, 110, marke)
             c.setFillColorRGB(*DUNKEL)
             c.setFont("Helvetica-Bold", 9)
             c.drawString(RAND + 4, y, f"{schritt.get('groesse', '')}  {schritt.get('formel', '')}")
@@ -120,10 +131,10 @@ def einzelberechnung_pdf(
             y -= 20
         y -= 4
 
-    y = _umbruch(c, y, titel, untertitel)
+    y = _umbruch(c, y, titel, untertitel, marke=marke)
     y = _abschnitt(c, y, "Resultat")
     for index, eintrag in enumerate(ergebnisse):
-        y = _umbruch(c, y, titel, untertitel)
+        y = _umbruch(c, y, titel, untertitel, marke=marke)
         einheit = eintrag.get("einheit") or ""
         wert = f"{eintrag['wert']} {einheit}".strip()
         y = _zeile(c, y, [(str(eintrag["label"]), RAND + 4, "l"), (wert, rechts - 4, "r")],
@@ -131,12 +142,12 @@ def einzelberechnung_pdf(
 
     if hinweise:
         y -= 14
-        y = _umbruch(c, y, titel, untertitel)
+        y = _umbruch(c, y, titel, untertitel, marke=marke)
         y = _abschnitt(c, y, "Hinweise")
         c.setFillColorRGB(*GRAU)
         c.setFont("Helvetica", 8.5)
         for hinweis in hinweise:
-            y = _umbruch(c, y, titel, untertitel)
+            y = _umbruch(c, y, titel, untertitel, marke=marke)
             c.setFillColorRGB(*GRAU)
             c.setFont("Helvetica", 8.5)
             c.drawString(RAND + 4, y, str(hinweis)[:150])

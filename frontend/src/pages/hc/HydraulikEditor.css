@@ -1437,6 +1437,16 @@
   background: rgba(255, 255, 255, 0.97);
   box-shadow: 0 8px 22px rgba(15, 23, 42, 0.1);
   backdrop-filter: blur(4px);
+  /* Die Leiste war länger als der Bildschirm: auf einem 720 px hohen Fenster
+     ragten «Auswahl löschen», «Dehnen» und «Notiz» unten heraus und liessen
+     sich nicht anklicken — ohne Scrollbalken führte auch kein Weg hin. Mit
+     jedem neuen Befehl wächst sie weiter, also bekommt sie eine Grenze und
+     darf scrollen. `overscroll-behavior` verhindert, dass das Mausrad am Ende
+     der Liste in den Zoom des Schemas durchschlägt. */
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 .hc-toolrail__button {
   position: relative;

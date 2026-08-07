@@ -130,6 +130,25 @@ Es darf keinen Mischzustand geben, bei dem die Projektliste privat ist, direkte
 Schema-IDs innerhalb der Firma aber zugänglich sind. Projekte sind firmenweit;
 Schreib- und Freigaberechte werden explizit geregelt.
 
+### Öffentliche Auth-Routen
+
+Login und Registrierung sind die einzigen Endpunkte ohne Token. Wiederholte
+Fehlversuche werden begrenzt (`app/rate_limit.py`): eng pro Konto, weit pro
+Absenderadresse. Die Antwort ist ein 429 mit `Retry-After` und ohne jede
+Auskunft darüber, ob das Konto existiert.
+
+**Pilotgrenze:** Die Zähler liegen im Arbeitsspeicher des Prozesses. Das trägt,
+solange das Backend als EIN Prozess läuft — der aktuelle Railway-Start
+(`uvicorn app.main:app` ohne `--workers`) tut das. Sobald mehrere
+Arbeitsprozesse oder Instanzen laufen, zählt jede für sich und die tatsächliche
+Grenze vervielfacht sich; dann gehören die Zähler in einen gemeinsamen Speicher.
+
+Die Absenderadresse kommt aus dem LETZTEN Eintrag von `X-Forwarded-For` — nur
+den schreibt der Proxy, der uns am nächsten steht. Wer den ersten nähme, hätte
+den Schutz abgeschaltet, weil ein Aufrufer die vorderen Einträge frei erfinden
+kann. Das gilt für genau eine Proxy-Ebene; kommt eine zweite dazu, muss die
+Regel mitgezogen werden.
+
 ## Persistenz
 
 Benutzer, Firmen, Projekte und Referenzen liegen in PostgreSQL. Ein Deployment

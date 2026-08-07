@@ -11,7 +11,7 @@ Mitglieder und Projekte ausschliesslich innerhalb der eigenen Firma.
 from datetime import datetime
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
@@ -26,6 +26,14 @@ from app.auth import (
     verify_password,
 )
 from app.database import get_db
+from app.rate_limit import (
+    alles_aufraeumen,
+    client_ip,
+    login_ip_sperre,
+    login_konto_sperre,
+    register_ip_sperre,
+    sperrhinweis,
+)
 from app.models.auth import Firma, Role, User
 from app.models.grobkostenschaetzung import Korrekturfaktor
 from app.models.heizungscockpit import HcProject
@@ -130,10 +138,46 @@ def _firma_fuer_registrierung(body: RegisterIn, db: Session) -> Firma:
     return firma
 
 
+def _absender(request: Request | None) -> str:
+    """Die Adresse, an der die IP-Zähler hängen."""
+    if request is None:
+        return "unbekannt"
+    return client_ip(request.headers.get("x-forwarded-for"), getattr(request.client, "host", None))
+
+
+def _sperre_pruefen(*zaehler) -> None:
+    """Ist einer der Zähler gesperrt, endet der Aufruf hier mit 429.
+
+    Geprüft wird VOR jeder Datenbankabfrage und vor `verify_password`. Sonst
+    trüge der Server die Kosten des Angriffs weiter, obwohl er ihn schon
+    abgelehnt hat.
+    """
+    rest = max((sperre.restsperre_s(schluessel) for sperre, schluessel in zaehler), default=0.0)
+    if rest <= 0:
+        return
+    # `Retry-After` ist die maschinenlesbare Hälfte derselben Aussage; ohne sie
+    # weiss ein Client nicht, wann er es wieder versuchen darf.
+    raise HTTPException(
+        status.HTTP_429_TOO_MANY_REQUESTS,
+        sperrhinweis(rest),
+        headers={"Retry-After": str(max(1, int(rest) + 1))},
+    )
+
+
 @router.post("/register", status_code=201)
-def register(body: RegisterIn, db: Session = Depends(get_db)):
+def register(body: RegisterIn, db: Session = Depends(get_db), request: Request = None):
+    # `request` steht hinter `db` und trägt einen Vorgabewert, damit bestehende
+    # direkte Aufrufe der Funktion (so testet dieses Projekt) weiter stimmen.
+    # FastAPI erkennt den Typ und reicht die Anfrage unabhängig von der
+    # Reihenfolge durch — `test_http_*` belegt das.
+    absender = _absender(request)
+    _sperre_pruefen((register_ip_sperre, absender))
+    # Aufräumen hängt an den öffentlichen Routen: nur sie legen Schlüssel an,
+    # und sie laufen selten genug für einen Durchgang je Aufruf.
+    alles_aufraeumen()
     email = body.email.lower().strip()
     if db.query(User).filter(User.email == email).first():
+        register_ip_sperre.fehlversuch(absender)
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Diese E-Mail ist bereits registriert.")
     firma = _firma_fuer_registrierung(body, db)
     user = User(
@@ -150,15 +194,28 @@ def register(body: RegisterIn, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenOut)
-def login(body: LoginIn, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == body.email.lower().strip()).first()
+def login(body: LoginIn, db: Session = Depends(get_db), request: Request = None):
+    email = body.email.lower().strip()
+    absender = _absender(request)
+    _sperre_pruefen((login_konto_sperre, email), (login_ip_sperre, absender))
+    alles_aufraeumen()
+
+    user = db.query(User).filter(User.email == email).first()
     if not user or not verify_password(body.password, user.password_hash):
+        # Beide Zähler laufen mit: der Kontozähler stoppt das Durchprobieren
+        # EINES Passworts, der IP-Zähler das Durchprobieren vieler Konten.
+        login_konto_sperre.fehlversuch(email)
+        login_ip_sperre.fehlversuch(absender)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "E-Mail oder Passwort falsch.")
     if not user.is_active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Konto ist deaktiviert.")
     require_active_company(user)
     if not user.is_verified:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Konto noch nicht freigeschaltet — bitte auf die Freischaltung warten.")
+    # Nur der Kontozähler wird zurückgesetzt. Bliebe auch der IP-Zähler stehen,
+    # könnte jemand mit einem einzigen gültigen Konto seine Adresse nach jedem
+    # Block wieder freikaufen.
+    login_konto_sperre.zuruecksetzen(email)
     user.last_login_at = datetime.utcnow()
     db.commit()
     token = create_access_token(user.id)

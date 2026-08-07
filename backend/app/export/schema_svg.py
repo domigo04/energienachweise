@@ -422,13 +422,36 @@ def caption_titel(node) -> str:
     return d.get("label") or CAPTION_NAMEN.get(node.get("type"), node.get("type") or "Bauteil")
 
 
-def datenblock_anker(node) -> tuple:
-    """Mitte-X und Oberkante des Datenblocks — verschoben wie im Editor.
+def datenblock_sichtbar(node) -> bool:
+    """Ist der Datenblock dieses Bauteils eingeblendet?
 
-    Der Versatz darf in jede Richtung gehen: zum Ausrichten mehrerer Blöcke auf
-    eine gemeinsame Flucht muss ein Block auch nach oben wandern können.
+    Gleiche Regel wie im Editor (`schema/datenblock.js::blockSichtbar`): nur
+    ein ausdrückliches True blendet aus. Ein Altbestand ohne das Feld bleibt
+    dadurch unverändert sichtbar.
+    """
+    return (node.get("data") or {}).get("caption_hidden") is not True
+
+
+def datenblock_anker(node) -> tuple:
+    """Mitte-X und Oberkante des Datenblocks.
+
+    Seit #58 trägt der Block eine EIGENE Lage im Schema (`caption_pos`) — er
+    hängt nicht mehr am Bauteil und bleibt liegen, wenn das Bauteil wandert.
+    Gespeichert ist genau dieser Anker: waagrechte Mitte, Oberkante. Der Editor
+    zeichnet ihn mit `translateX(-50%)`, hier wird er direkt verwendet.
+
+    Ohne eigene Lage gilt unverändert das Altmodell (Bauteilmitte, Unterkante,
+    Versatz). Ein Schema, das noch nie im neuen Editor offen war, exportiert
+    dadurch exakt wie bisher. Der Versatz darf in jede Richtung gehen: zum
+    Ausrichten mehrerer Blöcke auf eine Flucht muss ein Block auch nach oben
+    wandern können.
     """
     d = node.get("data") or {}
+    pos = d.get("caption_pos")
+    if isinstance(pos, dict):
+        px, py = _f(pos.get("x")), _f(pos.get("y"))
+        if px is not None and py is not None:
+            return (px, py)
     w, h = node_groesse(node)
     x = (node.get("position") or {}).get("x", 0)
     y = (node.get("position") or {}).get("y", 0)
@@ -439,6 +462,8 @@ def datenblock_anker(node) -> tuple:
 def zeichne_datenblock(parts: list, node, results) -> None:
     """Datenblock unter dem Bauteil — für Einzelteile wie für Gruppen gleich."""
     if (node.get("data") or {}).get("nr") is None:
+        return
+    if not datenblock_sichtbar(node):
         return
     mitte_x, oben_y = datenblock_anker(node)
     zeichne_datenkasten(parts, mitte_x, oben_y, caption_titel(node),

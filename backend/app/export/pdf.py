@@ -14,7 +14,7 @@ from reportlab.lib.utils import ImageReader
 from svglib.svglib import svg2rlg
 
 from app.calculations.bww_sia385 import CP_WASSER_KJ_KGK
-from app.calculations.grundlagen import GRUNDLAGE_FEHLT, grundlage_zeile
+from app.calculations.grundlagen import grundlage_zeile
 from app.export.design import STANDARD, Marke, logo_klein, wasserzeichen
 from app.export import diagramme as diagramm
 from app.export.diagramme import FARBEN
@@ -926,13 +926,12 @@ def _berechnungs_seiten(c, abschnitte, projekt_name, marke: Marke = STANDARD):
         # Grundlage direkt unter dem Titel (Issue #84). Sie steht bewusst VOR
         # den Zahlen: die erste Frage einer Prüfung lautet «wonach gerechnet?»,
         # und die Antwort soll nicht erst hinter dem Rechenweg auftauchen.
-        # Fehlt sie, steht das ausgeschrieben da — eine leere Zeile sähe wie
-        # eine bewusste Entscheidung aus.
+        # Gibt es für diese Berechnung keine Norm, steht hier nichts — das ist
+        # die richtige Aussage, kein Versäumnis (Entscheid Dominic 2026-08-07).
         grundlage = a.get("grundlage")
         if grundlage:
-            offen = GRUNDLAGE_FEHLT in grundlage
-            c.setFont("Helvetica-Oblique" if offen else "Helvetica", 8.5)
-            c.setFillColorRGB(*(0.57, 0.25, 0.05) if offen else (0.45, 0.5, 0.55))
+            c.setFont("Helvetica", 8.5)
+            c.setFillColorRGB(0.45, 0.5, 0.55)
             c.drawString(50, y, grundlage)
             y -= 13
         y -= 2

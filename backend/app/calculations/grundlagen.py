@@ -8,17 +8,29 @@ damit sie nie auseinanderlaufen.
 ## Die Regel, an der dieses Modul hängt
 
 Eine geratene Normangabe ist schlimmer als gar keine, weil sie geprüft
-aussieht. Darum steht hier ausschliesslich, was im Code oder in `PHYSIK.md`
-tatsächlich belegt ist — mit Fundstelle. Alles andere trägt ausdrücklich
-`GRUNDLAGE_FEHLT`, und das erscheint sichtbar im Nachweis.
+aussieht. Darum steht hier ausschliesslich, was Dominic ausdrücklich
+entschieden hat — mit Fundstelle. Die Zuordnung Berechnung → Grundlage ist eine
+**fachliche Aussage**; sie wird hier nicht hergeleitet, nicht recherchiert und
+nicht aus der Methode erschlossen.
 
-Die Zuordnung Berechnung → Grundlage ist eine **fachliche Aussage**. Sie wird
-hier nicht hergeleitet, nicht recherchiert und nicht aus der Methode erschlossen
-— sie wird von Dominic eingetragen. Dieses Modul liefert nur den Mechanismus.
+## Warum nicht jede Berechnung eine Grundlage trägt
 
-## Wie eine offene Zeile geschlossen wird
+Nach Entscheid Dominic (2026-08-07) hängt das am Schaden, den ein Fehler
+anrichtet:
 
-`GRUNDLAGEN[...] = Grundlage("SWKI 301-01", ausgabe="2013", abschnitt="…",
+* **Kritisch** — Erdsonden, Trinkwarmwasserspeicher und Expansionsgefäss. Eine
+  falsche Auslegung ist hier teuer bis gefährlich; sie hat deshalb eine Norm,
+  und die gehört in den Nachweis.
+* **Unkritisch** — Ventile, technischer Speicher und die übrigen. Für sie gibt
+  es schlicht **keine** einschlägige Norm.
+
+Wo keine Grundlage besteht, steht im Nachweis auch **nichts**. Der frühere
+Hinweis «Grundlage nicht angegeben» wurde zurückgenommen: er las sich wie ein
+Versäumnis, obwohl die Abwesenheit einer Norm dort die richtige Aussage ist.
+
+## Wie eine weitere Zeile ergänzt wird
+
+`GRUNDLAGEN[...] = Grundlage("SIA …", ausgabe="…", abschnitt="…",
 fundstelle="Entscheid Dominic <Datum>")` — mehr ist nicht nötig. Rechenweg,
 Ergebnis und PDF ziehen die Angabe automatisch nach.
 """
@@ -27,10 +39,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-# Genau dieser Wortlaut erscheint im Rechenweg UND im PDF, wenn nichts
-# hinterlegt ist. Eine Lücke darf nicht wie eine bewusste Entscheidung
-# aussehen — deshalb steht sie ausgeschrieben da und nicht als leere Zeile.
-GRUNDLAGE_FEHLT = "Grundlage nicht angegeben"
+# Ohne Grundlage steht im Nachweis nichts (Entscheid Dominic 2026-08-07).
+# Die Konstante bleibt als leerer Text bestehen, damit Aufrufer weiterhin
+# gegen einen Wert prüfen können statt gegen `None`.
+GRUNDLAGE_FEHLT = ""
 
 
 @dataclass(frozen=True)
@@ -84,20 +96,35 @@ GRUNDLAGEN: dict[str, Optional[Grundlage]] = {
         fundstelle="sole_rohre.py:4, :29-:86, :100, :109; PHYSIK.md §19",
     ),
 
-    # ── Offen — von Dominic zu entscheiden ────────────────────────────────
+    # Expansionsgefäss: SWKI 301-01 (Entscheid Dominic 2026-08-07). Der
+    # Modulkopf nannte bisher nur «Auslegung nach Dominics Excel»; damit war
+    # offen, ob e-Tabelle und Faktor X der Richtlinie folgen oder eine
+    # Hausmethode sind. Sie folgen ihr. Ohne Ausgabejahr, weil keines genannt
+    # wurde — eine erfundene Jahreszahl wäre schlimmer als keine.
+    "expansion": Grundlage(
+        bezeichnung="SWKI 301-01",
+        fundstelle="Entscheid Dominic 2026-08-07",
+    ),
+    # Erdsonden-Druckverlust: SIA 384/6 (Entscheid Dominic 2026-08-07). Das
+    # Modul zitierte die Norm bisher nur für die Nenndruckstufe und dort als
+    # «informativ»; sie gilt für die Auslegung insgesamt. Ausgabe 2021 wie bei
+    # `sole_rohre` — dieselbe Norm, in PHYSIK.md §19 mit Jahr belegt.
+    "sole_druckverlust": Grundlage(
+        bezeichnung="SIA 384/6",
+        ausgabe="2021",
+        fundstelle="Entscheid Dominic 2026-08-07; Ausgabe aus PHYSIK.md §19",
+    ),
+
+    # ── Ohne Grundlage ────────────────────────────────────────────────────
     #
-    # Bewusst `None` statt einer plausiblen Vermutung. Zu jeder Zeile steht,
-    # was im Code über die Herkunft bekannt ist; die Frage dazu liegt in der PR.
+    # Für diese Berechnungen gibt es keine einschlägige Norm (Entscheid Dominic
+    # 2026-08-07). Eine falsche Auslegung ist hier nicht kritisch — anders als
+    # bei Erdsonden, Trinkwarmwasser und Expansionsgefäss. Im Nachweis steht
+    # dazu nichts; das ist die richtige Aussage, kein Versäumnis.
     "betriebsfaelle": None,
     "bkp": None,
     "druckverlust": None,
     "einzel": None,
-    # Der Modulkopf sagt «Auslegung nach Dominics Excel
-    # (Expanion_dominic_goulon.xlsx)», PHYSIK.md §8 ebenso. Ob die e-Tabelle und
-    # der Faktor X der SWKI-Richtlinie entsprechen oder eine Hausmethode sind,
-    # entscheidet über «SWKI 301-01» vs. «Firmenmethode, angelehnt an
-    # SWKI 301-01». Das kann nur der Fachplaner sagen.
-    "expansion": None,
     "grobkostenschaetzung": None,
     "heizgruppen": None,
     "hydraulik": None,
@@ -106,12 +133,6 @@ GRUNDLAGEN: dict[str, Optional[Grundlage]] = {
     "ravel": None,
     "schema_mengen": None,
     "schema_sizing": None,
-    # Zitiert SIA 384/6 NUR für die Nenndruckstufe nach Sondentiefe
-    # (sole_druckverlust.py:207/:222, dort ausdrücklich «informativ»). Das
-    # Druckverlustverfahren selbst stammt laut PHYSIK.md §18 aus
-    # `Erdsonden.xlsx` und rechnet mit Blasius/Nikuradse/Prandtl-Kármán. Die
-    # Norm deshalb NICHT auf das ganze Modul zu ziehen wäre eine Ableitung.
-    "sole_druckverlust": None,
     "ventil": None,
     "waermepumpe": None,
 }
@@ -155,8 +176,12 @@ def grundlage_zeile(schluessel: str) -> str:
     Genau EINE Funktion baut diesen Text. Zwei Formulierungen für dieselbe
     Angabe wären der sichere Weg dahin, dass Editor und Nachweis irgendwann
     Verschiedenes behaupten.
+
+    Ohne Grundlage kommt ein leerer Text zurück — nicht «Grundlage: ». Der
+    Aufrufer zeichnet dann gar nichts.
     """
-    return f"Grundlage: {grundlage_text(schluessel)}"
+    text = grundlage_text(schluessel)
+    return f"Grundlage: {text}" if text else ""
 
 
 def mit_grundlage(resultat: dict, schluessel: str) -> dict:

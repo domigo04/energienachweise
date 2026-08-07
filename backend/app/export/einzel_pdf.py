@@ -10,7 +10,6 @@ from datetime import date
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas as pdfcanvas
 
-from app.calculations.grundlagen import GRUNDLAGE_FEHLT
 from app.export.design import STANDARD, Marke, logo_klein, wasserzeichen
 
 PLANER = "SIREGO GmbH · Dominic Goulon · Winterthur"
@@ -98,10 +97,10 @@ def einzelberechnung_pdf(
     puffer = io.BytesIO()
     c = pdfcanvas.Canvas(puffer, pagesize=A4)
     c.setTitle(f"{titel} – Einzelberechnung")
-    # Ohne Angabe stand hier bisher nur «Einzelberechnung» — die Lücke war
-    # unsichtbar und damit von einer bewussten Entscheidung nicht zu
-    # unterscheiden. Sie wird jetzt ausgeschrieben (Issue #84).
-    untertitel = f"Einzelberechnung · Grundlage: {grundlage or GRUNDLAGE_FEHLT}"
+    # Ohne Grundlage nur «Einzelberechnung»: für diese Rechnungen gibt es keine
+    # einschlägige Norm, und ein Hinweis darauf läse sich wie ein Versäumnis
+    # (Entscheid Dominic 2026-08-07).
+    untertitel = f"Einzelberechnung · Grundlage: {grundlage}" if grundlage else "Einzelberechnung"
     y = _kopf(c, titel, untertitel, marke)
 
     rechts = BREITE - RAND

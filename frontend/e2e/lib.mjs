@@ -271,6 +271,12 @@ export async function starten() {
       const s = await w.weltZuScreen({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
       if (!(await w.istFrei(s))) return null;
       await page.mouse.click(s.x, s.y);
+      // Maus vom Griff wegfahren. In der Segmentmitte sitzt der Diamantgriff;
+      // `griffHover` oeffnet sein Menue 420 ms nach dem Ueberfahren, und dessen
+      // Auffangflaeche (z-index 3700) liegt dann ueber der ganzen Zeichnung.
+      // Ein danach begonnener Zug traefe nur noch diese Flaeche. Ein Mensch
+      // fuehrt die Maus ohnehin weiter, sobald er gewaehlt hat.
+      await w.mausWeg();
       await page.waitForTimeout(500);
       return s;
     },

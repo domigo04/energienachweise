@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 
 from app.export.einzel_pdf import einzelberechnung_pdf
+from app.export.design import fuer_firma
 from app.calculations.einzel import (
     druckverlust_kvs,
     jahresenergie,
@@ -83,6 +84,7 @@ def einzelberechnung_export(body: EinzelberechnungExport):
     pdf = einzelberechnung_pdf(
         titel=body.titel,
         grundlage=body.grundlage,
+        marke=fuer_firma(user.firma.name if user.firma else None),
         eingaben=[zeile.model_dump() for zeile in body.eingabe_zeilen],
         rechenweg=resultat.get("rechenweg") or [],
         ergebnisse=ergebnisse,

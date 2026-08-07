@@ -9,6 +9,7 @@ from app.auth import get_current_user
 from app.calculations.hydraulik import berechne_schema
 from app.database import get_db
 from app.export.pdf import erzeuge_pdf
+from app.export.design import fuer_firma
 from app.models.auth import User
 from app.models.heizungscockpit import HcProject, HcSchema
 
@@ -47,6 +48,9 @@ def _schema_pdf_response(schema_id: int, inhalt: str, user: User, db: Session,
     pdf = erzeuge_pdf(
         p.name if p else "Projekt", s.name or "Schema", inhalt,
         nodes, edges, results,
+        # Der Auftritt gehoert der Firma, die exportiert. Ohne eigene Marke
+        # bleibt es beim bisherigen Standard-Look.
+        marke=fuer_firma(user.firma.name if user.firma else None),
         plankopf={
             "projektnummer": p.projektnummer if p and p.projektnummer else (str(p.id) if p else "—"),
             "bauherr": (p.bauherr or p.kunde) if p else "—",

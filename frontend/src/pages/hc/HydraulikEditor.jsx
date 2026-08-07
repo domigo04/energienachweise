@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   AlertTriangle, AlignHorizontalJustifyCenter, ArrowLeft, Check, ChevronDown, Copy, Download, Eye,
   FlipHorizontal2, Grid2x2, History,
-  Image as ImageIcon, Layers3, LayoutTemplate, Link2, Lock, Unlock, MapPin, Move, MoveHorizontal,
+  Image as ImageIcon, Layers3, LayoutTemplate, Link2, ListOrdered, Lock, Unlock, MapPin, Move, MoveHorizontal,
   CopyPlus, CornerDownRight, MoveRight, PanelLeftClose, PanelLeftOpen, RotateCcw, RotateCw,
   Scissors, Slice, Spline,
   PanelRightClose, PanelRightOpen, Redo2, Save as SaveIcon, Settings, Settings2, Trash2, Undo2, X,
@@ -64,6 +64,7 @@ import {
   reihenAbbildungen, routeAbgebildet, spiegelung, verschiebung as verschiebungsAbbildung,
   winkelAusBuffer, winkelZwischen,
 } from './schema/cadTransform';
+import { anzahlAenderungen, neueNummern } from './schema/nummerierung';
 import {
   CAD_GRID, DEFAULT_DRAWING_CONFIG, GRID_OPTIONEN,
   graphFuerEditor, normalisiereDrawingConfig,
@@ -2528,6 +2529,10 @@ function EditorInner() {
   const [transformBefehl, setTransformBefehl] = useState(null);
   const transformBefehlRef = useRef(null);
   transformBefehlRef.current = transformBefehl;
+  // Rückfrage vor dem Neunummerieren: { gesamt, aenderungen }. Nummern wandern
+  // erst auf ausdrückliche Bestätigung — sie stehen auch in bereits
+  // exportierten Plänen (§83).
+  const [neuNummerieren, setNeuNummerieren] = useState(null);
   // Basis- und Zielpunkt werden an EINER Stelle gesetzt: im Capture-Lauf der
   // Zeichenfläche (`cadHandlePointerDown`). Der läuft vor Auswahl, Griffen und
   // React Flow, und damit gehört der Klick immer dem laufenden Befehl — egal,
@@ -5880,6 +5885,60 @@ function EditorInner() {
   }, [befehlsFang, drehenAnwenden, screenToFlowPosition, snapshotKopieren]);
   transformKlickRef.current = transformKlick;
 
+  // ── Neu nummerieren (§83) ────────────────────────────────────────────────
+  //
+  // Die Nummer ist sonst die Reihenfolge, in der jemand die Bauteile gesetzt
+  // hat. Dieser Befehl vergibt sie in Leserichtung neu — und NUR dieser
+  // Befehl. Eine laufende Automatik würde die Nummern eines freigegebenen
+  // Standes still verändern; ein exportiertes PDF trüge dann andere Nummern
+  // als dasselbe Schema beim nächsten Öffnen (Projektregel 8).
+
+  /**
+   * Nummerierbare Bauteile mit ihrer Lage und Höhe.
+   *
+   * Die Höhe kommt zuerst aus dem Node selbst (`measured`, das React Flow dort
+   * hinterlegt) und erst danach aus dem internen Store. Der Store war im
+   * Browsertest direkt nach dem Laden noch leer; die Bandtoleranz wurde dadurch
+   * 0 und eine sichtbar gerade Zeile zerfiel. Fehlt beides, springt im reinen
+   * Modul `ERSATZ_HOEHE` ein.
+   */
+  const nummerierbareBauteile = useCallback(() => nodesRef.current
+    .filter(node => NUMMERIERT.includes(node.type))
+    .map(node => ({
+      id:node.id,
+      x:node.position?.x || 0,
+      y:node.position?.y || 0,
+      hoehe:node.measured?.height || node.height || nodeGroesse(node.id).height || 0,
+      nr:node.data?.nr,
+    })), [nodeGroesse]);
+
+  const neuNummerierenAnwenden = useCallback(() => {
+    const nummern = neueNummern(nummerierbareBauteile());
+    if (!nummern.length) return false;
+    const zuweisung = new Map(nummern.map(eintrag => [eintrag.id, eintrag.nr]));
+    snap();
+    setNodes(items => items.map(node => (zuweisung.has(node.id)
+      ? { ...node, data:{ ...(node.data || {}), nr:zuweisung.get(node.id) } }
+      : node)));
+    return true;
+  }, [nummerierbareBauteile, setNodes, snap]);
+
+  /**
+   * Nachfragen, bevor Nummern wandern.
+   *
+   * Die Zahl im Hinweis ist bewusst die der ÄNDERUNGEN, nicht die der
+   * Bauteile: Sie beantwortet die Frage, die der Planer wirklich hat — bringt
+   * mir das etwas, oder stimmt schon alles?
+   */
+  const neuNummerierenFragen = useCallback(() => {
+    const nummern = neueNummern(nummerierbareBauteile());
+    if (!nummern.length) {
+      setBefehlHinweis('Neu nummerieren · Es gibt keine nummerierten Bauteile.');
+      return;
+    }
+    setNeuNummerieren({ gesamt:nummern.length, aenderungen:anzahlAenderungen(nummern) });
+  }, [nummerierbareBauteile]);
+
   const auswahlLoeschen = useCallback(() => {
     const knotenIds = new Set(nodesRef.current.filter(node => node.selected).map(node => node.id));
     if (selected) knotenIds.add(selected.id);
@@ -6338,6 +6397,7 @@ function EditorInner() {
         befehlsfolge.current = '';
         platzierVorschauRef.current = null;
         setPlatzierVorschau(null); setInlineTreffer(null); setTransformBefehl(null);
+        setNeuNummerieren(null);
         setEndpointMenu(null); setEdgeMenu(null); setAusrichtenHinweis(null);
         setEditorMode(escapeMode(editorModeRef.current));
         return;
@@ -7954,6 +8014,11 @@ function EditorInner() {
                 taste:drawingConfig.shortcut_stretch,
                 hinweis:'Fenster aufziehen, Basispunkt, Zielpunkt. Was im Fenster liegt, wandert mit.',
                 aktiv:Boolean(dehnen), aktion:dehnenStarten },
+              { id:'neu-nummerieren', Icon:ListOrdered, name:'Neu nummerieren',
+                hinweis:'Vergibt alle Bauteilnummern in Leserichtung neu — oben nach unten, links nach rechts. Fragt vorher nach und ist ein einziger Undo-Schritt.',
+                aktiv:Boolean(neuNummerieren),
+                gesperrt:!nodes.some(node => NUMMERIERT.includes(node.type)),
+                aktion:() => (neuNummerieren ? setNeuNummerieren(null) : neuNummerierenFragen()) },
               { id:'notiz', Icon:MapPin, name:'Notiz-Stecknadel',
                 hinweis:'Danach auf die Stelle im Schema klicken. Der Eintrag landet im Projektjournal.',
                 aktiv:nadelModus, gesperrt:!schemaId, marke:notizen.length,
@@ -8093,6 +8158,37 @@ function EditorInner() {
                 da, damit niemand raten muss, welcher Klick als Nächstes kommt.
                 Die Spiegelfrage ist der einzige Schritt mit Knöpfen — sie ist
                 eine Entscheidung, kein Punkt auf der Zeichenfläche. */}
+            {/* Neu nummerieren (§83): erst die Rückfrage, dann die Aktion. Die
+                Nummer steht auch in bereits exportierten Plänen — sie darf
+                nicht auf einen Knopfdruck ohne Bestätigung wandern. */}
+            {neuNummerieren && (
+              <Panel position="top-center">
+                <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:8, padding:'7px 12px', borderRadius:18,
+                  background:'#5b21b6', color:'white', fontSize:10, fontWeight:700, boxShadow:'0 6px 16px rgba(91,33,182,.28)' }}>
+                  <span>
+                    {neuNummerieren.aenderungen === 0
+                      ? `Neu nummerieren · ${neuNummerieren.gesamt} Bauteile stehen bereits in Leserichtung`
+                      : `Neu nummerieren · ${neuNummerieren.aenderungen} von ${neuNummerieren.gesamt} Bauteilen bekommen eine andere Nummer`}
+                  </span>
+                  <span style={{ display:'flex', gap:6 }}>
+                    <button type="button" data-werkzeug="neu-nummerieren-ausfuehren"
+                      onClick={() => { neuNummerierenAnwenden(); setNeuNummerieren(null); }}
+                      disabled={neuNummerieren.aenderungen === 0}
+                      style={{ background:'white', color:'#5b21b6', border:'none', borderRadius:12,
+                        padding:'3px 10px', fontSize:10, fontWeight:700,
+                        cursor:neuNummerieren.aenderungen === 0 ? 'default' : 'pointer',
+                        opacity:neuNummerieren.aenderungen === 0 ? 0.5 : 1 }}>
+                      Ausführen
+                    </button>
+                    <button type="button" onClick={() => setNeuNummerieren(null)}
+                      style={{ background:'rgba(255,255,255,.18)', color:'white', border:'1px solid rgba(255,255,255,.5)',
+                        borderRadius:12, padding:'3px 10px', fontSize:10, fontWeight:700, cursor:'pointer' }}>
+                      Abbrechen
+                    </button>
+                  </span>
+                </div>
+              </Panel>
+            )}
             {transformBefehl && (
               <Panel position="top-center">
                 <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:8, padding:'7px 12px', borderRadius:18,
@@ -9038,7 +9134,7 @@ function EditorInner() {
                 // Auch der Hinweistext der Befehle aus #72 gehört zum Abbruch —
                 // sonst bliebe «Stutzen · …» stehen, obwohl nichts mehr läuft.
                 setBefehlHinweis(null);
-                setTransformBefehl(null);
+                setTransformBefehl(null); setNeuNummerieren(null);
                 setEditorMode(escapeMode(editorModeRef.current));
               }],
             ] : [

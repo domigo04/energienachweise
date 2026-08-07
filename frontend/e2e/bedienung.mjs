@@ -238,9 +238,23 @@ kopf('Werkzeuge stehen in der Leiste am Canvasrand, nicht in der Kopfzeile');
   const rail = page.locator('.hc-toolrail');
   const werkzeug = (id) => rail.locator(`[data-werkzeug="${id}"]`);
 
-  pruefe('U1', 'Alle acht Zeichenbefehle sind sichtbar',
-    (await rail.locator('.hc-toolrail__button').count()) === 8,
-    `${await rail.locator('.hc-toolrail__button').count()} Werkzeuge`);
+  // Geprüft werden die Werkzeuge, die es geben MUSS — nicht ihre Anzahl. Eine
+  // feste Zahl veraltet stillschweigend, sobald ein Befehl dazukommt: sie stand
+  // auf 8, während die Leiste längst 11 Werkzeuge trug.
+  const erwartet = [
+    'leitung', 'verschieben', 'drehen', 'spiegeln', 'ausrichten', 'trennen',
+    'ecke-verbinden', 'dehnen',
+    // Leitungen ändern (#72)
+    'versatz', 'stutzen', 'dehnen-kante', 'verbinden',
+  ];
+  const fehlend = [];
+  for (const id of erwartet) {
+    if (!(await werkzeug(id).count())) fehlend.push(id);
+  }
+  pruefe('U1', 'Alle Zeichenbefehle sind als Werkzeug sichtbar',
+    fehlend.length === 0,
+    fehlend.length ? `fehlt: ${fehlend.join(', ')}`
+      : `${await rail.locator('.hc-toolrail__button').count()} Werkzeuge, alle erwarteten dabei`);
 
   // Fünf davon gab es bisher nur als Taste — sie waren schlicht unauffindbar.
   const vorherUnsichtbar = ['drehen', 'spiegeln', 'ausrichten', 'trennen', 'dehnen'];

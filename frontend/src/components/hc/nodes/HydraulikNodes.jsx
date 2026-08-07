@@ -1,6 +1,7 @@
 import { memo, useRef, useState } from 'react';
 import { Handle, Position, useReactFlow, NodeResizer, ViewportPortal } from '@xyflow/react';
 import { datenblockAusrichten, fangPunkte } from '../../../pages/hc/schema/datenblockAusrichten';
+import { ALT_ABSTAND, eigeneBlockLage, blockSichtbar } from '../../../pages/hc/schema/datenblock';
 import {
   SymPump, SymValve2V, SymValve3, SymCheckValve,
   SymShutoff, SymWE, SymVerbraucher, SymSpeicher, SymBwwSpeicher, SymBypass,
@@ -1238,14 +1239,21 @@ function mitNr(Comp) {
       event.preventDefault();
       event.stopPropagation();
       const eigener = captionRef.current;
+      const eigenesRechteck = eigener ? blockMessen(eigener) : null;
       captionDrag.current = {
         x:event.clientX,
         y:event.clientY,
-        offsetX:Number(props.data?.caption_offset_x) || 0,
-        offsetY:Number(props.data?.caption_offset_y) || 0,
+        // Ausgangslage in WELTkoordinaten, GEMESSEN statt gerechnet. Der Block
+        // hängt nicht mehr am Bauteil, also wird kein Versatz mehr
+        // fortgeschrieben — und die Messung stimmt auch dann, wenn die Lage
+        // noch aus dem Altmodell kommt und erst beim Ziehen entsteht.
+        // Gespeichert wird der Anker: waagrechte Mitte, Oberkante.
+        start:eigenesRechteck
+          ? { x:eigenesRechteck.x + eigenesRechteck.breite / 2, y:eigenesRechteck.y }
+          : { x:0, y:0 },
         // Die anderen Blöcke stehen während des Ziehens still; sie werden
         // einmal beim Anfassen gemessen statt bei jeder Mausbewegung.
-        rechteck:eigener ? blockMessen(eigener) : null,
+        rechteck:eigenesRechteck,
         andere:Array.from(document.querySelectorAll('.hc-datenblock'))
           .filter(element => element !== eigener)
           .map(blockMessen),
@@ -1265,10 +1273,10 @@ function mitNr(Comp) {
         const gefangen = bewegt && !moveEvent.altKey
           ? datenblockAusrichten(bewegt, drag.andere, DATENBLOCK_FANG / zoom)
           : { dx:0, dy:0, linien:[] };
-        const nextX = drag.offsetX + dx + gefangen.dx;
-        const nextY = drag.offsetY + dy + gefangen.dy;
+        const nextX = drag.start.x + dx + gefangen.dx;
+        const nextY = drag.start.y + dy + gefangen.dy;
         setNodes(nodes => nodes.map(node => node.id === props.id
-          ? { ...node, data:{ ...node.data, caption_offset_x:nextX, caption_offset_y:nextY } }
+          ? { ...node, data:{ ...node.data, caption_pos:{ x:nextX, y:nextY } } }
           : node));
         setFang(bewegt ? {
           linien:gefangen.linien,
@@ -1285,6 +1293,9 @@ function mitNr(Comp) {
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', up);
     };
+    // Eigene Lage des Blocks, sofern das Schema schon überführt ist.
+    const eigeneLage = eigeneBlockLage(props.data);
+
     return (
       <div style={{ position:'relative', display:skaliert ? 'block' : 'inline-block',
         ...(skaliert ? { width:'100%', height:'100%' } : {}) }}>
@@ -1299,14 +1310,29 @@ function mitNr(Comp) {
             padding: kompakt ? '0 3px' : '0 4px', zIndex: 20, pointerEvents: 'none',
           }}>{nr}</div>
         )}
-        {nr != null && (
+        {nr != null && blockSichtbar(props.data) && (
           <div className="nodrag nopan hc-datenblock"
             ref={captionRef}
+            data-bauteil={props.id}
             onPointerDown={captionPointerDown}
             title="Datenblock verschieben — rastet an den anderen Blöcken ein (Alt hält den Fang an)"
             style={{
-              position:'absolute', top:'100%', left:'50%',
-              transform:`translate(calc(-50% + ${Number(props.data?.caption_offset_x) || 0}px), ${10 + (Number(props.data?.caption_offset_y) || 0)}px)`,
+              position:'absolute',
+              // Der Block liegt im Schema, nicht am Bauteil (§58). Seine eigene
+              // Lage ist eine Weltkoordinate; hier wird sie nur gegen die
+              // Bauteilecke aufgerechnet, damit sie als CSS-Versatz taugt. Der
+              // Block ist zwar weiterhin ein Kind des Bauteils im DOM — aber
+              // die Rechnung sorgt dafür, dass er beim Verschieben des
+              // Bauteils an derselben Weltkoordinate stehen bleibt.
+              //
+              // Ohne eigene Lage (Schema noch nie im neuen Editor offen) gilt
+              // unverändert das Altmodell: Bauteilmitte, Unterkante, Versatz.
+              ...(eigeneLage
+                ? { left:eigeneLage.x - props.positionAbsoluteX,
+                    top:eigeneLage.y - props.positionAbsoluteY,
+                    transform:'translateX(-50%)' }
+                : { top:'100%', left:'50%',
+                    transform:`translate(calc(-50% + ${Number(props.data?.caption_offset_x) || 0}px), ${ALT_ABSTAND + (Number(props.data?.caption_offset_y) || 0)}px)` }),
               minWidth:DATENBLOCK_MIN_BREITE, maxWidth:DATENBLOCK_MAX_BREITE,
               boxSizing:'border-box', padding:'3px 7px',
               border:'1px solid #94a3b8', borderRadius:3, background:'white',

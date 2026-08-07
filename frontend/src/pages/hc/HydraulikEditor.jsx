@@ -1,7 +1,7 @@
 import React, { useCallback, useState, useMemo, useRef, useEffect } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  AlertTriangle, AlignHorizontalJustifyCenter, ArrowLeft, Check, ChevronDown, Copy, Download, Eye,
+  AlertTriangle, AlignHorizontalJustifyCenter, ArrowLeft, Check, ChevronDown, Copy, Download, Eye, EyeOff,
   FlipHorizontal2, Grid2x2, History,
   Image as ImageIcon, Layers3, LayoutTemplate, Link2, ListOrdered, Lock, Unlock, MapPin, Move, MoveHorizontal,
   CopyPlus, CornerDownRight, MoveRight, PanelLeftClose, PanelLeftOpen, RotateCcw, RotateCw,
@@ -65,6 +65,9 @@ import {
   winkelAusBuffer, winkelZwischen,
 } from './schema/cadTransform';
 import { anzahlAenderungen, neueNummern } from './schema/nummerierung';
+import {
+  blockSichtbar, brauchtMigration, migrierteDaten, naechsteBlockLage,
+} from './schema/datenblock';
 import {
   CAD_GRID, DEFAULT_DRAWING_CONFIG, GRID_OPTIONEN,
   graphFuerEditor, normalisiereDrawingConfig,
@@ -711,6 +714,20 @@ function Typenschild({ d, set, praefix = '' }) {
   );
 }
 
+function DatenblockSchalter({ node, onUpdate }) {
+  // Nur Bauteile mit Nummer haben überhaupt einen Block.
+  if (node?.data?.nr == null) return null;
+  const versteckt = node.data?.caption_hidden === true;
+  return (
+    <label style={{ display:'flex', alignItems:'center', gap:7, fontSize:11, color:'#334155',
+      marginTop:8, cursor:'pointer' }}>
+      <input type="checkbox" checked={!versteckt}
+        onChange={event => onUpdate('caption_hidden', !event.target.checked)} />
+      Datenblock anzeigen
+    </label>
+  );
+}
+
 function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ventilResults, pumpenResults, expansionResults, anschlussWarnungen, anschlussResults, pwtResults, heatpumpResults, speicherResults, erdsondenResults, bwwResults, onUpdate, onDelete, onSetAbgaenge, navigate, drawingConfig, onDrawingConfig }) {
   // Punkt 13 — nichts ausgewählt heisst nicht „nichts zu zeigen": dann gehören
   // hierher die Eigenschaften der ANSICHT, wie in Revit.
@@ -862,7 +879,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         ) : (
           <div style={warnSt}>Q, VL und RL eingeben — das Backend rechnet automatisch.</div>
         )}
-        <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
+        <DatenblockSchalter node={node} onUpdate={onUpdate} /><Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
     );
   }
@@ -894,7 +911,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         {gr?.ventil?.pv != null && ro('Ventil kvs / Autorität', `${gr.ventil.kvs_eff} / ${gr.ventil.pv.toFixed(1)} %`, '')}
         {!gr?.m_sek && <div style={warnSt}>Hauptgruppe verbinden und Leistung eingeben.</div>}
         <div style={miniSt}>Detaillierte Auslegung: <b>Doppelklick</b> auf die Gruppe.</div>
-        <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
+        <DatenblockSchalter node={node} onUpdate={onUpdate} /><Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
     );
   }
@@ -924,7 +941,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         {fld('Leistung Q','q_kw','z.B. 8.5','kW')}
         {vl>0&&rl>0&&dt<=0&&<div style={warnSt}>⚠ VL muss grösser als RL sein</div>}
         <ResultBox v={calc} label="Berechneter Volumenstrom" unit="m³/h" />
-        <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
+        <DatenblockSchalter node={node} onUpdate={onUpdate} /><Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
     );
   }
@@ -969,7 +986,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
             <PvBox pv={ver.pv} v={ver.v} kvs_eff={ver.kvs_eff}/>
           </> : <div style={miniSt}>Δpvar eingeben — das Backend rechnet kvs + Autorität.</div>}
         </>}
-        <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
+        <DatenblockSchalter node={node} onUpdate={onUpdate} /><Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
     );
   }
@@ -995,7 +1012,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
             </div>
           )}
           {pr.warnings?.map((w,i)=><div key={i} style={warnSt}>⚠ {w}</div>)}
-          <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
+          <DatenblockSchalter node={node} onUpdate={onUpdate} /><Div/><DelBtn onClick={()=>onDelete(node.id)}/>
         </div>
       );
     }
@@ -1017,7 +1034,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
             <div style={{fontSize:16,fontWeight:700,color:'#1d4ed8',marginTop:4}}>Förderhöhe: {pr.foerderhoehe_kpa.toFixed(1)} kPa = {pr.mws.toFixed(2)} mWS</div>
           </div>
         )}
-        <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
+        <DatenblockSchalter node={node} onUpdate={onUpdate} /><Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
     );
   }
@@ -1031,7 +1048,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         <Typenschild d={d} set={set}/>
         {v ? ro('Durchfluss (aus Leitung)', v, 'm³/h', true)
            : <div style={warnSt}>In eine Leitung mit Durchfluss setzen — der Zähler übernimmt automatisch.</div>}
-        <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
+        <DatenblockSchalter node={node} onUpdate={onUpdate} /><Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
     );
   }
@@ -1063,7 +1080,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         )}
         {xr?.fehler && <div style={{ ...warnSt, background:'#fef2f2', border:'1px solid #fca5a5', color:'#b91c1c' }}>⚠ {xr.fehler}</div>}
         {!xr && <div style={miniSt}>Alle vier Werte eingeben — das Backend rechnet nach EN 12828 (PHYSIK §8).</div>}
-        <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
+        <DatenblockSchalter node={node} onUpdate={onUpdate} /><Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
     );
   }
@@ -1158,7 +1175,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
           </>
         )}
         <button style={btnBlue} onClick={()=>navigate('/rechner/ravel')}>→ RAVEL Wirtschaftlichkeit</button>
-        <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
+        <DatenblockSchalter node={node} onUpdate={onUpdate} /><Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
     );
   }
@@ -1183,7 +1200,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         <div style={{ fontSize:9, lineHeight:1.5, color:'#64748b', background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:6, padding:'6px 7px' }}>
           Automatik: Erzeugerleistung, sonst Summe der Verbrauchergruppen; oben höchste Gruppen-VL + 2 K, unten gerechneter Misch-Rücklauf. Im Doppelklick lassen sich die Eingaben kontrolliert überschreiben.
         </div>
-        <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
+        <DatenblockSchalter node={node} onUpdate={onUpdate} /><Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
     );
   }
@@ -1215,7 +1232,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
           <b>Doppelklick auf den Speicher</b> öffnet Belegungsdaten, Auslegung,
           Wärmepumpenabgleich, Diagramme und den vollständigen Rechenweg.
         </div>
-        <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
+        <DatenblockSchalter node={node} onUpdate={onUpdate} /><Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
     );
   }
@@ -1251,7 +1268,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         <div style={{ fontSize:9, lineHeight:1.5, color:'#64748b', background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:6, padding:'6px 7px' }}>
           Die Quellenleistung kommt automatisch von der Wärmepumpe. Die spezifische Entzugsleistung ist bewusst eine sichtbare Projektangabe; es wird kein standortunabhängiger Pauschalwert eingesetzt.
         </div>
-        <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
+        <DatenblockSchalter node={node} onUpdate={onUpdate} /><Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
     );
   }
@@ -1285,7 +1302,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         ) : (
           <div style={warnSt}>Heizkreise an Verteiler anschliessen</div>
         )}
-        <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
+        <DatenblockSchalter node={node} onUpdate={onUpdate} /><Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
     );
   }
@@ -1315,7 +1332,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
           {ro('Sekundär Massenstrom', Number(pr.m_sek).toFixed(3), 'm³/h', true)}
           <div style={{ fontSize:9, color:'#94a3b8', marginTop:2 }}>gleiche Leistung Q → Fluss = Q / (1.163 · ΔT_sek)</div>
         </>)}
-        <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
+        <DatenblockSchalter node={node} onUpdate={onUpdate} /><Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
     );
   }
@@ -1343,7 +1360,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
             V' {ar.m != null ? Number(ar.m).toFixed(3) : '—'} m³/h — die Leitung ab hier trägt diesen Fluss.
           </div>
         ) : null; })()}
-        <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
+        <DatenblockSchalter node={node} onUpdate={onUpdate} /><Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
     );
   }
@@ -1362,7 +1379,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         <div style={{ fontSize:10, color:'#94a3b8', lineHeight:1.5 }}>
           Direkt auf der Leinwand: Doppelklick zum Bearbeiten, ziehen zum Verschieben. Ausgewählten Textblock mit ⌘C/⌘V kopieren.
         </div>
-        <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
+        <DatenblockSchalter node={node} onUpdate={onUpdate} /><Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
     );
   }
@@ -1382,7 +1399,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         <div style={{ marginTop:5, fontSize:9, color:'#64748b' }}>
           Kleiner Wert = dichtere Schraffur. Die Einstellung wird identisch in den Vektorplot übernommen.
         </div>
-        <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
+        <DatenblockSchalter node={node} onUpdate={onUpdate} /><Div/><DelBtn onClick={()=>onDelete(node.id)}/>
       </div>
     );
   }
@@ -1396,7 +1413,7 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
         <Typenschild d={d} set={set}/>
         {v ? ro("V' (aus Leitung)", v, 'm³/h', true) : null}
       </>}
-      <Div/><DelBtn onClick={()=>onDelete(node.id)}/>
+      <DatenblockSchalter node={node} onUpdate={onUpdate} /><Div/><DelBtn onClick={()=>onDelete(node.id)}/>
     </div>
   );
 }
@@ -5893,6 +5910,93 @@ function EditorInner() {
   // Standes still verändern; ein exportiertes PDF trüge dann andere Nummern
   // als dasselbe Schema beim nächsten Öffnen (Projektregel 8).
 
+  // ── Beschriftungsblöcke (§58) ────────────────────────────────────────────
+  //
+  // Der Block trägt eine EIGENE Lage im Schema (`caption_pos`) statt eines
+  // Versatzes zum Bauteil. Nur so bleibt er liegen, wenn das Bauteil wandert,
+  // und nur so hält eine ausgerichtete Flucht mehrerer Blöcke.
+
+  /**
+   * Bauteile mit Rechteck — sie spannen den Rahmen der Blockreihe auf.
+   *
+   * Gemessen wird am gezeichneten Element, nicht am React-Flow-Store: dessen
+   * `measured` war beim Platzieren nachweislich leer, und die gedachte Linie
+   * lag dann auf Höhe der Bauteiloberkanten statt darunter. Der DOM zeigt, was
+   * der Planer sieht — inklusive Drehung und von Hand gezogener Grösse.
+   */
+  const blockBauteile = useCallback(() => {
+    const flaeche = document.querySelector('.react-flow');
+    const viewport = document.querySelector('.react-flow__viewport');
+    if (!flaeche || !viewport) return [];
+    const m = new DOMMatrix(getComputedStyle(viewport).transform);
+    const rahmen = flaeche.getBoundingClientRect();
+    const zoom = m.a || 1;
+    return Array.from(document.querySelectorAll('.react-flow__node'))
+      .filter(element => !element.className.includes('react-flow__node-junction')
+        && !element.className.includes('react-flow__node-label'))
+      .map(element => {
+        const r = element.getBoundingClientRect();
+        return {
+          x:(r.left - rahmen.left - m.e) / zoom,
+          y:(r.top - rahmen.top - m.f) / zoom,
+          breite:r.width / zoom,
+          hoehe:r.height / zoom,
+        };
+      });
+  }, []);
+
+  /** Die schon belegten Blocklagen. */
+  const blockLagen = useCallback((liste) => liste
+    .map(node => node.data?.caption_pos)
+    .filter(Boolean), []);
+
+  /**
+   * Altbestand einmalig auf die eigene Lage überführen.
+   *
+   * Die Umrechnung braucht die Bauteilgrösse, und die kennt erst React Flow
+   * nach dem Zeichnen — deshalb hängt das hier an `nodeGeometryVersion` und
+   * nicht an `graphMigration`, das schon vor der Messung läuft. Die Regel
+   * selbst ist rein und getestet (`schema/datenblock.js`).
+   *
+   * Bewusst OHNE `snap()`: das ist keine Bearbeitung des Planers, sondern eine
+   * Formatumstellung. Sie darf seinen Undo-Verlauf nicht belegen.
+   */
+  useEffect(() => {
+    if (!loaded) return;
+    const offen = nodesRef.current.filter(brauchtMigration);
+    if (!offen.length) return;
+    // Ohne Messung keine Umrechnung — lieber später als an falscher Stelle.
+    const messbar = offen.filter(node => (nodeGroesse(node.id).height || 0) > 0);
+    if (!messbar.length) return;
+    const neueDaten = new Map(messbar.map(node => [node.id, migrierteDaten(node, nodeGroesse(node.id))]));
+    setNodes(items => items.map(node => (neueDaten.has(node.id)
+      ? { ...node, data:neueDaten.get(node.id) }
+      : node)));
+  }, [loaded, nodeGeometryVersion, nodeGroesse, setNodes]);
+
+  /**
+   * Alle Blöcke gemeinsam ein- oder ausblenden.
+   *
+   * Der Schalter schreibt `caption_hidden` an jedes Bauteil, statt eine eigene
+   * globale Einstellung einzuführen. Grund: der PDF-Export liest die
+   * Zeichenkonfiguration gar nicht — eine globale Einstellung käme dort nie an,
+   * und Editor und Export zeigten Verschiedenes.
+   */
+  const alleBloeckeSetzen = useCallback((versteckt) => {
+    const betroffen = nodesRef.current.filter(node => node.data?.nr != null);
+    if (!betroffen.length) return false;
+    snap();
+    const ids = new Set(betroffen.map(node => node.id));
+    setNodes(items => items.map(node => (ids.has(node.id)
+      ? { ...node, data:{ ...(node.data || {}), caption_hidden:versteckt } }
+      : node)));
+    return true;
+  }, [setNodes, snap]);
+
+  /** Sind gerade alle Blöcke ausgeblendet? */
+  const alleBloeckeVersteckt = nodes.length > 0
+    && nodes.filter(node => node.data?.nr != null).every(node => !blockSichtbar(node.data));
+
   /**
    * Nummerierbare Bauteile mit ihrer Lage und Höhe.
    *
@@ -7031,6 +7135,12 @@ function EditorInner() {
   // einzige Weg, und der `PLACE`-Befehl blieb toter Code. Jetzt rufen Drop UND
   // Klick-Platzierung dieselbe Funktion, sodass beide Wege identisch verhalten.
   const bauteilPlatzieren = useCallback((raw, weltPosition, screenPunkt = null) => {
+    // Lage des neuen Datenblocks VOR dem Zustandswechsel bestimmen. Innerhalb
+    // des `setNodes`-Updaters trägt die Bauteilliste noch keine gemessenen
+    // Höhen; die gedachte Linie läge dann zu hoch und der Block ragte in die
+    // Zeichnung.
+    const blockLageFuerNeues = naechsteBlockLage(
+      blockBauteile(), blockLagen(nodesRef.current));
     if (!raw) return null;
     snap();
     const pos = weltPosition;
@@ -7098,7 +7208,9 @@ function EditorInner() {
         id, type: nodeType, position: nodePosition, ...annoStyle,
         data: { label: p?.label || nodeType, ...extra, ...(p?.preset || {}),
           ...(inlineRotation ? { rotation: inlineRotation } : {}),
-          ...(NUMMERIERT.includes(nodeType) ? { nr: naechsteNr(ns) } : {}) },
+          ...(NUMMERIERT.includes(nodeType)
+            ? { nr: naechsteNr(ns), caption_pos: blockLageFuerNeues }
+            : {}) },
       };
       // Der Abzweigpunkt ist ein echter Topologie-Knoten, kein optischer Punkt.
       return branchJunctionId
@@ -7175,7 +7287,7 @@ function EditorInner() {
       setSchaltungswahl({ nodeId: id, nodeType, x: screenPunkt.x, y: screenPunkt.y });
     }
     return id;
-  }, [cadAnker, drawingConfig.corner_radius, getZoom, leitungTeilen, naechsteSichtbareLeitung, screenToFlowPosition, setEdges, setNodes, snap]);
+  }, [blockBauteile, blockLagen, cadAnker, drawingConfig.corner_radius, getZoom, leitungTeilen, naechsteSichtbareLeitung, screenToFlowPosition, setEdges, setNodes, snap]);
 
   // Drag&Drop bleibt erhalten — es ist jetzt nur einer von zwei Wegen.
   const onDrop = useCallback((e) => {
@@ -8014,6 +8126,12 @@ function EditorInner() {
                 taste:drawingConfig.shortcut_stretch,
                 hinweis:'Fenster aufziehen, Basispunkt, Zielpunkt. Was im Fenster liegt, wandert mit.',
                 aktiv:Boolean(dehnen), aktion:dehnenStarten },
+              { id:'bloecke-sicht', Icon:alleBloeckeVersteckt ? EyeOff : Eye,
+                name:alleBloeckeVersteckt ? 'Alle Datenblöcke einblenden' : 'Alle Datenblöcke ausblenden',
+                hinweis:'Blendet die Beschriftungsblöcke aller Bauteile gemeinsam ein oder aus. Ein einzelner Block lässt sich im Bauteilpanel schalten.',
+                aktiv:alleBloeckeVersteckt,
+                gesperrt:!nodes.some(node => node.data?.nr != null),
+                aktion:() => alleBloeckeSetzen(!alleBloeckeVersteckt) },
               { id:'neu-nummerieren', Icon:ListOrdered, name:'Neu nummerieren',
                 hinweis:'Vergibt alle Bauteilnummern in Leserichtung neu — oben nach unten, links nach rechts. Fragt vorher nach und ist ein einziger Undo-Schritt.',
                 aktiv:Boolean(neuNummerieren),

@@ -8,6 +8,9 @@ import { protokoll, starten } from './lib.mjs';
 const { pruefe, kopf, bilanz } = protokoll('copy');
 const w = await starten();
 const { page } = w;
+// Die Bauteillegende liegt ueber dem unteren Drittel der Zeichenflaeche. Ohne
+// sie steht dem Test die volle Hoehe fuer Ziel- und Achspunkte zur Verfuegung.
+await page.addInitScript(() => localStorage.setItem('hc_showLegende', '0'));
 const OUT = w.cfg.arbeitsordner;
 
 kopf('Kopieren eines angeschlossenen Bauteils (Punkt 6/7)');
@@ -119,8 +122,8 @@ pruefe('C8', 'Die Kopie liegt nicht exakt auf dem Original',
 const leitungsBild = async () => {
   await w.graphSetzen({
     nodes: [
-      { id: 'a1', type: 'junction', position: { x: 300, y: 300 }, data: { cad_anchor: true } },
-      { id: 'a2', type: 'junction', position: { x: 700, y: 300 }, data: { cad_anchor: true } },
+      { id: 'a1', type: 'junction', position: { x: 700, y: 400 }, data: { cad_anchor: true } },
+      { id: 'a2', type: 'junction', position: { x: 1100, y: 400 }, data: { cad_anchor: true } },
     ],
     edges: [{
       id: 'l1', source: 'a1', sourceHandle: 'center-source', target: 'a2', targetHandle: 'center-target',
@@ -135,6 +138,10 @@ const leitungsBild = async () => {
 
 /** Zustand des Graphen mit den üblichen Kennzahlen. */
 const bild = async () => {
+  // Erst das Autosave abwarten. `graphLesen` fragt den Server, der Editor
+  // schickt seinen Stand aber verzoegert. Ohne dieses Warten kann die Pruefung
+  // den Zustand VOR der Aktion lesen. `datenblock.mjs` macht es seit jeher so.
+  await page.waitForTimeout(1500);
   const g = await w.graphLesen();
   const nodes = g.nodes || [];
   const edges = g.edges || [];
@@ -152,27 +159,52 @@ const bild = async () => {
 /** Welt-Punkt anklicken, wenn er frei auf der Zeichenfläche liegt. */
 const klickWelt = async (punkt, warten = 500) => {
   const s = await w.weltZuScreen(punkt);
-  if (!(await w.istFrei(s))) return false;
+  // Ein verworfener Klick MUSS auffallen. Vorher gab `klickWelt` still `false`
+  // zurueck; der Test lief weiter und meldete 13 Folgefehler, die aussahen wie
+  // ein kaputter Editor — in Wahrheit hatte die Maus nie die Flaeche beruehrt.
+  if (!(await w.istFrei(s))) {
+    const was = await page.evaluate(([x, y]) => {
+      const el = document.elementFromPoint(x, y);
+      return `${el?.tagName}.${el?.className}` + (el?.innerText ? ` «${el.innerText.slice(0, 40)}»` : '');
+    }, [s.x, s.y]);
+    throw new Error(`Testaufbau: Weltpunkt ${JSON.stringify(punkt)} liegt auf Bildschirm `
+      + `${JSON.stringify(s)} nicht frei — davor liegt ${was}`);
+  }
   await page.mouse.move(s.x, s.y);
   await page.waitForTimeout(160);
   await page.mouse.click(s.x, s.y);
+  // Maus vom Griff wegfahren. `griffHover` oeffnet das Griffmenue 420 ms nach
+  // dem Ueberfahren, und dessen Auffangflaeche (z-index 3700) liegt dann ueber
+  // der ganzen Zeichnung — der naechste Klick kaeme nie an. Ein Mensch zieht
+  // die Maus ohnehin weiter; der Test muss das nachstellen.
+  await w.mausWeg();
   await page.waitForTimeout(warten);
   return true;
 };
+
+/**
+ * Die Leitung auswaehlen, ohne ihr Griffmenue zu oeffnen.
+ *
+ * `w.segmentKlicken` trifft bewusst die SEGMENTMITTE — dort sitzt seit #72 der
+ * Diamantgriff. Sein Menue legt eine bildschirmfuellende Auffangflaeche
+ * (z-index 3700) ueber die Zeichnung, und die schluckt jeden weiteren Klick.
+ * Ein Viertelpunkt waehlt dasselbe Teilstueck aus, ohne das Menue zu oeffnen.
+ */
+const leitungWaehlen = () => klickWelt({ x: 800, y: 400 });
 
 kopf('Leitung kopieren über Basispunkt und Zielpunkt (§74)');
 {
   await leitungsBild();
   // Leitung wählen (Klick auf die Mitte), dann Kopieren mit Shift = ganze Leitung.
-  await w.segmentKlicken({ x: 300, y: 300 }, { x: 700, y: 300 });
+  await leitungWaehlen();
   await page.keyboard.press('Shift+C');
   await page.waitForTimeout(300);
   const gestartet = await page.locator('.hc-toolrail__button[data-werkzeug="kopieren-basis"][aria-pressed="true"]').count();
   pruefe('K0', 'Kopieren-Befehl ist aktiv', gestartet === 1, `${gestartet} aktive Knöpfe`);
 
   // Basispunkt auf das linke Leitungsende, Zielpunkt 200 tiefer.
-  await klickWelt({ x: 300, y: 300 });
-  await klickWelt({ x: 300, y: 500 });
+  await klickWelt({ x: 700, y: 400 });
+  await klickWelt({ x: 700, y: 600 });
 
   const nach = await bild();
   pruefe('K1', 'Es gibt jetzt zwei Leitungen', nach.edges.length === 2,
@@ -199,8 +231,8 @@ kopf('Leitung kopieren über Basispunkt und Zielpunkt (§74)');
 kopf('Mehrfachkopie bleibt aktiv, bis abgebrochen wird (§74)');
 {
   // Ohne Neustart des Befehls: zwei weitere Klicks = zwei weitere Kopien.
-  await klickWelt({ x: 300, y: 600 });
-  await klickWelt({ x: 300, y: 700 });
+  await klickWelt({ x: 700, y: 700 });
+  await klickWelt({ x: 700, y: 750 });
   const nach = await bild();
   pruefe('M1', 'Weitere Klicks erzeugen weitere Kopien', nach.edges.length === 4,
     `${nach.edges.length} Kanten`);
@@ -209,7 +241,7 @@ kopf('Mehrfachkopie bleibt aktiv, bis abgebrochen wird (§74)');
 
   await page.keyboard.press('Escape');
   await page.waitForTimeout(300);
-  await klickWelt({ x: 300, y: 800 });
+  await klickWelt({ x: 700, y: 650 });
   const danach = await bild();
   pruefe('M3', 'Nach ESC erzeugt ein Klick keine Kopie mehr',
     danach.edges.length === 4, `${danach.edges.length} Kanten`);
@@ -228,12 +260,12 @@ kopf('Undo: eine Kopie ist genau ein Schritt (§74)');
 kopf('Spiegeln über zwei Achspunkte (§74)');
 {
   await leitungsBild();
-  await w.segmentKlicken({ x: 300, y: 300 }, { x: 700, y: 300 });
+  await leitungWaehlen();
   await page.keyboard.press('Shift+S');
   await page.waitForTimeout(300);
-  // Waagrechte Achse bei y = 500 → die Leitung landet bei y = 700.
-  await klickWelt({ x: 200, y: 500 });
-  await klickWelt({ x: 900, y: 500 });
+  // Waagrechte Achse bei y = 700 → die Leitung bei y = 400 landet bei y = 1000.
+  await klickWelt({ x: 600, y: 700 });
+  await klickWelt({ x: 1300, y: 700 });
   await page.keyboard.press('j');          // Original behalten
   await page.waitForTimeout(800);
 
@@ -244,7 +276,7 @@ kopf('Spiegeln über zwei Achspunkte (§74)');
   const ankerVon = (id) => nach.nodes.find((n) => n.id === id);
   const spiegelStart = kopie ? ankerVon(kopie.source) : null;
   pruefe('S2', 'Das Spiegelbild liegt auf der gespiegelten Höhe',
-    !!spiegelStart && Math.abs(spiegelStart.position.y - 700) < 1,
+    !!spiegelStart && Math.abs(spiegelStart.position.y - 1000) < 1,
     `y = ${spiegelStart?.position?.y}`);
   pruefe('S3', 'Das Spiegelbild hat eigene Anker und keine Geisterverbindung',
     !!kopie && !['a1', 'a2'].includes(kopie.source) && !['a1', 'a2'].includes(kopie.target),
@@ -257,10 +289,10 @@ kopf('Spiegeln über zwei Achspunkte (§74)');
 kopf('Drehen um einen getippten Winkel (§74)');
 {
   await leitungsBild();
-  await w.segmentKlicken({ x: 300, y: 300 }, { x: 700, y: 300 });
+  await leitungWaehlen();
   await page.keyboard.press('Shift+D');
   await page.waitForTimeout(300);
-  await klickWelt({ x: 300, y: 300 });     // Basispunkt = linkes Ende
+  await klickWelt({ x: 700, y: 400 });     // Basispunkt = linkes Ende
   await page.keyboard.type('90');
   await page.waitForTimeout(200);
   await page.keyboard.press('Enter');
@@ -271,11 +303,11 @@ kopf('Drehen um einen getippten Winkel (§74)');
     `${nach.edges.length} Kanten`);
   const ende = nach.nodes.find((n) => n.id === 'a2');
   pruefe('D2', 'Das freie Ende ist um 90° um den Basispunkt gewandert',
-    !!ende && Math.abs(ende.position.x - 300) < 1 && Math.abs(ende.position.y - 700) < 1,
+    !!ende && Math.abs(ende.position.x - 700) < 1 && Math.abs(ende.position.y - 800) < 1,
     `${ende?.position?.x} / ${ende?.position?.y}`);
   const basis = nach.nodes.find((n) => n.id === 'a1');
   pruefe('D3', 'Der Basispunkt selbst bleibt liegen',
-    !!basis && Math.abs(basis.position.x - 300) < 1 && Math.abs(basis.position.y - 300) < 1,
+    !!basis && Math.abs(basis.position.x - 700) < 1 && Math.abs(basis.position.y - 400) < 1,
     `${basis?.position?.x} / ${basis?.position?.y}`);
   pruefe('D4', 'Die Leitung behält ihre ID und ihre Anker',
     nach.edges[0]?.id === 'l1' && nach.edges[0]?.source === 'a1' && nach.edges[0]?.target === 'a2',
@@ -285,11 +317,11 @@ kopf('Drehen um einen getippten Winkel (§74)');
 kopf('Lineare Reihe (§74)');
 {
   await leitungsBild();
-  await w.segmentKlicken({ x: 300, y: 300 }, { x: 700, y: 300 });
+  await leitungWaehlen();
   await page.keyboard.press('Shift+E');
   await page.waitForTimeout(300);
-  await klickWelt({ x: 300, y: 300 });     // Basispunkt
-  await klickWelt({ x: 300, y: 400 });     // Abstand = 100 nach unten
+  await klickWelt({ x: 700, y: 400 });     // Basispunkt
+  await klickWelt({ x: 700, y: 500 });     // Abstand = 100 nach unten
   await page.keyboard.press('Backspace');  // vorgeschlagene 3 löschen
   await page.keyboard.type('4');
   await page.waitForTimeout(200);
@@ -305,7 +337,7 @@ kopf('Lineare Reihe (§74)');
   const hoehen = nach.nodes.filter((n) => n.type === 'junction')
     .map((n) => n.position.y).sort((a, b) => a - b);
   pruefe('R3', 'Die Kopien stehen in gleichen Abständen',
-    [...new Set(hoehen)].join(',') === '300,400,500,600',
+    [...new Set(hoehen)].join(',') === '400,500,600,700',
     [...new Set(hoehen)].join(', '));
 }
 

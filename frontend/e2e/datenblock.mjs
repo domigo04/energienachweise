@@ -109,10 +109,16 @@ kopf('Die ausgerichtete Lage übersteht Speichern und Neuladen');
 {
   await page.waitForTimeout(1500);                    // Autosave abwarten
   const gespeichert = await w.graphLesen();
-  const daten = (gespeichert.nodes || []).find((n) => n.id === 'v1')?.data || {};
-  pruefe('B6', 'Der Versatz ist gespeichert und darf nach oben zeigen',
-    Number(daten.caption_offset_y) < 0,
-    `caption_offset_y = ${daten.caption_offset_y}`);
+  const knoten = (gespeichert.nodes || []).find((n) => n.id === 'v1') || {};
+  const daten = knoten.data || {};
+  // Seit #58 traegt der Block eine EIGENE Lage (`caption_pos`) statt eines
+  // Versatzes zum Bauteil. Die Aussage bleibt dieselbe: die Lage darf oberhalb
+  // des Bauteils liegen — hier wurde der Block auf die Flucht des Nachbarn
+  // hochgezogen, also ueber die Oberkante seines eigenen Ventils.
+  pruefe('B6', 'Die eigene Lage ist gespeichert und darf ueber dem Bauteil liegen',
+    Boolean(daten.caption_pos) && Number(daten.caption_pos.y) < Number(knoten.position?.y)
+      && daten.caption_offset_x === undefined && daten.caption_offset_y === undefined,
+    `caption_pos = ${JSON.stringify(daten.caption_pos)}, Bauteil y = ${knoten.position?.y}`);
 
   const vorher = await block('v1');
   await w.laden();

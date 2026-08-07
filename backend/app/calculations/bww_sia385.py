@@ -19,6 +19,7 @@ import math
 from typing import Optional
 
 from app.calculations.einzel import _schritt, _z
+from app.calculations.grundlagen import mit_grundlage
 
 # Bezugseinheiten Wohnungsbau in l/(d·P), Blatt `Werte Bezugseinheit`.
 BEZUGSEINHEITEN = {
@@ -309,7 +310,7 @@ def bww_auslegung(
         rf"{{{_z(n_z, 1)}\cdot {_z(t_z, 1)}\cdot3600\cdot {_z(eta, 2)}}}",
         gruppe="Leistungsberechnung"))
 
-    return {
+    return mit_grundlage({
         "personen": round(np_, 2),
         "wohnungen": wohnungszeilen,
         "bezugseinheit": bezug["label"],
@@ -335,7 +336,7 @@ def bww_auslegung(
         "diagramme": _diagrammdaten(v_sto),
         "rechenweg": rechenweg,
         "warnungen": warnungen,
-    }
+    }, "bww_sia385")
 
 
 def leistungsabgleich(resultat: dict, waermepumpenleistung_kw: Optional[float],

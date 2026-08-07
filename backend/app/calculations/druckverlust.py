@@ -1,4 +1,5 @@
 from typing import List
+from app.calculations.grundlagen import mit_grundlage
 
 
 def berechne_kreis(rohrlange_m: float, druckgefaelle_pam: float, apparate: List[dict]) -> dict:
@@ -25,10 +26,10 @@ def berechne_kreis(rohrlange_m: float, druckgefaelle_pam: float, apparate: List[
 
     total_kpa = dp_rohr_kpa + dp_apparate_total
 
-    return {
+    return mit_grundlage({
         "dp_rohr_kpa": round(dp_rohr_kpa, 3),
         "dp_apparate_kpa": round(dp_apparate_total, 3),
         "apparate_details": apparate_details,
         "total_kpa": round(total_kpa, 2),
         "total_mws": round(total_kpa / 10.0, 3),
-    }
+    }, 'druckverlust')

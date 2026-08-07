@@ -14,6 +14,7 @@ from reportlab.lib.utils import ImageReader
 from svglib.svglib import svg2rlg
 
 from app.calculations.bww_sia385 import CP_WASSER_KJ_KGK
+from app.calculations.grundlagen import GRUNDLAGE_FEHLT, grundlage_zeile
 from app.export import diagramme as diagramm
 from app.export.diagramme import FARBEN
 from app.export.formelsatz import formel
@@ -40,6 +41,27 @@ TITEL = {
     "sicherheitsventil": "Sicherheitsventil", "pwt": "Plattentauscher (PWT)",
 }
 INHALT_TEXT = {"schema": "Nur Schema", "berechnungen": "Nur Berechnungen", "beides": "Schema + Berechnungen"}
+
+# Welches Berechnungsmodul liefert die Grundlage eines Abschnitts (Issue #84).
+# Ein Bauteil ohne Eintrag bekommt «Grundlage nicht angegeben» — sichtbar, statt
+# stillschweigend leer. Die Zuordnung selbst steht in `calculations/grundlagen.py`.
+GRUNDLAGE_JE_TYP = {
+    "gruppe": "heizgruppen",
+    "heizkreis": "heizgruppen",
+    "heizkoerper": "heizgruppen",
+    "luftheizapparat": "heizgruppen",
+    "lufterhitzer_gruppe": "heizgruppen",
+    "verteiler": "hydraulik",
+    "valve2": "ventil",
+    "valve3": "ventil",
+    "pump": "druckverlust",
+    "expansion": "expansion",
+    "bww": "bww_sia385",
+    "erdsonden": "sole_druckverlust",
+    "speicher": "schema_sizing",
+    "erzeuger": "waermepumpe",
+    "pwt": "einzel",
+}
 
 
 def _f(x):
@@ -331,6 +353,7 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
                 hinweise = p.get("warnings") or []
                 abschnitte.append({"nr": d.get("nr"), "titel": TITEL.get(t, t),
                                    "bezeichnung": d.get("label") or "",
+                                   "grundlage": grundlage_zeile(GRUNDLAGE_JE_TYP.get(t)),
                                    "eingaben": eingaben, "resultate": resultate,
                                    "rechenweg": rechenweg, "hinweise": hinweise,
                                    "diagramme": diagramme})
@@ -605,6 +628,7 @@ def berechnungs_abschnitte(nodes: list, results: dict) -> list:
         else:
             continue
         abschnitte.append({"nr": d.get("nr"), "titel": TITEL.get(t, t), "bezeichnung": d.get("label") or "",
+                           "grundlage": grundlage_zeile(GRUNDLAGE_JE_TYP.get(t)),
                            "eingaben": eingaben, "resultate": resultate,
                            "rechenweg": rechenweg, "hinweise": hinweise,
                            "diagramme": diagramme})
@@ -891,7 +915,20 @@ def _berechnungs_seiten(c, abschnitte, projekt_name):
         c.setFont("Helvetica-Bold", 11)
         c.setFillColorRGB(0.86, 0.15, 0.15)
         c.drawString(50, y, f"{nr}{a['titel']}{' — ' + a['bezeichnung'] if a['bezeichnung'] else ''}")
-        y -= 16
+        y -= 14
+        # Grundlage direkt unter dem Titel (Issue #84). Sie steht bewusst VOR
+        # den Zahlen: die erste Frage einer Prüfung lautet «wonach gerechnet?»,
+        # und die Antwort soll nicht erst hinter dem Rechenweg auftauchen.
+        # Fehlt sie, steht das ausgeschrieben da — eine leere Zeile sähe wie
+        # eine bewusste Entscheidung aus.
+        grundlage = a.get("grundlage")
+        if grundlage:
+            offen = GRUNDLAGE_FEHLT in grundlage
+            c.setFont("Helvetica-Oblique" if offen else "Helvetica", 8.5)
+            c.setFillColorRGB(*(0.57, 0.25, 0.05) if offen else (0.45, 0.5, 0.55))
+            c.drawString(50, y, grundlage)
+            y -= 13
+        y -= 2
         c.setFillColorRGB(0.1, 0.12, 0.2)
         for gruppe, rows in [("Eingaben", a["eingaben"]), ("Resultate", a["resultate"])]:
             if not rows:

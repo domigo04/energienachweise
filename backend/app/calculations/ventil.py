@@ -1,4 +1,5 @@
 from typing import Optional, List
+from app.calculations.grundlagen import mit_grundlage
 
 # Normierte KVS-Reihe (gängige Ventilhersteller)
 KVS_REIHE = [0.1, 0.16, 0.25, 0.4, 0.63, 1.0, 1.6, 2.5, 4.0, 6.3, 10.0, 16.0, 25.0, 40.0, 63.0]
@@ -28,7 +29,7 @@ def berechne_kvs(volumenstrom_m3h: float, dp_var_kpa: float, kvs_gewaehlt: Optio
     elif pv > 80:
         warnings.append(f"Hohe Ventilautorität ({pv:.1f}%) — Regelkomfort sehr gut")
 
-    return {
+    return mit_grundlage({
         "volumenstrom_m3h": volumenstrom_m3h,
         "dp_var_kpa": dp_var_kpa,
         "dp_var_bar": round(dp_var_bar, 5),
@@ -40,4 +41,4 @@ def berechne_kvs(volumenstrom_m3h: float, dp_var_kpa: float, kvs_gewaehlt: Optio
         "dp_v_eff_kpa": round(dp_v_eff_kpa, 3),
         "ventilautoritaet_pct": round(pv, 2),
         "warnings": warnings,
-    }
+    }, 'ventil')

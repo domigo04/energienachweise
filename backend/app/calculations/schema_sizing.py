@@ -7,6 +7,7 @@ automatischen Eingaben; hier leben nur Formeln, Einheiten und Rechenweg.
 from typing import Optional
 
 from app.calculations.einzel import speichervolumen_wp
+from app.calculations.grundlagen import mit_grundlage
 
 
 ROHRINHALT_L_M = {25: 0.327, 32: 0.531, 40: 0.835}
@@ -38,7 +39,7 @@ def technischer_speicher(
         dichte_kg_m3=dichte_kg_m3,
         waermekapazitaet_kj_kgk=waermekapazitaet_kj_kgk,
     )
-    return {
+    return mit_grundlage({
         **result,
         "leistung_kw": round(leistung, 2),
         "vorlauf_max_c": round(vorlauf, 1),
@@ -46,7 +47,7 @@ def technischer_speicher(
         "speicher_unten_c": round(ruecklauf, 1),
         "ueberdeckung_k": round(ueberdeckung, 1),
         "ueberbrueckung_min": round(float(ueberbrueckung_min), 1),
-    }
+    }, 'schema_sizing')
 
 
 def erdsondenfeld(
@@ -159,7 +160,7 @@ def erdsondenfeld(
             "ergebnis": f"{glykol:.1f} kg",
         })
 
-    return {
+    return mit_grundlage({
         "quellenleistung_kw": round(q0, 2) if q0 is not None else None,
         "sonden_anzahl": anzahl,
         "sonden_laenge_m": round(laenge, 1) if laenge is not None else None,
@@ -179,4 +180,4 @@ def erdsondenfeld(
         "glykol_konzentration_pct": float(glykol_konzentration_pct),
         "glykolbedarf_kg": round(glykol, 1) if glykol is not None else None,
         "rechenweg": rechenweg,
-    }
+    }, 'schema_sizing')

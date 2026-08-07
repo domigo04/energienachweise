@@ -10,6 +10,8 @@ from datetime import date
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas as pdfcanvas
 
+from app.calculations.grundlagen import GRUNDLAGE_FEHLT
+
 PLANER = "SIREGO GmbH · Dominic Goulon · Winterthur"
 BLAU = (0.031, 0.498, 0.898)   # #087fe5, die Aktionsfarbe der Marke
 DUNKEL = (0.031, 0.184, 0.286)  # #082f49, das Marine der Überschriften
@@ -90,7 +92,10 @@ def einzelberechnung_pdf(
     puffer = io.BytesIO()
     c = pdfcanvas.Canvas(puffer, pagesize=A4)
     c.setTitle(f"{titel} – Einzelberechnung")
-    untertitel = f"Einzelberechnung · Grundlage: {grundlage}" if grundlage else "Einzelberechnung"
+    # Ohne Angabe stand hier bisher nur «Einzelberechnung» — die Lücke war
+    # unsichtbar und damit von einer bewussten Entscheidung nicht zu
+    # unterscheiden. Sie wird jetzt ausgeschrieben (Issue #84).
+    untertitel = f"Einzelberechnung · Grundlage: {grundlage or GRUNDLAGE_FEHLT}"
     y = _kopf(c, titel, untertitel)
 
     rechts = BREITE - RAND

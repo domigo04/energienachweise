@@ -2528,6 +2528,15 @@ function EditorInner() {
   const [transformBefehl, setTransformBefehl] = useState(null);
   const transformBefehlRef = useRef(null);
   transformBefehlRef.current = transformBefehl;
+  // Basis- und Zielpunkt werden an EINER Stelle gesetzt: im Capture-Lauf der
+  // Zeichenfläche (`cadHandlePointerDown`). Der läuft vor Auswahl, Griffen und
+  // React Flow, und damit gehört der Klick immer dem laufenden Befehl — egal,
+  // ob er auf leerer Fläche, auf einer Leitung oder genau auf einem Griff
+  // liegt. Gerade dort liegt er meistens, dafür gibt es ja den Objektfang.
+  //
+  // Der Verweis ist nötig, weil der Capture-Lauf früher definiert wird als der
+  // Befehl selbst.
+  const transformKlickRef = useRef(null);
   // ── Notiz-Stecknadeln (Dominic 2026-07-31) ──────────────────────────────
   // Ein Journaleintrag kann an einer Stelle im Schema hängen. Der Editor zeigt
   // die Nadeln seines Schemas, setzt neue und öffnet den Eintrag direkt hier —
@@ -3965,6 +3974,9 @@ function EditorInner() {
 
   const cadHandlePointerDown = useCallback((event) => {
     if (event.button !== 0 || spacePanRef.current) return;
+    // Läuft Kopieren, Spiegeln, Drehen oder Reihe, setzt dieser Druck ihren
+    // nächsten Punkt — vor allem anderen.
+    if (transformBefehlRef.current) { transformKlickRef.current?.(event); return; }
     const handle = event.target?.closest?.('.react-flow__handle');
     if (!handle) return;
     const nodeId = handle.dataset.nodeid;
@@ -5830,6 +5842,11 @@ function EditorInner() {
     if (event.button != null && event.button !== 0) return false;
     event.preventDefault();
     event.stopPropagation();
+    // Ein Mausdruck erzeugt mehrere Ereignisse (pointerdown, pointerup, click).
+    // Den Punkt setzt ausschliesslich der Capture-Lauf auf `pointerdown`; alle
+    // späteren gehören demselben Druck und werden nur noch verschluckt, damit
+    // sie weder einen zweiten Punkt setzen noch die Auswahl ändern.
+    if (event.type !== 'pointerdown') return true;
     const raw = screenToFlowPosition({ x:event.clientX, y:event.clientY });
     const { point } = befehlsFang(raw, { basis:befehl.basis, shift:event.shiftKey });
     if (!befehl.basis) {
@@ -5861,6 +5878,7 @@ function EditorInner() {
     }
     return true;
   }, [befehlsFang, drehenAnwenden, screenToFlowPosition, snapshotKopieren]);
+  transformKlickRef.current = transformKlick;
 
   const auswahlLoeschen = useCallback(() => {
     const knotenIds = new Set(nodesRef.current.filter(node => node.selected).map(node => node.id));

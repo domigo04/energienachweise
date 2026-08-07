@@ -556,6 +556,95 @@ kopf('Gedrehtes Bauteil: die Leitung von oben kommt weiter von oben');
     breite <= 4, `breitester Leitungsverlauf ${Math.round(breite)} px`);
 }
 
+// ── 11. Fensterauswahl, Ergänzen, Abwählen und gemeinsames Löschen ─────────
+kopf('Mehrfachauswahl wie im CAD und gemeinsames Löschen');
+{
+  await w.graphSetzen({
+    nodes: [
+      { id:'m1', type:'pump', position:{ x:220, y:350 }, data:{ nr:1 } },
+      { id:'m2', type:'pump', position:{ x:500, y:350 }, data:{ nr:2 } },
+      { id:'m3', type:'pump', position:{ x:900, y:350 }, data:{ nr:3 } },
+    ],
+    edges: [], layer_config: {},
+  });
+  await w.laden();
+
+  const kaesten = await page.evaluate(() => ['m1', 'm2'].map(id => {
+    const r = document.querySelector(`.react-flow__node[data-id="${id}"]`).getBoundingClientRect();
+    return { left:r.left, top:r.top, right:r.right, bottom:r.bottom };
+  }));
+  const start = {
+    x:Math.floor(Math.min(...kaesten.map(r => r.left)) - 18),
+    y:Math.floor(Math.min(...kaesten.map(r => r.top)) - 18),
+  };
+  const ende = {
+    x:Math.ceil(Math.max(...kaesten.map(r => r.right)) + 18),
+    y:Math.ceil(Math.max(...kaesten.map(r => r.bottom)) + 18),
+  };
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down({ button:'left' });
+  await page.mouse.move(ende.x, ende.y, { steps:12 });
+  await page.mouse.up({ button:'left' });
+  await page.waitForTimeout(350);
+
+  const gewaehlt = () => page.evaluate(() => [...document.querySelectorAll('.react-flow__node.selected')]
+    .map(node => node.dataset.id).sort());
+  pruefe('M1', 'Linke Maustaste zieht einen Auswahlrahmen über mehrere Bauteile',
+    JSON.stringify(await gewaehlt()) === JSON.stringify(['m1', 'm2']), JSON.stringify(await gewaehlt()));
+
+  await page.locator('.react-flow__node[data-id="m3"]').click({ modifiers:['Control'] });
+  await page.waitForTimeout(250);
+  pruefe('M2', 'Ctrl ergänzt ein weiteres Bauteil zur Auswahl',
+    JSON.stringify(await gewaehlt()) === JSON.stringify(['m1', 'm2', 'm3']), JSON.stringify(await gewaehlt()));
+
+  await page.locator('.react-flow__node[data-id="m2"]').click({ modifiers:['Shift'] });
+  await page.waitForTimeout(250);
+  pruefe('M3', 'Shift wählt ein einzelnes Bauteil ab',
+    JSON.stringify(await gewaehlt()) === JSON.stringify(['m1', 'm3']), JSON.stringify(await gewaehlt()));
+
+  const vorher = await w.graphLesen();
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('Shift+ArrowDown');
+  await page.waitForTimeout(900);
+  const nachNudge = await w.graphLesen();
+  const delta = id => {
+    const a = vorher.nodes.find(node => node.id === id)?.position;
+    const b = nachNudge.nodes.find(node => node.id === id)?.position;
+    return a && b ? { x:b.x - a.x, y:b.y - a.y } : null;
+  };
+  pruefe('M4', 'Pfeile verschieben alle gewählten Bauteile 1 mm und mit Shift 10 mm',
+    ['m1', 'm3'].every(id => delta(id)?.x === 1 && delta(id)?.y === 10)
+      && delta('m2')?.x === 0 && delta('m2')?.y === 0,
+    JSON.stringify({ m1:delta('m1'), m2:delta('m2'), m3:delta('m3') }));
+
+  await page.keyboard.press('Delete');
+  await page.waitForTimeout(900);
+  const nachDelete = await w.graphLesen();
+  pruefe('M5', 'Delete löscht die gesamte Auswahl in einem Schritt',
+    nachDelete.nodes.length === 1 && nachDelete.nodes[0].id === 'm2',
+    JSON.stringify(nachDelete.nodes.map(node => node.id)));
+}
+
+// ── 12. Die Bibliothek zeigt jedes Bauteil als Miniatur ───────────────────
+kopf('Echte Bauteil-Miniaturen in der Bibliothek');
+{
+  const gruppen = page.locator('.hc-palette-group__trigger');
+  for (let i = 0; i < await gruppen.count(); i += 1) {
+    const gruppe = gruppen.nth(i);
+    if (!(await gruppe.evaluate(el => el.classList.contains('is-open')))) await gruppe.click();
+  }
+  const items = page.locator('.hc-palette-item');
+  const miniaturen = items.locator('.hc-palette-miniature > svg');
+  const anzahl = await items.count();
+  pruefe('B1', 'Jeder sichtbare Bibliothekseintrag hat ein SVG-Miniatursymbol',
+    anzahl > 0 && await miniaturen.count() === anzahl,
+    `${await miniaturen.count()} Miniaturen für ${anzahl} Einträge`);
+  const split = items.filter({ has:page.locator('strong', { hasText:'Luft/Wasser-WP – Splitgerät' }) });
+  pruefe('B2', 'Auch eine Bauteilvariante zeigt ihr eigenes Symbol',
+    (await split.locator('svg').textContent()).includes('SPLIT'),
+    await split.locator('svg').textContent());
+}
+
 pruefe('X', 'keine Konsolenfehler', w.fehler.length === 0, w.fehler.slice(0, 3).join(' || '));
 await page.screenshot({ path: `${OUT}/bedienung.png` });
 const offen = bilanz(OUT);

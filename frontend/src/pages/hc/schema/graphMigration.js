@@ -9,13 +9,18 @@
 
 import { NUMMERIERT } from '../../../components/hc/nodes/HydraulikNodes';
 
-export const GRID_OPTIONEN = [2, 5, 10, 20, 25, 50];   // mm
-export const CAD_GRID = 10;
+// Fangraster und sichtbares Raster sind bewusst getrennt. Der Planer setzt
+// Punkte im feinen 1/2/5/10-mm-Raster; die Darstellung verdichtet bzw.
+// vergröbert sich unabhängig davon mit dem Zoom (siehe cadConstraints).
+export const GRID_OPTIONEN = [1, 2, 5, 10];   // mm
+export const CAD_GRID = 1;
 
 export const DEFAULT_DRAWING_CONFIG = {
   corner_radius: 8,
   grid_size: CAD_GRID,
-  snap_tolerance: 10,
+  // Bildschirm-Pixel, nicht Welt-mm: der Fang fühlt sich bei jedem Zoom gleich
+  // an. Beim Suchen wird der Wert durch den aktuellen Zoom geteilt.
+  snap_tolerance: 8,
   shortcut_polyline: 'p',
   shortcut_line: 'l',
   shortcut_rotate: 'd',

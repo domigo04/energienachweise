@@ -31,6 +31,33 @@ export const FREI = 'frei';
 export const SCHRAEGE_MIN_WINKEL = 30;
 export const POLAR_WINKEL = Object.freeze([90, 45, 30, 15]);
 
+/** Bildschirmtoleranz in eine Weltstrecke umrechnen (zoomstabiler Objektfang). */
+export function weltFangtoleranz(pixel = 8, zoom = 1) {
+  const px = Math.max(2, Math.min(40, Number(pixel) || 8));
+  return px / Math.max(0.05, Number(zoom) || 1);
+}
+
+/**
+ * Sichtbare Rasterweite unabhängig vom Fangraster.
+ *
+ * Verwendet die CAD-übliche 1/2/5-Folge und sorgt dafür, dass zwei sichtbare
+ * Linien auf dem Bildschirm nie enger als `minPixel` liegen. So bleibt ein
+ * 1-mm-Fangraster auch beim Herauszoomen nutzbar, ohne zu einem grauen Block zu
+ * werden.
+ */
+export function sichtbareRasterweite(fangraster = 1, zoom = 1, minPixel = 12) {
+  const basis = Math.max(0.001, Number(fangraster) || 1);
+  const z = Math.max(0.05, Number(zoom) || 1);
+  const minimum = Math.max(4, Number(minPixel) || 12) / z;
+  if (basis >= minimum) return basis;
+  const exponent = Math.floor(Math.log10(minimum));
+  const potenz = 10 ** exponent;
+  const faktor = [1, 2, 5, 10].find(wert => wert * potenz >= minimum) || 10;
+  const kandidat = faktor * potenz;
+  // Sichtbare Linien bleiben immer auf einem echten Fangpunkt.
+  return Math.ceil(kandidat / basis) * basis;
+}
+
 /** Neigung eines Segments zur Horizontalen, unabhängig von der Zeichenrichtung. */
 export function segmentWinkelGrad(a, b) {
   if (!a || !b) return null;

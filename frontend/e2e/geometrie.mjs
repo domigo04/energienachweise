@@ -54,7 +54,9 @@ if (!gewaehlt) {
   process.exit(1);
 }
 const grips = await page.locator('.react-flow__edge circle').count();
-pruefe('S0', 'Leitung auswählbar, Grips sichtbar', grips >= 2, `${grips} Grips`);
+const segmentGrips = await page.locator('.react-flow__edge rect').count();
+pruefe('S0', 'Leitung auswählbar, Grips sichtbar', grips >= 2 && segmentGrips >= 3,
+  `${grips} Punktgrips, ${segmentGrips} Segmentgrips`);
 
 const vorher = await punkteVon();
 pruefe('S1', 'Ausgangsgeometrie ist die Treppe', JSON.stringify(vorher) === JSON.stringify([

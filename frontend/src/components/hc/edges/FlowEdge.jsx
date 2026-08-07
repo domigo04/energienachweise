@@ -99,7 +99,7 @@ export function FlowEdge({
         onPointerDown={(event) => {
           if (selected && event.button === 0) {
             event.stopPropagation();
-            data._onSegmentPointerDown?.(event, id);
+            data._onSegmentPointerDown?.(event, id, null);
           }
         }}
         onContextMenu={(event) => {
@@ -140,12 +140,13 @@ export function FlowEdge({
         const a = vertices[index];
         const mitte = { x:(a.x + point.x) / 2, y:(a.y + point.y) / 2 };
         return <rect key={`${id}-segment-grip-${index}`}
+          data-cad-edge-id={id} data-cad-segment-index={index}
           x={mitte.x - gripR} y={mitte.y - gripR} width={gripR * 2} height={gripR * 2}
           transform={`rotate(45 ${mitte.x} ${mitte.y})`} fill="white" stroke={color} strokeWidth={gripStroke}
           style={{ pointerEvents:'all', cursor:'grab' }}
           onPointerEnter={(event)=>data._onGripHover?.(event, { typ:'segment', edgeId:id, segmentIndex:index, point:mitte })}
           onPointerLeave={()=>data._onGripLeave?.()}
-          onPointerDown={(event)=>{ event.stopPropagation(); if (event.button === 0) data._onSegmentPointerDown?.(event, id); }}
+          onPointerDown={(event)=>{ event.stopPropagation(); if (event.button === 0) data._onSegmentPointerDown?.(event, id, index); }}
           onContextMenu={(event)=>{
             event.preventDefault(); event.stopPropagation();
             data._onGripContextMenu?.(event, { typ:'segment', edgeId:id, segmentIndex:index, point:mitte });
@@ -211,7 +212,10 @@ export function FlowEdge({
               onDoubleClick={(event) => { event.stopPropagation(); data._onLabelReset?.(id); }}
               style={{
                 position: 'absolute',
-                transform: `translate(-50%, -130%) translate(${labelAnker.x}px,${labelAnker.y}px)`,
+                // Genügend Abstand zum Segmentmittelgriff: bei -130 % lag der
+                // HTML-Datenblock noch über dem SVG-Diamanten und fing dessen
+                // Pointer-down ab. Beide bleiben nun getrennt greifbar.
+                transform: `translate(-50%, -205%) translate(${labelAnker.x}px,${labelAnker.y}px)`,
                 fontSize: 9, fontFamily: 'monospace', fontWeight: 700,
                 color: isVL ? '#b91c1c' : isRL ? '#1d4ed8' : '#374151',
                 background: 'rgba(255,255,255,0.92)', padding: '2px 5px', borderRadius: 3,

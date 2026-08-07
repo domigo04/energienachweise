@@ -105,13 +105,13 @@ gewandert. `[x]` = im Code vorhanden und durch Test/Build abgesichert;
 
 ### 13 Feines mm-Raster
 
-- [~] Raster/Fang existiert (`GRID_OPTIONEN = [2,5,10,20,25,50]` mm), aber noch
-      nicht wie gefordert: 1 mm als Standard, 1/2/5/10 mm, Pfeiltaste 1 mm,
-      Shift+Pfeil 10 mm, sichtbares Raster getrennt vom Fangraster
+- [x] 1 mm als Standard, wählbar 1/2/5/10 mm; Pfeiltaste 1 mm,
+      Shift+Pfeil 10 mm; sichtbares Raster zoomabhängig vom Fangraster getrennt
 
 ### 14 Kleinere Fangtoleranzen
 
-- [~] mm-Fang eingeführt; «nicht mehr so aggressives Anspringen» noch feinjustieren
+- [x] Fangtoleranz als konstante Bildschirmdistanz (4/6/8/12 px), einschliesslich
+      `Tab`-Kandidatenwechsel und Einmal-Fängen `SE/SM/SI/SP/SN/SA`
 
 ### 15 Dauerhafter Leitungsmodus
 
@@ -119,7 +119,8 @@ gewandert. `[x]` = im Code vorhanden und durch Test/Build abgesichert;
 
 ### 16 CAD-/Revit-Optik weiter härten
 
-- [~] Zonen-Handles/kleinere Grips vorhanden; offen: Handles nur bei Bedarf,
+- [~] Zonen-Handles, Segmentgrips, Revit-nahe graue Arbeitsleisten und echte
+      Bauteil-Miniaturen vorhanden; offen: Handles nur bei Bedarf,
       Bogenradius standardmässig 0, weniger React-Flow-Look
 
 ## P4 – PDF-Unterlage

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   ENDPOINT, GRID, INTERSECTION, NEAREST, PORT,
-  fangErgebnis, fangMitHysterese, fangStil, fangspurPunkt, orthogonalerTStueckPunkt,
-  pruefeFangTreue, segmentSchnittpunkt, senkrechterFang,
+  fangErgebnis, fangMitHysterese, fangShortcut, fangStil, fangspurPunkt,
+  naechsterFangkandidat, orthogonalerTStueckPunkt, pruefeFangTreue,
+  segmentSchnittpunkt, senkrechterFang, sortiereFangkandidaten,
 } from './cadSnap';
 
 describe('Fangtypen', () => {
@@ -134,6 +135,39 @@ describe('Schnittpunkt', () => {
   it('liefert für parallele Segmente keinen Schnittpunkt', () => {
     expect(segmentSchnittpunkt({ x: 0, y: 0 }, { x: 100, y: 0 },
                                { x: 0, y: 50 }, { x: 100, y: 50 })).toBeNull();
+  });
+
+  it('findet auch den Schnittpunkt zweier schräger Segmente', () => {
+    expect(segmentSchnittpunkt({ x:0, y:0 }, { x:100, y:100 },
+      { x:0, y:100 }, { x:100, y:0 })).toEqual({ x:50, y:50 });
+  });
+});
+
+describe('Fangziel-Wechsel und Einmal-Shortcuts', () => {
+  const kandidaten = [
+    { typ:'nearest', x:90, y:90, distanz:1, edgeId:'e1' },
+    { typ:'endpoint', x:100, y:100, distanz:5, edgeId:'e2' },
+    { typ:'midpoint', x:110, y:110, distanz:2, edgeId:'e3' },
+  ];
+
+  it('sortiert wie die automatische Fangentscheidung und rotiert mit Tab', () => {
+    const sortiert = sortiereFangkandidaten(kandidaten);
+    expect(sortiert.map(item => item.typ)).toEqual(['endpoint', 'midpoint', 'nearest']);
+    const erster = naechsterFangkandidat(kandidaten);
+    const zweiter = naechsterFangkandidat(kandidaten, erster);
+    const dritter = naechsterFangkandidat(kandidaten, zweiter);
+    expect([erster.typ, zweiter.typ, dritter.typ]).toEqual(['endpoint', 'midpoint', 'nearest']);
+    expect(naechsterFangkandidat(kandidaten, dritter)).toEqual(erster);
+  });
+
+  it('kennt Revit-artige Zweitastenbefehle als Einmal-Fang', () => {
+    expect(fangShortcut('SE')).toBe('endpoint');
+    expect(fangShortcut('sm')).toBe('midpoint');
+    expect(fangShortcut('SI')).toBe('intersection');
+    expect(fangShortcut('SP')).toBe('perpendicular');
+    expect(fangShortcut('SN')).toBe('nearest');
+    expect(fangShortcut('SA')).toBe('port');
+    expect(fangShortcut('SX')).toBeNull();
   });
 });
 

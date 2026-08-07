@@ -107,19 +107,20 @@ describe('normalisiereDrawingConfig', () => {
     expect(normalisiereDrawingConfig({}).raster_sichtbar).toBe(false);
     expect(normalisiereDrawingConfig({ raster_sichtbar: true }).raster_sichtbar).toBe(true);
     // Der Rasterfang hängt an grid_size und bleibt davon unberührt.
-    expect(normalisiereDrawingConfig({ raster_sichtbar: false }).grid_size).toBe(10);
+    expect(normalisiereDrawingConfig({ raster_sichtbar: false }).grid_size).toBe(1);
   });
 
   it('lässt nur erlaubte Rasterweiten zu', () => {
-    expect(normalisiereDrawingConfig({ grid_size: 25 }).grid_size).toBe(25);
-    expect(normalisiereDrawingConfig({ grid_size: 7 }).grid_size).toBe(10);
-    expect(normalisiereDrawingConfig({ grid_size: 'viel' }).grid_size).toBe(10);
+    expect(normalisiereDrawingConfig({ grid_size: 5 }).grid_size).toBe(5);
+    expect(normalisiereDrawingConfig({ grid_size: 25 }).grid_size).toBe(1);
+    expect(normalisiereDrawingConfig({ grid_size: 7 }).grid_size).toBe(1);
+    expect(normalisiereDrawingConfig({ grid_size: 'viel' }).grid_size).toBe(1);
   });
 
   it('begrenzt Radius und Fangtoleranz auf sinnvolle Werte', () => {
     expect(normalisiereDrawingConfig({ corner_radius: 999 }).corner_radius).toBe(40);
     expect(normalisiereDrawingConfig({ corner_radius: -5 }).corner_radius).toBe(0);
-    expect(normalisiereDrawingConfig({ snap_tolerance: 0 }).snap_tolerance).toBe(10);
+    expect(normalisiereDrawingConfig({ snap_tolerance: 0 }).snap_tolerance).toBe(8);
     expect(normalisiereDrawingConfig({ snap_tolerance: 500 }).snap_tolerance).toBe(40);
   });
 

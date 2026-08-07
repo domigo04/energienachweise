@@ -17,6 +17,15 @@ export const MIDPOINT = 'midpoint';
 export const CORNER = 'corner';
 export const PERPENDICULAR = 'perpendicular';
 
+export const FANG_SHORTCUTS = Object.freeze({
+  se: ENDPOINT,
+  sm: MIDPOINT,
+  si: INTERSECTION,
+  sp: PERPENDICULAR,
+  sn: NEAREST,
+  sa: PORT,
+});
+
 /**
  * Darstellung je Fangtyp. `form` ist die Marker-Geometrie, `label` der Kurztext
  * am Cursor. `prio` entscheidet, welcher Fang gewinnt, wenn mehrere greifen:
@@ -35,6 +44,31 @@ export const FANG_STIL = {
 
 export const fangStil = (typ) => FANG_STIL[typ] || FANG_STIL[GRID];
 
+/** Kandidaten in derselben Reihenfolge wie die automatische Fangentscheidung. */
+export function sortiereFangkandidaten(kandidaten = []) {
+  return (kandidaten || [])
+    .filter(k => k && FANG_STIL[k.typ] && Number.isFinite(k.x) && Number.isFinite(k.y))
+    .map((kandidat, index) => ({ kandidat, index }))
+    .sort((a, b) => fangStil(b.kandidat.typ).prio - fangStil(a.kandidat.typ).prio
+      || (a.kandidat.distanz ?? Infinity) - (b.kandidat.distanz ?? Infinity)
+      || a.index - b.index)
+    .map(item => item.kandidat);
+}
+
+/** Tab wechselt zyklisch durch die aktuell erreichbaren Fangziele. */
+export function naechsterFangkandidat(kandidaten = [], aktuell = null) {
+  const sortiert = sortiereFangkandidaten(kandidaten);
+  if (!sortiert.length) return null;
+  const key = (item) => `${item.typ}:${item.nodeId || item.edgeId || ''}:${item.x}:${item.y}`;
+  const index = aktuell ? sortiert.findIndex(item => key(item) === key(aktuell)) : -1;
+  return sortiert[(index + 1) % sortiert.length];
+}
+
+/** Zweistellige Revit-artige Einmal-Shortcuts (SE, SM, SI, SP, SN, SA). */
+export function fangShortcut(sequence) {
+  return FANG_SHORTCUTS[String(sequence || '').trim().toLowerCase()] || null;
+}
+
 /**
  * Fangkandidaten → ein Ergebnis.
  *
@@ -46,8 +80,7 @@ export const fangStil = (typ) => FANG_STIL[typ] || FANG_STIL[GRID];
  * fängt man auch aufs Raster, und der Nutzer soll das sehen.
  */
 export function fangErgebnis(kandidaten, fallback, { zeigeRaster = true } = {}) {
-  const gueltig = (kandidaten || []).filter(k =>
-    k && FANG_STIL[k.typ] && Number.isFinite(k.x) && Number.isFinite(k.y));
+  const gueltig = sortiereFangkandidaten(kandidaten);
 
   if (!gueltig.length) {
     if (!fallback || !Number.isFinite(fallback.x) || !Number.isFinite(fallback.y)) return null;
@@ -59,12 +92,7 @@ export function fangErgebnis(kandidaten, fallback, { zeigeRaster = true } = {}) 
     };
   }
 
-  const beste = gueltig.reduce((a, b) => {
-    const pa = fangStil(a.typ).prio;
-    const pb = fangStil(b.typ).prio;
-    if (pa !== pb) return pa > pb ? a : b;
-    return (a.distanz ?? Infinity) <= (b.distanz ?? Infinity) ? a : b;
-  });
+  const beste = gueltig[0];
 
   // EINE Koordinatenquelle für Punkt und Marker.
   const point = { x: beste.x, y: beste.y };
@@ -120,22 +148,21 @@ export function pruefeFangTreue(ergebnis) {
  * Schnittpunkte zweier achsparalleler Segmente. Nur echte Kreuzungen innerhalb
  * beider Segmente, keine Verlängerungen — sonst „fängt" der Cursor im Leeren.
  */
-export function segmentSchnittpunkt(a1, a2, b1, b2) {
-  const aVertikal = Math.abs(a1.x - a2.x) < 0.5;
-  const bVertikal = Math.abs(b1.x - b2.x) < 0.5;
-  const aHorizontal = Math.abs(a1.y - a2.y) < 0.5;
-  const bHorizontal = Math.abs(b1.y - b2.y) < 0.5;
-  const zwischen = (wert, p, q) => wert >= Math.min(p, q) - 0.5 && wert <= Math.max(p, q) + 0.5;
-
-  if (aVertikal && bHorizontal) {
-    const punkt = { x: a1.x, y: b1.y };
-    return zwischen(punkt.y, a1.y, a2.y) && zwischen(punkt.x, b1.x, b2.x) ? punkt : null;
-  }
-  if (aHorizontal && bVertikal) {
-    const punkt = { x: b1.x, y: a1.y };
-    return zwischen(punkt.x, a1.x, a2.x) && zwischen(punkt.y, b1.y, b2.y) ? punkt : null;
-  }
-  return null;   // parallel oder schräg — hier bewusst kein Schnittpunktfang
+export function segmentSchnittpunkt(a1, a2, b1, b2, toleranz = 0.5) {
+  if (![a1, a2, b1, b2].every(p => Number.isFinite(p?.x) && Number.isFinite(p?.y))) return null;
+  const r = { x:a2.x - a1.x, y:a2.y - a1.y };
+  const s = { x:b2.x - b1.x, y:b2.y - b1.y };
+  const kreuz = r.x * s.y - r.y * s.x;
+  if (Math.abs(kreuz) <= 1e-9) return null;
+  const q = { x:b1.x - a1.x, y:b1.y - a1.y };
+  const t = (q.x * s.y - q.y * s.x) / kreuz;
+  const u = (q.x * r.y - q.y * r.x) / kreuz;
+  const laengeR = Math.hypot(r.x, r.y) || 1;
+  const laengeS = Math.hypot(s.x, s.y) || 1;
+  const epsT = toleranz / laengeR;
+  const epsU = toleranz / laengeS;
+  if (t < -epsT || t > 1 + epsT || u < -epsU || u > 1 + epsU) return null;
+  return { x:a1.x + t * r.x, y:a1.y + t * r.y };
 }
 
 /**

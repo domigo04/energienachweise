@@ -4,7 +4,8 @@ import {
   achsenAbstandGrad, aktiverConstraint, constrainPoint, istBewussteDiagonale,
   laengeAusBuffer, laengeTaste, massAnker, massLabel, punktAusLaenge, rasterPunkt,
   polarPunkt, punktAusDynamischerEingabe, richtungsWinkelGrad,
-  segmentLaenge, segmentMassLabel, segmentWinkelGrad, winkelLabel, zugLaenge,
+  segmentLaenge, segmentMassLabel, segmentWinkelGrad, sichtbareRasterweite,
+  weltFangtoleranz, winkelLabel, zugLaenge,
 } from './cadConstraints';
 
 describe('Constraint-Zustand', () => {
@@ -13,6 +14,20 @@ describe('Constraint-Zustand', () => {
     expect(aktiverConstraint(true, true)).toBe(DIAG);
     expect(aktiverConstraint(false, false)).toBe(FREI);
     expect(aktiverConstraint(false, true)).toBe(ORTHO);
+  });
+});
+
+describe('zoomabhängige Zeichenhilfen', () => {
+  it('hält die Fangtoleranz in Bildschirmpixeln konstant', () => {
+    expect(weltFangtoleranz(8, 1)).toBe(8);
+    expect(weltFangtoleranz(8, 0.25)).toBe(32);
+    expect(weltFangtoleranz(8, 4)).toBe(2);
+  });
+
+  it('vergröbert nur die sichtbaren Linien, nie das Fangraster', () => {
+    expect(sichtbareRasterweite(1, 1)).toBe(20);
+    expect(sichtbareRasterweite(1, 0.2)).toBe(100);
+    expect(sichtbareRasterweite(5, 4)).toBe(5);
   });
 });
 

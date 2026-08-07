@@ -17,6 +17,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import './HydraulikEditor.css';
 import { NODE_TYPES, NUMMERIERT, ROTATABLE } from '../../components/hc/nodes/HydraulikNodes';
+import { BauteilMiniatur } from '../../components/hc/nodes/PaletteMiniature';
 import {
   anfahrtsSeite,
   anschluesseNachDrehung,
@@ -38,11 +39,12 @@ import {
   constrainPoint, istBewussteDiagonale, laengeAusBuffer, laengeTaste, massAnker,
   massLabel, rasterPunkt as rasterAufGitter,
   POLAR_WINKEL, punktAusDynamischerEingabe, punktAusLaenge, richtungsWinkelGrad,
-  segmentLaenge, segmentMassLabel, winkelLabel,
+  segmentLaenge, segmentMassLabel, sichtbareRasterweite, weltFangtoleranz, winkelLabel,
 } from './schema/cadConstraints';
 import {
-  CORNER, ENDPOINT, GRID, MIDPOINT, NEAREST, PERPENDICULAR, PORT,
-  fangErgebnis, fangspurPunkt, fangStil, orthogonalerTStueckPunkt, senkrechterFang,
+  CORNER, ENDPOINT, GRID, INTERSECTION, MIDPOINT, NEAREST, PERPENDICULAR, PORT,
+  fangErgebnis, fangShortcut, fangspurPunkt, fangStil, naechsterFangkandidat,
+  orthogonalerTStueckPunkt, segmentSchnittpunkt, senkrechterFang,
 } from './schema/cadSnap';
 import { SOLE_ROHRE, SOLE_TRAEGER } from './schema/soleTabellen';
 import {
@@ -140,7 +142,7 @@ const LEITUNGS_LAYER = [
 const DEFAULT_LAYER_VISIBILITY = Object.fromEntries(LEITUNGS_LAYER.map(layer => [layer.id, true]));
 const EMPTY_OBJECT = Object.freeze({});
 const EMPTY_ARRAY = Object.freeze([]);
-const TOLERANZ_OPTIONEN = [4, 8, 12, 20];        // Fangtoleranz in mm
+const TOLERANZ_OPTIONEN = [4, 6, 8, 12];         // Fangtoleranz in Bildschirm-Pixeln
 
 // Rasterfang kommt aus dem Constraint-Modul — eine Quelle, nicht zwei.
 const rasterPunkt = (point, grid = CAD_GRID) => rasterAufGitter(point, grid);
@@ -357,7 +359,7 @@ function CadMass({ mass, zoom }) {
 // Direktmass zwischen einem gewählten Teilstück und einer nahen Bauteilkante.
 // Anders als CadMass wird es nicht parallel versetzt: Die beiden Endpunkte sind
 // bereits die geometrisch kürzeste Verbindung und damit selbst die Masslinie.
-function CadDirektMass({ mass, zoom }) {
+function CadDirektMass({ mass, zoom, selected = false, onActivate = null }) {
   if (!mass?.a || !mass?.b || !(mass.distance > 0)) return null;
   const z = Math.max(zoom || 1, 0.05);
   const dx = mass.b.x - mass.a.x;
@@ -373,14 +375,18 @@ function CadDirektMass({ mass, zoom }) {
   const tick = 5 / z;
   const mitte = { x:(mass.a.x + mass.b.x) / 2, y:(mass.a.y + mass.b.y) / 2 };
   return (
-    <g pointerEvents="none" stroke="#475569" strokeWidth={1 / z} opacity="0.82">
+    <g pointerEvents={onActivate ? 'all' : 'none'} stroke={selected ? '#4f46e5' : '#475569'}
+      strokeWidth={(selected ? 1.4 : 1) / z} opacity={selected ? 1 : 0.82}
+      style={onActivate ? { cursor:'pointer' } : undefined}
+      onPointerDown={event => { if (onActivate) { event.preventDefault(); event.stopPropagation(); onActivate(); } }}>
+      {onActivate && <title>Bezug wählen · nochmals klicken, um den Abstand einzugeben</title>}
       <line x1={mass.a.x} y1={mass.a.y} x2={mass.b.x} y2={mass.b.y} strokeDasharray={`${4 / z} ${3 / z}`} />
       {[mass.a, mass.b].map((punkt, index) => (
         <line key={index} x1={punkt.x - nx * tick} y1={punkt.y - ny * tick}
           x2={punkt.x + nx * tick} y2={punkt.y + ny * tick} />
       ))}
       <text x={mitte.x + nx * 8 / z} y={mitte.y + ny * 8 / z}
-        textAnchor="middle" dominantBaseline="middle" fill="#334155"
+        textAnchor="middle" dominantBaseline="middle" fill={selected ? '#4338ca' : '#334155'}
         stroke="#ffffff" strokeWidth={3.5 / z} paintOrder="stroke"
         fontSize={11 / z} fontWeight="700" fontFamily="ui-monospace, SFMono-Regular, monospace">
         {mass.label}
@@ -744,10 +750,10 @@ function PropertiesPanel({ node, nodeFlows, verteilerResults, gruppeResults, ven
             </select>
           </div>
           <div>
-            <label style={lbl}>Fangtoleranz</label>
+            <label style={lbl}>Fangtoleranz am Bildschirm</label>
             <select style={inp} value={drawingConfig.snap_tolerance}
               onChange={e => onDrawingConfig('snap_tolerance', Number(e.target.value))}>
-              {TOLERANZ_OPTIONEN.map(t => <option key={t} value={t}>{t} mm</option>)}
+              {TOLERANZ_OPTIONEN.map(t => <option key={t} value={t}>{t} px</option>)}
             </select>
           </div>
           <div>
@@ -2517,6 +2523,13 @@ function EditorInner() {
   const fangHoverRef = useRef(null);
   const [fangOverride, setFangOverride] = useState(null);
   const fangOverrideRef = useRef(null);
+  // Alle aktuell erreichbaren Fangziele. Tab rotiert durch genau diese Liste;
+  // Punkt, Marker und späterer Klick bleiben damit dieselbe Entscheidung.
+  const fangKandidatenRef = useRef([]);
+  const fangAktuellRef = useRef(null);
+  const fangTastenfolge = useRef('');
+  const fangTastenTimer = useRef(null);
+  const [tempMassRef, setTempMassRef] = useState(null);
   const [segmentVerschiebung, setSegmentVerschiebung] = useState(null);
   const [griffMass, setGriffMass] = useState(null); // Mass beim Ziehen eines Eck-/Endpunkts
   const [endpointMenu, setEndpointMenu] = useState(null); // { x, y, edgeId, side }
@@ -2637,6 +2650,11 @@ function EditorInner() {
     if (istModify(editorMode)) return;
     setLetzteBefehle(verlauf => befehlMerken(verlauf, editorMode));
   }, [editorMode]);
+
+  const sichtbaresRaster = useMemo(
+    () => sichtbareRasterweite(drawingConfig.grid_size, zoomAnzeige, 12),
+    [drawingConfig.grid_size, zoomAnzeige],
+  );
 
   useEffect(() => {
     const down = (event) => { if (event.key === 'Shift') setShiftPressed(true); };
@@ -3025,6 +3043,10 @@ function EditorInner() {
   const befehlsfolgeTimer = useRef(null);
   const nodesRef = useRef([]);
   const edgesRef = useRef([]);
+  // React Flow aktualisiert seine Knotenauswahl bereits beim Pointer-down.
+  // Für Cmd/Ctrl-Toggle und Shift-Abwahl brauchen wir deshalb den Stand VOR
+  // dieser internen Änderung; der Capture-Handler friert ihn ein.
+  const nodeSelectionVorKlickRef = useRef(new Set());
   const edgePointDrag = useRef(null);
   const edgeSegmentDrag = useRef(null);
   const labelDrag = useRef(null);
@@ -3232,14 +3254,16 @@ function EditorInner() {
   // geometrisch dieselbe Operation wie Drag-and-drop: endpunktnahe Waypoints
   // werden auf ihrer bisherigen Achse mitgeführt, damit kein schräges
   // Anschlusssegment entsteht.
-  const nudgeNode = useCallback((id, dx, dy) => {
+  const nudgeNode = useCallback((idOderIds, dx, dy) => {
+    const ids = new Set((Array.isArray(idOderIds) ? idOderIds : [idOderIds]).filter(Boolean));
+    if (!ids.size || (!dx && !dy)) return;
     snap();
     const achsen = {};
     edgesRef.current.forEach(edge => {
       const wp = edge.data?.points;
       if (!Array.isArray(wp) || !wp.length) return;
-      const sourceBewegt = edge.source === id;
-      const targetBewegt = edge.target === id;
+      const sourceBewegt = ids.has(edge.source);
+      const targetBewegt = ids.has(edge.target);
       if (!sourceBewegt && !targetBewegt) return;
       const eintrag = {};
       if (sourceBewegt) {
@@ -3269,7 +3293,7 @@ function EditorInner() {
         return { ...edge, data:{ ...(edge.data || {}), cad_polyline:true, points:neu } };
       }));
     }
-    setNodes(ns => ns.map(x => x.id === id
+    setNodes(ns => ns.map(x => ids.has(x.id)
       ? { ...x, position: { x:(x.position?.x || 0) + dx, y:(x.position?.y || 0) + dy } }
       : x));
   }, [handlePosition, setEdges, setNodes, snap]);
@@ -3507,6 +3531,39 @@ function EditorInner() {
     return best;
   }, [layerVisibility, routePunkte]);
 
+  // Echte Kreuzung zweier endlicher Teilstücke — auch bei schrägen Leitungen.
+  // Beide Treffer bleiben am Kandidaten, damit der Abschluss beide Leitungen
+  // am selben Topologie-Anker teilt und nicht nur optisch auf der Kreuzung endet.
+  const naechsterSchnittpunkt = useCallback((point, layerId, radius = 10, excludedEdgeIds = new Set()) => {
+    const segmente = [];
+    edgesRef.current.forEach(edge => {
+      if (excludedEdgeIds.has(edge.id) || layerVonEdge(edge).id !== layerId
+          || layerVisibility[layerVonEdge(edge).id] === false) return;
+      const route = routePunkte(edge);
+      route.slice(1).forEach((b, segmentIndex) => {
+        segmente.push({ edge, route, segmentIndex, a:route[segmentIndex], b });
+      });
+    });
+    let best = null;
+    for (let i = 0; i < segmente.length; i += 1) {
+      for (let j = i + 1; j < segmente.length; j += 1) {
+        const a = segmente[i];
+        const b = segmente[j];
+        if (a.edge.id === b.edge.id) continue;
+        const kreuzung = segmentSchnittpunkt(a.a, a.b, b.a, b.b);
+        if (!kreuzung) continue;
+        const distanz = Math.hypot(point.x - kreuzung.x, point.y - kreuzung.y);
+        if (distanz > radius || (best && distanz >= best.distanz)) continue;
+        best = {
+          ...kreuzung, distanz, position:kreuzung, type:'intersection',
+          edgeId:a.edge.id, edge:a.edge, route:a.route, segmentIndex:a.segmentIndex,
+          secondary:{ ...kreuzung, edgeId:b.edge.id, edge:b.edge, route:b.route, segmentIndex:b.segmentIndex },
+        };
+      }
+    }
+    return best;
+  }, [layerVisibility, routePunkte]);
+
   const naechsterBauteilAnschluss = useCallback((point, excludedNodeId, role, radius = 24) => {
     let best = null;
     nodesRef.current.forEach(node => {
@@ -3541,7 +3598,7 @@ function EditorInner() {
   // Ein Fang „auf der Leitung" — dazu gehört auch der Mittelpunkt. Beide teilen
   // die getroffene Leitung und erzeugen eine echte Verbindung. Der Unterschied
   // liegt nur in der Beschriftung des Markers.
-  const istLeitungsfang = (hit) => ['line', 'midpoint', 'corner', 'perpendicular'].includes(hit?.type);
+  const istLeitungsfang = (hit) => ['line', 'midpoint', 'corner', 'perpendicular', 'intersection'].includes(hit?.type);
 
   const leitungTeilen = useCallback((hit, junctionId, layerId) => {
     const host = hit.edge;
@@ -3564,6 +3621,14 @@ function EditorInner() {
       ...host, id:newId(), source:junctionId, sourceHandle:'center-source', data:splitData(after, 1 - firstShare), selected:false,
     }];
   }, []);
+
+  const leitungenAmFangTeilen = useCallback((hit, junctionId, layerId) => {
+    const treffer = [hit, hit?.secondary].filter(Boolean);
+    return {
+      edgeIds:new Set(treffer.map(item => item.edge?.id).filter(Boolean)),
+      edges:treffer.flatMap(item => leitungTeilen(item, junctionId, layerId)),
+    };
+  }, [leitungTeilen]);
 
   // Punkt 28 — an derselben Stelle darf nur EIN Topologie-Anker liegen. Sonst
   // entstehen zwei Junctions auf identischer Koordinate: optisch ein Punkt,
@@ -3666,6 +3731,9 @@ function EditorInner() {
     setWinkelPuffer(null);
     setDynamikFeld('length');
     setFangOverride(null);
+    fangKandidatenRef.current = [];
+    fangAktuellRef.current = null;
+    fangTastenfolge.current = '';
   }, []);
 
   const leitungsEntwurfStarten = useCallback((startPoint, startEndpoint = null, options = {}) => {
@@ -3686,6 +3754,8 @@ function EditorInner() {
     setLaengenPuffer(null);
     setWinkelPuffer(null);
     setDynamikFeld('length');
+    fangKandidatenRef.current = [];
+    fangAktuellRef.current = null;
     setSelected(null);
     setSelectedEdgeId(null);
     setEndpointMenu(null);
@@ -3787,10 +3857,10 @@ function EditorInner() {
       };
 
       if (istLeitungsfang(snapHit)) {
-        const [first, second] = leitungTeilen(snapHit, finalAnchorId, layer.id);
+        const geteilt = leitungenAmFangTeilen(snapHit, finalAnchorId, layer.id);
         setEdges(items => [
-          ...items.filter(item => item.id !== existing.id && item.id !== snapHit.edge.id),
-          first, second, extended,
+          ...items.filter(item => item.id !== existing.id && !geteilt.edgeIds.has(item.id)),
+          ...geteilt.edges, extended,
         ]);
       } else {
         setEdges(items => items.map(item => item.id === existing.id ? extended : item));
@@ -3856,8 +3926,8 @@ function EditorInner() {
     const pairedEdges = returnPair ? [returnPair.returnEdge] : [];
 
     if (istLeitungsfang(snapHit)) {
-      const [first, second] = leitungTeilen(snapHit, targetAnchorId, layer.id);
-      setEdges(items => [...items.filter(item => item.id !== snapHit.edge.id), first, second, edge, ...pairedEdges]);
+      const geteilt = leitungenAmFangTeilen(snapHit, targetAnchorId, layer.id);
+      setEdges(items => [...items.filter(item => !geteilt.edgeIds.has(item.id)), ...geteilt.edges, edge, ...pairedEdges]);
     } else {
       setEdges(items => [...items, edge, ...pairedEdges]);
     }
@@ -3866,7 +3936,7 @@ function EditorInner() {
     setSelectedEdgeId(edgeId);
     // Nach Abschluss beenden — ausser der dauerhafte Leitungsmodus ist aktiv.
     setEditorMode(finishCommand(editorModeRef.current));
-  }, [activeLayer, bestehendeJunction, cadAnker, drawingConfig, entwurfVerwerfen, handleAusrichtung, handlePosition, letzterEntwurfsPunkt, leitungTeilen, routePunkte, ruecklaufPaarErstellen, setEdges, setNodes, snap]);
+  }, [activeLayer, bestehendeJunction, cadAnker, drawingConfig, entwurfVerwerfen, handleAusrichtung, handlePosition, letzterEntwurfsPunkt, leitungenAmFangTeilen, routePunkte, ruecklaufPaarErstellen, setEdges, setNodes, snap]);
 
   // Doppelklick, zweiter Klick auf denselben Punkt, ESC und ✓ beenden eine frei
   // gezeichnete Leitung am LETZTEN bewusst geklickten Eckpunkt. Die aktuelle
@@ -3904,6 +3974,7 @@ function EditorInner() {
       ? LEITUNGS_LAYER.find(item => item.id === draft.layerId) || activeLayer
       : activeLayer;
     const zoom = Math.max(getZoom(), 0.2);
+    const tolerance = weltFangtoleranz(drawingConfig.snap_tolerance, zoom);
     // SNAP aus (Statusleiste): nur Raster und Richtungs-Constraint, kein Objektfang.
     const fangAktiv = snapAnRef.current;
     const nur = fangOverrideRef.current;
@@ -3912,8 +3983,10 @@ function EditorInner() {
       setFangOverride(null);
     }
     const erlaubt = (typ) => !nur || nur === typ;
-    const portHit = fangAktiv && erlaubt('port') ? naechsterBauteilAnschluss(raw, null, layer.role, 28 / zoom) : null;
-    const endpointHit = (!fangAktiv || portHit || !erlaubt('endpoint')) ? null : naechsterFreierLeitungsEndpunkt(raw, layer.id, 16 / zoom, draft?.extendEdgeId);
+    const portHit = fangAktiv && erlaubt(PORT)
+      ? naechsterBauteilAnschluss(raw, null, layer.role, tolerance * 1.5) : null;
+    const endpointHit = (!fangAktiv || portHit || !erlaubt(ENDPOINT)) ? null
+      : naechsterFreierLeitungsEndpunkt(raw, layer.id, tolerance * 1.2, draft?.extendEdgeId);
 
     if (!draft) {
       if (nurBeiAnschluss && !portHit && !endpointHit) return true;
@@ -3934,25 +4007,33 @@ function EditorInner() {
     const excludedEdges = draft.extendEdgeId ? new Set([draft.extendEdgeId]) : new Set();
     // Eckpunkt vor Mittelpunkt und Leitung: er ist der genaueste Punkt und der
     // einzige, den der Planer bewusst gesetzt hat.
-    const eckHit = fangAktiv && erlaubt('corner') ? naechsterEckpunkt(raw, 12 / zoom, excludedEdges) : null;
+    const eckHit = fangAktiv && erlaubt(CORNER) ? naechsterEckpunkt(raw, tolerance, excludedEdges) : null;
     if (eckHit) {
       leitungsEntwurfAbschliessen(eckHit.position, { ...eckHit, type:'corner' }, event.shiftKey || shiftPressed);
       return true;
     }
-    const midHit = fangAktiv && erlaubt('midpoint') ? naechsterMittelpunkt(raw, 14 / zoom, excludedEdges) : null;
+    const intersectionHit = fangAktiv && erlaubt(INTERSECTION)
+      ? naechsterSchnittpunkt(raw, layer.id, tolerance * 1.25, excludedEdges) : null;
+    if (intersectionHit) {
+      leitungsEntwurfAbschliessen(intersectionHit.position, intersectionHit, event.shiftKey || shiftPressed);
+      return true;
+    }
+    const midHit = fangAktiv && erlaubt(MIDPOINT)
+      ? naechsterMittelpunkt(raw, tolerance * 1.1, excludedEdges) : null;
     if (midHit) {
       leitungsEntwurfAbschliessen(midHit.position, { ...midHit, type:'midpoint' }, event.shiftKey || shiftPressed);
       return true;
     }
     const previous = letzterEntwurfsPunkt(draft);
-    const perpendicularHit = fangAktiv && erlaubt('perpendicular')
-      ? naechsterSenkrechtFang(previous, raw, layer.id, 18 / zoom, excludedEdges)
+    const perpendicularHit = fangAktiv && erlaubt(PERPENDICULAR)
+      ? naechsterSenkrechtFang(previous, raw, layer.id, tolerance * 1.4, excludedEdges)
       : null;
     if (perpendicularHit) {
       leitungsEntwurfAbschliessen(perpendicularHit.position, perpendicularHit, event.shiftKey || shiftPressed);
       return true;
     }
-    const lineHit = fangAktiv && erlaubt('nearest') ? naechsteLeitung(raw, layer.id, 22 / zoom, excludedEdges) : null;
+    const lineHit = fangAktiv && erlaubt(NEAREST)
+      ? naechsteLeitung(raw, layer.id, tolerance * 1.5, excludedEdges) : null;
     if (lineHit) {
       const hit = tStueckHit(previous, raw, { ...lineHit, type:'line' });
       leitungsEntwurfAbschliessen(hit, hit, event.shiftKey || shiftPressed);
@@ -3961,7 +4042,7 @@ function EditorInner() {
     const spur = fangAktiv ? fangspurPunkt(raw, [
       ...aufgenommeneFangpunkteRef.current,
       ...(previous ? [{ ...previous, kind:'draft' }] : []),
-    ], drawingConfig.snap_tolerance / zoom) : null;
+    ], tolerance) : null;
     const point = constrainPoint(previous, spur?.point || rasterPunkt(raw, drawingConfig.grid_size), {
       ortho:orthoAnRef.current,
       shift:event.shiftKey || shiftPressed,
@@ -3982,7 +4063,7 @@ function EditorInner() {
     setLeitungsEntwurf(next);
     setFangOverride(null);
     return true;
-  }, [activeLayer, drawingConfig, entwurfAmLetztenPunktAbschliessen, getZoom, letzterEntwurfsPunkt, leitungsEntwurfAbschliessen, leitungsEntwurfStarten, naechsteLeitung, naechsterBauteilAnschluss, naechsterEckpunkt, naechsterFreierLeitungsEndpunkt, naechsterMittelpunkt, naechsterSenkrechtFang, screenToFlowPosition, shiftPressed]);
+  }, [activeLayer, drawingConfig, entwurfAmLetztenPunktAbschliessen, getZoom, letzterEntwurfsPunkt, leitungsEntwurfAbschliessen, leitungsEntwurfStarten, naechsteLeitung, naechsterBauteilAnschluss, naechsterEckpunkt, naechsterFreierLeitungsEndpunkt, naechsterMittelpunkt, naechsterSchnittpunkt, naechsterSenkrechtFang, screenToFlowPosition, shiftPressed]);
 
   // Doppelklick beendet die laufende Leitung. Der zweite Klick des Doppelklicks
   // schliesst sie meist schon über die Punktgleichheit oben ab; landet er durch
@@ -3997,22 +4078,46 @@ function EditorInner() {
 
   const cadHandlePointerDown = useCallback((event) => {
     if (event.button !== 0 || spacePanRef.current) return;
+    nodeSelectionVorKlickRef.current = new Set(
+      nodesRef.current.filter(node => node.selected).map(node => node.id),
+    );
+    // Modifier-Klicks vollständig vor React Flow behandeln. Dessen interner
+    // Pointer-down schreibt sonst zeitversetzt nochmals eine Auswahl und kann
+    // die von `onNodeClick` korrekt ergänzte Menge direkt wieder überholen.
+    const nodeElement = event.target?.closest?.('.react-flow__node');
+    const nodeId = nodeElement?.dataset?.id;
+    if (nodeId && istModify(editorModeRef.current)
+      && (event.metaKey || event.ctrlKey || event.shiftKey)) {
+      event.preventDefault();
+      event.stopPropagation();
+      const gewuenscht = new Set(nodeSelectionVorKlickRef.current);
+      if (event.shiftKey) gewuenscht.delete(nodeId);
+      else if (gewuenscht.has(nodeId)) gewuenscht.delete(nodeId);
+      else gewuenscht.add(nodeId);
+      setNodes(items => items.map(item => ({ ...item, selected:gewuenscht.has(item.id) })));
+      const node = nodesRef.current.find(item => item.id === nodeId);
+      if (gewuenscht.has(nodeId)) setSelected(node || null);
+      else setSelected(current => current?.id === nodeId ? null : current);
+      setSelectedLabelEdgeId(null);
+      setInspectorOpen(true);
+      return;
+    }
     // Läuft Kopieren, Spiegeln, Drehen oder Reihe, setzt dieser Druck ihren
     // nächsten Punkt — vor allem anderen.
     if (transformBefehlRef.current) { transformKlickRef.current?.(event); return; }
     const handle = event.target?.closest?.('.react-flow__handle');
     if (!handle) return;
-    const nodeId = handle.dataset.nodeid;
+    const handleNodeId = handle.dataset.nodeid;
     const handleId = handle.dataset.handleid;
-    const node = nodesRef.current.find(item => item.id === nodeId);
-    if (!nodeId || node?.type === 'junction') return;
+    const node = nodesRef.current.find(item => item.id === handleNodeId);
+    if (!handleNodeId || node?.type === 'junction') return;
     const draft = leitungsEntwurfRef.current;
     const layer = draft
       ? LEITUNGS_LAYER.find(item => item.id === draft.layerId) || activeLayer
       : activeLayer;
     if (layer.role === 'vl' && handleId?.startsWith('rl')) return;
     if (layer.role === 'rl' && handleId?.startsWith('vl')) return;
-    const point = handlePosition(nodeId, handleId);
+    const point = handlePosition(handleNodeId, handleId);
     if (!point) return;
     // Ein Klick direkt auf einen Anschluss ist eindeutig — er startet den
     // Leitungsbefehl gleich mit, statt vorher L zu verlangen. Auf der freien
@@ -4026,16 +4131,16 @@ function EditorInner() {
       if (!zeichenModusRef.current) {
         setEditorMode(mode => startCommand(DRAW_PIPE, { persistent:mode.persistent }));
       }
-      leitungsEntwurfStarten(point, { nodeId, handleId });
+      leitungsEntwurfStarten(point, { nodeId:handleNodeId, handleId });
       return;
     }
     leitungsEntwurfAbschliessen(point, {
       x:point.x,
       y:point.y,
       type:'port',
-      nodeId,
+      nodeId:handleNodeId,
       handleId,
-      handlePosition:handleAusrichtung(nodeId, handleId),
+      handlePosition:handleAusrichtung(handleNodeId, handleId),
     }, event.shiftKey || shiftPressed);
   }, [activeLayer, handleAusrichtung, handlePosition, leitungsEntwurfAbschliessen, leitungsEntwurfStarten, shiftPressed]);
 
@@ -4051,6 +4156,18 @@ function EditorInner() {
     if (window.__hcSnapVerlauf.length > 400) window.__hcSnapVerlauf.shift();
   }, []);
 
+  const fangKandidatAnzeigen = useCallback((kandidat) => {
+    if (!kandidat?.snap) return false;
+    const point = { x:kandidat.x, y:kandidat.y };
+    fangAktuellRef.current = kandidat;
+    leitungsCursorRef.current = point;
+    setLeitungsCursor(point);
+    setLeitungsSnap(kandidat.snap);
+    setLeitungsGuides(kandidat.guides || []);
+    fangProtokoll('cursor', kandidat.typ, point, kandidat.protokoll || {});
+    return true;
+  }, [fangProtokoll]);
+
   const cadCursorAktualisieren = useCallback((event) => {
     const draft = leitungsEntwurfRef.current;
     if (!draft) return;
@@ -4059,11 +4176,12 @@ function EditorInner() {
     leitungsCursorFrame.current = requestAnimationFrame(() => {
       const layer = LEITUNGS_LAYER.find(item => item.id === draft.layerId) || activeLayer;
       const zoom = Math.max(getZoom(), 0.2);
+      const tolerance = weltFangtoleranz(drawingConfig.snap_tolerance, zoom);
       const fangAktiv = snapAnRef.current;
       const nur = fangOverrideRef.current;
       const erlaubt = (typ) => !nur || nur === typ;
       if (fangAktiv) {
-        const radius = 12 / zoom;
+        const radius = tolerance;
         const kandidat = objektFangpunkte.reduce((beste, punkt) => {
           const distanz = Math.hypot(raw.x - punkt.x, raw.y - punkt.y);
           return distanz <= radius && (!beste || distanz < beste.distanz)
@@ -4081,83 +4199,57 @@ function EditorInner() {
         fangHoverRef.current = null;
         setAufgenommeneFangpunkte([]);
       }
-      const portHit = fangAktiv && erlaubt('port') ? naechsterBauteilAnschluss(raw, null, layer.role, 28 / zoom) : null;
-      if (portHit) {
-        leitungsCursorRef.current = portHit.position;
-        setLeitungsCursor(portHit.position);
-        setLeitungsSnap({ ...portHit, ...portHit.position, type:'port', fangArt:'port' });
-        fangProtokoll('cursor', 'port', portHit.position,
-          { nodeId:portHit.nodeId, handleId:portHit.handleId, distanz:portHit.distance });
-        const previous = letzterEntwurfsPunkt(draft);
-        const corner = orthogonalerAnschlussEckpunkt(previous, portHit.position, portHit.handlePosition);
-        setLeitungsGuides(corner ? [{
-          x1:portHit.position.x,
-          y1:portHit.position.y,
-          x2:corner.x,
-          y2:corner.y,
-          snapType:'handle',
-        }] : []);
-        return;
-      }
-      const endpointHit = fangAktiv && erlaubt('endpoint') ? naechsterFreierLeitungsEndpunkt(raw, layer.id, 16 / zoom, draft.extendEdgeId) : null;
-      if (endpointHit) {
-        leitungsCursorRef.current = endpointHit.position;
-        setLeitungsCursor(endpointHit.position);
-        setLeitungsSnap({ ...endpointHit, ...endpointHit.position, type:'port', fangArt:'endpoint' });
-        setLeitungsGuides([]);
-        fangProtokoll('cursor', 'endpoint', endpointHit.position, { edgeId:endpointHit.edgeId });
-        return;
-      }
       const excludedEdges = draft.extendEdgeId ? new Set([draft.extendEdgeId]) : new Set();
-      const eckHit = fangAktiv && erlaubt('corner') ? naechsterEckpunkt(raw, 12 / zoom, excludedEdges) : null;
-      if (eckHit) {
-        leitungsCursorRef.current = eckHit.position;
-        setLeitungsCursor(eckHit.position);
-        setLeitungsSnap({ ...eckHit, type:'corner' });
-        setLeitungsGuides([]);
-        fangProtokoll('cursor', 'corner', eckHit.position, { edgeId:eckHit.edgeId });
-        return;
-      }
-      const midHit = fangAktiv && erlaubt('midpoint') ? naechsterMittelpunkt(raw, 14 / zoom, excludedEdges) : null;
-      if (midHit) {
-        leitungsCursorRef.current = midHit.position;
-        setLeitungsCursor(midHit.position);
-        setLeitungsSnap({ ...midHit, type:'midpoint' });
-        setLeitungsGuides([]);
-        fangProtokoll('cursor', 'midpoint', midHit.position, { edgeId:midHit.edgeId });
-        return;
-      }
       const previous = letzterEntwurfsPunkt(draft);
-      const perpendicularHit = fangAktiv && erlaubt('perpendicular')
-        ? naechsterSenkrechtFang(previous, raw, layer.id, 18 / zoom, excludedEdges)
-        : null;
-      if (perpendicularHit) {
-        const point = perpendicularHit.position;
-        leitungsCursorRef.current = point;
-        setLeitungsCursor(point);
-        setLeitungsSnap(perpendicularHit);
-        const orthogonal = previous && (Math.abs(previous.x - point.x) < 0.5 || Math.abs(previous.y - point.y) < 0.5);
-        setLeitungsGuides(orthogonal ? [{
-          x1:previous.x, y1:previous.y, x2:point.x, y2:point.y, snapType:'perpendicular',
-        }] : []);
-        fangProtokoll('cursor', 'perpendicular', point, { edgeId:perpendicularHit.edge?.id });
-        return;
-      }
-      const lineHit = fangAktiv && erlaubt('nearest') ? naechsteLeitung(raw, layer.id, 22 / zoom, excludedEdges) : null;
-      if (lineHit) {
-        const hit = tStueckHit(previous, raw, { ...lineHit, type:'line' });
-        const point = { x:hit.x, y:hit.y };
-        leitungsCursorRef.current = point;
-        setLeitungsCursor(point);
-        setLeitungsSnap(hit);
-        setLeitungsGuides([]);
-        fangProtokoll('cursor', 'nearest', point, { edgeId:hit.edge?.id });
-        return;
-      }
+      const portHit = fangAktiv ? naechsterBauteilAnschluss(raw, null, layer.role, tolerance * 1.5) : null;
+      const endpointHit = fangAktiv
+        ? naechsterFreierLeitungsEndpunkt(raw, layer.id, tolerance * 1.2, draft.extendEdgeId) : null;
+      const eckHit = fangAktiv ? naechsterEckpunkt(raw, tolerance, excludedEdges) : null;
+      const intersectionHit = fangAktiv
+        ? naechsterSchnittpunkt(raw, layer.id, tolerance * 1.25, excludedEdges) : null;
+      const midHit = fangAktiv ? naechsterMittelpunkt(raw, tolerance * 1.1, excludedEdges) : null;
+      const perpendicularHit = fangAktiv
+        ? naechsterSenkrechtFang(previous, raw, layer.id, tolerance * 1.4, excludedEdges) : null;
+      const lineRaw = fangAktiv ? naechsteLeitung(raw, layer.id, tolerance * 1.5, excludedEdges) : null;
+      const lineHit = lineRaw ? tStueckHit(previous, raw, { ...lineRaw, type:'line' }) : null;
+      const portCorner = portHit
+        ? orthogonalerAnschlussEckpunkt(previous, portHit.position, portHit.handlePosition) : null;
+      const kandidaten = [
+        portHit && { typ:PORT, x:portHit.position.x, y:portHit.position.y, distanz:portHit.distance,
+          nodeId:portHit.nodeId, snap:{ ...portHit, ...portHit.position, type:'port', fangArt:'port' },
+          guides:portCorner ? [{ x1:portHit.position.x, y1:portHit.position.y,
+            x2:portCorner.x, y2:portCorner.y, snapType:'handle' }] : [],
+          protokoll:{ nodeId:portHit.nodeId, handleId:portHit.handleId, distanz:portHit.distance } },
+        endpointHit && { typ:ENDPOINT, x:endpointHit.position.x, y:endpointHit.position.y,
+          distanz:endpointHit.distance, edgeId:endpointHit.edgeId,
+          snap:{ ...endpointHit, ...endpointHit.position, type:'port', fangArt:'endpoint' },
+          protokoll:{ edgeId:endpointHit.edgeId } },
+        eckHit && { typ:CORNER, x:eckHit.x, y:eckHit.y, distanz:eckHit.distanz,
+          edgeId:eckHit.edgeId, snap:{ ...eckHit, type:'corner' }, protokoll:{ edgeId:eckHit.edgeId } },
+        intersectionHit && { typ:INTERSECTION, x:intersectionHit.x, y:intersectionHit.y,
+          distanz:intersectionHit.distanz, edgeId:intersectionHit.edgeId,
+          snap:intersectionHit, protokoll:{ edgeId:intersectionHit.edgeId } },
+        midHit && { typ:MIDPOINT, x:midHit.x, y:midHit.y, distanz:midHit.distanz,
+          edgeId:midHit.edgeId, snap:{ ...midHit, type:'midpoint' }, protokoll:{ edgeId:midHit.edgeId } },
+        perpendicularHit && { typ:PERPENDICULAR, x:perpendicularHit.x, y:perpendicularHit.y,
+          distanz:perpendicularHit.distanz, edgeId:perpendicularHit.edge?.id, snap:perpendicularHit,
+          guides:previous && (Math.abs(previous.x - perpendicularHit.x) < 0.5
+            || Math.abs(previous.y - perpendicularHit.y) < 0.5) ? [{
+              x1:previous.x, y1:previous.y, x2:perpendicularHit.x, y2:perpendicularHit.y,
+              snapType:'perpendicular',
+            }] : [], protokoll:{ edgeId:perpendicularHit.edge?.id } },
+        lineHit && { typ:NEAREST, x:lineHit.x, y:lineHit.y, distanz:lineHit.distance,
+          edgeId:lineHit.edge?.id, snap:lineHit, protokoll:{ edgeId:lineHit.edge?.id } },
+      ].filter(Boolean);
+      fangKandidatenRef.current = kandidaten;
+      const erlaubtKandidaten = kandidaten.filter(kandidat => erlaubt(kandidat.typ));
+      const automatisch = fangErgebnis(erlaubtKandidaten, null)?.treffer || null;
+      if (automatisch && fangKandidatAnzeigen(automatisch)) return;
+      fangAktuellRef.current = null;
       const spur = fangAktiv ? fangspurPunkt(raw, [
         ...aufgenommeneFangpunkteRef.current,
         ...(previous ? [{ ...previous, kind:'draft' }] : []),
-      ], drawingConfig.snap_tolerance / zoom) : null;
+      ], tolerance) : null;
       const point = constrainPoint(previous, spur?.point || rasterPunkt(raw, drawingConfig.grid_size), {
         ortho:orthoAnRef.current,
         shift:event.shiftKey || shiftPressed,
@@ -4169,9 +4261,9 @@ function EditorInner() {
       setLeitungsCursor(point);
       setLeitungsSnap(null);
       setLeitungsGuides(guidesAmPunkt(spur?.guides, point));
-      fangProtokoll('cursor', lineHit ? 'nearest' : 'grid', point);
+      fangProtokoll('cursor', 'grid', point);
     });
-  }, [activeLayer, fangProtokoll, drawingConfig.grid_size, drawingConfig.polar_angle, drawingConfig.polar_snap, drawingConfig.snap_tolerance, getZoom, letzterEntwurfsPunkt, naechsteLeitung, naechsterBauteilAnschluss, naechsterEckpunkt, naechsterFreierLeitungsEndpunkt, naechsterMittelpunkt, naechsterSenkrechtFang, objektFangpunkte, screenToFlowPosition, shiftPressed]);
+  }, [activeLayer, fangKandidatAnzeigen, fangProtokoll, drawingConfig.grid_size, drawingConfig.polar_angle, drawingConfig.polar_snap, drawingConfig.snap_tolerance, getZoom, letzterEntwurfsPunkt, naechsteLeitung, naechsterBauteilAnschluss, naechsterEckpunkt, naechsterFreierLeitungsEndpunkt, naechsterMittelpunkt, naechsterSchnittpunkt, naechsterSenkrechtFang, objektFangpunkte, screenToFlowPosition, shiftPressed]);
 
   const cadEntwurfRoute = (() => {
     if (!leitungsEntwurf) return [];
@@ -4268,6 +4360,8 @@ function EditorInner() {
             ? CORNER
             : leitungsSnap.type === 'midpoint'
               ? MIDPOINT
+              : leitungsSnap.type === 'intersection'
+                ? INTERSECTION
               : leitungsSnap.type === 'perpendicular'
                 ? PERPENDICULAR
               : leitungsSnap.type === 'line'
@@ -4398,16 +4492,25 @@ function EditorInner() {
       : item));
   }, [routePunkte, screenToFlowPosition, setEdges, snap]);
 
-  const segmentDragStart = useCallback((event, edgeId) => {
+  const segmentDragStart = useCallback((event, edgeId, direkterSegmentIndex = null) => {
     const edge = edgesRef.current.find(item => item.id === edgeId);
     if (!edge) return;
     const route = routePunkte(edge);
     if (route.length < 2) return;
     const raw = screenToFlowPosition({ x:event.clientX, y:event.clientY });
-    let best = null;
-    for (let index = 0; index < route.length - 1; index += 1) {
-      const hit = projektionAufSegment(raw, route[index], route[index + 1]);
-      if (hit && (!best || hit.distance < best.distance)) best = { ...hit, segmentIndex:index };
+    // Der sichtbare Diamant kennt sein Segment bereits. Diese explizite
+    // Identität ist stabiler als eine erneute Projektion aus dem Pointerevent
+    // (insbesondere nach Zoom/DOM-Transformation). Der breite Linien-Hitbereich
+    // fällt weiterhin auf die geometrische Suche zurück.
+    let best = Number.isInteger(direkterSegmentIndex)
+      && direkterSegmentIndex >= 0 && direkterSegmentIndex < route.length - 1
+      ? { segmentIndex:direkterSegmentIndex }
+      : null;
+    if (!best) {
+      for (let index = 0; index < route.length - 1; index += 1) {
+        const hit = projektionAufSegment(raw, route[index], route[index + 1]);
+        if (hit && (!best || hit.distance < best.distance)) best = { ...hit, segmentIndex:index };
+      }
     }
     if (!best) return;
     event.preventDefault();
@@ -6296,7 +6399,10 @@ function EditorInner() {
     if (sofort) setGripMenu(menu);
     else gripMenuTimer.current = setTimeout(() => setGripMenu(menu), 420);
   }, []);
-  const griffHover = useCallback((event, griff) => griffMenuOeffnen(event, griff, false), [griffMenuOeffnen]);
+  // Das Aktionsmenü öffnet ausschliesslich per Rechtsklick. Ein zeitgesteuertes
+  // Hover-Menü legte seinen vollflächigen Overlay genau beim Ansetzen über den
+  // Griff und verhinderte damit das anschliessende Ziehen.
+  const griffHover = useCallback(() => {}, []);
   const griffVerlassen = useCallback(() => {
     if (gripMenuTimer.current) clearTimeout(gripMenuTimer.current);
   }, []);
@@ -6510,14 +6616,28 @@ function EditorInner() {
         return;
       }
 
-      if (leitungsEntwurfRef.current && drawingConfig.dynamic_input && ev.key === 'Tab') {
+      if (leitungsEntwurfRef.current && ev.key === 'Tab') {
         ev.preventDefault();
-        setDynamikFeld(feld => {
-          const next = feld === 'length' ? 'angle' : 'length';
-          if (next === 'length' && laengenPufferRef.current === null) setLaengenPuffer('');
-          if (next === 'angle' && winkelPufferRef.current === null) setWinkelPuffer('');
-          return next;
-        });
+        // Während einer Zahleneingabe wechselt Tab weiterhin Länge/Winkel.
+        // Ohne aktive Eingabe rotiert es wie in Revit durch die Fangziele unter
+        // dem Cursor; der gewählte Kandidat bleibt der nächste Klick.
+        if (drawingConfig.dynamic_input
+            && (laengenPufferRef.current !== null || winkelPufferRef.current !== null)) {
+          setDynamikFeld(feld => {
+            const next = feld === 'length' ? 'angle' : 'length';
+            if (next === 'length' && laengenPufferRef.current === null) setLaengenPuffer('');
+            if (next === 'angle' && winkelPufferRef.current === null) setWinkelPuffer('');
+            return next;
+          });
+        } else {
+          const next = naechsterFangkandidat(fangKandidatenRef.current, fangAktuellRef.current);
+          if (next) {
+            fangOverrideRef.current = next.typ;
+            setFangOverride(next.typ);
+            fangKandidatAnzeigen(next);
+            setBefehlHinweis(`Fangziel ${fangStil(next.typ).label} · Tab für nächstes Ziel`);
+          }
+        }
         return;
       }
 
@@ -6547,6 +6667,40 @@ function EditorInner() {
         if (drawingConfig.dynamic_input && dynamikFeld === 'angle') setWinkelPuffer(ev.key);
         else setLaengenPuffer(ev.key);
         return;
+      }
+
+      // Revit-artige Einmal-Fänge: SE Endpunkt, SM Mittelpunkt, SI
+      // Schnittpunkt, SP Senkrecht, SN auf Leitung, SA Anschluss. Sie gelten
+      // genau für den nächsten Klick und verändern die dauerhafte SNAP-Einstellung nicht.
+      if (leitungsEntwurfRef.current && !ev.metaKey && !ev.ctrlKey && /^[a-z]$/i.test(ev.key)) {
+        const key = ev.key.toLowerCase();
+        if (fangTastenfolge.current === 's') {
+          ev.preventDefault();
+          const typ = fangShortcut(`s${key}`);
+          fangTastenfolge.current = '';
+          if (fangTastenTimer.current) clearTimeout(fangTastenTimer.current);
+          if (typ) {
+            fangOverrideRef.current = typ;
+            setFangOverride(typ);
+            const kandidat = fangKandidatenRef.current.find(item => item.typ === typ);
+            if (kandidat) fangKandidatAnzeigen(kandidat);
+            setBefehlHinweis(`${String(`S${key}`).toUpperCase()} · nur ${fangStil(typ).label} für den nächsten Punkt`);
+          } else {
+            setBefehlHinweis(`S${key.toUpperCase()} ist kein Fang-Shortcut`);
+          }
+          return;
+        }
+        if (key === 's') {
+          ev.preventDefault();
+          fangTastenfolge.current = 's';
+          setBefehlHinweis('S … E Endpunkt · M Mittelpunkt · I Schnittpunkt · P Senkrecht · N Leitung · A Anschluss');
+          if (fangTastenTimer.current) clearTimeout(fangTastenTimer.current);
+          fangTastenTimer.current = setTimeout(() => {
+            fangTastenfolge.current = '';
+            setBefehlHinweis(null);
+          }, 1600);
+          return;
+        }
       }
 
       // ── Eingaben der Modify-Befehle (§74) ───────────────────────────────
@@ -6755,13 +6909,16 @@ function EditorInner() {
           else if (key === drawingConfig.shortcut_mirror && ROTATABLE.has(selected.type)) { ev.preventDefault(); mirrorNode(selected.id); }
           else if (key === drawingConfig.shortcut_align && ev.shiftKey) { ev.preventDefault(); alignNode(selected.id); }
         }
-        // Verschieben per Pfeiltaste (Shift = grosser Schritt).
-        if (selected && ev.key.startsWith('Arrow')) {
+        // Verschieben per Pfeiltaste: exakt 1 mm, mit Shift 10 mm — unabhängig
+        // vom Fangraster. Eine Rahmen-/Mehrfachauswahl bewegt gemeinsam.
+        const pfeilKnoten = nodesRef.current.filter(node => node.selected && node.type !== 'junction');
+        if (!pfeilKnoten.length && selected) pfeilKnoten.push(selected);
+        if (pfeilKnoten.length && ev.key.startsWith('Arrow')) {
           ev.preventDefault();
-          const schritt = (ev.shiftKey ? 5 : 1) * drawingConfig.grid_size;
+          const schritt = ev.shiftKey ? 10 : 1;
           const dx = ev.key === 'ArrowLeft' ? -schritt : ev.key === 'ArrowRight' ? schritt : 0;
           const dy = ev.key === 'ArrowUp' ? -schritt : ev.key === 'ArrowDown' ? schritt : 0;
-          if (dx || dy) nudgeNode(selected.id, dx, dy);
+          if (dx || dy) nudgeNode(pfeilKnoten.map(node => node.id), dx, dy);
         }
         if (ev.key === 'Delete' || ev.key === 'Backspace') {
           // Eine angewählte Beschriftung wird ausgeblendet, nicht die Leitung
@@ -6782,8 +6939,11 @@ function EditorInner() {
       }
     };
     window.addEventListener('keydown', handler, true);
-    return () => window.removeEventListener('keydown', handler, true);
-  }, [undo, redo, selected, selectedEdgeId, selectedEdgePoint, selectedLabelEdgeId, markierteEdgeIds, beschriftungSetzen, punktEntfernen, snap, rotateNode, mirrorNode, alignNode, nudgeNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, drawingConfig, dynamikFeld, setNodes, laengeAnwenden, entwurfAmLetztenPunktAbschliessen, entwurfVerwerfen, verschiebenStarten, ausrichtenUmschalten, trennenStarten, eckeVerbindenStarten, dehnenStarten, versatzStarten, grenzBefehlStarten, verbindenStarten, auswahlKopieren, auswahlEinfuegen, auswahlLoeschen, transformStarten, drehenAnwenden, reiheAnwenden, spiegelnAnwenden]);
+    return () => {
+      window.removeEventListener('keydown', handler, true);
+      if (fangTastenTimer.current) clearTimeout(fangTastenTimer.current);
+    };
+  }, [undo, redo, selected, selectedEdgeId, selectedEdgePoint, selectedLabelEdgeId, markierteEdgeIds, beschriftungSetzen, punktEntfernen, snap, rotateNode, mirrorNode, alignNode, nudgeNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, drawingConfig, dynamikFeld, setNodes, laengeAnwenden, entwurfAmLetztenPunktAbschliessen, entwurfVerwerfen, verschiebenStarten, ausrichtenUmschalten, trennenStarten, eckeVerbindenStarten, dehnenStarten, versatzStarten, grenzBefehlStarten, verbindenStarten, auswahlKopieren, auswahlEinfuegen, auswahlLoeschen, transformStarten, drehenAnwenden, reiheAnwenden, spiegelnAnwenden, fangKandidatAnzeigen]);
 
   // Berechnete Werte (Backend) in die Node-Daten spiegeln — nur für die Anzeige.
   // Verteiler-Rahmen: nur die Balken sind greifbar (dragHandle), die Lücke
@@ -6928,6 +7088,33 @@ function EditorInner() {
       .sort((links, rechts) => links.distance - rechts.distance)
       .slice(0, 3);
   }, [edges, getInternalNode, nodeGeometryVersion, nodes, routePunkte, selectedEdgeSegment]);
+
+  useEffect(() => { setTempMassRef(null); }, [selectedEdgeSegment?.edgeId, selectedEdgeSegment?.segmentIndex]);
+
+  const direktMassAktivieren = useCallback((mass) => {
+    if (!selectedEdgeSegment || !mass?.distance) return;
+    const key = `${selectedEdgeSegment.edgeId}:${selectedEdgeSegment.segmentIndex}:${mass.nodeId}`;
+    if (tempMassRef !== key) {
+      setTempMassRef(key);
+      setBefehlHinweis('Temporäres Mass gewählt · nochmals klicken für exakten Abstand');
+      return;
+    }
+    const eingabe = window.prompt('Abstand zum gewählten Bauteil in mm', String(Math.round(mass.distance)));
+    if (eingabe === null) return;
+    const ziel = Number.parseFloat(String(eingabe).replace(',', '.'));
+    if (!(ziel >= 0)) {
+      setBefehlHinweis('Der Abstand muss 0 mm oder grösser sein.');
+      return;
+    }
+    const faktor = (ziel - mass.distance) / mass.distance;
+    // `a` liegt auf dem Segment, `b` auf der Bauteilkante. Vom Bauteil weg ist
+    // darum a-b; die Segmentfunktion bindet den Vektor zusätzlich an die
+    // tatsächliche Segmentnormale.
+    const dx = (mass.a.x - mass.b.x) * faktor;
+    const dy = (mass.a.y - mass.b.y) * faktor;
+    segmentNumerischVerschieben(selectedEdgeSegment.edgeId, selectedEdgeSegment.segmentIndex, dx / 10, dy / 10);
+    setBefehlHinweis(`Abstand auf ${Math.round(ziel)} mm gesetzt`);
+  }, [selectedEdgeSegment, segmentNumerischVerschieben, tempMassRef]);
 
   // Edges: VL durchgezogen, RL gestrichelt, V' als Label
   const displayEdges = useMemo(() => {
@@ -7358,13 +7545,16 @@ function EditorInner() {
     setEndpointMenu(null);
     const addieren = event.metaKey || event.ctrlKey;
     const entfernen = event.shiftKey;
-    setNodes(items => items.map(item => ({ ...item,
-      selected:entfernen && item.id === node.id ? false
-        : addieren ? (item.id === node.id ? !item.selected : Boolean(item.selected))
-          : item.id === node.id,
-    })));
-    if (entfernen) setSelected(current => current?.id === node.id ? null : current);
-    else setSelected(node);
+    const vorher = nodeSelectionVorKlickRef.current;
+    const warGewaehlt = vorher.has(node.id);
+    const gewuenscht = new Set(addieren || entfernen ? vorher : []);
+    if (entfernen) gewuenscht.delete(node.id);
+    else if (addieren && warGewaehlt) gewuenscht.delete(node.id);
+    else gewuenscht.add(node.id);
+    setNodes(items => items.map(item => ({ ...item, selected:gewuenscht.has(item.id) })));
+    if (!gewuenscht.has(node.id)) {
+      setSelected(current => current?.id === node.id ? null : current);
+    } else setSelected(node);
     if (!addieren && !entfernen) {
       setEdges(items => items.map(item => ({ ...item, selected:false })));
       setSelectedEdgeId(null);
@@ -7936,7 +8126,7 @@ function EditorInner() {
             <label style={{ display:'grid', gridTemplateColumns:'88px 1fr', alignItems:'center', gap:7, marginBottom:10, fontSize:10, color:'#475569' }}>
               Fangtoleranz
               <select value={drawingConfig.snap_tolerance} onChange={event=>drawingConfigAktualisieren('snap_tolerance', event.target.value)} style={{ border:'1px solid #cbd5e1', borderRadius:5, padding:4, background:'white', fontSize:10 }}>
-                {TOLERANZ_OPTIONEN.map(mm => <option key={mm} value={mm}>{mm} mm{mm === 4 ? ' · exakt' : mm === 20 ? ' · grosszügig' : ''}</option>)}
+                {TOLERANZ_OPTIONEN.map(px => <option key={px} value={px}>{px} px{px === 4 ? ' · exakt' : px === 12 ? ' · grosszügig' : ''}</option>)}
               </select>
             </label>
             {/* Die Tastenbelegung ist persönlich und liegt darum nicht mehr
@@ -8023,7 +8213,7 @@ function EditorInner() {
                   onClick={event=>platzierenStarten(kennung, { persistent:event.shiftKey })}
                   title={`${item.label} — klicken, dann auf die Zeichenfläche klicken. Shift-Klick: mehrere setzen.`}
                   className={`hc-palette-item${platzierTyp === kennung ? ' is-armed' : ''}`}>
-                  <span className="hc-palette-item__grip">⠿</span>
+                  <BauteilMiniatur item={item} />
                   <span>
                     <strong>{item.label}</strong>
                     {item.desc && <small>{item.desc}</small>}
@@ -8212,9 +8402,9 @@ function EditorInner() {
                 steht. Der Rasterfang läuft unabhängig davon weiter. */}
             {drawingConfig.raster_sichtbar && (
               <>
-                <Background id="hc-minor" variant={BackgroundVariant.Dots} gap={drawingConfig.grid_size}
+                <Background id="hc-minor" variant={BackgroundVariant.Dots} gap={sichtbaresRaster}
                   size={1} color="#cbd5e1"/>
-                <Background id="hc-major" variant={BackgroundVariant.Lines} gap={drawingConfig.grid_size * 5}
+                <Background id="hc-major" variant={BackgroundVariant.Lines} gap={sichtbaresRaster * 5}
                   color="#dbe3ec" lineWidth={1}/>
               </>
             )}
@@ -8454,7 +8644,9 @@ function EditorInner() {
                 {griffMass && <CadMass mass={griffMass} zoom={zoomAnzeige} />}
                 {segmentAbstandsMasse.map(mass => (
                   <CadDirektMass key={`${selectedEdgeSegment?.edgeId}-${selectedEdgeSegment?.segmentIndex}-${mass.nodeId}`}
-                    mass={mass} zoom={zoomAnzeige} />
+                    mass={mass} zoom={zoomAnzeige}
+                    selected={tempMassRef === `${selectedEdgeSegment?.edgeId}:${selectedEdgeSegment?.segmentIndex}:${mass.nodeId}`}
+                    onActivate={() => direktMassAktivieren(mass)} />
                 ))}
                 {/* Punkt 6 — getippte Länge direkt am Segmentende. Bewusst im
                     Viewport und nicht am Bildschirmrand: beim Zeichnen schaut
@@ -8776,6 +8968,11 @@ function EditorInner() {
               onClick={() => setSnapAn(v => { setDrawingConfig(c => ({ ...c, object_snap:!v })); return !v; })}
               className={`hc-statusbar__toggle${snapAn ? ' is-on' : ''}`}
               title="Objektfang auf Anschlüsse, Endpunkte und Leitungen">SNAP</button>
+            {fangOverride && (
+              <span className="hc-statusbar__snap-override" title="Einmal-Fang für den nächsten Punkt">
+                {fangStil(fangOverride).label} · 1×
+              </span>
+            )}
             <button type="button"
               onClick={() => setDrawingConfig(c => ({ ...c, dynamic_input:!c.dynamic_input }))}
               className={`hc-statusbar__toggle${drawingConfig.dynamic_input ? ' is-on' : ''}`}

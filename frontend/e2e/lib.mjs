@@ -272,7 +272,23 @@ export async function starten() {
       if (!(await w.istFrei(s))) return null;
       await page.mouse.click(s.x, s.y);
       await page.waitForTimeout(500);
-      return s;
+      // Die Auswahl kann den Eigenschaftenbereich öffnen und damit die
+      // Zeichenfläche verschmälern. Der sichtbare Diamant liegt dann nicht
+      // mehr an der alten Bildschirmkoordinate, obwohl seine Weltkoordinate
+      // unverändert ist.
+      const erwartet = await w.weltZuScreen({ x:(a.x + b.x) / 2, y:(a.y + b.y) / 2 });
+      const markierteGrips = page.locator('[data-cad-segment-index]');
+      const grips = await markierteGrips.count() ? markierteGrips : page.locator('.react-flow__edge rect');
+      let bester = null;
+      for (let i = 0; i < await grips.count(); i += 1) {
+        const box = await grips.nth(i).boundingBox();
+        if (!box) continue;
+        const punkt = { x:box.x + box.width / 2, y:box.y + box.height / 2 };
+        const distanz = Math.hypot(punkt.x - erwartet.x, punkt.y - erwartet.y);
+        if (!bester || distanz < bester.distanz) bester = { ...punkt, distanz };
+      }
+      const ziel = bester ? { x:Math.round(bester.x), y:Math.round(bester.y) } : erwartet;
+      return ziel;
     },
 
     /** Von `von` nach `nach` ziehen (mit Zwischenschritten, damit Drags greifen). */

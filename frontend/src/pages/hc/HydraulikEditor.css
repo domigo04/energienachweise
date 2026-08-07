@@ -2,7 +2,7 @@
   --hc-ink: #172033;
   --hc-muted: #64748b;
   --hc-line: #dce3ec;
-  --hc-soft: #f6f8fb;
+  --hc-soft: #f1f3f5;
   --hc-accent: #4f46e5;
   display: flex;
   height: 100vh;
@@ -166,7 +166,8 @@
   gap: 7px;
   padding: 7px 12px;
   border-bottom: 1px solid var(--hc-line);
-  background: #fafbfc;
+  background: #eef0f3;
+  box-shadow: inset 0 1px 0 #fff;
   box-shadow: none;
 }
 
@@ -456,7 +457,7 @@
   gap: 8px;
   padding: 9px 10px 9px 14px;
   border-bottom: 1px solid #e7ecf2;
-  background: white;
+  background: #f3f4f6;
 }
 
 .hc-sidepanel-header > div {
@@ -530,7 +531,7 @@
   justify-content: space-between;
   padding: 0 13px;
   border: 0;
-  background: transparent;
+  background: #f7f8fa;
   color: #64748b;
   cursor: pointer;
   font-size: 8.5px;
@@ -560,13 +561,13 @@
 
 .hc-palette-item {
   display: grid;
-  grid-template-columns: 18px 1fr;
+  grid-template-columns: 52px 1fr;
   align-items: center;
   gap: 7px;
-  min-height: 45px;
-  padding: 7px 9px;
-  border: 1px solid #e2e8f0;
-  border-radius: 9px;
+  min-height: 54px;
+  padding: 5px 7px;
+  border: 1px solid #d8dde5;
+  border-radius: 4px;
   background: white;
   color: #334155;
   cursor: grab;
@@ -575,8 +576,9 @@
 }
 
 .hc-palette-item:hover {
-  border-color: #a5b4fc;
-  box-shadow: none;
+  border-color: #818cf8;
+  background: #f7f7ff;
+  box-shadow: inset 3px 0 0 #4f46e5;
   transform: none;
 }
 
@@ -584,9 +586,22 @@
   cursor: grabbing;
 }
 
-.hc-palette-item__grip {
-  color: #cbd5e1;
-  font-size: 15px;
+.hc-palette-miniature {
+  display: grid;
+  width: 50px;
+  height: 42px;
+  place-items: center;
+  overflow: hidden;
+  border-right: 1px solid #e5e7eb;
+  padding-right: 5px;
+}
+
+.hc-palette-miniature > svg,
+.hc-palette-miniature > * > svg {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 46px;
+  max-height: 40px;
 }
 
 .hc-palette-item strong,
@@ -627,11 +642,20 @@
   min-height: 0;
   flex: 1 1 auto;
   overflow: hidden;
-  background: #f8fafc;
+  background: #fbfbfa;
 }
 
 .hc-hydraulik-flow {
-  background: #f8fafc;
+  background: #fbfbfa;
+}
+
+/* React Flow legt nach einer Fensterauswahl einen gemeinsamen Drag-Rahmen über
+   alle Knoten. Der würde genau die CAD-Gesten abfangen, die danach gebraucht
+   werden: Cmd/Ctrl zum Ergänzen und Shift zum einzelnen Abwählen. Die Knoten
+   bleiben selbst ziehbar; Mehrfachverschiebung erfolgt präzise per Befehl oder
+   Pfeiltasten. */
+.hc-hydraulik-flow .react-flow__nodesselection-rect {
+  pointer-events: none;
 }
 
 .hc-hydraulik-flow .react-flow__controls {
@@ -1201,10 +1225,10 @@
   z-index: 20;
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 5px 12px;
-  background: rgba(248, 250, 252, 0.96);
-  border-top: 1px solid #e2e8f0;
+  gap: 9px;
+  padding: 4px 8px;
+  background: rgba(231, 234, 238, 0.98);
+  border-top: 1px solid #c7ccd4;
   font-size: 11px;
   color: #475569;
   backdrop-filter: blur(4px);
@@ -1212,8 +1236,8 @@
 .hc-statusbar__mode {
   min-width: 92px;
   padding: 2px 9px;
-  border-radius: 4px;
-  background: #e2e8f0;
+  border-radius: 2px;
+  background: #d5d9df;
   color: #334155;
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -1226,9 +1250,9 @@
 .hc-statusbar__toggle {
   padding: 2px 8px;
   border: 1px solid #cbd5e1;
-  border-radius: 4px;
-  background: transparent;
-  color: #94a3b8;
+  border-radius: 2px;
+  background: #f6f7f8;
+  color: #667085;
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.06em;
@@ -1238,6 +1262,16 @@
   border-color: #4f46e5;
   background: #eef2ff;
   color: #4338ca;
+}
+.hc-statusbar__snap-override {
+  padding: 2px 6px;
+  border: 1px solid #818cf8;
+  border-radius: 2px;
+  background: #fff;
+  color: #4338ca;
+  font-size: 9px;
+  font-weight: 800;
+  white-space: nowrap;
 }
 .hc-statusbar__raster {
   display: inline-flex;
@@ -1432,11 +1466,10 @@
   flex-direction: column;
   gap: 2px;
   padding: 4px;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.97);
-  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.1);
-  backdrop-filter: blur(4px);
+  border: 1px solid #bfc5ce;
+  border-radius: 3px;
+  background: rgba(238, 240, 243, 0.98);
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.12);
   /* Die Leiste war länger als der Bildschirm: auf einem 720 px hohen Fenster
      ragten «Auswahl löschen», «Dehnen» und «Notiz» unten heraus und liessen
      sich nicht anklicken — ohne Scrollbalken führte auch kein Weg hin. Mit
@@ -1455,15 +1488,16 @@
   justify-content: center;
   width: 34px;
   height: 34px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  background: #f8f9fa;
   color: #475569;
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease;
 }
 .hc-toolrail__button:hover:not(:disabled) {
-  background: #f1f5f9;
+  border-color: #aeb5c0;
+  background: #fff;
   color: #0f172a;
 }
 .hc-toolrail__button:disabled {
@@ -1482,7 +1516,7 @@
   position: absolute;
   inset: -1px;
   border: 2px solid #4f46e5;
-  border-radius: 8px;
+  border-radius: 3px;
 }
 /* Die Taste steht klein am Knopf: so lernt man sie beim Klicken nebenbei. */
 .hc-toolrail__key {

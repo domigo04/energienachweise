@@ -138,6 +138,32 @@ anderes als die Taste.
 | ESC | beendet am letzten gesetzten Eckpunkt, Dauerbefehl endet mit |
 | Rechtsklick → «Abbrechen» | verwirft den Entwurf, ohne etwas zu erzeugen |
 
+## Raster, Fang und Tastatur
+
+Das Fangraster arbeitet in **1/2/5/10 mm**, standardmässig mit 1 mm. Seine
+Darstellung wird abhängig vom Zoom ausgedünnt, ohne den eigentlichen Fang zu
+vergröbern: weit herausgezoomt sieht man also weniger Rasterlinien, kann aber
+weiterhin millimetergenau setzen. Pfeiltasten verschieben alle gewählten
+Bauteile gemeinsam um 1 mm, `Shift` + Pfeil um 10 mm.
+
+Objektfang bleibt in Bildschirm-Pixeln gleich fein und wird deshalb beim
+Zoomen weder aggressiver noch unerreichbar. Liegen mehrere Fangarten am selben
+Ort, wechselt `Tab` vor dem Setzen durch die Kandidaten. Die Revit-nahen
+Einmal-Fänge gelten nur für den nächsten Punkt:
+
+| Tastenfolge | Fang |
+|---|---|
+| `SE` | Endpunkt |
+| `SM` | Mittelpunkt |
+| `SI` | Schnittpunkt |
+| `SP` | Lotrecht |
+| `SN` | Nächster Punkt |
+| `SA` | Bauteilanschluss |
+
+Ein ausdrücklich mit `SI` gefangener Leitungsschnittpunkt teilt beide
+Bestandsleitungen am gemeinsamen Junction-Knoten. Eine bloss geometrische
+Kreuzung ohne diesen bewussten Fang bleibt weiterhin unverbunden.
+
 ## Auswahlstufen an einer Leitung
 
 Ein Klick trifft das **Teilstück**. `Tab` erweitert auf das **Leitungssystem** und
@@ -252,7 +278,9 @@ mit zweitem Griff.
 Wird ein einzelnes Teilstück gewählt, erscheinen zu höchstens drei Bauteilen im
 Umkreis von 500 mm temporäre Direktmasse zur nächstliegenden Bauteilkante. Die
 Anzeige verwendet dieselbe Massformatierung wie der Zeichenbefehl und bleibt
-damit in der aktuellen Zeicheneinheit.
+damit in der aktuellen Zeicheneinheit. Ein Klick auf ein Mass setzt es als
+Referenz; beim zweiten Klick kann der exakte Abstand eingegeben und das
+Teilstück entsprechend verschoben werden.
 
 Beim Spiegeln wird nur die Bauteilgeometrie gespiegelt. Symboltext, Nummer und
 Datenblock bleiben im Editor und im SVG/PDF-Export seitenrichtig lesbar.
@@ -331,11 +359,20 @@ Leitung gilt die normale freie Platzierung.
 ### Verbindung entsteht nur bewusst
 
 Eine geometrische Kreuzung zweier Leitungen erzeugt **keine** Verbindung. Eine
-Verbindung entsteht nur, wenn eine Leitung ausdrücklich auf einer anderen endet
-oder ein Bauteil eingesetzt wird. Ein Fang auf den Mittelpunkt einer Leitung
-zählt dabei als Fang auf der Leitung: er erzeugt dieselbe T-Verbindung. Vorher
-entstand dort nur ein freier Anker auf derselben Koordinate — optisch
-angeschlossen, fachlich nicht.
+Verbindung entsteht nur, wenn eine Leitung ausdrücklich auf einer anderen
+endet, der Schnittpunktfang `SI` verwendet oder ein Bauteil eingesetzt wird.
+Ein Fang auf den Mittelpunkt einer Leitung zählt dabei als Fang auf der
+Leitung: er erzeugt dieselbe T-Verbindung. Vorher entstand dort nur ein freier
+Anker auf derselben Koordinate — optisch angeschlossen, fachlich nicht.
+
+## Oberfläche und Bauteilbibliothek
+
+Die Arbeitsoberfläche verbindet die nüchterne, kompakte Revit-Logik mit dem
+SIREGO-Auftritt: hellgraue Werkzeug- und Statusleisten, kleine rechtwinklige
+Bedienelemente und klare Zustände, ergänzt um SIREGO-Violett für aktive
+Befehle. Jede Zeile der Bauteilbibliothek zeigt links eine echte SVG-Miniatur
+des später gesetzten Bauteils. Auch Varianten wie Luft/Wasser-Splitgerät sowie
+reine Zeichenobjekte sind dadurch vor dem Platzieren visuell unterscheidbar.
 
 Das Einsetzen ist EINE Rückgängig-Aktion: der Schnappschuss entsteht vor der
 Erzeugung, und Bauteil wie Teilstücke liegen darin gemeinsam.

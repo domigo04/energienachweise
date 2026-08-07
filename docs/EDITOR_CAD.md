@@ -25,7 +25,7 @@ und funktionsfähig:
 | Eckpunkt-/Segment-/Endpunkt-Grips | `edgePointDrag`, `edgeSegmentDrag`, `edgeEndpointDrag` | wird weiterverwendet |
 | Zeichnen mehrerer Eckpunkte | `leitungsEntwurf` + `cadKlick` | wird weiterverwendet |
 | Enter beendet, Backspace nimmt zurück | Tastaturhandler | wird weiterverwendet |
-| Rechtsklick bricht ab | `onPaneContextMenu` | wird weiterverwendet |
+| Rechtsklick öffnet Befehlsmenü; «Abbrechen» verwirft | `onPaneContextMenu` | wird weiterverwendet |
 | Shortcuts greifen nicht in Inputs | Prüfung auf `INPUT/TEXTAREA/SELECT` | wird weiterverwendet |
 | Underlay, Revisionen, Undo | eigene Bereiche | unberührt |
 
@@ -136,7 +136,7 @@ anderes als die Taste.
 | zweiter Klick auf denselben Punkt | dasselbe — es entsteht kein Nullsegment |
 | Enter | beendet an der aktuellen Cursorposition |
 | ESC | beendet am letzten gesetzten Eckpunkt, Dauerbefehl endet mit |
-| Rechtsklick | bricht ab, ohne etwas zu erzeugen |
+| Rechtsklick → «Abbrechen» | verwirft den Entwurf, ohne etwas zu erzeugen |
 
 ## Auswahlstufen an einer Leitung
 

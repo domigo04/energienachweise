@@ -3650,7 +3650,7 @@ function EditorInner() {
   }, [handlePosition]);
 
   // Der laufende Leitungsentwurf wird an genau EINER Stelle verworfen — egal
-  // ob durch Abbruch (ESC, Rechtsklick, anderer Befehl) oder nach dem
+  // ob durch Abbruch (Rechtsklick, anderer Befehl) oder nach dem
   // Abschluss. Der Entwurf lebt nur im Zustand; solange er nicht abgeschlossen
   // ist, existiert im Graphen weder Anker noch Kante. Ein Abbruch kann deshalb
   // nichts hinterlassen.
@@ -3868,12 +3868,13 @@ function EditorInner() {
     setEditorMode(finishCommand(editorModeRef.current));
   }, [activeLayer, bestehendeJunction, cadAnker, drawingConfig, entwurfVerwerfen, handleAusrichtung, handlePosition, letzterEntwurfsPunkt, leitungTeilen, routePunkte, ruecklaufPaarErstellen, setEdges, setNodes, snap]);
 
-  // Doppelklick, zweiter Klick auf denselben Punkt und ✓ beenden eine frei
+  // Doppelklick, zweiter Klick auf denselben Punkt, ESC und ✓ beenden eine frei
   // gezeichnete Leitung am LETZTEN bewusst geklickten Eckpunkt. Die aktuelle
   // Cursorvorschau wird nicht gespeichert. Der letzte Punkt wird vor dem
   // Abschluss aus den Zwischenpunkten genommen, weil er nun zum echten
   // Leitungsende wird. Ob ein Dauerbefehl aktiv bleibt, entscheidet allein
-  // `finishCommand` im Abschluss — ESC ist kein Abschluss, sondern Abbruch.
+  // `finishCommand` im Abschluss. Der Keyboard-Handler beendet nach ESC auch
+  // einen Dauerbefehl ausdrücklich und führt in den Grundzustand zurück.
   const entwurfAmLetztenPunktAbschliessen = useCallback(() => {
     const draft = leitungsEntwurfRef.current;
     const abschluss = entwurfFuerAbschluss(draft);
@@ -3885,7 +3886,7 @@ function EditorInner() {
   }, [leitungsEntwurfAbschliessen]);
 
   const cadKlick = useCallback((event, nurBeiAnschluss = false) => {
-    // Nur die linke Taste zeichnet. Mittlere Taste = Pan, rechte = abschliessen.
+    // Nur die linke Taste zeichnet. Mittlere Taste = Pan, rechte = Befehlsmenü.
     if (event.button != null && event.button !== 0) return true;
     if (spacePanRef.current) return true;          // Space hält das Pan-Werkzeug
     event.preventDefault();
@@ -6489,11 +6490,13 @@ function EditorInner() {
       if (document.activeElement?.isContentEditable) return;
 
       // ESC gehört immer dem laufenden CAD-Befehl — auch während gerade eine
-      // Zahl editiert wird. Der vollständige Entwurf verschwindet spurlos.
+      // Zahl editiert wird. Eine Leitung endet am letzten bewusst gesetzten
+      // Eckpunkt; die bewegte Cursorvorschau wird nie übernommen. Ohne einen
+      // gesetzten Folgepunkt bleibt nichts zurück.
       if (ev.key === 'Escape') {
         ev.preventDefault();
         ev.stopPropagation();
-        entwurfVerwerfen();
+        if (!entwurfAmLetztenPunktAbschliessen()) entwurfVerwerfen();
         setLaengenPuffer(null); setWinkelPuffer(null); setDynamikFeld('length');
         setVerschiebung(null); setLuecke(null); setDehnen(null); setBefehlHinweis(null);
         setPaneMenu(null); setGripMenu(null);
@@ -6780,7 +6783,7 @@ function EditorInner() {
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [undo, redo, selected, selectedEdgeId, selectedEdgePoint, selectedLabelEdgeId, markierteEdgeIds, beschriftungSetzen, punktEntfernen, snap, rotateNode, mirrorNode, alignNode, nudgeNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, drawingConfig, dynamikFeld, setNodes, laengeAnwenden, entwurfVerwerfen, verschiebenStarten, ausrichtenUmschalten, trennenStarten, eckeVerbindenStarten, dehnenStarten, versatzStarten, grenzBefehlStarten, verbindenStarten, auswahlKopieren, auswahlEinfuegen, auswahlLoeschen, transformStarten, drehenAnwenden, reiheAnwenden, spiegelnAnwenden]);
+  }, [undo, redo, selected, selectedEdgeId, selectedEdgePoint, selectedLabelEdgeId, markierteEdgeIds, beschriftungSetzen, punktEntfernen, snap, rotateNode, mirrorNode, alignNode, nudgeNode, layerWaehlen, leitungsEntwurfAbschliessen, leitungsSnap, shiftPressed, endpointMenu, edgeMenu, drawingConfig, dynamikFeld, setNodes, laengeAnwenden, entwurfAmLetztenPunktAbschliessen, entwurfVerwerfen, verschiebenStarten, ausrichtenUmschalten, trennenStarten, eckeVerbindenStarten, dehnenStarten, versatzStarten, grenzBefehlStarten, verbindenStarten, auswahlKopieren, auswahlEinfuegen, auswahlLoeschen, transformStarten, drehenAnwenden, reiheAnwenden, spiegelnAnwenden]);
 
   // Berechnete Werte (Backend) in die Node-Daten spiegeln — nur für die Anzeige.
   // Verteiler-Rahmen: nur die Balken sind greifbar (dragHandle), die Lücke
@@ -8368,12 +8371,12 @@ function EditorInner() {
                     : ['line', 'midpoint'].includes(leitungsSnap?.type)
                       ? 'T-Verbindung erstellen'
                       : leitungsEntwurf.extendEdgeId
-                        ? 'Linie weiterziehen · Klick = neuer Eckpunkt · Doppelklick = fertig · Esc = abbrechen'
-                        : 'Leitung zeichnen · Klick = Eckpunkt · Doppelklick = fertig · Esc = abbrechen'}
+                        ? 'Linie weiterziehen · Klick = neuer Eckpunkt · Doppelklick/Esc = fertig'
+                        : 'Leitung zeichnen · Klick = Eckpunkt · Doppelklick/Esc = fertig'}
                   <button onClick={entwurfAmLetztenPunktAbschliessen}
                     disabled={!leitungsEntwurf.points?.length}
                     style={{ width:22, height:22, borderRadius:11, border:0, background:'rgba(255,255,255,.2)', color:'white', cursor:'pointer', fontWeight:800 }}
-                    title="Am letzten Eckpunkt abschliessen (Doppelklick)">✓</button>
+                    title="Am letzten Eckpunkt abschliessen (Doppelklick/Esc)">✓</button>
                 </div>
               </Panel>
             )}
@@ -9238,7 +9241,7 @@ function EditorInner() {
               ['⌛', 'Nur auf Leitung', 'Gilt für den nächsten Klick', () => setFangOverride('nearest')],
             ] : paneMenu.active ? [
               ...(leitungsEntwurfRef.current?.points?.length ? [[
-                '✓', 'Fertig', 'Entspricht Enter', () => entwurfAmLetztenPunktAbschliessen(),
+                '✓', 'Fertig', 'Am letzten Eckpunkt · wie ESC', () => entwurfAmLetztenPunktAbschliessen(),
               ], [
                 '↶', 'Letzten Punkt zurück', 'Entspricht Backspace', () => {
                   const draft = leitungsEntwurfRef.current;
@@ -9247,7 +9250,7 @@ function EditorInner() {
                   leitungsEntwurfRef.current = next; setLeitungsEntwurf(next);
                 },
               ]] : []),
-              ['×', 'Abbrechen', 'Entspricht ESC', () => {
+              ['×', 'Abbrechen', 'Entwurf vollständig verwerfen', () => {
                 entwurfVerwerfen(); setVerschiebung(null); setLuecke(null); setDehnen(null);
                 // Auch der Hinweistext der Befehle aus #72 gehört zum Abbruch —
                 // sonst bliebe «Stutzen · …» stehen, obwohl nichts mehr läuft.

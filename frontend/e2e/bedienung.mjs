@@ -2,8 +2,8 @@
 //
 // Drei Zusagen, die man nur im Browser belegen kann:
 //
-//   1. Eine Leitung endet mit einem Doppelklick bzw. mit einem zweiten Klick
-//      auf denselben Punkt — Escape bricht ab und hinterlässt nichts.
+//   1. Eine Leitung endet mit einem Doppelklick, einem zweiten Klick auf
+//      denselben Punkt oder mit Escape am letzten bewusst gesetzten Eckpunkt.
 //   2. Ein Klick auf eine Leitung wählt das Teilstück; Tab nimmt den ganzen
 //      zusammenhängenden Strang dazu und Tab führt wieder zurück.
 //   3. Die 90°-Drehung dreht nur das Bauteilzeichen; Nummer und Datenblock
@@ -48,6 +48,40 @@ await w.frischLaden();
   pruefe('D2', 'Der doppelt geklickte Punkt wird das Ende, kein Eckpunkt',
     punkte.length === 0, `${punkte.length} Eckpunkte`);
   pruefe('D3', 'Der Zeichenbefehl läuft nicht mehr weiter',
+    /MODIFY/i.test(await w.status()), await w.status());
+}
+
+// ── 1b. Escape übernimmt nie die bewegte Cursorvorschau ───────────────────
+kopf('Escape beendet am letzten gesetzten Eckpunkt');
+await w.frischLaden();
+{
+  const start = await w.freieFlaeche();
+  const letzterPunkt = { x:start.x + 240, y:start.y };
+  const cursor = { x:start.x + 420, y:start.y + 140 };
+  await page.mouse.move(start.x, start.y);
+  await page.keyboard.press('l');
+  await page.waitForTimeout(200);
+  await page.mouse.click(start.x, start.y);
+  await page.waitForTimeout(220);
+  await page.mouse.click(letzterPunkt.x, letzterPunkt.y);
+  await page.waitForTimeout(220);
+  await page.mouse.move(cursor.x, cursor.y);
+  await page.waitForTimeout(220);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(1500);
+
+  const g = await w.graphLesen();
+  const edge = g.edges?.[0];
+  const source = (g.nodes || []).find(node => node.id === edge?.source);
+  const target = (g.nodes || []).find(node => node.id === edge?.target);
+  const dx = source && target ? Math.abs(target.position.x - source.position.x) : null;
+  const dy = source && target ? Math.abs(target.position.y - source.position.y) : null;
+  pruefe('E1', 'Escape hat genau eine Leitung erzeugt',
+    (g.edges || []).length === 1, `${(g.edges || []).length} Kanten`);
+  pruefe('E2', 'Die Leitung endet am gesetzten Punkt, nicht an der Cursorvorschau',
+    dx !== null && dx >= 200 && dx <= 280 && dy <= 20,
+    `Endpunktabstand Δx=${dx}, Δy=${dy}`);
+  pruefe('E3', 'Escape beendet auch den Zeichenbefehl',
     /MODIFY/i.test(await w.status()), await w.status());
 }
 

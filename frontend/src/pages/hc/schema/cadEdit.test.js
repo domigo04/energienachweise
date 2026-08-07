@@ -228,7 +228,7 @@ describe('Löschauswahl', () => {
   });
 });
 
-describe('Leitung am letzten Eckpunkt abschliessen', () => {
+describe('Leitung mit Doppelklick oder Escape am letzten Eckpunkt abschliessen', () => {
   it('verwendet den letzten gesetzten Eckpunkt und nie die Cursorvorschau', () => {
     const draft = {
       startPoint:{ x:0, y:0 },

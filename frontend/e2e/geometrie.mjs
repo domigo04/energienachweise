@@ -359,7 +359,9 @@ await w.laden();
   pruefe('N1', 'Abgebrochenes Platzieren hinterlässt kein Bauteil',
     (g.nodes || []).length === 0, `${(g.nodes || []).length} Nodes`);
 
-  // Abgebrochene Leitung
+  // Eine Leitung wird über das Rechtsklickmenü ausdrücklich abgebrochen. ESC
+  // wäre hier absichtlich «Fertig am letzten Eckpunkt» und darf deshalb nicht
+  // für den Phantomobjekt-Test verwendet werden.
   await page.mouse.move(frei.x, frei.y);
   await page.keyboard.press('l');
   await page.waitForTimeout(200);
@@ -369,10 +371,12 @@ await w.laden();
   await page.waitForTimeout(200);
   await page.mouse.click(frei.x + 220, frei.y);
   await page.waitForTimeout(250);
-  await page.keyboard.press('Escape');
+  await page.mouse.click(frei.x + 320, frei.y + 140, { button: 'right' });
+  await page.waitForTimeout(250);
+  await page.getByRole('button', { name: /Abbrechen/ }).click();
   await page.waitForTimeout(1100);
   g = await w.graphLesen();
-  pruefe('N2', 'Abgebrochene Leitung hinterlässt keinen Anker und keine Kante',
+  pruefe('N2', 'Ausdrücklich abgebrochene Leitung hinterlässt keinen Anker und keine Kante',
     (g.nodes || []).length === 0 && (g.edges || []).length === 0,
     `${(g.nodes || []).length} Nodes, ${(g.edges || []).length} Kanten`);
   // Nullsegmente/NaN im ganzen Graphen

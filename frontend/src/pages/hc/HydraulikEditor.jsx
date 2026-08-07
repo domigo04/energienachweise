@@ -6520,6 +6520,33 @@ function EditorInner() {
           dehnenStarten();
           return;
         }
+        // ── Basispunkt-Befehle (§74) ──────────────────────────────────────
+        // Sie stehen VOR den frei belegbaren Tasten: die prüfen kein Shift, und
+        // `E` gehört ohne Shift dem Dehnen bis Kante aus #72. Mit Shift ist es
+        // die Reihe. Spiegeln und Drehen liegen aus demselben Grund auf Shift
+        // neben ihrer Bauteil-Schnellfunktion.
+        if (ev.shiftKey && key === 'e') {
+          ev.preventDefault();
+          transformStarten('reihe', { ganzeLeitungen:true });
+          return;
+        }
+        if (ev.shiftKey && key === drawingConfig.shortcut_mirror) {
+          ev.preventDefault();
+          transformStarten('spiegeln');
+          return;
+        }
+        if (ev.shiftKey && key === drawingConfig.shortcut_rotate) {
+          ev.preventDefault();
+          transformStarten('drehen');
+          return;
+        }
+        // C wie COPY — fest verdrahtet wie das zweistellige TR, damit in der
+        // frei belegbaren Liste keine Doppelbelegung entstehen kann.
+        if (key === 'c') {
+          ev.preventDefault();
+          transformStarten('kopieren', { ganzeLeitungen:ev.shiftKey });
+          return;
+        }
         // ── Leitungen ändern (#72) ────────────────────────────────────────
         // Vier eigene, frei belegbare Tasten. `TR` bleibt unangetastet die
         // Ecke-verbinden-Folge; Stutzen hat darum eine eigene Taste.
@@ -6548,32 +6575,6 @@ function EditorInner() {
         if (key === drawingConfig.shortcut_move) {
           ev.preventDefault();
           verschiebenStarten(ev.shiftKey);
-          return;
-        }
-        // ── Kopieren und Reihe (§74) ──────────────────────────────────────
-        // Feste Tasten wie das zweistellige TR: C wie COPY, E wie rEihe. Sie
-        // liegen nicht in der frei belegbaren Liste, damit dort keine
-        // Doppelbelegung entstehen kann.
-        if (key === 'c') {
-          ev.preventDefault();
-          transformStarten('kopieren', { ganzeLeitungen:ev.shiftKey });
-          return;
-        }
-        if (key === 'e') {
-          ev.preventDefault();
-          transformStarten('reihe', { ganzeLeitungen:ev.shiftKey });
-          return;
-        }
-        // Spiegeln und Drehen mit Shift: dieselbe Taste wie die Bauteil-
-        // Schnellfunktion, nur der grosse Befehl mit Basispunkt und Achse.
-        if (ev.shiftKey && key === drawingConfig.shortcut_mirror) {
-          ev.preventDefault();
-          transformStarten('spiegeln');
-          return;
-        }
-        if (ev.shiftKey && key === drawingConfig.shortcut_rotate) {
-          ev.preventDefault();
-          transformStarten('drehen');
           return;
         }
         // Layer-Schnellwahl. Die frei belegbaren Befehlstasten haben Vorrang —
@@ -7910,8 +7911,8 @@ function EditorInner() {
                 aktiv:transformBefehl?.art === 'drehen',
                 gesperrt:!transformBefehl && !hatAuswahl,
                 aktion:() => (transformBefehl?.art === 'drehen' ? transformBeenden() : transformStarten('drehen')) },
-              { id:'reihe', Icon:Grid2x2, name:'Lineare Reihe', taste:'E',
-                hinweis:'Basispunkt und Zielpunkt geben den Abstand, danach die Anzahl eintippen (Original zählt mit).',
+              { id:'reihe', Icon:Grid2x2, name:'Lineare Reihe', taste:'⇧E',
+                hinweis:'Basispunkt und Zielpunkt geben den Abstand, danach die Anzahl eintippen (Original zählt mit). Ohne Shift gehört E dem Dehnen bis Kante.',
                 aktiv:transformBefehl?.art === 'reihe',
                 gesperrt:!transformBefehl && !hatAuswahl,
                 aktion:() => (transformBefehl?.art === 'reihe' ? transformBeenden() : transformStarten('reihe')) },

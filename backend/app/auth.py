@@ -28,7 +28,9 @@ if SECRET_KEY == "dev-secret-change-me":
     print("[WARNUNG] SECRET_KEY nicht gesetzt — unsicherer Code-Default aktiv. "
           "Für Produktion zwingend eine eigene, geheime Umgebungsvariable setzen.")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "10080"))  # 7 Tage
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "15"))
+if not 1 <= ACCESS_TOKEN_EXPIRE_MINUTES <= 60:
+    raise RuntimeError("ACCESS_TOKEN_EXPIRE_MINUTES muss zwischen 1 und 60 liegen.")
 
 _bearer = HTTPBearer(auto_error=True)
 
@@ -44,9 +46,19 @@ def verify_password(pw: str, hashed: str) -> bool:
         return False
 
 
-def create_access_token(user_id: int) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    return jwt.encode({"sub": str(user_id), "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
+def create_access_token(user_id: int, session_version: int) -> str:
+    now = datetime.now(timezone.utc)
+    expire = now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    return jwt.encode(
+        {"sub": str(user_id), "sv": session_version, "iat": now, "exp": expire},
+        SECRET_KEY,
+        algorithm=ALGORITHM,
+    )
+
+
+def revoke_user_sessions(user: User) -> None:
+    """Macht alle zuvor ausgestellten Tokens eines Benutzers ungültig."""
+    user.session_version = (user.session_version or 0) + 1
 
 
 def require_active_company(user: User) -> None:
@@ -75,10 +87,15 @@ def get_current_user(
     try:
         payload = jwt.decode(creds.credentials, SECRET_KEY, algorithms=[ALGORITHM])
         user_id = int(payload.get("sub"))
+        token_session_version = payload.get("sv")
+        if isinstance(token_session_version, bool) or not isinstance(token_session_version, int):
+            raise ValueError("Token enthält keine gültige Session-Version")
     except Exception:
         raise cred_exc
     user = db.query(User).filter(User.id == user_id).first()
     if not user or not user.is_active:
+        raise cred_exc
+    if user.session_version != token_session_version:
         raise cred_exc
     if not user.is_verified:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Konto noch nicht freigeschaltet")

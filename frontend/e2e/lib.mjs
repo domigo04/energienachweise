@@ -68,8 +68,8 @@ export async function starten() {
   page.on('pageerror', (e) => fehler.push(e.message));
   page.on('console', (m) => { if (m.type() === 'error') fehler.push(m.text()); });
   await page.addInitScript(([t, u]) => {
-    localStorage.setItem('hc_token', t);
-    localStorage.setItem('hc_auth', u);
+    sessionStorage.setItem('hc_token', t);
+    sessionStorage.setItem('hc_auth', u);
   }, [cfg.token, JSON.stringify(cfg.user)]);
 
   const kopfZeilen = { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.token}` };

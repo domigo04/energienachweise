@@ -10,7 +10,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.audit import add_audit_event
-from app.auth import require_firma_admin
+from app.auth import require_firma_admin, revoke_user_sessions
 from app.database import get_db
 from app.models.auth import Role, User
 from app.models.heizungscockpit import HcAuditEvent, HcProject
@@ -178,6 +178,10 @@ def update_member(
     next_role = body.firma_role if body.firma_role is not None else target.firma_role
     next_active = body.is_active if body.is_active is not None else target.is_active
     next_verified = body.is_verified if body.is_verified is not None else target.is_verified
+    sessions_widerrufen = (
+        (target.is_active and not next_active)
+        or (target.is_verified and not next_verified)
+    )
 
     verliert_adminrecht = (
         target.firma_role == "admin"
@@ -201,6 +205,8 @@ def update_member(
     target.firma_role = next_role
     target.is_active = next_active
     target.is_verified = next_verified
+    if sessions_widerrufen:
+        revoke_user_sessions(target)
     if next_role == "admin":
         if not next_verified:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nur freigeschaltete Mitglieder können Firmenadmin werden.")

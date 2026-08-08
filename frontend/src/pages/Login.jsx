@@ -9,6 +9,11 @@ export default function Login() {
   const { login, register } = useAuth();
   const navigate = useNavigate();
   const loc = useLocation();
+  const sessionNotice = loc.state?.notice || (
+    new URLSearchParams(loc.search).get("session") === "expired"
+      ? "Deine Sitzung ist abgelaufen oder wurde widerrufen. Bitte melde dich erneut an."
+      : ""
+  );
   const [modus, setModus] = useState("login");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -53,6 +58,12 @@ export default function Login() {
         <h1 className="mt-3 text-2xl font-bold text-slate-900">
           Heizungs<span className="text-brand-600">cockpit</span>
         </h1>
+
+        {sessionNotice && (
+          <div className="mt-4 rounded-sm border border-amber-200 border-l-2 border-l-amber-600 bg-white px-3 py-2 text-xs text-slate-700">
+            {sessionNotice}
+          </div>
+        )}
 
         <div className="mt-6 flex border-b border-slate-200">
           <button className={tab(modus === "login")} onClick={() => wechsel("login")}><LogIn className="size-4" /> Anmelden</button>

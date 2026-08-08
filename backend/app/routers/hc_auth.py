@@ -23,6 +23,7 @@ from app.auth import (
     hash_password,
     require_active_company,
     require_admin,
+    revoke_user_sessions,
     verify_password,
 )
 from app.database import get_db
@@ -218,7 +219,7 @@ def login(body: LoginIn, db: Session = Depends(get_db), request: Request = None)
     login_konto_sperre.zuruecksetzen(email)
     user.last_login_at = datetime.utcnow()
     db.commit()
-    token = create_access_token(user.id)
+    token = create_access_token(user.id, user.session_version)
     return TokenOut(access_token=token, user=_user_out(user))
 
 
@@ -238,6 +239,7 @@ def update_me(body: MePatch, user: User = Depends(get_current_user), db: Session
         if not body.aktuelles_passwort or not verify_password(body.aktuelles_passwort, user.password_hash):
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Aktuelles Passwort ist falsch.")
         user.password_hash = hash_password(body.neues_passwort)
+        revoke_user_sessions(user)
         changed["passwort"] = {"geaendert": True}
     if changed:
         add_audit_event(
@@ -390,10 +392,16 @@ def update_user(user_id: int, body: UserPatch, admin: User = Depends(require_adm
         "role": user.role.value,
         "firma_role": user.firma_role,
     }
+    sessions_widerrufen = (
+        (body.is_active is False and user.is_active)
+        or (body.is_verified is False and user.is_verified)
+    )
     for field in ("is_verified", "is_active", "role"):
         val = getattr(body, field, None)
         if val is not None:
             setattr(user, field, val)
+    if sessions_widerrufen:
+        revoke_user_sessions(user)
     if body.firma_role is not None:
         user.firma_role = body.firma_role
         if body.firma_role == "admin":

@@ -149,6 +149,24 @@ den Schutz abgeschaltet, weil ein Aufrufer die vorderen Einträge frei erfinden
 kann. Das gilt für genau eine Proxy-Ebene; kommt eine zweite dazu, muss die
 Regel mitgezogen werden.
 
+### Sitzungslebensdauer und Widerruf
+
+- Zugriffstokens laufen standardmässig nach 15 Minuten ab; die Konfiguration
+  darf für den Pilot höchstens 60 Minuten betragen.
+- Jedes Token enthält die serverseitig geprüfte `session_version` des
+  Benutzers. Passwortwechsel, Benutzerdeaktivierung und Entzug der
+  Freischaltung erhöhen diese Version und widerrufen damit alle älteren
+  Tokens sofort.
+- Tokens ohne Versionsclaim gelten nach Einführung dieses Verfahrens nicht
+  mehr. Ein Deployment dieser Migration verlangt deshalb einmalig ein neues
+  Login für bestehende Browser-Sitzungen.
+- Das Frontend speichert Token und Benutzerzustand im `sessionStorage`, nicht
+  dauerhaft im `localStorage`. Beim Schliessen des Tabs, bei Ablauf oder
+  Widerruf ist ein neues Login erforderlich.
+- Ein HttpOnly-Cookie mit Refresh-Token ist bewusst nicht Teil dieses
+  Pilot-Schnitts. Es würde eine abgestimmte SameSite-, CORS- und CSRF-Strategie
+  für die getrennten Frontend-/Backend-Ursprünge benötigen.
+
 ## Persistenz
 
 Benutzer, Firmen, Projekte und Referenzen liegen in PostgreSQL. Ein Deployment

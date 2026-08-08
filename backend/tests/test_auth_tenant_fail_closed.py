@@ -42,10 +42,10 @@ class _UserDb:
         pass
 
 
-def _credentials(user_id: int = 1) -> HTTPAuthorizationCredentials:
+def _credentials(user_id: int = 1, session_version: int = 0) -> HTTPAuthorizationCredentials:
     return HTTPAuthorizationCredentials(
         scheme="Bearer",
-        credentials=create_access_token(user_id),
+        credentials=create_access_token(user_id, session_version),
     )
 
 
@@ -57,6 +57,7 @@ def _user(*, tenant_id, firma, role=Role.user):
         role=role,
         is_active=True,
         is_verified=True,
+        session_version=0,
     )
 
 

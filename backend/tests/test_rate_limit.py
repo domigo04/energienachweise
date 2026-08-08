@@ -213,6 +213,7 @@ def _user(email, *, aktiv=True, verifiziert=True):
         firma_admin_bestaetigt_von=None,
         is_active=aktiv,
         is_verified=verifiziert,
+        session_version=0,
         created_at=datetime(2026, 1, 1),
         last_login_at=None,
     )

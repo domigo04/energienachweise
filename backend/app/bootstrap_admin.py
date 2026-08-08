@@ -10,7 +10,7 @@ import os
 
 from sqlalchemy.orm import Session
 
-from app.auth import hash_password
+from app.auth import hash_password, revoke_user_sessions
 from app.database import SessionLocal
 from app.models import subscription  # noqa: F401 — Ziel der Firmen-Fremdschlüssel laden
 from app.models.auth import Firma, Role, User
@@ -62,14 +62,19 @@ def seed_admin(db: Session, *, require_configuration: bool = False) -> str | Non
             admin_pw_seed_version=admin_password_version,
         )
         db.add(admin)
-    elif admin.admin_pw_seed_version is None:
-        # Erster Start nach Entfernung des alten SHA-256-Fingerprints: aktuelle
-        # Version übernehmen, aber ein eventuell manuell geändertes Passwort
-        # ausdrücklich nicht zurücksetzen.
-        admin.admin_pw_seed_version = admin_password_version
-    elif admin.admin_pw_seed_version != admin_password_version:
-        admin.password_hash = hash_password(admin_password)
-        admin.admin_pw_seed_version = admin_password_version
+    else:
+        sessions_widerrufen = not admin.is_active or not admin.is_verified
+        if admin.admin_pw_seed_version is None:
+            # Erster Start nach Entfernung des alten SHA-256-Fingerprints:
+            # aktuelle Version übernehmen, aber ein eventuell manuell
+            # geändertes Passwort ausdrücklich nicht zurücksetzen.
+            admin.admin_pw_seed_version = admin_password_version
+        elif admin.admin_pw_seed_version != admin_password_version:
+            admin.password_hash = hash_password(admin_password)
+            admin.admin_pw_seed_version = admin_password_version
+            sessions_widerrufen = True
+        if sessions_widerrufen:
+            revoke_user_sessions(admin)
 
     admin.role = Role.admin
     admin.is_verified = True

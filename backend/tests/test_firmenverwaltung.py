@@ -138,6 +138,21 @@ class FirmenverwaltungTest(unittest.TestCase):
 
         self.assertEqual(error.exception.status_code, 409)
 
+    def test_mitglied_deaktivieren_widerruft_bestehende_sessions(self):
+        db = _db()
+        _, _, admin, member, *_ = _setup(db)
+        vorher = member.session_version
+
+        updated = update_member(
+            member.id,
+            FirmenMemberPatch(is_active=False),
+            admin,
+            db,
+        )
+
+        self.assertFalse(updated["is_active"])
+        self.assertEqual(member.session_version, vorher + 1)
+
     def test_verantwortung_nur_an_aktive_person_der_eigenen_firma(self):
         db = _db()
         _, _, admin, member, _, foreign, project, _ = _setup(db)

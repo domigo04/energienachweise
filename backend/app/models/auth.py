@@ -74,6 +74,9 @@ class User(Base):
     firma_admin_bestaetigt_von = Column(Integer, nullable=True)
     is_verified = Column(Boolean, default=False)  # Admin muss freischalten
     is_active = Column(Boolean, default=True)
+    # Serverseitige Widerrufsgrenze für alle Zugriffstokens dieses Benutzers.
+    # Ein Token gilt nur, solange sein `sv`-Claim diesem Wert entspricht.
+    session_version = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_login_at = Column(DateTime, nullable=True)
     # Nicht geheime Versionskennung des zuletzt bewusst aus der Deployment-

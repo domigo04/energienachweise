@@ -143,6 +143,7 @@ def _ensure_columns():
         ],
         "hc_users": [
             ("admin_pw_seed_version", "VARCHAR"),
+            ("session_version", "INTEGER NOT NULL DEFAULT 0"),
             ("firma_role", "VARCHAR"),
             ("firma_admin_beantragt_at", "TIMESTAMP"),
             ("firma_admin_bestaetigt_at", "TIMESTAMP"),
@@ -206,6 +207,7 @@ def _ensure_columns():
         conn.execute(text("UPDATE hc_firmen SET abo_plan = 'kostenlos' WHERE abo_plan IS NULL"))
         conn.execute(text("UPDATE hc_firmen SET is_active = TRUE WHERE is_active IS NULL"))
         conn.execute(text("UPDATE hc_users SET firma_role = 'mitglied' WHERE firma_role IS NULL"))
+        conn.execute(text("UPDATE hc_users SET session_version = 0 WHERE session_version IS NULL"))
         conn.execute(text("UPDATE ref_kostenzeilen SET gewerk = 'heizung' WHERE gewerk IS NULL"))
         conn.execute(text("UPDATE lv_import_costs SET is_group_total = FALSE WHERE is_group_total IS NULL"))
         conn.execute(text("UPDATE lv_import_costs SET mapping_confirmed = FALSE WHERE mapping_confirmed IS NULL"))

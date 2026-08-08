@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Building2, CreditCard, ShieldCheck, User as UserIcon } from "lucide-react";
 import { getMe, requestFirmaAdmin, updateMe } from "../api/hcApi";
 import { useAuth } from "../auth/AuthContext";
@@ -8,7 +8,8 @@ import PageHeader from "../components/ui/PageHeader";
 const ABO_LABEL = { kostenlos: "Kostenlos" };
 
 export default function KontoPage() {
-  const { refreshUser } = useAuth();
+  const { logout, refreshUser } = useAuth();
+  const navigate = useNavigate();
   const [konto, setKonto] = useState(null);
   const [name, setName] = useState("");
   const [savingName, setSavingName] = useState(false);
@@ -18,7 +19,6 @@ export default function KontoPage() {
   const [neuesPw, setNeuesPw] = useState("");
   const [neuesPw2, setNeuesPw2] = useState("");
   const [savingPw, setSavingPw] = useState(false);
-  const [pwMsg, setPwMsg] = useState("");
   const [pwError, setPwError] = useState("");
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminMsg, setAdminMsg] = useState("");
@@ -66,13 +66,15 @@ export default function KontoPage() {
   const passwortAendern = async (e) => {
     e.preventDefault();
     setPwError("");
-    setPwMsg("");
     if (neuesPw !== neuesPw2) { setPwError("Die neuen Passwörter stimmen nicht überein."); return; }
     setSavingPw(true);
     try {
       await updateMe({ aktuelles_passwort: aktuellesPw, neues_passwort: neuesPw });
-      setPwMsg("Passwort geändert.");
-      setAktuellesPw(""); setNeuesPw(""); setNeuesPw2("");
+      logout();
+      navigate("/login", {
+        replace: true,
+        state: { notice: "Passwort geändert. Bitte melde dich erneut an." },
+      });
     } catch (err) {
       setPwError(err?.response?.data?.detail || "Passwort ändern fehlgeschlagen.");
     } finally {
@@ -163,7 +165,6 @@ export default function KontoPage() {
           <div><label className="label">Neues Passwort</label><input type="password" className="input" value={neuesPw} onChange={(e) => setNeuesPw(e.target.value)} /></div>
           <div><label className="label">Neues Passwort wiederholen</label><input type="password" className="input" value={neuesPw2} onChange={(e) => setNeuesPw2(e.target.value)} /></div>
           {pwError && <div className="rounded-sm border border-red-200 border-l-2 border-l-red-600 bg-white px-3 py-2 text-xs text-red-700">{pwError}</div>}
-          {pwMsg && <div className="rounded-sm border border-green-200 border-l-2 border-l-green-600 bg-white px-3 py-2 text-xs text-slate-700">{pwMsg}</div>}
           <button type="submit" disabled={savingPw} className="btn-primary">{savingPw ? "Speichere…" : "Passwort ändern"}</button>
         </form>
       </div>

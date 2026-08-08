@@ -60,6 +60,8 @@ def test_geaenderte_variable_rotiert_admin_passwort(db, monkeypatch):
     monkeypatch.setenv("ADMIN_INITIAL_PASSWORD", "altes-passwort")
     monkeypatch.setenv("ADMIN_INITIAL_PASSWORD_VERSION", "2026-08-01-1")
     seed_admin(db, require_configuration=True)
+    admin = db.query(User).one()
+    initial_session_version = admin.session_version
 
     monkeypatch.setenv("ADMIN_INITIAL_PASSWORD", "neues-passwort")
     monkeypatch.setenv("ADMIN_INITIAL_PASSWORD_VERSION", "2026-08-01-2")
@@ -67,6 +69,7 @@ def test_geaenderte_variable_rotiert_admin_passwort(db, monkeypatch):
 
     admin = db.query(User).one()
     assert admin.admin_pw_seed_version == "2026-08-01-2"
+    assert admin.session_version == initial_session_version + 1
     assert verify_password("neues-passwort", admin.password_hash)
     assert not verify_password("altes-passwort", admin.password_hash)
 
@@ -83,6 +86,23 @@ def test_geaendertes_passwort_ohne_neue_version_wird_nicht_uebernommen(db, monke
     admin = db.query(User).one()
     assert verify_password("initial-passwort", admin.password_hash)
     assert not verify_password("unbeabsichtigt-geaendert", admin.password_hash)
+
+
+def test_bootstrap_reaktivierung_widerruft_alte_admin_sessions(db, monkeypatch):
+    monkeypatch.setenv("ADMIN_EMAIL", "admin@sirego.ch")
+    monkeypatch.setenv("ADMIN_INITIAL_PASSWORD", "initial-passwort")
+    seed_admin(db, require_configuration=True)
+
+    admin = db.query(User).one()
+    admin.is_active = False
+    initial_session_version = admin.session_version
+    db.commit()
+
+    seed_admin(db, require_configuration=True)
+    db.refresh(admin)
+
+    assert admin.is_active is True
+    assert admin.session_version == initial_session_version + 1
 
 
 def test_erster_start_nach_migration_bewahrt_manuelles_passwort(db, monkeypatch):
